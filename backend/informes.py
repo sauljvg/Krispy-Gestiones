@@ -5,6 +5,7 @@ import os
 
 from openpyxl import load_workbook
 
+import scoring_valores
 from db import get_connection
 
 # Estos son los que ya sabemos que existen; el admin puede añadir más desde
@@ -328,6 +329,26 @@ def read_workbook_sheets(file_bytes):
     return resultado
 
 
+def _quiza_calcular_scoring(hojas):
+    """Si el Excel trae una hoja "Respuestas" cruda (export directo de Forms,
+    sin Dashboard ya calculado) y se reconoce como de Valores y Competencias
+    por sus preguntas, calculamos aquí el Scoring/Dashboard — así el usuario
+    solo sube el Excel plano sin depender del script externo. Si el Excel ya
+    trae su propio Dashboard (el flujo de siempre), no se toca nada. Funciona
+    igual para cualquier tipo/empresa (Krispy Kreme, Saona...) porque detecta
+    el cuestionario por su contenido, no por el nombre del tipo."""
+    respuestas = hojas.get("Respuestas")
+    if not respuestas or "Dashboard" in hojas:
+        return hojas
+    if not scoring_valores.parece_valores_competencias(respuestas):
+        return hojas
+    scoring_rows, dashboard_rows = scoring_valores.calcular(respuestas)
+    nuevas = dict(hojas)
+    nuevas["Scoring"] = scoring_rows
+    nuevas["Dashboard"] = dashboard_rows
+    return nuevas
+
+
 def import_excel(tipo_clave, file_bytes, archivo_nombre, subido_por):
     tipo = get_tipo(tipo_clave)
     if tipo is None:
@@ -336,6 +357,7 @@ def import_excel(tipo_clave, file_bytes, archivo_nombre, subido_por):
     hojas = read_workbook_sheets(file_bytes)
     if not hojas:
         raise ValueError("El Excel no tiene filas de datos en ninguna hoja")
+    hojas = _quiza_calcular_scoring(hojas)
 
     conn = get_connection()
     cur = conn.execute(

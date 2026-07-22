@@ -158,6 +158,8 @@ def list_users(_admin: dict = Depends(require_admin)):
 def create_user_route(body: NewUserBody, _admin: dict = Depends(require_admin)):
     if body.rol not in auth_module.ROLES:
         raise HTTPException(status_code=400, detail=f"rol debe ser uno de: {', '.join(auth_module.ROLES)}")
+    if not auth_module.username_disponible(body.username):
+        raise HTTPException(status_code=400, detail="Ese usuario ya existe (el usuario no distingue mayúsculas de minúsculas)")
     try:
         user_id = auth_module.create_user(body.username, body.nombre, body.rol)
     except Exception as exc:
@@ -238,6 +240,19 @@ def set_admin_pin_route(user_id: int, body: SetAdminPinBody, _admin: dict = Depe
     if row is None:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     auth_module.admin_set_pin(user_id, body.pin)
+    return {"ok": True}
+
+
+@router.post("/users/{user_id}/reset-pin")
+def reset_pin_route(user_id: int, _admin: dict = Depends(require_admin)):
+    """Borra el PIN del usuario — la próxima vez que entre con su usuario le
+    pedirá crear uno nuevo, como si fuera la primera vez."""
+    conn = get_connection()
+    row = conn.execute("SELECT id FROM usuarios WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    auth_module.reset_pin(user_id)
     return {"ok": True}
 
 

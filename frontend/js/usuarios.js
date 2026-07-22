@@ -254,6 +254,7 @@ async function loadUsers(currentUserId) {
         <td>${fmtFecha(u.creado)}</td>
         <td>
           <button type="button" class="btn btn-ghost btn-guardar-pin" data-id="${u.id}">Guardar PIN</button>
+          ${u.pin ? `<button type="button" class="btn btn-ghost btn-reset-pin" data-id="${u.id}" title="Borra el PIN — al volver a entrar, el usuario crea uno nuevo">Resetear PIN</button>` : ""}
           ${u.id === currentUserId ? "" : `<button type="button" class="btn btn-ghost btn-delete-user" data-id="${u.id}">Eliminar</button>`}
         </td>
       </tr>`
@@ -397,6 +398,19 @@ async function loadUsers(currentUserId) {
       } else {
         alert("PIN actualizado.");
       }
+    });
+  });
+
+  tbody.querySelectorAll(".btn-reset-pin").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      if (!confirm("¿Borrar el PIN de este usuario? La próxima vez que entre, tendrá que crear uno nuevo.")) return;
+      const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}/reset-pin`, { method: "POST" });
+      if (!res.ok) {
+        alert("No se pudo resetear el PIN.");
+        return;
+      }
+      loadUsers(currentUserId);
     });
   });
 

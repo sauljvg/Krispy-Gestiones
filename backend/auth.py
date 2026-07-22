@@ -180,10 +180,27 @@ def tiene_modulo(user: dict, modulo: str) -> bool:
 
 
 def get_user_by_username(username: str):
+    # COLLATE NOCASE: "Berta", "BERTA" y "BeRtA" deben entrar igual — el
+    # usuario no tiene por qué acordarse de con qué mayúsculas se lo dieron.
     conn = get_connection()
-    row = conn.execute("SELECT * FROM usuarios WHERE username = ?", (username,)).fetchone()
+    row = conn.execute("SELECT * FROM usuarios WHERE username = ? COLLATE NOCASE", (username,)).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def username_disponible(username: str) -> bool:
+    """Para evitar crear 'Berta' y 'berta' como dos cuentas distintas, ya que
+    el login ahora no distingue mayúsculas de minúsculas."""
+    return get_user_by_username(username) is None
+
+
+def reset_pin(user_id: int):
+    """Borra el PIN — el usuario vuelve a ver la pantalla de "todavía no
+    tienes un PIN" la próxima vez que entre, y puede crear uno nuevo."""
+    conn = get_connection()
+    conn.execute("UPDATE usuarios SET pin = NULL WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
 
 
 def set_pin_si_no_tiene(username: str, pin: str) -> bool:
