@@ -11,13 +11,25 @@ function escapeHTML(str) {
   return div.innerHTML;
 }
 
+// Cuando el usuario (gerente) está restringido a una sola tienda, no tiene
+// sentido ofrecerle "Todas" ni un desplegable — /api/stores ya viene filtrado
+// por el middleware de permisos, así que aquí solo hace falta bloquear la UI.
+let tiendasPermitidas = [];
+
 async function loadStores() {
   const { stores } = await fetchJSON(`${API_BASE}/stores`);
   const select = document.getElementById("filter-tienda");
   const current = select.value;
-  select.innerHTML = `<option value="">Todas</option>` +
-    stores.map((s) => `<option value="${escapeHTML(s.tienda)}">${escapeHTML(s.tienda)} (${s.total})</option>`).join("");
-  select.value = current;
+  const restringidoAUna = tiendasPermitidas.length === 1;
+  const opciones = stores.map((s) => `<option value="${escapeHTML(s.tienda)}">${escapeHTML(s.tienda)} (${s.total})</option>`).join("");
+  select.innerHTML = restringidoAUna ? opciones : `<option value="">Todas</option>` + opciones;
+  select.disabled = restringidoAUna;
+  if (restringidoAUna) {
+    select.value = stores[0]?.tienda ?? "";
+    state.tienda = select.value;
+  } else {
+    select.value = current;
+  }
 }
 
 function currentTransactionsMonth() {
@@ -503,7 +515,12 @@ function clearFilters() {
 document.addEventListener("DOMContentLoaded", async () => {
   const user = await checkAuth();
   if (!user) return; // checkAuth ya redirigió a /login.html
+  if (!(user.modulos || []).includes("resenas")) {
+    window.location.href = "/";
+    return;
+  }
   wireUserBar(user);
+  tiendasPermitidas = user.tiendas || [];
 
   wireFilters(() => refreshAll(), () => loadReviews());
 

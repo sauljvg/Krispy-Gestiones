@@ -1,4 +1,17 @@
 let ROLES_CACHE = [];
+let MODULOS_CACHE = [];
+let TIPOS_INFORME_CACHE = null; // null = todavía no se ha pedido (se carga la primera vez que hace falta)
+
+function escapeHTML(str) {
+  const div = document.createElement("div");
+  div.textContent = str ?? "";
+  return div.innerHTML;
+}
+
+// Mismas 6 tiendas del selector de Reseñas — ParqueSur es una sola ficha de
+// Google (fábrica y tienda comparten la misma reseña pública), así que no
+// hay forma de separarlas a nivel de datos.
+const TIENDAS_DISPONIBLES = ["Caleido", "Gran Plaza 2", "La Gavia", "ParqueSur", "Plenilunio", "Princesa"];
 
 function fmtFecha(iso) {
   if (!iso) return "";
@@ -12,13 +25,141 @@ async function loadRoles() {
   select.innerHTML = ROLES_CACHE.map((r) => `<option value="${r.value}">${r.label}</option>`).join("");
 }
 
+async function loadModulos() {
+  const res = await fetch(`${AUTH_API_BASE}/auth/modulos`);
+  MODULOS_CACHE = await res.json();
+}
+
+async function loadTiposInformeSiHaceFalta() {
+  if (TIPOS_INFORME_CACHE !== null) return TIPOS_INFORME_CACHE;
+  const res = await fetch(`${AUTH_API_BASE}/informes/tipos`);
+  TIPOS_INFORME_CACHE = res.ok ? await res.json() : [];
+  return TIPOS_INFORME_CACHE;
+}
+
+function moduloLabel(clave) {
+  return MODULOS_CACHE.find((m) => m.value === clave)?.label || clave;
+}
+
+// --- Formulario de creación ---
+
+function renderNuModulosChecklist() {
+  const wrap = document.getElementById("nu-modulos-checklist");
+  wrap.innerHTML = MODULOS_CACHE.map(
+    (m, i) => `
+    <div class="checklist-row">
+      <input type="checkbox" id="nu-modulo-${i}" class="nu-modulo-check" value="${m.value}">
+      <label for="nu-modulo-${i}">${escapeHTML(m.label)}</label>
+    </div>`
+  ).join("");
+  wrap.querySelectorAll(".nu-modulo-check").forEach((cb) => {
+    cb.addEventListener("change", actualizarVisibilidadDependientesNuevoUsuario);
+  });
+}
+
+function modulosSeleccionadosNuevoUsuario() {
+  return [...document.querySelectorAll(".nu-modulo-check:checked")].map((cb) => cb.value);
+}
+
+async function actualizarVisibilidadDependientesNuevoUsuario() {
+  const modulos = modulosSeleccionadosNuevoUsuario();
+  document.getElementById("nu-tiendas-wrap").hidden = !modulos.includes("resenas");
+  const tiposWrap = document.getElementById("nu-tipos-informe-wrap");
+  tiposWrap.hidden = !modulos.includes("informes");
+  if (modulos.includes("informes") && !tiposWrap.dataset.cargado) {
+    tiposWrap.dataset.cargado = "1";
+    await renderNuTiposInformeChecklist();
+  }
+}
+
+function actualizarVisibilidadPorRol() {
+  const rol = document.getElementById("nu-rol").value;
+  const esAdmin = rol === "admin";
+  document.getElementById("nu-modulos-checklist").hidden = esAdmin;
+  document.getElementById("nu-admin-hint").hidden = !esAdmin;
+  if (esAdmin) {
+    document.getElementById("nu-tiendas-wrap").hidden = true;
+    document.getElementById("nu-tipos-informe-wrap").hidden = true;
+  } else {
+    actualizarVisibilidadDependientesNuevoUsuario();
+  }
+}
+
+function renderNuTiendasChecklist() {
+  const wrap = document.getElementById("nu-tiendas-checklist");
+  wrap.innerHTML = TIENDAS_DISPONIBLES.map(
+    (t, i) => `
+    <div class="checklist-row">
+      <input type="checkbox" id="nu-tienda-${i}" class="nu-tienda-check" value="${t}" disabled>
+      <label for="nu-tienda-${i}">${t}</label>
+    </div>`
+  ).join("");
+  const todas = document.getElementById("nu-tienda-todas");
+  todas.addEventListener("change", () => {
+    wrap.querySelectorAll(".nu-tienda-check").forEach((cb) => {
+      cb.disabled = todas.checked;
+      if (todas.checked) cb.checked = false;
+    });
+  });
+}
+
+function tiendasSeleccionadasNuevoUsuario() {
+  if (document.getElementById("nu-tienda-todas").checked) return [];
+  return [...document.querySelectorAll(".nu-tienda-check:checked")].map((cb) => cb.value);
+}
+
+async function renderNuTiposInformeChecklist() {
+  const tipos = await loadTiposInformeSiHaceFalta();
+  const wrap = document.getElementById("nu-tipos-informe-checklist");
+  wrap.innerHTML = tipos.map(
+    (t, i) => `
+    <div class="checklist-row">
+      <input type="checkbox" id="nu-tipo-informe-${i}" class="nu-tipo-informe-check" value="${t.clave}" disabled>
+      <label for="nu-tipo-informe-${i}">${escapeHTML(t.nombre)}</label>
+    </div>`
+  ).join("");
+  const todos = document.getElementById("nu-tipo-informe-todos");
+  todos.onchange = () => {
+    wrap.querySelectorAll(".nu-tipo-informe-check").forEach((cb) => {
+      cb.disabled = todos.checked;
+      if (todos.checked) cb.checked = false;
+    });
+  };
+}
+
+function tiposInformeSeleccionadosNuevoUsuario() {
+  if (document.getElementById("nu-tipo-informe-todos").checked) return [];
+  return [...document.querySelectorAll(".nu-tipo-informe-check:checked")].map((cb) => cb.value);
+}
+
+// --- Tabla de usuarios existentes ---
+
 function rolSelectHTML(current) {
   return ROLES_CACHE.map(
     (r) => `<option value="${r.value}" ${r.value === current ? "selected" : ""}>${r.label}</option>`
   ).join("");
 }
 
+function tiendasResumenHTML(tiendas) {
+  if (!tiendas || tiendas.length === 0) return `<span class="staff-hint">Todas</span>`;
+  return escapeHTML(tiendas.join(", "));
+}
+
+function modulosResumenHTML(u) {
+  if (u.rol === "admin") return `<span class="staff-hint">Todo (admin)</span>`;
+  if (!u.modulos || u.modulos.length === 0) return `<span class="staff-hint">Ninguno</span>`;
+  return escapeHTML(u.modulos.map(moduloLabel).join(", "));
+}
+
+function tiposInformeResumenHTML(tipos) {
+  if (!tipos || tipos.length === 0) return `<span class="staff-hint">Todos</span>`;
+  const cache = TIPOS_INFORME_CACHE || [];
+  const nombres = tipos.map((clave) => cache.find((t) => t.clave === clave)?.nombre || clave);
+  return escapeHTML(nombres.join(", "));
+}
+
 async function loadUsers(currentUserId) {
+  await loadTiposInformeSiHaceFalta();
   const res = await fetch(`${AUTH_API_BASE}/auth/users`);
   const users = await res.json();
   const tbody = document.getElementById("users-list");
@@ -29,6 +170,84 @@ async function loadUsers(currentUserId) {
         <td>${u.username}</td>
         <td>${u.nombre}</td>
         <td><select class="rol-select" data-id="${u.id}" ${u.id === currentUserId ? "disabled" : ""}>${rolSelectHTML(u.rol)}</select></td>
+        <td>
+          ${
+            u.rol === "admin"
+              ? modulosResumenHTML(u)
+              : `
+          <div class="checklist-wrap">
+            <span class="modulos-resumen" data-id="${u.id}">${modulosResumenHTML(u)}</span>
+            <button type="button" class="btn btn-ghost btn-editar-modulos" data-id="${u.id}" style="font-size:11px; padding:3px 8px; margin-left:6px;">Editar</button>
+            <div class="checklist-popover" id="modulos-popover-${u.id}">
+              <div class="checklist-popover-actions">
+                <span style="font-size:11px; color:var(--text-secondary);">Módulos</span>
+                <button type="button" class="btn-modulos-cerrar" data-id="${u.id}">Cerrar</button>
+              </div>
+              ${MODULOS_CACHE.map(
+                (m, i) => `
+                <div class="checklist-row">
+                  <input type="checkbox" id="em-${u.id}-${i}" class="em-modulo" data-id="${u.id}" value="${m.value}"
+                    ${(u.modulos || []).includes(m.value) ? "checked" : ""}>
+                  <label for="em-${u.id}-${i}">${escapeHTML(m.label)}</label>
+                </div>`
+              ).join("")}
+              <button type="button" class="btn btn-primary btn-guardar-modulos" data-id="${u.id}" style="width:100%; margin-top:8px; font-size:12px;">Guardar</button>
+            </div>
+          </div>`
+          }
+        </td>
+        <td>
+          <div class="checklist-wrap">
+            <span class="tiendas-resumen" data-id="${u.id}">${tiendasResumenHTML(u.tiendas)}</span>
+            <button type="button" class="btn btn-ghost btn-editar-tiendas" data-id="${u.id}" style="font-size:11px; padding:3px 8px; margin-left:6px;">Editar</button>
+            <div class="checklist-popover" id="tiendas-popover-${u.id}">
+              <div class="checklist-popover-actions">
+                <span style="font-size:11px; color:var(--text-secondary);">Tiendas</span>
+                <button type="button" class="btn-tiendas-cerrar" data-id="${u.id}">Cerrar</button>
+              </div>
+              <div class="checklist-row" style="border-bottom:1px solid var(--border); padding-bottom:6px; margin-bottom:4px;">
+                <input type="checkbox" id="et-todas-${u.id}" class="et-todas" data-id="${u.id}" ${!u.tiendas || u.tiendas.length === 0 ? "checked" : ""}>
+                <label for="et-todas-${u.id}">Todas las tiendas</label>
+              </div>
+              ${TIENDAS_DISPONIBLES.map(
+                (t, i) => `
+                <div class="checklist-row">
+                  <input type="checkbox" id="et-${u.id}-${i}" class="et-tienda" data-id="${u.id}" value="${t}"
+                    ${(u.tiendas || []).includes(t) ? "checked" : ""}
+                    ${!u.tiendas || u.tiendas.length === 0 ? "disabled" : ""}>
+                  <label for="et-${u.id}-${i}">${t}</label>
+                </div>`
+              ).join("")}
+              <button type="button" class="btn btn-primary btn-guardar-tiendas" data-id="${u.id}" style="width:100%; margin-top:8px; font-size:12px;">Guardar</button>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="checklist-wrap">
+            <span class="tipos-informe-resumen" data-id="${u.id}">${tiposInformeResumenHTML(u.tipos_informes)}</span>
+            <button type="button" class="btn btn-ghost btn-editar-tipos-informe" data-id="${u.id}" style="font-size:11px; padding:3px 8px; margin-left:6px;">Editar</button>
+            <div class="checklist-popover" id="tipos-informe-popover-${u.id}">
+              <div class="checklist-popover-actions">
+                <span style="font-size:11px; color:var(--text-secondary);">Informes</span>
+                <button type="button" class="btn-tipos-informe-cerrar" data-id="${u.id}">Cerrar</button>
+              </div>
+              <div class="checklist-row" style="border-bottom:1px solid var(--border); padding-bottom:6px; margin-bottom:4px;">
+                <input type="checkbox" id="eti-todos-${u.id}" class="eti-todos" data-id="${u.id}" ${!u.tipos_informes || u.tipos_informes.length === 0 ? "checked" : ""}>
+                <label for="eti-todos-${u.id}">Todos los tipos</label>
+              </div>
+              ${(TIPOS_INFORME_CACHE || []).map(
+                (t, i) => `
+                <div class="checklist-row">
+                  <input type="checkbox" id="eti-${u.id}-${i}" class="eti-tipo" data-id="${u.id}" value="${t.clave}"
+                    ${(u.tipos_informes || []).includes(t.clave) ? "checked" : ""}
+                    ${!u.tipos_informes || u.tipos_informes.length === 0 ? "disabled" : ""}>
+                  <label for="eti-${u.id}-${i}">${escapeHTML(t.nombre)}</label>
+                </div>`
+              ).join("")}
+              <button type="button" class="btn btn-primary btn-guardar-tipos-informe" data-id="${u.id}" style="width:100%; margin-top:8px; font-size:12px;">Guardar</button>
+            </div>
+          </div>
+        </td>
         <td>
           <input type="text" class="pin-input" data-id="${u.id}" value="${u.pin || ""}" placeholder="sin PIN" maxlength="4" style="width:60px; text-align:center;">
         </td>
@@ -41,6 +260,108 @@ async function loadUsers(currentUserId) {
     )
     .join("");
 
+  function wirePopoverToggle(btnClass, popoverPrefix) {
+    tbody.querySelectorAll(btnClass).forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.id;
+        tbody.querySelectorAll(".checklist-popover").forEach((p) => {
+          if (p.id !== `${popoverPrefix}-${id}`) p.classList.remove("visible");
+        });
+        document.getElementById(`${popoverPrefix}-${id}`).classList.toggle("visible");
+      });
+    });
+  }
+  function wirePopoverClose(btnClass, popoverPrefix) {
+    tbody.querySelectorAll(btnClass).forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.getElementById(`${popoverPrefix}-${btn.dataset.id}`).classList.remove("visible");
+      });
+    });
+  }
+
+  wirePopoverToggle(".btn-editar-modulos", "modulos-popover");
+  wirePopoverClose(".btn-modulos-cerrar", "modulos-popover");
+  wirePopoverToggle(".btn-editar-tiendas", "tiendas-popover");
+  wirePopoverClose(".btn-tiendas-cerrar", "tiendas-popover");
+  wirePopoverToggle(".btn-editar-tipos-informe", "tipos-informe-popover");
+  wirePopoverClose(".btn-tipos-informe-cerrar", "tipos-informe-popover");
+
+  tbody.querySelectorAll(".et-todas").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const id = cb.dataset.id;
+      tbody.querySelectorAll(`.et-tienda[data-id="${id}"]`).forEach((tCb) => {
+        tCb.disabled = cb.checked;
+        if (cb.checked) tCb.checked = false;
+      });
+    });
+  });
+  tbody.querySelectorAll(".eti-todos").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const id = cb.dataset.id;
+      tbody.querySelectorAll(`.eti-tipo[data-id="${id}"]`).forEach((tCb) => {
+        tCb.disabled = cb.checked;
+        if (cb.checked) tCb.checked = false;
+      });
+    });
+  });
+
+  tbody.querySelectorAll(".btn-guardar-modulos").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      const modulos = [...tbody.querySelectorAll(`.em-modulo[data-id="${id}"]:checked`)].map((cb) => cb.value);
+      const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}/modulos`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modulos }),
+      });
+      if (!res.ok) {
+        alert("No se pudieron guardar los módulos.");
+        return;
+      }
+      loadUsers(currentUserId);
+    });
+  });
+
+  tbody.querySelectorAll(".btn-guardar-tiendas").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      const todas = document.getElementById(`et-todas-${id}`).checked;
+      const tiendas = todas
+        ? []
+        : [...tbody.querySelectorAll(`.et-tienda[data-id="${id}"]:checked`)].map((cb) => cb.value);
+      const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}/tiendas`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tiendas }),
+      });
+      if (!res.ok) {
+        alert("No se pudieron guardar las tiendas.");
+        return;
+      }
+      loadUsers(currentUserId);
+    });
+  });
+
+  tbody.querySelectorAll(".btn-guardar-tipos-informe").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      const todos = document.getElementById(`eti-todos-${id}`).checked;
+      const tipos_informes = todos
+        ? []
+        : [...tbody.querySelectorAll(`.eti-tipo[data-id="${id}"]:checked`)].map((cb) => cb.value);
+      const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}/tipos-informes`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tipos_informes }),
+      });
+      if (!res.ok) {
+        alert("No se pudieron guardar los informes.");
+        return;
+      }
+      loadUsers(currentUserId);
+    });
+  });
+
   tbody.querySelectorAll(".rol-select").forEach((sel) => {
     sel.addEventListener("change", async () => {
       const id = sel.dataset.id;
@@ -52,8 +373,8 @@ async function loadUsers(currentUserId) {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         alert(body.detail || "No se pudo cambiar el rol.");
-        loadUsers(currentUserId);
       }
+      loadUsers(currentUserId);
     });
   });
 
@@ -103,7 +424,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   wireUserBar(user);
 
   await loadRoles();
+  await loadModulos();
   await loadUsers(user.id);
+  renderNuModulosChecklist();
+  renderNuTiendasChecklist();
+  actualizarVisibilidadPorRol();
+  document.getElementById("nu-rol").addEventListener("change", actualizarVisibilidadPorRol);
+
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".checklist-wrap")) {
+      document.querySelectorAll(".checklist-popover.visible").forEach((p) => p.classList.remove("visible"));
+    }
+  });
 
   const errorEl = document.getElementById("new-user-error");
   const okEl = document.getElementById("new-user-ok");
@@ -117,6 +449,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       username: document.getElementById("nu-username").value.trim(),
       nombre: document.getElementById("nu-nombre").value.trim(),
       rol: document.getElementById("nu-rol").value,
+      tiendas: tiendasSeleccionadasNuevoUsuario(),
+      modulos: modulosSeleccionadosNuevoUsuario(),
+      tipos_informes: document.getElementById("nu-tipos-informe-wrap").hidden ? [] : tiposInformeSeleccionadosNuevoUsuario(),
     };
 
     const res = await fetch(`${AUTH_API_BASE}/auth/users`, {
@@ -135,6 +470,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     okEl.textContent = `Usuario "${body.username}" creado.`;
     okEl.hidden = false;
     document.getElementById("new-user-form").reset();
+    document.getElementById("nu-tienda-todas").checked = true;
+    renderNuModulosChecklist();
+    renderNuTiendasChecklist();
+    actualizarVisibilidadPorRol();
     loadUsers(user.id);
   });
 });

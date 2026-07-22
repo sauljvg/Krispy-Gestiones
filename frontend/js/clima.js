@@ -1,14 +1,42 @@
 let currentOleada = null;
 let currentCentro = null;
 
-const COLOR_CATEGORIA = {
-  "Totalmente de acuerdo": "#006838",
-  "De acuerdo": "#eda100",
-  "Neutral": "#8f8f89",
-  "En desacuerdo": "#e8622c",
-  "Totalmente en desacuerdo": "#a83232",
+// Valores por defecto — se sobreescriben con assets/design-tokens.json (la
+// misma fuente que usa el PDF) en cargarTokensDiseno(). Si el fetch fallara,
+// el gráfico se sigue viendo igual que hoy en vez de romperse.
+let COLOR_CATEGORIA = {
+  "Totalmente de acuerdo": "#1b5e20",
+  "De acuerdo": "#66bb6a",
+  "Neutral": "#bdbdbd",
+  "En desacuerdo": "#ffa726",
+  "Totalmente en desacuerdo": "#c62828",
 };
-const ORDEN_CATEGORIAS = Object.keys(COLOR_CATEGORIA);
+let ORDEN_CATEGORIAS = Object.keys(COLOR_CATEGORIA);
+
+async function cargarTokensDiseno() {
+  try {
+    const res = await fetch("assets/design-tokens.json");
+    if (!res.ok) return;
+    const tokens = await res.json();
+    COLOR_CATEGORIA = {
+      "Totalmente de acuerdo": tokens.likert.totalmente_de_acuerdo,
+      "De acuerdo": tokens.likert.de_acuerdo,
+      "Neutral": tokens.likert.neutral,
+      "En desacuerdo": tokens.likert.en_desacuerdo,
+      "Totalmente en desacuerdo": tokens.likert.totalmente_en_desacuerdo,
+    };
+    ORDEN_CATEGORIAS = Object.keys(COLOR_CATEGORIA);
+    const raiz = document.documentElement.style;
+    raiz.setProperty("--kk-verde", tokens.marca.verde_kk);
+    raiz.setProperty("--kk-gris-anterior", tokens.marca.gris_anterior);
+    raiz.setProperty("--chip-fortaleza", tokens.chips.fortaleza);
+    raiz.setProperty("--chip-oportunidad", tokens.chips.oportunidad);
+    raiz.setProperty("--radio-chip", `${tokens.radio.chip}px`);
+    raiz.setProperty("--radio-caja", `${tokens.radio.caja_score}px`);
+  } catch (e) {
+    // Se queda con los valores por defecto de arriba.
+  }
+}
 
 let chartResultados = null;
 let chartImpulsores = null;
@@ -72,6 +100,13 @@ function barraStackedData(items) {
   return { labels, datasets };
 }
 
+// Umbral mínimo de % para dibujar su etiqueta dentro del segmento de barra.
+// Se probó en 0 (mostrar todos, incluidos los pequeños) con datos reales, y
+// los segmentos muy chicos (2-5%) quedaban con las etiquetas de segmentos
+// vecinos solapadas y saturadas. Por eso se deja en 6: basta con bajarlo a 0
+// para volver a mostrarlas todas si se prefiere.
+const MIN_PCT_PARA_ETIQUETA = 6;
+
 const percentLabelsPlugin = {
   id: "percentLabels",
   afterDatasetsDraw(chart) {
@@ -81,7 +116,7 @@ const percentLabelsPlugin = {
       if (meta.hidden) return;
       meta.data.forEach((bar, index) => {
         const value = dataset.data[index];
-        if (value >= 6) {
+        if (value > MIN_PCT_PARA_ETIQUETA) {
           const centroX = (bar.x + bar.base) / 2;
           ctx.save();
           ctx.fillStyle = "#fff";
@@ -118,7 +153,9 @@ function renderChart(canvasId, existingChart, items) {
         legend: {
           display: canvasId === "chart-resultados",
           position: "bottom",
-          labels: { boxWidth: 12, font: { size: 11 }, color: colorTexto },
+          // Puntos redondos y más grandes (igual que el PDF) para que cada
+          // categoría se distinga bien, no un cuadradito diminuto.
+          labels: { usePointStyle: true, pointStyle: "circle", boxWidth: 10, boxHeight: 10, font: { size: 12 }, padding: 16, color: colorTexto },
         },
         tooltip: {
           callbacks: {
@@ -128,20 +165,6 @@ function renderChart(canvasId, existingChart, items) {
       },
     },
   });
-}
-
-function renderNube(container, entradas) {
-  if (!entradas || entradas.length === 0) {
-    container.innerHTML = `<p class="staff-hint">(sin comentarios)</p>`;
-    return;
-  }
-  const max = Math.max(...entradas.map((e) => e.veces));
-  container.innerHTML = entradas
-    .map((e) => {
-      const tam = 12 + Math.round((e.veces / max) * 20);
-      return `<span class="nube-palabra" style="font-size:${tam}px;">${escapeHTML(e.palabra)}</span>`;
-    })
-    .join(" ");
 }
 
 async function loadReporte(centro) {
@@ -173,56 +196,72 @@ async function loadReporte(centro) {
     </div>
   `;
 
+  const colSatisfaccion = document.getElementById("col-satisfaccion");
+  colSatisfaccion.hidden = !data.tiene_satisfaccion;
+  if (data.tiene_satisfaccion) {
+    const formatoEstrellas = (v) => (v !== null ? `${v.toFixed(1)} ★` : "—");
+    document.getElementById("score-boxes-satisfaccion").innerHTML = `
+      <div class="score-box score-presente">
+        <div class="score-label">Presente</div>
+        <div class="score-value">${formatoEstrellas(data.satisfaccion_presente)}</div>
+      </div>
+      <div class="score-box score-anterior">
+        <div class="score-label">Anterior</div>
+        <div class="score-value">${formatoEstrellas(data.satisfaccion_anterior)}</div>
+      </div>
+    `;
+  }
+
   chartResultados = renderChart("chart-resultados", chartResultados, data.resultados_engagement);
   chartImpulsores = renderChart("chart-impulsores", chartImpulsores, data.impulsores_engagement);
 
+  const numFilasFo = Math.max(data.fortalezas.length, data.oportunidades.length);
+  let filasFoHtml = "";
+  for (let i = 0; i < numFilasFo; i++) {
+    const f = data.fortalezas[i];
+    const o = data.oportunidades[i];
+    filasFoHtml += f ? `<span class="fo-chip fo-chip-fortaleza">${escapeHTML(f.pregunta)} — ${f.top2box}% de acuerdo</span>` : "<span></span>";
+    filasFoHtml += o ? `<span class="fo-chip fo-chip-oportunidad">${escapeHTML(o.pregunta)} — ${o.top2box}% de acuerdo</span>` : "<span></span>";
+  }
   document.getElementById("fo-grid").innerHTML = `
-    <div class="fo-col">
-      <h3>Fortalezas (¡Celébralo con el equipo!)</h3>
-      ${data.fortalezas.map((i) => `<p class="fo-fortaleza">+ ${escapeHTML(i.pregunta)} (${i.top2box}%)</p>`).join("")}
-    </div>
-    <div class="fo-col">
-      <h3>Oportunidades (plan de acción)</h3>
-      ${data.oportunidades.map((i) => `<p class="fo-oportunidad">- ${escapeHTML(i.pregunta)} (${i.top2box}%)</p>`).join("")}
-    </div>
+    <h3 class="fo-col-title fo-title-fortaleza">¡Celébralo con el equipo!</h3>
+    <h3 class="fo-col-title fo-title-oportunidad">Plan de acción</h3>
+    ${filasFoHtml}
   `;
 
   const comentariosWrap = document.getElementById("comentarios-wrap");
-  const headers = Object.keys(data.nube_palabras);
+  const headers = Object.keys(data.abiertas);
   comentariosWrap.innerHTML = headers
     .map(
       (h, i) => `
-      <h3 style="font-size:13px;">${escapeHTML(h)}</h3>
-      <div class="nube-wrap" id="nube-${i}"></div>
+      <h3 style="font-size:15px;">${escapeHTML(h)}</h3>
       <div class="comentarios-lista" id="lista-${i}"></div>
     `
     )
     .join("");
   headers.forEach((h, i) => {
-    renderNube(document.getElementById(`nube-${i}`), data.nube_palabras[h]);
     renderListaComentarios(document.getElementById(`lista-${i}`), data.abiertas[h]);
   });
 }
 
 function renderListaComentarios(container, textos) {
   if (!textos || textos.length === 0) {
-    container.innerHTML = "";
+    container.innerHTML = `<p class="staff-hint">(sin comentarios)</p>`;
     return;
   }
-  container.innerHTML =
-    `<p class="comentarios-lista-titulo">Respuestas</p>` +
-    `<ul>${textos.map((t) => `<li>${escapeHTML(t)}</li>`).join("")}</ul>`;
+  container.innerHTML = `<ul>${textos.map((t) => `<li>${escapeHTML(t)}</li>`).join("")}</ul>`;
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
   const user = await checkAuth("/clima.html");
   if (!user) return;
-  if (!esRolTodo(user.rol)) {
+  if (!(user.modulos || []).includes("clima")) {
     window.location.href = "/";
     return;
   }
   wireUserBar(user);
 
+  await cargarTokensDiseno();
   await loadOleadas();
 
   document.getElementById("select-oleada").addEventListener("change", async (e) => {

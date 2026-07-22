@@ -1,0 +1,29 @@
+{
+  "_comentario": "Fuente única de verdad para colores/radios compartidos entre la web (clima.js/clima.html) y el PDF (clima_pdf.py) de Clima Laboral. Cambiar un valor aquí lo cambia en los dos sitios a la vez.",
+
+  "marca": {
+    "verde_kk": "#006838",
+    "gris_anterior": "#8a8a86"
+  },
+
+  "likert": {
+    "_comentario": "Paleta de las 5 categorías de las barras apiladas. Elegida para que se distingan incluso con daltonismo rojo-verde: dos verdes de luminosidad distinta, un gris claro neutro, un naranja y un rojo oscuro bien separados en tono. No es la misma que el verde de marca (verde_kk) a propósito — el verde de marca se reserva para logo/cajas de puntuación, y esta paleta se optimiza para diferenciar 5 valores de dato.",
+    "totalmente_de_acuerdo": "#1b5e20",
+    "de_acuerdo": "#66bb6a",
+    "neutral": "#bdbdbd",
+    "en_desacuerdo": "#ffa726",
+    "totalmente_en_desacuerdo": "#c62828"
+  },
+
+  "chips": {
+    "_comentario": "Fortalezas / Oportunidades. 'oportunidad' usa naranja (no el rojo de marca) para no leerse como 'alarma/problema' — es un área de mejora, no una crisis.",
+    "fortaleza": "#006838",
+    "oportunidad": "#e07b00"
+  },
+
+  "radio": {
+    "chip": 8,
+    "caja_score": 8,
+    "barra": 6
+  }
+}

@@ -17,8 +17,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/styles.css">
-<script src="js/vendor/chart.umd.min.js"></script>
+<link rel="stylesheet" href="css/styles.css?v=20260722c">
+<script src="js/vendor/chart.umd.min.js?v=20260722c"></script>
 </head>
 <body>
 <div class="app">
@@ -38,7 +38,6 @@
       </select>
     </div>
     <div class="topbar-actions">
-      <a href="/" class="btn btn-ghost" title="Volver al inicio">🏠 Inicio</a>
       <div id="scrape-progress" class="scrape-progress" hidden>
         <div class="scrape-progress-bar"><div class="scrape-progress-fill"></div></div>
         <span id="scrape-progress-msg"></span>
@@ -47,15 +46,29 @@
           <div class="scrape-info-tooltip" id="scrape-info-tooltip">Esperando datos…</div>
         </span>
       </div>
-      <span id="topbar-user" class="topbar-user" hidden></span>
-      <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
-      <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema" title="Cambiar entre claro y oscuro">🌙</button>
-      <button id="btn-refresh" class="btn btn-ghost">↻ Actualizar</button>
-      <label class="btn btn-ghost btn-upload" title="Importar el .zip de Google Takeout (Perfil de Empresa en Google): lee todas las reseñas oficiales y solo añade las que faltan, sin duplicar.">
-        <span id="btn-import-takeout-label">📥 Importar Takeout</span>
-        <input type="file" id="input-import-takeout" accept=".zip" hidden>
-      </label>
-      <button id="btn-export-csv" class="btn btn-primary">⬇ Exportar Excel</button>
+
+      <div class="topbar-groups">
+        <div class="topbar-group">
+          <button id="btn-refresh" class="btn btn-ghost">↻ Actualizar</button>
+        </div>
+        <div class="topbar-group">
+          <label class="btn btn-ghost btn-upload" title="Importar el .zip de Google Takeout (Perfil de Empresa en Google): lee todas las reseñas oficiales y solo añade las que faltan, sin duplicar.">
+            <span id="btn-import-takeout-label">📥 Importar Takeout</span>
+            <input type="file" id="input-import-takeout" accept=".zip" hidden>
+          </label>
+          <button id="btn-export-csv" class="btn btn-primary">⬇ Exportar Excel</button>
+        </div>
+      </div>
+
+      <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
+      <div class="hamburger-wrap">
+        <button id="btn-hamburger" class="btn btn-ghost hamburger-btn" aria-label="Menú" aria-haspopup="true" aria-expanded="false">☰</button>
+        <div id="hamburger-menu" class="hamburger-menu" hidden>
+          <span id="topbar-user" class="topbar-user" hidden></span>
+          <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema">🌙 Cambiar tema</button>
+          <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -264,10 +277,11 @@
   </main>
 </div>
 
-<script src="js/theme.js"></script>
-<script src="js/auth-common.js"></script>
-<script src="js/filters.js"></script>
-<script src="js/analytics.js"></script>
-<script src="js/dashboard.js"></script>
+<script src="js/theme.js?v=20260722c"></script>
+<script src="js/auth-common.js?v=20260722c"></script>
+<script src="js/topbar-menu.js?v=20260722c"></script>
+<script src="js/filters.js?v=20260722c"></script>
+<script src="js/analytics.js?v=20260722c"></script>
+<script src="js/dashboard.js?v=20260722c"></script>
 </body>
 </html>

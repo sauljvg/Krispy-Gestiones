@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Krispy Gestiones · Compartido conmigo</title>
+<title>Krispy Gestiones · Reclutamiento</title>
 <script>
   (function () {
     var guardado = localStorage.getItem("kt-theme");
@@ -15,10 +15,26 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/styles.css?v=20260722c">
 <style>
   .compartidos-wrap { max-width: 900px; margin: 0 auto; padding: 0 0 60px; }
-  .candidato-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 14px; }
+  .reclu-seccion { font-size: 18px; margin: 26px 0 12px; }
+  .reclu-seccion:first-child { margin-top: 6px; }
+  .tanda { border: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px; background: var(--surface-1); overflow: hidden; }
+  .tanda-summary {
+    list-style: none; cursor: pointer; padding: 14px 18px;
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px;
+    user-select: none;
+  }
+  .tanda-summary::-webkit-details-marker { display: none; }
+  .tanda-summary::before { content: "▸"; color: var(--text-secondary); margin-right: 6px; transition: transform 0.15s; display: inline-block; }
+  .tanda[open] > .tanda-summary::before { transform: rotate(90deg); }
+  .tanda-summary:hover { background: var(--surface-page); }
+  .tanda-fecha { font-weight: 600; font-size: 14px; }
+  .tanda-meta { color: var(--text-secondary); font-size: 12px; }
+  .tanda-body { padding: 4px 18px 14px; }
+  .candidato-card { background: var(--surface-page); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 12px; }
+  .candidato-card:last-child { margin-bottom: 0; }
   .candidato-card h3 { margin: 0 0 4px; font-size: 16px; }
   .candidato-meta { color: var(--text-secondary); font-size: 12px; margin-bottom: 12px; }
   .candidato-datos { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 16px; font-size: 13px; }
@@ -32,21 +48,27 @@
       <span class="brand-icon">🍩</span>
       <div>
         <h1>Krispy Gestiones</h1>
-        <p class="subtitle">Compartido conmigo</p>
+        <p class="subtitle">Reclutamiento</p>
       </div>
     </div>
     <div class="topbar-actions">
-      <a href="/" class="btn btn-ghost" title="Volver al inicio">🏠 Inicio</a>
-      <span id="topbar-user" class="topbar-user" hidden></span>
-      <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
-      <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema" title="Cambiar entre claro y oscuro">🌙</button>
+      <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
+      <div class="hamburger-wrap">
+        <button id="btn-hamburger" class="btn btn-ghost hamburger-btn" aria-label="Menú" aria-haspopup="true" aria-expanded="false">☰</button>
+        <div id="hamburger-menu" class="hamburger-menu" hidden>
+          <span id="topbar-user" class="topbar-user" hidden></span>
+          <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema">🌙 Cambiar tema</button>
+          <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+        </div>
+      </div>
     </div>
   </header>
 
   <div class="compartidos-wrap" id="compartidos-list"></div>
 </div>
-<script src="js/theme.js"></script>
-<script src="js/auth-common.js"></script>
-<script src="js/compartidos.js"></script>
+<script src="js/theme.js?v=20260722c"></script>
+<script src="js/auth-common.js?v=20260722c"></script>
+<script src="js/topbar-menu.js?v=20260722c"></script>
+<script src="js/compartidos.js?v=20260722c"></script>
 </body>
 </html>

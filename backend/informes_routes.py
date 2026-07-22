@@ -1,9 +1,11 @@
+import mimetypes
 import os
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+import auth as auth_module
 import informes as informes_module
 from auth_routes import get_current_user
 from db import get_connection
@@ -11,9 +13,19 @@ from db import get_connection
 router = APIRouter()
 
 
-def require_todo(user: dict = Depends(get_current_user)) -> dict:
-    if user["rol"] not in ("admin", "rrhh"):
+def require_informes(user: dict = Depends(get_current_user)) -> dict:
+    if not auth_module.tiene_modulo(user, "informes"):
         raise HTTPException(status_code=403, detail="No tienes acceso a Informes")
+    return user
+
+
+def require_tipo_acceso(tipo_clave: str, user: dict = Depends(require_informes)) -> dict:
+    """Además del módulo, valida el tipo de informe concreto — un usuario
+    puede tener Informes pero solo para ciertos tipos (p.ej. solo Tiendas,
+    no Oficina)."""
+    permitidos = informes_module.get_tipos_permitidos(user["id"])
+    if permitidos and tipo_clave not in permitidos:
+        raise HTTPException(status_code=403, detail="No tienes acceso a este tipo de informe")
     return user
 
 
@@ -37,12 +49,16 @@ class HojaNombreBody(BaseModel):
 
 
 @router.get("/tipos")
-def list_tipos_route(_user: dict = Depends(require_todo)):
-    return informes_module.list_tipos()
+def list_tipos_route(user: dict = Depends(require_informes)):
+    tipos = informes_module.list_tipos()
+    permitidos = informes_module.get_tipos_permitidos(user["id"])
+    if permitidos:
+        tipos = [t for t in tipos if t["clave"] in permitidos]
+    return tipos
 
 
 @router.post("/tipos")
-def create_tipo_route(body: NewTipoBody, _user: dict = Depends(require_todo)):
+def create_tipo_route(body: NewTipoBody, _user: dict = Depends(require_informes)):
     try:
         tipo_id = informes_module.create_tipo(body.clave, body.nombre)
     except Exception as exc:
@@ -51,7 +67,7 @@ def create_tipo_route(body: NewTipoBody, _user: dict = Depends(require_todo)):
 
 
 @router.get("/usuarios-para-compartir")
-def usuarios_para_compartir_route(_user: dict = Depends(require_todo)):
+def usuarios_para_compartir_route(_user: dict = Depends(require_informes)):
     conn = get_connection()
     rows = conn.execute("SELECT id, username, nombre, rol FROM usuarios ORDER BY nombre").fetchall()
     conn.close()
@@ -63,8 +79,13 @@ def get_compartidos_route(user: dict = Depends(get_current_user)):
     return informes_module.get_compartidos_con(user["id"])
 
 
+@router.get("/compartidos-por-mi")
+def get_compartidos_por_mi_route(user: dict = Depends(get_current_user)):
+    return informes_module.get_compartidos_por(user["username"])
+
+
 @router.get("/{tipo_clave}/hojas")
-def list_hojas_route(tipo_clave: str, _user: dict = Depends(require_todo)):
+def list_hojas_route(tipo_clave: str, _user: dict = Depends(require_tipo_acceso)):
     try:
         return informes_module.list_hojas(tipo_clave)
     except ValueError as exc:
@@ -72,7 +93,7 @@ def list_hojas_route(tipo_clave: str, _user: dict = Depends(require_todo)):
 
 
 @router.post("/{tipo_clave}/hojas/ocultar")
-def set_hoja_oculta_route(tipo_clave: str, body: HojaOcultaBody, _user: dict = Depends(require_todo)):
+def set_hoja_oculta_route(tipo_clave: str, body: HojaOcultaBody, _user: dict = Depends(require_tipo_acceso)):
     try:
         informes_module.set_hoja_oculta(tipo_clave, body.hoja, body.oculta)
     except ValueError as exc:
@@ -81,7 +102,7 @@ def set_hoja_oculta_route(tipo_clave: str, body: HojaOcultaBody, _user: dict = D
 
 
 @router.post("/{tipo_clave}/hojas/principal")
-def set_hoja_conteo_route(tipo_clave: str, body: HojaNombreBody, _user: dict = Depends(require_todo)):
+def set_hoja_conteo_route(tipo_clave: str, body: HojaNombreBody, _user: dict = Depends(require_tipo_acceso)):
     try:
         informes_module.set_hoja_conteo(tipo_clave, body.hoja)
     except ValueError as exc:
@@ -90,7 +111,7 @@ def set_hoja_conteo_route(tipo_clave: str, body: HojaNombreBody, _user: dict = D
 
 
 @router.post("/{tipo_clave}/hojas/eliminar")
-def eliminar_hoja_route(tipo_clave: str, body: HojaNombreBody, _user: dict = Depends(require_todo)):
+def eliminar_hoja_route(tipo_clave: str, body: HojaNombreBody, _user: dict = Depends(require_tipo_acceso)):
     try:
         informes_module.eliminar_hoja(tipo_clave, body.hoja)
     except ValueError as exc:
@@ -99,7 +120,7 @@ def eliminar_hoja_route(tipo_clave: str, body: HojaNombreBody, _user: dict = Dep
 
 
 @router.post("/{tipo_clave}/importar")
-async def importar_route(tipo_clave: str, file: UploadFile = File(...), user: dict = Depends(require_todo)):
+async def importar_route(tipo_clave: str, file: UploadFile = File(...), user: dict = Depends(require_tipo_acceso)):
     if not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="Sube un archivo Excel (.xlsx)")
     content = await file.read()
@@ -122,20 +143,22 @@ def respuestas_route(
     fecha_col: str | None = None,
     fecha_desde: str | None = None,
     fecha_hasta: str | None = None,
-    _user: dict = Depends(require_todo),
+    excluir_no_aptos: bool = False,
+    _user: dict = Depends(require_tipo_acceso),
 ):
     try:
         return informes_module.get_respuestas(
             tipo_clave, hoja=hoja, page=page, page_size=page_size, q=q,
             orden=orden, orden_dir=orden_dir,
             fecha_col=fecha_col, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
+            excluir_no_aptos=excluir_no_aptos,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.post("/respuestas/{respuesta_id}/cv")
-async def subir_cv_route(respuesta_id: int, file: UploadFile = File(...), _user: dict = Depends(require_todo)):
+async def subir_cv_route(respuesta_id: int, file: UploadFile = File(...), _user: dict = Depends(require_informes)):
     content = await file.read()
     try:
         informes_module.guardar_cv(respuesta_id, file.filename, content)
@@ -146,7 +169,7 @@ async def subir_cv_route(respuesta_id: int, file: UploadFile = File(...), _user:
 
 @router.get("/respuestas/{respuesta_id}/cv")
 def descargar_cv_route(respuesta_id: int, user: dict = Depends(get_current_user)):
-    tiene_acceso = user["rol"] in ("admin", "rrhh") or informes_module.usuario_tiene_acceso_respuesta(
+    tiene_acceso = auth_module.tiene_modulo(user, "informes") or informes_module.usuario_tiene_acceso_respuesta(
         user["id"], respuesta_id
     )
     if not tiene_acceso:
@@ -154,20 +177,26 @@ def descargar_cv_route(respuesta_id: int, user: dict = Depends(get_current_user)
     respuesta = informes_module.get_respuesta(respuesta_id)
     if respuesta is None or not respuesta["cv_ruta"] or not os.path.exists(respuesta["cv_ruta"]):
         raise HTTPException(status_code=404, detail="Este candidato no tiene CV subido")
+    nombre = respuesta["cv_nombre_original"] or "cv"
+    # inline (no attachment) + el media_type real para que el navegador lo
+    # ABRA en la pestaña (los PDF se ven, no se descargan de golpe) y sea el
+    # usuario quien decida guardarlo. Los .doc/.docx el navegador no los sabe
+    # renderizar y los descargará igualmente, que es lo esperado ahí.
+    media_type = mimetypes.guess_type(nombre)[0] or "application/octet-stream"
     return FileResponse(
         respuesta["cv_ruta"],
-        filename=respuesta["cv_nombre_original"] or "cv",
-        media_type="application/octet-stream",
+        media_type=media_type,
+        headers={"Content-Disposition": f'inline; filename="{nombre}"'},
     )
 
 
 @router.post("/compartir")
-def compartir_route(body: CompartirBody, user: dict = Depends(require_todo)):
+def compartir_route(body: CompartirBody, user: dict = Depends(require_informes)):
     informes_module.compartir_respuestas(body.respuesta_ids, body.usuario_id, user["username"])
     return {"ok": True}
 
 
 @router.delete("/compartir/{respuesta_id}/{usuario_id}")
-def dejar_de_compartir_route(respuesta_id: int, usuario_id: int, _user: dict = Depends(require_todo)):
+def dejar_de_compartir_route(respuesta_id: int, usuario_id: int, _user: dict = Depends(require_informes)):
     informes_module.dejar_de_compartir(respuesta_id, usuario_id)
     return {"ok": True}

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from pydantic import BaseModel
 
 import auth as auth_module
+import informes as informes_module
 from db import get_connection
 
 router = APIRouter()
@@ -10,7 +11,12 @@ COOKIE_NAME = "kt_session"
 
 
 def public_user(row: dict) -> dict:
-    return {"id": row["id"], "username": row["username"], "nombre": row["nombre"], "rol": row["rol"]}
+    return {
+        "id": row["id"], "username": row["username"], "nombre": row["nombre"], "rol": row["rol"],
+        "tiendas": auth_module.get_tiendas_permitidas(row["id"]),
+        "modulos": list(auth_module.MODULOS) if row["rol"] == "admin" else auth_module.get_modulos_permitidos(row["id"]),
+        "tipos_informes": informes_module.get_tipos_permitidos(row["id"]),
+    }
 
 
 def get_current_user(kt_session: str | None = Cookie(default=None)) -> dict:
@@ -23,6 +29,12 @@ def get_current_user(kt_session: str | None = Cookie(default=None)) -> dict:
 def require_admin(user: dict = Depends(get_current_user)) -> dict:
     if user["rol"] != "admin":
         raise HTTPException(status_code=403, detail="Requiere rol admin")
+    return user
+
+
+def require_resenas(user: dict = Depends(get_current_user)) -> dict:
+    if not auth_module.tiene_modulo(user, "resenas"):
+        raise HTTPException(status_code=403, detail="No tienes acceso a Reseñas")
     return user
 
 
@@ -91,6 +103,9 @@ class NewUserBody(BaseModel):
     username: str
     nombre: str
     rol: str
+    tiendas: list[str] = []
+    modulos: list[str] = []
+    tipos_informes: list[str] = []
 
 
 class UpdateRoleBody(BaseModel):
@@ -101,9 +116,26 @@ class SetAdminPinBody(BaseModel):
     pin: str
 
 
+class SetTiendasBody(BaseModel):
+    tiendas: list[str] = []
+
+
+class SetModulosBody(BaseModel):
+    modulos: list[str] = []
+
+
+class SetTiposInformesBody(BaseModel):
+    tipos_informes: list[str] = []
+
+
 @router.get("/roles")
 def list_roles(_admin: dict = Depends(require_admin)):
     return [{"value": k, "label": v} for k, v in auth_module.ROLES.items()]
+
+
+@router.get("/modulos")
+def list_modulos(_admin: dict = Depends(require_admin)):
+    return [{"value": k, "label": v} for k, v in auth_module.MODULOS.items()]
 
 
 @router.get("/users")
@@ -111,7 +143,15 @@ def list_users(_admin: dict = Depends(require_admin)):
     conn = get_connection()
     rows = conn.execute("SELECT id, username, pin, nombre, rol, creado FROM usuarios ORDER BY id").fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [
+        {
+            **dict(r),
+            "tiendas": auth_module.get_tiendas_permitidas(r["id"]),
+            "modulos": list(auth_module.MODULOS) if r["rol"] == "admin" else auth_module.get_modulos_permitidos(r["id"]),
+            "tipos_informes": informes_module.get_tipos_permitidos(r["id"]),
+        }
+        for r in rows
+    ]
 
 
 @router.post("/users")
@@ -122,7 +162,51 @@ def create_user_route(body: NewUserBody, _admin: dict = Depends(require_admin)):
         user_id = auth_module.create_user(body.username, body.nombre, body.rol)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"No se pudo crear el usuario (¿username duplicado?): {exc}")
+    if body.tiendas:
+        auth_module.set_tiendas_permitidas(user_id, body.tiendas)
+    # admin siempre tiene todos los módulos (ver auth_module.tiene_modulo) —
+    # no hace falta guardarlo explícitamente, pero para el resto de roles el
+    # checkbox de cada módulo es la única fuente de verdad.
+    if body.rol != "admin":
+        auth_module.set_modulos_permitidos(user_id, body.modulos)
+    if body.tipos_informes:
+        informes_module.set_tipos_permitidos(user_id, body.tipos_informes)
     return {"ok": True, "id": user_id}
+
+
+@router.patch("/users/{user_id}/tiendas")
+def set_tiendas_route(user_id: int, body: SetTiendasBody, _admin: dict = Depends(require_admin)):
+    conn = get_connection()
+    row = conn.execute("SELECT id FROM usuarios WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    auth_module.set_tiendas_permitidas(user_id, body.tiendas)
+    return {"ok": True}
+
+
+@router.patch("/users/{user_id}/modulos")
+def set_modulos_route(user_id: int, body: SetModulosBody, _admin: dict = Depends(require_admin)):
+    conn = get_connection()
+    row = conn.execute("SELECT id, rol FROM usuarios WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    if row["rol"] == "admin":
+        raise HTTPException(status_code=400, detail="Admin ya tiene acceso a todos los módulos")
+    auth_module.set_modulos_permitidos(user_id, body.modulos)
+    return {"ok": True}
+
+
+@router.patch("/users/{user_id}/tipos-informes")
+def set_tipos_informes_route(user_id: int, body: SetTiposInformesBody, _admin: dict = Depends(require_admin)):
+    conn = get_connection()
+    row = conn.execute("SELECT id FROM usuarios WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    informes_module.set_tipos_permitidos(user_id, body.tipos_informes)
+    return {"ok": True}
 
 
 @router.patch("/users/{user_id}/rol")
@@ -132,9 +216,15 @@ def update_role_route(user_id: int, body: UpdateRoleBody, admin: dict = Depends(
     if user_id == admin["id"] and body.rol != "admin":
         raise HTTPException(status_code=400, detail="No puedes quitarte tu propio rol admin")
     conn = get_connection()
+    row = conn.execute("SELECT rol FROM usuarios WHERE id = ?", (user_id,)).fetchone()
     conn.execute("UPDATE usuarios SET rol = ? WHERE id = ?", (body.rol, user_id))
     conn.commit()
     conn.close()
+    # Un admin no tiene filas propias en usuario_modulos (siempre ve todo por
+    # su rol) — si deja de ser admin, hay que concederle explícitamente todo
+    # lo que ya veía, si no, se queda sin ningún módulo de golpe.
+    if row and row["rol"] == "admin" and body.rol != "admin" and not auth_module.get_modulos_permitidos(user_id):
+        auth_module.set_modulos_permitidos(user_id, list(auth_module.MODULOS))
     return {"ok": True}
 
 

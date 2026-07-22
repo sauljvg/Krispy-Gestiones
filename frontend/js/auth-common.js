@@ -1,11 +1,5 @@
 const AUTH_API_BASE = `${window.location.origin}/api`;
 
-const ROLES_TODO = ["admin", "rrhh"];
-
-function esRolTodo(rol) {
-  return ROLES_TODO.includes(rol);
-}
-
 async function checkAuth(nextPath) {
   const res = await fetch(`${AUTH_API_BASE}/auth/me`);
   if (!res.ok) {

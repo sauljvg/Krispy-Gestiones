@@ -103,6 +103,9 @@ function currentFiltros() {
     if (desde) params.set("fecha_desde", desde);
     if (hasta) params.set("fecha_hasta", hasta);
   }
+  if (document.getElementById("f-excluir-no-aptos").checked) {
+    params.set("excluir_no_aptos", "true");
+  }
   params.set("page_size", "500");
   return params;
 }
@@ -239,6 +242,11 @@ async function loadRespuestas() {
     fechaWrap.dataset.col = "";
   }
 
+  // El filtro "Excluir No aptos" solo tiene sentido para informes que traen
+  // la columna RESULTADO (Valores y Competencias) — en otros tipos (p.ej.
+  // entrevistas de salida) se oculta.
+  document.getElementById("f-no-aptos-wrap").hidden = !data.columnas.includes("RESULTADO");
+
   aplicarPreferenciaColumnas(data);
   renderColumnasPanel();
   renderTable();
@@ -352,7 +360,7 @@ function cerrarModalCompartir() {
 document.addEventListener("DOMContentLoaded", async () => {
   const user = await checkAuth("/informes.html");
   if (!user) return;
-  if (!esRolTodo(user.rol)) {
+  if (!(user.modulos || []).includes("informes")) {
     window.location.href = "/";
     return;
   }
@@ -408,7 +416,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   ["f-buscar"].forEach((id) => {
     document.getElementById(id).addEventListener("input", () => loadRespuestas());
   });
-  ["f-orden", "f-orden-dir", "f-fecha-desde", "f-fecha-hasta"].forEach((id) => {
+  ["f-orden", "f-orden-dir", "f-fecha-desde", "f-fecha-hasta", "f-excluir-no-aptos"].forEach((id) => {
     document.getElementById(id).addEventListener("change", () => loadRespuestas());
   });
 
@@ -418,6 +426,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("f-orden-dir").value = "asc";
     document.getElementById("f-fecha-desde").value = "";
     document.getElementById("f-fecha-hasta").value = "";
+    document.getElementById("f-excluir-no-aptos").checked = false;
     loadRespuestas();
   });
 

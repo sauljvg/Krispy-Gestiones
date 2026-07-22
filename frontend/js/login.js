@@ -57,6 +57,28 @@ document.getElementById("btn-login-back").addEventListener("click", () => {
   irAPaso("usuario");
 });
 
+// Con 4 dígitos ya está todo lo que hace falta — enviar directo sin esperar
+// un clic en "Entrar". Si estamos creando un PIN nuevo, el primer campo pasa
+// el foco al de confirmación en vez de enviar (todavía falta ese dato).
+function soloDigitos(valor) {
+  return /^\d{4}$/.test(valor);
+}
+
+document.getElementById("login-pin").addEventListener("input", (e) => {
+  if (!soloDigitos(e.target.value)) return;
+  if (tienePinActual) {
+    document.getElementById("login-form-pin").requestSubmit();
+  } else {
+    document.getElementById("login-pin-confirm").focus();
+  }
+});
+
+document.getElementById("login-pin-confirm").addEventListener("input", (e) => {
+  if (soloDigitos(e.target.value)) {
+    document.getElementById("login-form-pin").requestSubmit();
+  }
+});
+
 document.getElementById("login-form-pin").addEventListener("submit", async (e) => {
   e.preventDefault();
   const errorEl = document.getElementById("login-error-pin");

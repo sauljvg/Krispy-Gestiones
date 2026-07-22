@@ -58,6 +58,16 @@ def ensure_informe_tables():
             UNIQUE(tipo_id, hoja, fila_hash)
         )
     """)
+    # Sin filas = ve todos los tipos de informe (igual que usuario_tiendas en
+    # Reseñas) — esto es un refinamiento DENTRO del módulo "informes", que ya
+    # se concede o no a nivel de módulo en usuario_modulos.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS usuario_informe_tipos (
+            usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+            tipo_clave TEXT NOT NULL,
+            PRIMARY KEY (usuario_id, tipo_clave)
+        )
+    """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS informe_compartidos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -369,7 +379,7 @@ def _detect_date_columns(columnas):
 
 
 def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=None, orden_dir="asc",
-                    fecha_col=None, fecha_desde=None, fecha_hasta=None):
+                    fecha_col=None, fecha_desde=None, fecha_hasta=None, excluir_no_aptos=False):
     tipo = get_tipo(tipo_clave)
     if tipo is None:
         raise ValueError(f"Tipo de informe desconocido: {tipo_clave}")
@@ -394,6 +404,11 @@ def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=N
     if fecha_col and fecha_hasta:
         clauses.append("json_extract(datos_json, ?) <= ?")
         params.extend([f"$.\"{fecha_col}\"", fecha_hasta])
+    if excluir_no_aptos:
+        # RESULTADO viene del Excel de Valores y Competencias como "❌ No
+        # apto" — otros tipos de informe no tienen esta columna, así que se
+        # deja pasar cuando es NULL en vez de excluir de más.
+        clauses.append("(json_extract(datos_json, '$.RESULTADO') IS NULL OR json_extract(datos_json, '$.RESULTADO') NOT LIKE '%No apto%')")
     where = "WHERE " + " AND ".join(clauses)
 
     order_sql = "id DESC"
@@ -465,8 +480,16 @@ def guardar_cv(respuesta_id, archivo_nombre, contenido):
 def compartir_respuestas(respuesta_ids, usuario_id, compartido_por):
     conn = get_connection()
     for rid in respuesta_ids:
+        # Upsert en vez de INSERT OR IGNORE: si ya se había compartido antes,
+        # volver a compartir debe refrescar la fecha (y quién lo hizo), para
+        # que el orden de Reclutamiento refleje la última vez que se compartió.
         conn.execute(
-            "INSERT OR IGNORE INTO informe_compartidos (respuesta_id, usuario_id, compartido_por) VALUES (?, ?, ?)",
+            """
+            INSERT INTO informe_compartidos (respuesta_id, usuario_id, compartido_por)
+            VALUES (?, ?, ?)
+            ON CONFLICT(respuesta_id, usuario_id)
+            DO UPDATE SET compartido_por = excluded.compartido_por, compartido_en = datetime('now')
+            """,
             (rid, usuario_id, compartido_por),
         )
     conn.commit()
@@ -491,6 +514,28 @@ def usuario_tiene_acceso_respuesta(usuario_id, respuesta_id):
     return row is not None
 
 
+def get_tipos_permitidos(usuario_id: int) -> list[str]:
+    """Claves de tipo de informe a las que este usuario tiene acceso.
+    Lista vacía = sin restricción (ve todos, como usuario_tiendas)."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT tipo_clave FROM usuario_informe_tipos WHERE usuario_id = ? ORDER BY tipo_clave", (usuario_id,)
+    ).fetchall()
+    conn.close()
+    return [r["tipo_clave"] for r in rows]
+
+
+def set_tipos_permitidos(usuario_id: int, tipos: list[str]):
+    conn = get_connection()
+    conn.execute("DELETE FROM usuario_informe_tipos WHERE usuario_id = ?", (usuario_id,))
+    for tipo_clave in tipos:
+        conn.execute(
+            "INSERT OR IGNORE INTO usuario_informe_tipos (usuario_id, tipo_clave) VALUES (?, ?)", (usuario_id, tipo_clave)
+        )
+    conn.commit()
+    conn.close()
+
+
 def get_compartidos_con(usuario_id):
     conn = get_connection()
     rows = conn.execute("""
@@ -510,6 +555,42 @@ def get_compartidos_con(usuario_id):
             "compartido_id": row["compartido_id"],
             "compartido_en": row["compartido_en"],
             "compartido_por": row["compartido_por"],
+            "respuesta_id": row["respuesta_id"],
+            "datos": json.loads(row["datos_json"]),
+            "hoja": row["hoja"],
+            "tiene_cv": row["cv_ruta"] is not None,
+            "cv_nombre": row["cv_nombre_original"],
+            "tipo_nombre": row["tipo_nombre"],
+            "tipo_clave": row["tipo_clave"],
+        })
+    return resultado
+
+
+def get_compartidos_por(username):
+    """Candidatos que ESTE usuario ha compartido con otros (para su propia
+    carpeta de Reclutamiento, sección "Compartidos por ti"). Incluye a quién
+    se lo compartió, para poder agrupar por tanda + destinatario."""
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT c.id AS compartido_id, c.compartido_en, c.compartido_por,
+               u.nombre AS destinatario_nombre, u.username AS destinatario_username,
+               r.id AS respuesta_id, r.datos_json, r.hoja, r.cv_ruta, r.cv_nombre_original,
+               t.nombre AS tipo_nombre, t.clave AS tipo_clave
+        FROM informe_compartidos c
+        JOIN informe_respuestas r ON r.id = c.respuesta_id
+        JOIN informe_tipos t ON t.id = r.tipo_id
+        JOIN usuarios u ON u.id = c.usuario_id
+        WHERE c.compartido_por = ?
+        ORDER BY c.compartido_en DESC
+    """, (username,)).fetchall()
+    conn.close()
+    resultado = []
+    for row in rows:
+        resultado.append({
+            "compartido_id": row["compartido_id"],
+            "compartido_en": row["compartido_en"],
+            "destinatario_nombre": row["destinatario_nombre"],
+            "destinatario_username": row["destinatario_username"],
             "respuesta_id": row["respuesta_id"],
             "datos": json.loads(row["datos_json"]),
             "hoja": row["hoja"],

@@ -16,11 +16,13 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+import auth as auth_module
 import scrape_jobs
-from auth_routes import get_current_user
+from auth_routes import COOKIE_NAME, require_resenas
 from auth_routes import router as auth_router
 from clima_routes import router as clima_router
 from informes_routes import router as informes_router
+from request_context import tiendas_permitidas_actual
 from routes import router
 
 app = FastAPI(title="Krispy Kreme Reseñas API")
@@ -32,6 +34,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def restringir_tiendas_por_usuario(request, call_next):
+    """Resuelve, una vez por petición, a qué tiendas tiene acceso el usuario
+    de la sesión (si la hay) y lo deja en un contextvar — así build_filters()
+    y las funciones de analytics.py pueden aplicar la restricción sin que
+    cada endpoint de Reseñas tenga que pedirla explícitamente."""
+    token = request.cookies.get(COOKIE_NAME)
+    tiendas = []
+    if token:
+        user = auth_module.get_user_by_token(token)
+        if user:
+            tiendas = auth_module.get_tiendas_permitidas(user["id"])
+    reset_token = tiendas_permitidas_actual.set(tiendas)
+    try:
+        return await call_next(request)
+    finally:
+        tiendas_permitidas_actual.reset(reset_token)
+
+
+@app.middleware("http")
+async def no_cachear_estaticos(request, call_next):
+    """StaticFiles no manda Cache-Control, así que el navegador cachea el
+    HTML/JS/CSS con heurística propia y puede tardar en recoger cambios
+    (hace falta recargar sin caché para verlos). Forzar revalidación en cada
+    carga evita ese desfase sin perder el beneficio del ETag/304."""
+    response = await call_next(request)
+    if not request.url.path.startswith("/api"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 # /api/auth/* queda público (login/logout) o resuelve su propia auth (me,
 # users). El resto de /api/* exige sesión iniciada. /api/informes/* y
 # /api/clima/* exigen además el rol "Todo" (admin/rrhh), ya resuelto en cada
@@ -39,7 +72,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/auth")
 app.include_router(informes_router, prefix="/api/informes")
 app.include_router(clima_router, prefix="/api/clima")
-app.include_router(router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(router, prefix="/api", dependencies=[Depends(require_resenas)])
 
 
 @app.on_event("startup")

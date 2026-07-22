@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 
+import auth as auth_module
 import clima as clima_module
 from auth_routes import get_current_user
 from clima_pdf import generar_pdf
@@ -8,19 +9,19 @@ from clima_pdf import generar_pdf
 router = APIRouter()
 
 
-def require_todo(user: dict = Depends(get_current_user)) -> dict:
-    if user["rol"] not in ("admin", "rrhh"):
+def require_clima(user: dict = Depends(get_current_user)) -> dict:
+    if not auth_module.tiene_modulo(user, "clima"):
         raise HTTPException(status_code=403, detail="No tienes acceso a Clima Laboral")
     return user
 
 
 @router.get("/oleadas")
-def list_oleadas_route(_user: dict = Depends(require_todo)):
+def list_oleadas_route(_user: dict = Depends(require_clima)):
     return clima_module.list_oleadas()
 
 
 @router.get("/{oleada_id}/centros")
-def list_centros_route(oleada_id: int, _user: dict = Depends(require_todo)):
+def list_centros_route(oleada_id: int, _user: dict = Depends(require_clima)):
     return clima_module.list_centros(oleada_id)
 
 
@@ -28,7 +29,7 @@ def list_centros_route(oleada_id: int, _user: dict = Depends(require_todo)):
 async def importar_route(
     file: UploadFile = File(...),
     nueva_oleada: bool = Form(default=False),
-    user: dict = Depends(require_todo),
+    user: dict = Depends(require_clima),
 ):
     if not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="Sube un archivo Excel (.xlsx)")
@@ -41,7 +42,7 @@ async def importar_route(
 
 
 @router.get("/{oleada_id}/reporte")
-def reporte_route(oleada_id: int, centro: str | None = None, _user: dict = Depends(require_todo)):
+def reporte_route(oleada_id: int, centro: str | None = None, _user: dict = Depends(require_clima)):
     try:
         return clima_module.compute_reporte(oleada_id, centro)
     except ValueError as exc:
@@ -49,7 +50,7 @@ def reporte_route(oleada_id: int, centro: str | None = None, _user: dict = Depen
 
 
 @router.get("/{oleada_id}/reporte.pdf")
-def reporte_pdf_route(oleada_id: int, centro: str | None = None, _user: dict = Depends(require_todo)):
+def reporte_pdf_route(oleada_id: int, centro: str | None = None, _user: dict = Depends(require_clima)):
     try:
         reporte = clima_module.compute_reporte(oleada_id, centro)
     except ValueError as exc:

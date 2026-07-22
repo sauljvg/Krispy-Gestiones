@@ -3,10 +3,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (!user) return;
   wireUserBar(user);
 
-  if (esRolTodo(user.rol)) {
-    document.getElementById("card-informes").hidden = false;
-    document.getElementById("card-clima").hidden = false;
-  }
+  const modulos = user.modulos || [];
+  document.getElementById("card-resenas").hidden = !modulos.includes("resenas");
+  document.getElementById("card-informes").hidden = !modulos.includes("informes");
+  document.getElementById("card-clima").hidden = !modulos.includes("clima");
   if (user.rol === "admin") {
     document.getElementById("card-usuarios").hidden = false;
   }

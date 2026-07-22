@@ -51,6 +51,21 @@ STOPWORDS = {
 
 CV_DIR = None  # no aplica aquí
 
+# Une cada centro de Clima Laboral con su tienda equivalente en el sistema de
+# Reseñas (Google), para poder mostrar la satisfacción real de cliente junto
+# al engagement. Oficinas no tiene tienda física de cara al público, así que
+# se queda fuera (None). ParqueSur Fábrica/Tienda comparten la misma ficha de
+# Google (una sola ubicación), así que ambas apuntan a "ParqueSur".
+_CENTRO_A_TIENDAS = {
+    "caleido": ["Caleido"],
+    "gran plaza 2": ["Gran Plaza 2"],
+    "la gavia": ["La Gavia"],
+    "parquesur fabrica": ["ParqueSur"],
+    "parquesur tienda": ["ParqueSur"],
+    "princesa": ["Princesa"],
+    "plenilunio": ["Plenilunio"],
+}
+
 
 def ensure_clima_tables():
     conn = get_connection()
@@ -319,6 +334,19 @@ def _tokenizar(texto):
     return [p for p in palabras if len(p) > 2 and p not in STOPWORDS]
 
 
+_RESPUESTAS_SIN_VALOR = {".", "..", "…", "-", "sin comentarios", "sin comentario"}
+
+
+def _respuesta_con_valor(texto):
+    """Filtra respuestas abiertas vacías o que son solo un punto/relleno
+    ("." , "sin comentarios") — no aportan nada y no deben aparecer en la
+    lista de comentarios ni en el PDF."""
+    limpio = (texto or "").strip()
+    if not limpio:
+        return False
+    return limpio.lower() not in _RESPUESTAS_SIN_VALOR
+
+
 def compute_reporte(oleada_id, centro=None):
     conn = get_connection()
     filas = _fetch_respuestas(conn, oleada_id, centro)
@@ -383,6 +411,7 @@ def compute_reporte(oleada_id, centro=None):
     nube_palabras = {}
     for header in roles["abiertas"]:
         textos = [str(fila[header]).strip() for fila in filas if fila.get(header)]
+        textos = [t for t in textos if _respuesta_con_valor(t)]
         abiertas[header] = textos
         conteo_palabras = {}
         for texto in textos:
@@ -392,6 +421,7 @@ def compute_reporte(oleada_id, centro=None):
         nube_palabras[header] = [{"palabra": p, "veces": c} for p, c in top_palabras]
 
     anterior = get_anterior_score(centro, oleada_id)
+    satisfaccion = get_satisfaccion_cliente(centro, oleada_id)
 
     conn.close()
     return {
@@ -402,6 +432,9 @@ def compute_reporte(oleada_id, centro=None):
         "participacion": participacion,
         "engagement_presente": engagement_score,
         "engagement_anterior": anterior,
+        "satisfaccion_presente": satisfaccion["presente"] if satisfaccion else None,
+        "satisfaccion_anterior": satisfaccion["anterior"] if satisfaccion else None,
+        "tiene_satisfaccion": satisfaccion is not None,
         "resultados_engagement": resultados_engagement,
         "impulsores_engagement": impulsores_engagement,
         "fortalezas": fortalezas,
@@ -409,6 +442,49 @@ def compute_reporte(oleada_id, centro=None):
         "abiertas": abiertas,
         "nube_palabras": nube_palabras,
     }
+
+
+def _tiendas_para_centro(centro):
+    if centro is None:
+        todas = set()
+        for tiendas in _CENTRO_A_TIENDAS.values():
+            todas.update(tiendas)
+        return sorted(todas)
+    return _CENTRO_A_TIENDAS.get(_normaliza_header(centro))
+
+
+def get_satisfaccion_cliente(centro, oleada_id):
+    """Satisfacción de cliente (estrellas de Google) para el mismo centro,
+    para mostrarla junto al engagement. Presente = media de todas las
+    reseñas a día de hoy. Anterior = media de reseñas hasta la fecha de la
+    oleada anterior (así se compara el mismo punto en el tiempo que el
+    engagement de esa oleada). None si el centro no tiene tienda física
+    (p.ej. Oficinas) o no hay reseñas."""
+    tiendas = _tiendas_para_centro(centro)
+    if not tiendas:
+        return None
+
+    conn = get_connection()
+    anterior_oleada = conn.execute(
+        "SELECT creado_en FROM clima_oleadas WHERE id < ? ORDER BY id DESC LIMIT 1", (oleada_id,)
+    ).fetchone()
+    fecha_anterior = anterior_oleada["creado_en"] if anterior_oleada else None
+
+    placeholders = ",".join("?" for _ in tiendas)
+
+    def promedio(fecha_limite):
+        query = f"SELECT AVG(calificacion_num) AS media FROM reviews WHERE tienda IN ({placeholders})"
+        params = list(tiendas)
+        if fecha_limite:
+            query += " AND fecha_datetime <= ?"
+            params.append(fecha_limite)
+        row = conn.execute(query, params).fetchone()
+        return round(row["media"], 2) if row and row["media"] is not None else None
+
+    presente = promedio(None)
+    anterior = promedio(fecha_anterior) if fecha_anterior else None
+    conn.close()
+    return {"presente": presente, "anterior": anterior}
 
 
 def get_anterior_score(centro, oleada_id):

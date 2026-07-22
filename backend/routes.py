@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 import analytics
 import scrape_jobs
 from db import dict_rows, get_connection
+from request_context import tiendas_permitidas_actual
 from utils import paginate, read_transactions_xlsx, rows_to_csv, rows_to_xlsx
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scraper")))
@@ -23,9 +24,25 @@ def build_filters(rating, sentiment, date_from, date_to, q, staff=None, tienda=N
     clauses = []
     params = []
 
-    if tienda:
+    # Gerentes/area managers con tiendas asignadas solo pueden ver esas
+    # tiendas, sin importar qué pida el query param — si piden una que no
+    # les corresponde, la consulta no devuelve nada en vez de filtrar mal.
+    tiendas_permitidas = tiendas_permitidas_actual.get()
+    if tiendas_permitidas:
+        if tienda:
+            if tienda not in tiendas_permitidas:
+                clauses.append("1=0")
+            else:
+                clauses.append("tienda = ?")
+                params.append(tienda)
+        else:
+            placeholders = ",".join(["?"] * len(tiendas_permitidas))
+            clauses.append(f"tienda IN ({placeholders})")
+            params.extend(tiendas_permitidas)
+    elif tienda:
         clauses.append("tienda = ?")
         params.append(tienda)
+
     if rating is not None:
         clauses.append("calificacion_num = ?")
         params.append(rating)

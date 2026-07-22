@@ -15,47 +15,62 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/styles.css">
-<script src="js/vendor/chart.umd.min.js"></script>
+<link rel="stylesheet" href="css/styles.css?v=20260722c">
+<script src="js/vendor/chart.umd.min.js?v=20260722c"></script>
 <style>
+  /* Valores por defecto — se sobreescriben en runtime con
+     assets/design-tokens.json (misma fuente que usa el PDF), así que si el
+     fetch fallara por lo que sea, esto sigue viéndose igual que hoy. */
+  :root {
+    --kk-verde: #006838;
+    --kk-gris-anterior: #8a8a86;
+    --chip-fortaleza: #006838;
+    --chip-oportunidad: #e07b00;
+    --radio-chip: 8px;
+    --radio-caja: 8px;
+  }
   .clima-wrap { max-width: 1100px; margin: 0 auto; padding: 0 0 40px; }
-  .clima-report-title { text-align: center; margin: 10px 0 24px; }
+  .clima-report-title { text-align: center; margin: 6px 0 20px; }
   .clima-report-title img { height: 130px; width: auto; }
   .clima-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 16px 0; }
-  .clima-toolbar select { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 13px; }
-  .clima-import-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+  .clima-toolbar select { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 14px; }
+  .clima-import-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
   .centro-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
   .centro-card {
     background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
-    padding: 14px; text-align: center; cursor: pointer; font-size: 13px; font-weight: 600;
+    padding: 14px; text-align: center; cursor: pointer; font-size: 14px; font-weight: 600;
   }
   .centro-card:hover { border-color: var(--series-blue); }
   .centro-card.active { border-color: var(--status-good); background: color-mix(in srgb, var(--status-good) 12%, var(--surface-1)); }
 
-  .clima-header-stats { display: flex; gap: 20px; flex-wrap: wrap; margin: 12px 0 20px; color: var(--text-secondary); font-size: 13px; }
-  .clima-header-stats b { color: var(--text-primary); }
+  .clima-header-stats { display: flex; justify-content: center; gap: 32px; flex-wrap: wrap; margin: 14px 0 24px; color: var(--text-secondary); font-size: 17px; text-align: center; }
+  .clima-header-stats b { color: var(--text-primary); font-size: 19px; }
 
-  .score-boxes { display: flex; gap: 12px; margin-bottom: 24px; }
-  .score-box { flex: 1; max-width: 220px; border-radius: 10px; padding: 16px; color: #fff; text-align: center; }
-  .score-box .score-label { font-size: 12px; opacity: 0.9; }
-  .score-box .score-value { font-size: 26px; font-weight: 700; margin-top: 4px; }
-  .score-presente { background: #006838; }
-  .score-anterior { background: #8a8a86; }
+  .engagement-row { display: flex; gap: 32px; flex-wrap: wrap; margin-bottom: 28px; }
+  .engagement-col { flex: 1; min-width: 280px; }
+  .engagement-col h2 { margin: 0 0 12px; }
+
+  .score-boxes { display: flex; gap: 12px; }
+  .score-box { flex: 1; max-width: 220px; border-radius: var(--radio-caja); padding: 18px; color: #fff; text-align: center; }
+  .score-box .score-label { font-size: 15px; opacity: 0.9; }
+  .score-box .score-value { font-size: 32px; font-weight: 700; margin-top: 4px; }
+  .score-presente { background: var(--kk-verde); }
+  .score-anterior { background: var(--kk-gris-anterior); }
 
   .clima-chart-wrap { position: relative; margin-bottom: 10px; }
 
-  .fo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 10px 0 24px; }
-  .fo-col h3 { font-size: 13px; margin: 0 0 8px; }
-  .fo-col p { font-size: 13px; margin: 0 0 6px; }
-  .fo-fortaleza { color: var(--status-good); }
-  .fo-oportunidad { color: var(--status-critical); }
+  .fo-titulo-centrado { text-align: center; font-size: 22px; margin: 24px 0 16px; }
+  .fo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; margin: 10px 0 28px; align-items: stretch; }
+  .fo-col-title { font-size: 16px; margin: 0 0 4px; text-align: center; }
+  .fo-title-fortaleza { color: var(--chip-fortaleza); }
+  .fo-title-oportunidad { color: var(--chip-oportunidad); }
+  .fo-chip { display: flex; align-items: center; padding: 14px 18px; border-radius: var(--radio-chip); font-size: 16px; font-weight: 600; color: #fff; line-height: 1.4; height: 100%; box-sizing: border-box; }
+  .fo-chip-fortaleza { background: var(--chip-fortaleza); }
+  .fo-chip-oportunidad { background: var(--chip-oportunidad); }
 
-  .nube-wrap { line-height: 2.2; margin-bottom: 12px; }
-  .nube-palabra { color: #006838; font-weight: 600; margin-right: 10px; }
-  .comentarios-lista { margin-bottom: 24px; }
-  .comentarios-lista-titulo { font-size: 12px; color: var(--text-secondary); margin: 0 0 6px; }
-  .comentarios-lista ul { margin: 0; padding-left: 18px; max-height: 220px; overflow-y: auto; }
-  .comentarios-lista li { font-size: 13px; margin-bottom: 6px; color: var(--text-primary); }
+  .comentarios-lista { margin-bottom: 28px; }
+  .comentarios-lista ul { margin: 0; padding-left: 22px; max-height: 340px; overflow-y: auto; }
+  .comentarios-lista li { font-size: 16px; margin-bottom: 10px; color: var(--text-primary); line-height: 1.45; }
 </style>
 </head>
 <body>
@@ -69,14 +84,23 @@
       </div>
     </div>
     <div class="topbar-actions">
-      <a href="/" class="btn btn-ghost" title="Volver al inicio">🏠 Inicio</a>
-      <span id="topbar-user" class="topbar-user" hidden></span>
-      <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
-      <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema" title="Cambiar entre claro y oscuro">🌙</button>
+      <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
+      <div class="hamburger-wrap">
+        <button id="btn-hamburger" class="btn btn-ghost hamburger-btn" aria-label="Menú" aria-haspopup="true" aria-expanded="false">☰</button>
+        <div id="hamburger-menu" class="hamburger-menu" hidden>
+          <span id="topbar-user" class="topbar-user" hidden></span>
+          <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema">🌙 Cambiar tema</button>
+          <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+        </div>
+      </div>
     </div>
   </header>
 
   <div class="clima-wrap">
+    <div class="clima-report-title">
+      <img src="assets/la-voz-logo.png" alt="La Voz Krispy Kreme">
+    </div>
+
     <div class="clima-toolbar">
       <label for="select-oleada">Oleada</label>
       <select id="select-oleada"></select>
@@ -96,30 +120,42 @@
     <div class="centro-grid" id="centro-grid"></div>
 
     <div id="reporte-wrap" hidden>
-      <div class="clima-report-title">
-        <img src="assets/la-voz-logo.png" alt="La Voz Krispy Kreme">
-      </div>
       <div class="clima-header-stats" id="clima-header-stats"></div>
 
-      <h2 style="font-size:15px;">Puntuación Global de Engagement</h2>
-      <div class="score-boxes" id="score-boxes"></div>
+      <div class="engagement-row">
+        <div class="engagement-col">
+          <h2 style="font-size:18px;">Puntuación Global de Engagement</h2>
+          <div class="score-boxes" id="score-boxes"></div>
+        </div>
+        <div class="engagement-col" id="col-satisfaccion" hidden>
+          <h2 style="font-size:18px;">Satisfacción del cliente</h2>
+          <div class="score-boxes" id="score-boxes-satisfaccion"></div>
+        </div>
+      </div>
 
-      <h2 style="font-size:15px;">Resultados de Engagement</h2>
+      <h2 style="font-size:18px;">Resultados de Engagement</h2>
       <div class="clima-chart-wrap"><canvas id="chart-resultados"></canvas></div>
 
-      <h2 style="font-size:15px;">Impulsores de Engagement</h2>
+      <h2 style="font-size:18px;">Impulsores de Engagement</h2>
       <div class="clima-chart-wrap"><canvas id="chart-impulsores"></canvas></div>
 
-      <h2 style="font-size:15px;">Fortalezas / Oportunidades</h2>
+      <h2 class="fo-titulo-centrado">
+        Fortalezas / Oportunidades
+        <span class="info-tip-wrap">
+          <button type="button" class="info-tip-btn" aria-label="Cómo se interpreta">ⓘ</button>
+          <div class="info-tip-box">Suma de "Totalmente de acuerdo" + "De acuerdo" para cada pregunta.</div>
+        </span>
+      </h2>
       <div class="fo-grid" id="fo-grid"></div>
 
-      <h2 style="font-size:15px;">Comentarios abiertos</h2>
+      <h2 style="font-size:17px;">Preguntas abiertas</h2>
       <div id="comentarios-wrap"></div>
     </div>
   </div>
 </div>
-<script src="js/theme.js"></script>
-<script src="js/auth-common.js"></script>
-<script src="js/clima.js"></script>
+<script src="js/theme.js?v=20260722c"></script>
+<script src="js/auth-common.js?v=20260722c"></script>
+<script src="js/topbar-menu.js?v=20260722c"></script>
+<script src="js/clima.js?v=20260722c"></script>
 </body>
 </html>

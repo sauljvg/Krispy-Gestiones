@@ -15,11 +15,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/styles.css?v=20260722c">
 <style>
   .informes-wrap { max-width: 1200px; margin: 0 auto; padding: 0 0 60px; }
-  .home-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin: 20px 0 28px; }
-  .home-card { cursor: pointer; }
+  .informes-wrap .home-grid { margin: 20px 0 28px; }
+  .informes-wrap .home-card { cursor: pointer; }
   .informes-header { display: flex; justify-content: space-between; align-items: center; }
   #tipo-detail-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
   .table-scroll { overflow-x: auto; }
@@ -82,10 +82,15 @@
       </div>
     </div>
     <div class="topbar-actions">
-      <a href="/" class="btn btn-ghost" title="Volver al inicio">🏠 Inicio</a>
-      <span id="topbar-user" class="topbar-user" hidden></span>
-      <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
-      <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema" title="Cambiar entre claro y oscuro">🌙</button>
+      <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
+      <div class="hamburger-wrap">
+        <button id="btn-hamburger" class="btn btn-ghost hamburger-btn" aria-label="Menú" aria-haspopup="true" aria-expanded="false">☰</button>
+        <div id="hamburger-menu" class="hamburger-menu" hidden>
+          <span id="topbar-user" class="topbar-user" hidden></span>
+          <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema">🌙 Cambiar tema</button>
+          <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -144,6 +149,13 @@
           <label for="f-fecha-hasta">Hasta</label>
           <input type="date" id="f-fecha-hasta">
         </div>
+        <div class="campo" id="f-no-aptos-wrap" hidden>
+          <label>&nbsp;</label>
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px; white-space:nowrap; padding:7px 0;">
+            <input type="checkbox" id="f-excluir-no-aptos">
+            Excluir "No aptos"
+          </label>
+        </div>
         <div class="campo">
           <button type="button" id="btn-limpiar-filtros" class="btn btn-ghost">✕ Limpiar</button>
         </div>
@@ -187,8 +199,9 @@
   </div>
 </div>
 
-<script src="js/theme.js"></script>
-<script src="js/auth-common.js"></script>
-<script src="js/informes.js"></script>
+<script src="js/theme.js?v=20260722c"></script>
+<script src="js/auth-common.js?v=20260722c"></script>
+<script src="js/topbar-menu.js?v=20260722c"></script>
+<script src="js/informes.js?v=20260722c"></script>
 </body>
 </html>

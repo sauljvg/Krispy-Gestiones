@@ -4,6 +4,7 @@ import re
 from collections import Counter
 
 from db import get_connection
+from request_context import tiendas_permitidas_actual
 from staff_names import STORE_STAFF
 
 
@@ -187,7 +188,11 @@ def get_staff_mentions_all_stores(where="", params=None):
     actuales, anteriores = [], []
     conn = get_connection()
     cur = conn.cursor()
-    for tienda, patterns in _STORE_PATTERNS.items():
+    permitidas = tiendas_permitidas_actual.get()
+    tiendas_a_recorrer = (
+        {t: p for t, p in _STORE_PATTERNS.items() if t in permitidas} if permitidas else _STORE_PATTERNS
+    )
+    for tienda, patterns in tiendas_a_recorrer.items():
         clauses = ["tienda = ?", "texto IS NOT NULL"] + ([extra] if extra else [])
         sql_where = "WHERE " + " AND ".join(clauses)
         cur.execute(f"SELECT texto, calificacion_num, sentiment FROM reviews {sql_where}", [tienda] + params)
@@ -421,6 +426,10 @@ def get_store_stats(order_by="total", mes=None):
         for row in todas_tiendas:
             if row["tienda"] not in vistas:
                 rows.append({"tienda": row["tienda"], "total": 0, "promedio": 0, "transacciones": None})
+
+    permitidas = tiendas_permitidas_actual.get()
+    if permitidas:
+        rows = [r for r in rows if r["tienda"] in permitidas]
 
     for r in rows:
         r["promedio"] = round(r["promedio"], 2) if r["promedio"] else 0
