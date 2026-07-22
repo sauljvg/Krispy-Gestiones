@@ -7,3 +7,8 @@ krispy_kreme_todas_resenas.csv
 scraper/chrome_profile/
 scraper/chrome_profile_work/
 *.bak_pre_takeout
+*.bak_pre_informes_migracion
+*.bak_pre_pin_migracion
+uploads/
+*.pid
+

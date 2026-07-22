@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krispy Gestiones · Compartido conmigo</title>
+<script>
+  (function () {
+    var guardado = localStorage.getItem("kt-theme");
+    if (guardado === "light" || guardado === "dark") {
+      document.documentElement.dataset.theme = guardado;
+    }
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<style>
+  .compartidos-wrap { max-width: 900px; margin: 0 auto; padding: 0 0 60px; }
+  .candidato-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 14px; }
+  .candidato-card h3 { margin: 0 0 4px; font-size: 16px; }
+  .candidato-meta { color: var(--text-secondary); font-size: 12px; margin-bottom: 12px; }
+  .candidato-datos { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 16px; font-size: 13px; }
+  .candidato-datos .campo-nombre { color: var(--text-muted); font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">🍩</span>
+      <div>
+        <h1>Krispy Gestiones</h1>
+        <p class="subtitle">Compartido conmigo</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <a href="/" class="btn btn-ghost" title="Volver al inicio">🏠 Inicio</a>
+      <span id="topbar-user" class="topbar-user" hidden></span>
+      <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+      <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema" title="Cambiar entre claro y oscuro">🌙</button>
+    </div>
+  </header>
+
+  <div class="compartidos-wrap" id="compartidos-list"></div>
+</div>
+<script src="js/theme.js"></script>
+<script src="js/auth-common.js"></script>
+<script src="js/compartidos.js"></script>
+</body>
+</html>

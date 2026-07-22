@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krispy Gestiones · Usuarios</title>
+<script>
+  (function () {
+    var guardado = localStorage.getItem("kt-theme");
+    if (guardado === "light" || guardado === "dark") {
+      document.documentElement.dataset.theme = guardado;
+    }
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<style>
+  .config-wrap { max-width: 900px; margin: 0 auto; padding: 0 0 60px; }
+  .config-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: end; }
+  .config-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+  .config-field input, .config-field select {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface-page);
+    color: var(--text-primary);
+    font-size: 14px;
+  }
+  #users-table td, #users-table th { vertical-align: middle; }
+  #users-table select { padding: 5px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); }
+  .config-error { color: var(--status-critical); font-size: 13px; margin: 10px 0 0; }
+  .config-ok { color: var(--status-good); font-size: 13px; margin: 10px 0 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">🍩</span>
+      <div>
+        <h1>Krispy Gestiones</h1>
+        <p class="subtitle">Usuarios y niveles de acceso</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <a href="/" class="btn btn-ghost" title="Volver al inicio">🏠 Inicio</a>
+      <span id="topbar-user" class="topbar-user" hidden></span>
+      <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+      <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema" title="Cambiar entre claro y oscuro">🌙</button>
+    </div>
+  </header>
+
+  <div class="config-wrap">
+    <section class="chart-card">
+      <h2>Crear usuario</h2>
+      <form id="new-user-form" class="config-form">
+        <div class="config-field">
+          <label for="nu-username">Usuario</label>
+          <input type="text" id="nu-username" required>
+        </div>
+        <div class="config-field">
+          <label for="nu-nombre">Nombre</label>
+          <input type="text" id="nu-nombre" required>
+        </div>
+        <div class="config-field">
+          <label for="nu-rol">Rol</label>
+          <select id="nu-rol"></select>
+        </div>
+        <div class="config-field">
+          <button type="submit" class="btn btn-primary">Crear</button>
+        </div>
+      </form>
+      <p class="staff-hint">El usuario crea su propio PIN de 4 dígitos la primera vez que entra.</p>
+      <p class="config-error" id="new-user-error" hidden></p>
+      <p class="config-ok" id="new-user-ok" hidden></p>
+    </section>
+
+    <section class="chart-card">
+      <h2>Usuarios existentes</h2>
+      <div class="store-ranking-wrap">
+        <table class="staff-table" id="users-table">
+          <thead>
+            <tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>PIN</th><th>Creado</th><th></th></tr>
+          </thead>
+          <tbody id="users-list"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+<script src="js/theme.js"></script>
+<script src="js/auth-common.js"></script>
+<script src="js/usuarios.js"></script>
+</body>
+</html>

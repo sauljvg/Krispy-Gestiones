@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krispy Track</title>
+<script>
+  // Aplica el tema guardado ANTES de pintar la página, para que no haya un
+  // parpadeo del tema por defecto seguido del elegido por el usuario.
+  (function () {
+    var guardado = localStorage.getItem("kt-theme");
+    if (guardado === "light" || guardado === "dark") {
+      document.documentElement.dataset.theme = guardado;
+    }
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<script src="js/vendor/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">🍩</span>
+      <div>
+        <h1>Krispy Track</h1>
+        <p class="subtitle">Analítica de reseñas de Google Maps</p>
+      </div>
+    </div>
+    <div class="topbar-store">
+      <label for="filter-tienda">Tienda</label>
+      <select id="filter-tienda">
+        <option value="">Todas</option>
+      </select>
+    </div>
+    <div class="topbar-actions">
+      <a href="/" class="btn btn-ghost" title="Volver al inicio">🏠 Inicio</a>
+      <div id="scrape-progress" class="scrape-progress" hidden>
+        <div class="scrape-progress-bar"><div class="scrape-progress-fill"></div></div>
+        <span id="scrape-progress-msg"></span>
+        <span class="scrape-info-wrap">
+          <button type="button" class="scrape-info-btn" aria-label="Detalle del progreso">ⓘ</button>
+          <div class="scrape-info-tooltip" id="scrape-info-tooltip">Esperando datos…</div>
+        </span>
+      </div>
+      <span id="topbar-user" class="topbar-user" hidden></span>
+      <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+      <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema" title="Cambiar entre claro y oscuro">🌙</button>
+      <button id="btn-refresh" class="btn btn-ghost">↻ Actualizar</button>
+      <label class="btn btn-ghost btn-upload" title="Importar el .zip de Google Takeout (Perfil de Empresa en Google): lee todas las reseñas oficiales y solo añade las que faltan, sin duplicar.">
+        <span id="btn-import-takeout-label">📥 Importar Takeout</span>
+        <input type="file" id="input-import-takeout" accept=".zip" hidden>
+      </label>
+      <button id="btn-export-csv" class="btn btn-primary">⬇ Exportar Excel</button>
+    </div>
+  </header>
+
+  <main class="layout">
+   <div class="main-col">
+    <section class="stats-row" id="stats-row">
+      <div class="stat-tile">
+        <span class="stat-label">Total de reseñas</span>
+        <span class="stat-value-row">
+          <span class="stat-value" id="stat-total">—</span>
+          <span class="stat-check" id="stat-total-check" hidden>✓</span>
+        </span>
+      </div>
+      <div class="stat-tile">
+        <span class="stat-label">Promedio</span>
+        <span class="stat-value" id="stat-promedio">—</span>
+      </div>
+      <div class="stat-tile stat-good">
+        <span class="stat-label">Positivas</span>
+        <span class="stat-value" id="stat-positivas">—</span>
+      </div>
+      <div class="stat-tile">
+        <span class="stat-label">Reseñas recientes (120 días)</span>
+        <span class="stat-value" id="stat-recientes">—</span>
+      </div>
+    </section>
+
+    <section class="rating-progress-row" id="rating-progress-row">
+      <div class="stat-tile rating-true-tile">
+        <span class="stat-label">True Rating</span>
+        <span class="stat-value" id="rating-true-value">—</span>
+        <p class="rating-need-hint" id="rating-need-hint"></p>
+      </div>
+      <div class="stat-tile rating-progress-tile">
+        <span class="stat-label">Progreso al siguiente nivel</span>
+        <div class="rating-progress-labels">
+          <span id="rating-tier-low">—</span>
+          <span id="rating-tier-mid">—</span>
+          <span id="rating-tier-high">—</span>
+        </div>
+        <div class="rating-progress-bar"><div class="rating-progress-fill" id="rating-progress-fill"></div></div>
+        <div class="rating-progress-footer">
+          <span id="rating-progress-pct">—</span>
+          <span id="rating-trend"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="filters-row" id="filters-row">
+      <div class="filter-group">
+        <label>Estrellas</label>
+        <select id="filter-rating">
+          <option value="">Todas</option>
+          <option value="5">5 ★</option>
+          <option value="4">4 ★</option>
+          <option value="3">3 ★</option>
+          <option value="2">2 ★</option>
+          <option value="1">1 ★</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Sentimiento</label>
+        <select id="filter-sentiment">
+          <option value="">Todos</option>
+          <option value="positivo">Positivo</option>
+          <option value="neutral">Neutral</option>
+          <option value="negativo">Negativo</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Desde</label>
+        <input type="date" id="filter-date-from">
+      </div>
+      <div class="filter-group">
+        <label>Hasta</label>
+        <input type="date" id="filter-date-to">
+      </div>
+      <div class="filter-group filter-search">
+        <label>Buscar</label>
+        <input type="text" id="filter-search" placeholder="Texto o autor…">
+      </div>
+      <div class="filter-group">
+        <label>Ordenar</label>
+        <select id="filter-sort">
+          <option value="recientes">Más recientes</option>
+          <option value="antiguas">Más antiguas</option>
+          <option value="mejor">Mejor valoradas</option>
+          <option value="peor">Peor valoradas</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>&nbsp;</label>
+        <button id="btn-clear-filters" class="btn btn-ghost">✕ Limpiar filtros</button>
+      </div>
+    </section>
+
+    <section class="charts-row">
+      <div class="chart-card">
+        <h2>Timeline de reseñas</h2>
+        <canvas id="chart-timeline" height="260"></canvas>
+      </div>
+      <div class="chart-card">
+        <h2>Distribución de estrellas</h2>
+        <canvas id="chart-distribution" height="260"></canvas>
+      </div>
+    </section>
+
+    <section class="chart-card">
+      <div class="reviews-header">
+        <h2>Horario de reseñas</h2>
+        <button id="btn-toggle-horario" class="btn btn-ghost">Mostrar</button>
+      </div>
+      <p id="horario-hint" class="staff-hint" hidden></p>
+      <p class="staff-hint">Clic en una barra para ver esas reseñas en el listado de abajo</p>
+      <div id="horario-active-filter" class="staff-active-filter" hidden>
+        Filtrando por <b id="horario-active-label"></b>
+        <button id="btn-clear-horario" class="btn-clear-staff">✕</button>
+      </div>
+      <div id="horario-charts" class="charts-row" hidden>
+        <div class="chart-card">
+          <h2>Por hora del día</h2>
+          <canvas id="chart-hora" height="220"></canvas>
+        </div>
+        <div class="chart-card">
+          <h2>Por día de la semana</h2>
+          <canvas id="chart-dia-semana" height="220"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section class="keywords-card">
+      <h2>Palabras más mencionadas</h2>
+      <div id="keywords-list" class="keywords-list"></div>
+    </section>
+
+    <section class="reviews-card">
+      <div class="reviews-header">
+        <h2>Reseñas</h2>
+        <span id="reviews-count" class="reviews-count"></span>
+      </div>
+      <div id="reviews-list" class="reviews-list"></div>
+      <div class="pagination" id="pagination"></div>
+    </section>
+   </div>
+
+   <aside class="side-col">
+    <section class="staff-card">
+      <h2>Ranking de Krispy Team</h2>
+      <p id="staff-select-hint" class="staff-hint" hidden>Mostrando el personal de todas las tiendas — el mismo nombre de pila puede ser una persona distinta en cada local.</p>
+      <div id="staff-tables">
+        <p class="staff-hint">Clic en un nombre para ver solo sus reseñas</p>
+        <div id="staff-active-filter" class="staff-active-filter" hidden>
+          Filtrando por <b id="staff-active-name"></b>
+          <button id="btn-clear-staff" class="btn-clear-staff">✕</button>
+        </div>
+        <table class="staff-table" id="staff-current-table">
+          <thead>
+            <tr><th>Nombre</th><th>Tienda</th><th>Menciones</th><th>★ media</th><th>% pos.</th></tr>
+          </thead>
+          <tbody id="staff-list"></tbody>
+        </table>
+
+        <button id="btn-toggle-former" class="btn btn-ghost staff-toggle-former">Mostrar anteriores</button>
+        <table class="staff-table staff-table-former" id="staff-former-table" hidden>
+          <thead>
+            <tr><th>Nombre</th><th>Tienda</th><th>Menciones</th><th>★ media</th><th>% pos.</th></tr>
+          </thead>
+          <tbody id="staff-former-list"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="staff-card">
+      <div class="store-ranking-header">
+        <h2>Ranking de tiendas</h2>
+        <label class="btn btn-ghost btn-upload">
+          ⬆ Excel
+          <input type="file" id="input-transactions-upload" accept=".xlsx,.xls" hidden>
+        </label>
+      </div>
+      <div class="store-ranking-month">
+        <label for="input-transactions-month">Mes</label>
+        <input type="month" id="input-transactions-month">
+      </div>
+      <p class="staff-hint">Reseñas, transacciones y tasa del mes seleccionado. Carga un Excel (columnas "tienda", "mes", "transacciones") o edítalas a mano.</p>
+      <div class="store-ranking-wrap">
+        <table class="staff-table" id="store-ranking-table">
+          <thead>
+            <tr><th>Tienda</th><th>Reseñas</th><th>Transacc.</th><th>Tasa</th></tr>
+          </thead>
+          <tbody id="store-ranking-list"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="staff-card">
+      <h2>Valoración media por tienda</h2>
+      <table class="staff-table" id="avg-rating-table">
+        <thead>
+          <tr><th>Tienda</th><th>Promedio</th></tr>
+        </thead>
+        <tbody id="avg-rating-list"></tbody>
+      </table>
+    </section>
+   </aside>
+  </main>
+</div>
+
+<script src="js/theme.js"></script>
+<script src="js/auth-common.js"></script>
+<script src="js/filters.js"></script>
+<script src="js/analytics.js"></script>
+<script src="js/dashboard.js"></script>
+</body>
+</html>

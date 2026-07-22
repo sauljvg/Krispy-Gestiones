@@ -1,19 +1,9 @@
-function temaActual() {
-  return document.documentElement.dataset.theme
-    || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-}
-
-function aplicarTema(tema) {
-  document.documentElement.dataset.theme = tema;
-  localStorage.setItem("kt-theme", tema);
-  document.getElementById("btn-theme-toggle").textContent = tema === "dark" ? "☀️" : "🌙";
-}
-
 async function fetchJSON(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Error ${res.status} al llamar ${url}`);
   return res.json();
 }
+
 
 function escapeHTML(str) {
   const div = document.createElement("div");
@@ -510,11 +500,10 @@ function clearFilters() {
   return refreshAll();
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  aplicarTema(temaActual());
-  document.getElementById("btn-theme-toggle").addEventListener("click", () => {
-    aplicarTema(temaActual() === "dark" ? "light" : "dark");
-  });
+document.addEventListener("DOMContentLoaded", async () => {
+  const user = await checkAuth();
+  if (!user) return; // checkAuth ya redirigió a /login.html
+  wireUserBar(user);
 
   wireFilters(() => refreshAll(), () => loadReviews());
 

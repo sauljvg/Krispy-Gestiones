@@ -54,11 +54,43 @@
    aunque hidden=true (nos pasó con el check de 100% y la barra de scraping). */
 [hidden] { display: none !important; }
 
+@font-face {
+  font-family: "Gelica";
+  src: url("../assets/fonts/Gelica-SemiBold.otf") format("opentype");
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Brandon Grotesque";
+  src: url("../assets/fonts/BrandonGrotesque-Regular.otf") format("opentype");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Brandon Printed";
+  src: url("../assets/fonts/BrandonPrinted-One.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: "Brandon Grotesque", "Poppins", system-ui, -apple-system, "Segoe UI", sans-serif;
   background: var(--surface-page);
   color: var(--text-primary);
+}
+
+h1 {
+  font-family: "Gelica", "Poppins", system-ui, sans-serif;
+  font-weight: 600;
+}
+h2 {
+  font-family: "Brandon Grotesque", "Poppins", system-ui, sans-serif;
+  font-weight: 600;
+}
+h3 {
+  font-family: "Brandon Printed", "Poppins", system-ui, sans-serif;
+  font-weight: 400;
 }
 
 .app { max-width: 1560px; margin: 0 auto; padding: 24px 20px 60px; }
@@ -85,7 +117,8 @@ body {
 .brand h1 { margin: 0; font-size: 20px; }
 .subtitle { margin: 2px 0 0; color: var(--text-secondary); font-size: 13px; }
 
-.topbar-actions { display: flex; gap: 8px; }
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.topbar-user { font-size: 12px; color: var(--text-secondary); }
 
 .topbar-store {
   display: flex;

@@ -1,13 +1,26 @@
+import mimetypes
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from fastapi import FastAPI
+# En Windows, mimetypes no siempre trae registrados los tipos de fuentes
+# (depende del registro del sistema) — sin esto, StaticFiles las sirve como
+# application/octet-stream y Chrome rechaza silenciosamente los @font-face.
+mimetypes.add_type("font/otf", ".otf")
+mimetypes.add_type("font/ttf", ".ttf")
+mimetypes.add_type("font/woff", ".woff")
+mimetypes.add_type("font/woff2", ".woff2")
+
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 import scrape_jobs
+from auth_routes import get_current_user
+from auth_routes import router as auth_router
+from clima_routes import router as clima_router
+from informes_routes import router as informes_router
 from routes import router
 
 app = FastAPI(title="Krispy Kreme Reseñas API")
@@ -19,7 +32,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(router, prefix="/api")
+# /api/auth/* queda público (login/logout) o resuelve su propia auth (me,
+# users). El resto de /api/* exige sesión iniciada. /api/informes/* y
+# /api/clima/* exigen además el rol "Todo" (admin/rrhh), ya resuelto en cada
+# endpoint de esos routers.
+app.include_router(auth_router, prefix="/api/auth")
+app.include_router(informes_router, prefix="/api/informes")
+app.include_router(clima_router, prefix="/api/clima")
+app.include_router(router, prefix="/api", dependencies=[Depends(get_current_user)])
 
 
 @app.on_event("startup")

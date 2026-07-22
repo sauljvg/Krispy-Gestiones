@@ -1,1 +1,1 @@
-{"status": "done", "mensaje": "Completado", "reviews_visibles": 30, "nuevas": 1, "tienda": "Caleido", "actualizado": "2026-07-20T12:06:33", "ya_conocidas": 518, "total_google": null, "reviews_total": 30}
+{"status": "error", "mensaje": "HTTPConnectionPool(host='localhost', port=51430): Read timed out. (read timeout=120)", "reviews_visibles": 0, "nuevas": 0, "tienda": "Caleido", "actualizado": "2026-07-22T05:36:06"}

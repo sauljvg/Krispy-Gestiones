@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krispy Gestiones · Informes</title>
+<script>
+  (function () {
+    var guardado = localStorage.getItem("kt-theme");
+    if (guardado === "light" || guardado === "dark") {
+      document.documentElement.dataset.theme = guardado;
+    }
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<style>
+  .informes-wrap { max-width: 1200px; margin: 0 auto; padding: 0 0 60px; }
+  .home-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin: 20px 0 28px; }
+  .home-card { cursor: pointer; }
+  .informes-header { display: flex; justify-content: space-between; align-items: center; }
+  #tipo-detail-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .table-scroll { overflow-x: auto; }
+  #tipo-detail-table { min-width: 600px; }
+  .hoja-tabs { display: flex; gap: 6px; margin: 10px 0; }
+  .hoja-tab { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary); cursor: pointer; font-size: 13px; }
+  .hoja-tab.active { background: var(--series-blue); color: #fff; border-color: var(--series-blue); }
+  .filtros-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 14px 0; }
+  .filtros-row .campo label { display: block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; }
+  .filtros-row input, .filtros-row select {
+    padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 13px;
+  }
+  .compartir-bar {
+    display: none; align-items: center; gap: 10px; background: var(--surface-page);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px;
+  }
+  .compartir-bar.visible { display: flex; }
+  .row-check { cursor: pointer; }
+  .btn-cv { font-size: 12px; padding: 4px 8px; }
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none;
+    align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal-overlay.visible { display: flex; }
+  .modal-box {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 24px; width: 100%; max-width: 360px;
+  }
+  .modal-box h3 { margin: 0 0 14px; font-size: 16px; }
+  .modal-box select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); margin-bottom: 14px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+  .columnas-wrap { position: relative; }
+  .columnas-panel {
+    display: none; position: absolute; top: calc(100% + 6px); left: 0; z-index: 20;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px; width: 240px; max-height: 320px; overflow-y: auto;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  }
+  .columnas-panel.visible { display: block; }
+  .columnas-panel-actions { display: flex; justify-content: space-between; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .columnas-panel-actions button { font-size: 11px; background: none; border: none; color: var(--series-blue); cursor: pointer; padding: 0; }
+  .columna-check-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; }
+  .columna-check-row label { flex: 1; cursor: pointer; }
+
+  #tipo-detail-table td, #tipo-detail-table th {
+    max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">🍩</span>
+      <div>
+        <h1>Krispy Gestiones</h1>
+        <p class="subtitle">Informes</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <a href="/" class="btn btn-ghost" title="Volver al inicio">🏠 Inicio</a>
+      <span id="topbar-user" class="topbar-user" hidden></span>
+      <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+      <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema" title="Cambiar entre claro y oscuro">🌙</button>
+    </div>
+  </header>
+
+  <div class="informes-wrap">
+    <div class="informes-header">
+      <h1 style="font-size:18px; margin:0;">Selecciona un informe</h1>
+      <button id="btn-new-tipo" class="btn btn-ghost">+ Nuevo tipo</button>
+    </div>
+    <div class="home-grid" id="tipos-grid"></div>
+
+    <section class="chart-card" id="tipo-detail" hidden>
+      <div id="tipo-detail-head">
+        <h2 id="tipo-detail-title"></h2>
+        <label class="btn btn-primary btn-upload">
+          ⬆ Importar Excel
+          <input type="file" id="input-informe-upload" accept=".xlsx,.xls" hidden>
+        </label>
+      </div>
+      <p class="staff-hint" id="tipo-detail-hint"></p>
+
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div class="hoja-tabs" id="hoja-tabs"></div>
+        <div class="columnas-wrap">
+          <button type="button" id="btn-hojas-gestionar" class="btn btn-ghost" title="Elegir qué hojas se muestran" hidden>⚙ Hojas</button>
+          <div class="columnas-panel" id="hojas-panel">
+            <div class="columnas-panel-actions">
+              <span style="font-size:11px; color:var(--text-secondary);">Hojas visibles</span>
+              <button type="button" id="btn-hojas-cerrar">Cerrar</button>
+            </div>
+            <div id="hojas-checklist"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="filtros-row">
+        <div class="campo">
+          <label for="f-buscar">Buscar</label>
+          <input type="text" id="f-buscar" placeholder="Nombre, correo, texto…">
+        </div>
+        <div class="campo">
+          <label for="f-orden">Ordenar por</label>
+          <select id="f-orden"></select>
+        </div>
+        <div class="campo">
+          <label for="f-orden-dir">Dirección</label>
+          <select id="f-orden-dir">
+            <option value="asc">Ascendente</option>
+            <option value="desc">Descendente</option>
+          </select>
+        </div>
+        <div class="campo" id="f-fecha-wrap" hidden>
+          <label for="f-fecha-desde">Desde</label>
+          <input type="date" id="f-fecha-desde">
+        </div>
+        <div class="campo" id="f-fecha-hasta-wrap" hidden>
+          <label for="f-fecha-hasta">Hasta</label>
+          <input type="date" id="f-fecha-hasta">
+        </div>
+        <div class="campo">
+          <button type="button" id="btn-limpiar-filtros" class="btn btn-ghost">✕ Limpiar</button>
+        </div>
+        <div class="campo columnas-wrap">
+          <label>&nbsp;</label>
+          <button type="button" id="btn-columnas" class="btn btn-ghost">⚏ Columnas</button>
+          <div class="columnas-panel" id="columnas-panel">
+            <div class="columnas-panel-actions">
+              <button type="button" id="btn-columnas-todas">Mostrar todas</button>
+              <button type="button" id="btn-columnas-cerrar">Cerrar</button>
+            </div>
+            <div id="columnas-checklist"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="compartir-bar" id="compartir-bar">
+        <span id="compartir-count"></span>
+        <button type="button" id="btn-compartir" class="btn btn-primary">Compartir seleccionados</button>
+        <button type="button" id="btn-limpiar-seleccion" class="btn btn-ghost">Quitar selección</button>
+      </div>
+
+      <div class="table-scroll">
+        <table class="staff-table" id="tipo-detail-table">
+          <thead><tr id="tipo-detail-thead"></tr></thead>
+          <tbody id="tipo-detail-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="modal-overlay" id="compartir-modal">
+  <div class="modal-box">
+    <h3>Compartir con...</h3>
+    <select id="compartir-usuario-select"></select>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="btn-compartir-cancelar">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btn-compartir-confirmar">Compartir</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/theme.js"></script>
+<script src="js/auth-common.js"></script>
+<script src="js/informes.js"></script>
+</body>
+</html>
