@@ -53,6 +53,23 @@ function renderPregunta(q) {
       </div>
     </div>`;
   }
+  if (q.tipo === "fecha") {
+    return `<div class="pregunta-bloque" data-pregunta-id="${q.id}">
+      <label class="pregunta-label">${escapeHTML(q.etiqueta)}${req}</label>
+      <input type="date" data-pregunta-id="${q.id}" value="${escapeHTML(valorActual)}">
+    </div>`;
+  }
+  if (q.tipo === "calificacion") {
+    const valor = Number(valorActual) || 0;
+    return `<div class="pregunta-bloque" data-pregunta-id="${q.id}">
+      <label class="pregunta-label">${escapeHTML(q.etiqueta)}${req}</label>
+      <div class="calificacion-estrellas" data-pregunta-id="${q.id}">
+        ${[1, 2, 3, 4, 5]
+          .map((n) => `<button type="button" class="btn-estrella ${n <= valor ? "activa" : ""}" data-valor="${n}" aria-label="${n} estrellas">★</button>`)
+          .join("")}
+      </div>
+    </div>`;
+  }
   if (q.tipo === "prioridad") {
     if (!Array.isArray(respuestas[q.id])) {
       respuestas[q.id] = [...q.opciones];
@@ -102,25 +119,30 @@ function moverPrioridad(ol, idx, direccion) {
   bindPrioridadBotones(ol);
 }
 
-const LIKERT_OPCIONES = [
+const LIKERT_OPCIONES_DEFAULT = [
   "Totalmente en desacuerdo", "En desacuerdo", "Ni de acuerdo ni en desacuerdo", "De acuerdo", "Totalmente de acuerdo",
 ];
 
 function renderGrupoLikert(preguntas) {
+  // El puntaje enviado es SIEMPRE la posición (1-5), nunca el texto de la
+  // leyenda — así cada pregunta de escala puede tener sus propias etiquetas
+  // sin arriesgar la puntuación. Todas las preguntas del grupo comparten la
+  // escala de la primera (es una sola tabla con un encabezado compartido).
+  const escala = preguntas[0].opciones && preguntas[0].opciones.length === 5 ? preguntas[0].opciones : LIKERT_OPCIONES_DEFAULT;
   const filas = preguntas
     .map(
       (q) => `
     <tr data-pregunta-id="${q.id}">
       <td class="likert-etiqueta">${escapeHTML(q.etiqueta)}${q.obligatoria ? ' <span class="req">*</span>' : ""}</td>
-      ${LIKERT_OPCIONES.map(
-        (op) => `<td><input type="radio" name="pregunta-${q.id}" value="${op}" ${respuestas[q.id] === op ? "checked" : ""}></td>`
+      ${escala.map(
+        (_, i) => `<td><input type="radio" name="pregunta-${q.id}" value="${i + 1}" ${respuestas[q.id] === String(i + 1) ? "checked" : ""}></td>`
       ).join("")}
     </tr>`
     )
     .join("");
   return `
     <table class="likert-tabla">
-      <thead><tr><th></th>${LIKERT_OPCIONES.map((op) => `<th>${op}</th>`).join("")}</tr></thead>
+      <thead><tr><th></th>${escala.map((op) => `<th>${escapeHTML(op)}</th>`).join("")}</tr></thead>
       <tbody>${filas}</tbody>
     </table>`;
 }
@@ -163,7 +185,7 @@ function renderPagina(index) {
     <div class="encuesta-progreso-barra"><div class="encuesta-progreso-fill" style="width:${((index + 1) / totalPaginas) * 100}%"></div></div>
   `;
 
-  card.querySelectorAll("input[type='text'], input[type='email'], input[type='number'], textarea").forEach((el) => {
+  card.querySelectorAll("input[type='text'], input[type='email'], input[type='number'], input[type='date'], textarea").forEach((el) => {
     el.addEventListener("input", () => {
       respuestas[el.dataset.preguntaId] = el.value;
     });
@@ -175,6 +197,16 @@ function renderPagina(index) {
     });
   });
   card.querySelectorAll(".prioridad-lista").forEach((ol) => bindPrioridadBotones(ol));
+  card.querySelectorAll(".calificacion-estrellas").forEach((wrap) => {
+    wrap.querySelectorAll(".btn-estrella").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        respuestas[wrap.dataset.preguntaId] = btn.dataset.valor;
+        wrap.querySelectorAll(".btn-estrella").forEach((b) => {
+          b.classList.toggle("activa", Number(b.dataset.valor) <= Number(btn.dataset.valor));
+        });
+      });
+    });
+  });
 
   const btnAtras = document.getElementById("btn-atras");
   if (btnAtras) btnAtras.addEventListener("click", () => {

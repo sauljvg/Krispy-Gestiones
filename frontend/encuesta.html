@@ -28,10 +28,14 @@
   .pregunta-bloque { margin-bottom: 26px; }
   .pregunta-label { font-size: 15px; font-weight: 600; color: #222; margin-bottom: 8px; display: block; }
   .pregunta-label .req { color: #c00; }
-  .pregunta-bloque input[type="text"], .pregunta-bloque input[type="email"], .pregunta-bloque input[type="number"], .pregunta-bloque textarea {
+  .pregunta-bloque input[type="text"], .pregunta-bloque input[type="email"], .pregunta-bloque input[type="number"], .pregunta-bloque input[type="date"], .pregunta-bloque textarea {
     width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #ccc; font-size: 14px; font-family: inherit;
   }
   .pregunta-bloque textarea { min-height: 80px; resize: vertical; }
+
+  .calificacion-estrellas { display: flex; gap: 6px; }
+  .btn-estrella { border: none; background: none; font-size: 30px; line-height: 1; cursor: pointer; color: #d8d8d8; padding: 2px; }
+  .btn-estrella.activa { color: var(--color-boton, #5b2a2a); }
 
   .likert-tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
   .likert-tabla th { font-weight: 500; color: #555; padding: 6px 4px; text-align: center; vertical-align: bottom; width: 15%; }

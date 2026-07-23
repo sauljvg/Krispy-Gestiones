@@ -160,6 +160,8 @@ const TIPOS_PREGUNTA_LABELS = {
   texto: "Texto",
   email: "Email",
   numero: "Número",
+  fecha: "Fecha",
+  calificacion: "Calificación (estrellas)",
   likert: "Escala (1-5)",
   abierta: "Comentario abierto",
   opcion_multiple: "Opción múltiple",
@@ -169,6 +171,10 @@ const TIPOS_PREGUNTA_LABELS = {
 // Tipos cuya respuesta es una lista de frases/opciones editable (en vez de
 // un prompt() con comas, una fila por opción — como en Microsoft Forms).
 const TIPOS_CON_OPCIONES = new Set(["opcion_multiple", "prioridad"]);
+
+const LIKERT_DEFAULT_LABELS = [
+  "Totalmente en desacuerdo", "En desacuerdo", "Ni de acuerdo ni en desacuerdo", "De acuerdo", "Totalmente de acuerdo",
+];
 
 // Preguntas que interesa ver de un vistazo en el dashboard de resultados
 // (Scoring/Dashboard de Informes) vienen con esta casilla premarcada por
@@ -180,6 +186,27 @@ function mostrarDashboardPorDefecto(tipo) {
 const editandoPreguntas = new Set();
 
 function opcionesEditorHTML(tipo, opciones) {
+  if (tipo === "likert") {
+    // El puntaje SIEMPRE es 1-5 según la posición (no el texto) — así el
+    // admin puede cambiar la leyenda de cada nivel libremente sin arriesgar
+    // que la puntuación se rompa. Por eso son exactamente 5 filas fijas,
+    // sin poder añadir/quitar: no hay forma de dejarlo mal configurado.
+    const lista = opciones && opciones.length === 5 ? opciones : LIKERT_DEFAULT_LABELS;
+    return `<div class="opciones-editor" data-tipo="likert">
+      <p class="opciones-editor-ayuda">El puntaje (1 a 5) lo fija la posición, no el texto — edita solo la leyenda de cada nivel. Se comparte con las demás preguntas de escala de esta página.</p>
+      <div class="opciones-editor-filas">
+        ${lista
+          .map(
+            (op, i) => `
+          <div class="opcion-editor-row">
+            <span class="opcion-editor-punto">${i + 1} pt</span>
+            <input type="text" class="opcion-editor-input" value="${escapeHTML(op)}" placeholder="Nivel ${i + 1}">
+          </div>`
+          )
+          .join("")}
+      </div>
+    </div>`;
+  }
   if (!TIPOS_CON_OPCIONES.has(tipo)) return "";
   const lista = opciones && opciones.length ? opciones : ["", ""];
   return `<div class="opciones-editor">

@@ -15,7 +15,7 @@ from db import get_connection
 
 FONDOS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads", "encuestas_fondos"))
 
-TIPOS_PREGUNTA = {"texto", "email", "numero", "likert", "abierta", "opcion_multiple", "prioridad"}
+TIPOS_PREGUNTA = {"texto", "email", "numero", "likert", "abierta", "opcion_multiple", "prioridad", "fecha", "calificacion"}
 
 LIKERT_OPCIONES = [
     "Totalmente en desacuerdo", "En desacuerdo", "Ni de acuerdo ni en desacuerdo",

@@ -207,7 +207,14 @@ def _col_letter(index):
 
 def _likert_points_strict(val_norm, direction):
     base = 0
-    if "totalmentedeacuerdo" in val_norm:
+    # El módulo de Test envía directamente el punto (1-5) en vez del texto
+    # de la leyenda — así el admin puede personalizar las etiquetas de la
+    # escala sin romper la puntuación, que ya no depende de las palabras
+    # exactas "Totalmente de acuerdo" etc. Los Excel de Forms (donde sí
+    # viene el texto tal cual) siguen reconociéndose por las ramas de abajo.
+    if val_norm in ("1", "2", "3", "4", "5"):
+        base = int(val_norm)
+    elif "totalmentedeacuerdo" in val_norm:
         base = 5
     elif "totalmenteendesacuerdo" in val_norm:
         base = 1
