@@ -49,8 +49,8 @@
   },
 
   "periodos_saona": {
-    "_comentario": "Equivalente a 'periodos' pero en tonos de marca Saona (navy/terracota/azul grisáceo/ámbar) en vez del verde-rojo genérico de Krispy Kreme.",
-    "lista": ["#1E2D4A", "#B8562E", "#7A99AC", "#E0A458", "#5D7E96"]
+    "_comentario": "Equivalente a 'periodos' pero en tonos de marca Saona (azul grisáceo/terracota/navy/ámbar) en vez del verde-rojo genérico de Krispy Kreme. El primer color va primero en la lista clara (azul grisáceo) en vez del navy oscuro porque el navy casi no se distingue sobre fondo negro en modo oscuro.",
+    "lista": ["#7A99AC", "#B8562E", "#1E2D4A", "#E0A458", "#5D7E96"]
   },
 
   "radio": {

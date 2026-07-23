@@ -58,6 +58,14 @@
 }
 
 * { box-sizing: border-box; }
+/* Los navegadores NO heredan la fuente del body en botones/inputs/selects
+   por defecto (Chrome, por ejemplo, les pone Arial de forma nativa) — sin
+   esto, cualquier botón o campo de formulario se ve en una tipografía
+   distinta al resto del texto de la página. */
+button, input, select, textarea, optgroup {
+  font-family: inherit;
+  font-size: 100%;
+}
 /* Varios componentes fijan su propio "display" (flex/inline-flex) en la
    misma clase que se oculta con el atributo [hidden] — sin esto, ese
    "display" gana el empate de especificidad y el elemento nunca desaparece
