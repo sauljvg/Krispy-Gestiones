@@ -13,6 +13,11 @@ class SalidaIn(BaseModel):
     nombre: str
     fecha_baja: str
 
+
+class MatchIn(BaseModel):
+    respuesta_id: int
+    salida_id: int
+
 router = APIRouter()
 
 
@@ -36,6 +41,11 @@ def require_entrevistas_oleada(oleada_id: int, user: dict = Depends(get_current_
 @router.get("/oleadas")
 def list_oleadas_route(empresa: str = "kk", _user: dict = Depends(require_entrevistas)):
     return entrevistas_module.list_oleadas(empresa)
+
+
+@router.get("/centros-conocidos")
+def list_centros_conocidos_route(empresa: str = "kk", _user: dict = Depends(require_entrevistas)):
+    return entrevistas_module.list_centros_conocidos(empresa)
 
 
 @router.get("/{oleada_id}/centros")
@@ -83,6 +93,18 @@ def crear_salida_route(oleada_id: int, body: SalidaIn, _user: dict = Depends(req
     if not body.centro.strip() or not body.nombre.strip() or not body.fecha_baja.strip():
         raise HTTPException(status_code=400, detail="Centro, nombre y fecha de baja son obligatorios")
     entrevistas_module.add_salida(oleada_id, body.centro.strip(), body.nombre.strip(), body.fecha_baja.strip())
+    return {"ok": True}
+
+
+@router.post("/{oleada_id}/matches")
+def crear_match_route(oleada_id: int, body: MatchIn, _user: dict = Depends(require_entrevistas_oleada)):
+    entrevistas_module.set_match_manual(body.respuesta_id, body.salida_id)
+    return {"ok": True}
+
+
+@router.delete("/{oleada_id}/matches/{respuesta_id}")
+def borrar_match_route(oleada_id: int, respuesta_id: int, _user: dict = Depends(require_entrevistas_oleada)):
+    entrevistas_module.quitar_match_manual(respuesta_id)
     return {"ok": True}
 
 

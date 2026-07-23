@@ -37,6 +37,22 @@
     "oportunidad": "#e07b00"
   },
 
+  "chips_saona": {
+    "_comentario": "Equivalente a 'chips' pero en tonos de marca Saona: navy (marca_saona.secundario) para Fortalezas en vez del verde KK, y el ámbar cálido de likert_saona para Oportunidades en vez del naranja genérico.",
+    "fortaleza": "#1E2D4A",
+    "oportunidad": "#E0A458"
+  },
+
+  "periodos": {
+    "_comentario": "Colores de línea por cuatrimestre en los gráficos de evolución de Entrevista de Salida — el más antiguo en verde, el más reciente en rojo, igual que las hojas 'Analisis_XQ' del Apps Script original (Actual=rojo vs Anterior=verde). El resto son solo para tener más colores distinguibles si hay más de dos periodos.",
+    "lista": ["#38761d", "#c00000", "#1155cc", "#bf9000", "#6a3d9a", "#e08214"]
+  },
+
+  "periodos_saona": {
+    "_comentario": "Equivalente a 'periodos' pero en tonos de marca Saona (navy/terracota/azul grisáceo/ámbar) en vez del verde-rojo genérico de Krispy Kreme.",
+    "lista": ["#1E2D4A", "#B8562E", "#7A99AC", "#E0A458", "#5D7E96"]
+  },
+
   "radio": {
     "chip": 8,
     "caja_score": 8,

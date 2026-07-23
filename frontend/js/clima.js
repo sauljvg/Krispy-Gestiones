@@ -47,8 +47,9 @@ async function cargarTokensDiseno() {
     if (tokens.marca_saona && tokens.marca_saona.secundario) {
       raiz.setProperty("--saona-secundario", tokens.marca_saona.secundario);
     }
-    raiz.setProperty("--chip-fortaleza", tokens.chips.fortaleza);
-    raiz.setProperty("--chip-oportunidad", tokens.chips.oportunidad);
+    const chips = EMPRESA === "saona" ? tokens.chips_saona : tokens.chips;
+    raiz.setProperty("--chip-fortaleza", chips.fortaleza);
+    raiz.setProperty("--chip-oportunidad", chips.oportunidad);
     raiz.setProperty("--radio-chip", `${tokens.radio.chip}px`);
     raiz.setProperty("--radio-caja", `${tokens.radio.caja_score}px`);
   } catch (e) {
@@ -61,6 +62,8 @@ function aplicarBrandingEmpresa() {
   document.title = document.title.replace("Krispy Gestiones", "SAONA Gestiones");
   const icon = document.getElementById("brand-icon");
   if (icon) icon.textContent = "🌿";
+  const favicon = document.querySelector('link[rel="icon"]');
+  if (favicon) favicon.href = "assets/favicon-saona.png";
   const title = document.getElementById("brand-title");
   if (title) title.textContent = "SAONA Gestiones";
   const logo = document.getElementById("clima-report-logo");

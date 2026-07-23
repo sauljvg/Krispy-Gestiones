@@ -4,3 +4,4 @@ openpyxl
 python-multipart
 selenium
 reportlab
+requests

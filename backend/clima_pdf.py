@@ -50,6 +50,10 @@ def _likert_para_empresa(empresa):
     return TOKENS["likert_saona"] if empresa == "saona" else TOKENS["likert"]
 
 
+def _chips_para_empresa(empresa):
+    return TOKENS["chips_saona"] if empresa == "saona" else TOKENS["chips"]
+
+
 VERDE = colors.HexColor(TOKENS["marca"]["verde_kk"])
 VERDE_OSCURO = VERDE
 GRIS_TEXTO = colors.HexColor("#52514e")
@@ -339,13 +343,21 @@ def generar_pdf(reporte, empresa="kk"):
     # líneas de acento y la caja "Presente" — se recolorean aquí según la
     # empresa del reporte antes de montar el story, así el resto de helpers
     # (_titulo_seccion, _cajas_score, etc.) no necesitan saber de empresas.
-    global VERDE, VERDE_OSCURO
+    global VERDE, VERDE_OSCURO, CHIP_VERDE, CHIP_NARANJA
     color_marca = colors.HexColor(_marca_para_empresa(empresa)["verde_kk"])
     VERDE = color_marca
     VERDE_OSCURO = color_marca
     for estilo in (TITULO_STYLE, SUBTITULO_STYLE, SUBTITULO_CENTRADO_STYLE, SUBTITULO_COLUMNA_STYLE,
-                   COLUMNA_TITULO_FORTALEZA, COMENTARIO_TITULO_STYLE):
+                   COMENTARIO_TITULO_STYLE):
         estilo.textColor = color_marca
+
+    # Fortalezas/Oportunidades con los colores de marca de la empresa, no
+    # siempre el verde/naranja de Krispy Kreme.
+    chips_tokens = _chips_para_empresa(empresa)
+    CHIP_VERDE = colors.HexColor(chips_tokens["fortaleza"])
+    CHIP_NARANJA = colors.HexColor(chips_tokens["oportunidad"])
+    COLUMNA_TITULO_FORTALEZA.textColor = CHIP_VERDE
+    COLUMNA_TITULO_OPORTUNIDAD.textColor = CHIP_NARANJA
 
     # Igual que la web: las barras apiladas de Resultados/Impulsores usan
     # tonos de marca Saona en vez de la escala verde-a-rojo genérica.

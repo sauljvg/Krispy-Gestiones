@@ -20,6 +20,8 @@ import auth as auth_module
 import scrape_jobs
 from auth_routes import COOKIE_NAME, require_resenas
 from auth_routes import router as auth_router
+from boletines_routes import router as boletines_router
+from boletines_routes import router_publico as boletines_router_publico
 from clima_routes import router as clima_router
 from entrevistas_routes import router as entrevistas_router
 from informes_routes import router as informes_router
@@ -74,6 +76,8 @@ app.include_router(auth_router, prefix="/api/auth")
 app.include_router(informes_router, prefix="/api/informes")
 app.include_router(clima_router, prefix="/api/clima")
 app.include_router(entrevistas_router, prefix="/api/entrevistas")
+app.include_router(boletines_router, prefix="/api/boletines")
+app.include_router(boletines_router_publico, prefix="/api/public/boletines")
 app.include_router(router, prefix="/api", dependencies=[Depends(require_resenas)])
 
 

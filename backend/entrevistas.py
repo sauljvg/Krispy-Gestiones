@@ -30,6 +30,31 @@ METADATA_HINTS = {
 
 _RESPUESTAS_SIN_VALOR = {".", "..", "…", "-", "sin comentarios", "sin comentario"}
 
+# El campo "Centro de Trabajo" del formulario es texto libre, y a veces
+# alguien escribe una variante del nombre real de la tienda (p.ej. "Princesa
+# 7" en vez de "Princesa", el nombre que usa el resto de la app). Sin esto,
+# esa persona cuenta como si fuera OTRO centro distinto.
+_CENTRO_ALIASES = {
+    "princesa 7": "Princesa",
+}
+
+# Todas las tiendas/centros conocidos de Krispy Kreme — para poder registrar
+# una salida manual incluso en un centro que todavía no tiene ninguna
+# respuesta de Entrevista de Salida. "ParqueSur - Leganés" (con sufijo) y no
+# solo "ParqueSur" a propósito: así es como aparece de verdad en el Excel de
+# Entrevista de Salida (campo de texto libre) — si no coincidiera letra por
+# letra, una salida registrada aquí como "ParqueSur" contaría como un centro
+# distinto al que ya usan las respuestas reales.
+CENTROS_CONOCIDOS_KK = [
+    "Caleido", "Gran Plaza 2", "La Gavia", "Oficina Central", "ParqueSur - Leganés", "Plenilunio", "Princesa",
+]
+
+
+def _normaliza_centro(centro):
+    if not centro:
+        return centro
+    return _CENTRO_ALIASES.get(_normaliza_header(centro), centro)
+
 
 def _normaliza_header(h):
     return (h or "").strip().lower().replace("í", "i").replace("ó", "o").replace("á", "a").replace(
@@ -80,7 +105,64 @@ def _bloque_label(prefijo):
     return texto[0].upper() + texto[1:]
 
 
-def _column_roles(headers):
+# Las preguntas sueltas de escala sin bloque propio (ver _es_columna_likert)
+# resultan ser siempre, en la práctica, sobre instalaciones/salario/horarios
+# — es decir, "Condiciones Laborales", el mismo nombre de bloque que usan
+# tanto Krispy Kreme como Saona en sus formularios.
+GENERICO_BLOQUE_LABEL = "Condiciones Laborales"
+
+# El texto de la categoría tal cual viene en el Excel a veces es una
+# abreviatura de trabajo, no el nombre que se quiere mostrar (p.ej. el
+# formulario dice "Experiencia Krispy Kreme" pero el nombre correcto es
+# "Experiencia EN Krispy Kreme"). Normaliza solo esos casos conocidos; para
+# cualquier categoría no listada aquí se usa el texto tal cual viene.
+_BLOQUE_LABEL_ALIASES = {
+    "experiencia krispy kreme": "Experiencia en Krispy Kreme",
+    "cultura y ambiente en tu equipo": "Cultura y Ambiente",
+    "condiciones laborales": "Condiciones Laborales",
+}
+
+
+def _normaliza_bloque_label(nombre):
+    return _BLOQUE_LABEL_ALIASES.get(_normaliza_header(nombre), nombre)
+
+
+def _tiene_categoria_en_texto(h):
+    """True solo si el "." separa una categoría real de una pregunta real
+    (formato Krispy Kreme: "Categoria.Pregunta") — una frase que simplemente
+    termina en punto no cuenta: el partition dejaría la "pregunta" vacía."""
+    if "." not in h:
+        return False
+    _, _, resto = h.partition(".")
+    return len(resto.strip()) > 3
+
+
+def _es_columna_likert(header, filas):
+    """Para preguntas de escala SIN categoría en el encabezado ni formato
+    "titulo: [pregunta]" (algunos formularios de KK traen preguntas sueltas,
+    fuera de cualquier bloque tipo rejilla) — se decide mirando las
+    respuestas reales: si la mayoría son valores Likert reconocibles, es una
+    pregunta de escala (se agrupa en un bloque genérico), si no, es un
+    comentario libre."""
+    valores = [fila.get(header) for fila in filas if fila.get(header) not in (None, "")]
+    if not valores:
+        return False
+    likert_vals = [v for v in valores if _likert_to_num(v) is not None]
+    return len(likert_vals) / len(valores) >= 0.6
+
+
+def _column_roles(headers, filas=None):
+    """Dos formatos reconocidos para las preguntas de escala, además de
+    preguntas sueltas sin bloque:
+    - "titulo: [pregunta]" (Saona): el bloque es el texto antes de los dos
+      puntos.
+    - "Categoria.Pregunta" (Krispy Kreme, preguntas tipo rejilla): el bloque
+      es el texto antes del punto.
+    - Preguntas sueltas de escala sin ninguno de los dos formatos: se
+      agrupan todas bajo un bloque genérico ("Otros aspectos"), detectadas
+      por el contenido real de sus respuestas, no por texto hardcodeado.
+    """
+    filas = filas or []
     centro_col = None
     metadata_cols = {}
     motivo_col = None
@@ -91,6 +173,10 @@ def _column_roles(headers):
         norm = _normaliza_header(h)
         if "centro de trabajo" in norm or "centro" in norm:
             centro_col = h
+            continue
+        if norm == "id":
+            # Columna de fila autogenerada por Forms — no es ni metadata útil
+            # ni comentario, se ignora del todo.
             continue
         matched_meta = False
         for hint, campo in METADATA_HINTS.items():
@@ -106,9 +192,16 @@ def _column_roles(headers):
         m = _BLOQUE_PREGUNTA_RE.match(h)
         if m:
             prefijo, pregunta = m.group(1).strip(), m.group(2).strip()
-            bloques.setdefault(_bloque_label(prefijo), []).append((h, pregunta))
-        else:
-            abiertas.append(h)
+            bloques.setdefault(_normaliza_bloque_label(_bloque_label(prefijo)), []).append((h, pregunta))
+            continue
+        if _tiene_categoria_en_texto(h):
+            categoria, _, pregunta = h.partition(".")
+            bloques.setdefault(_normaliza_bloque_label(categoria.strip()), []).append((h, pregunta.strip()))
+            continue
+        if _es_columna_likert(h, filas):
+            bloques.setdefault(GENERICO_BLOQUE_LABEL, []).append((h, h.strip()))
+            continue
+        abiertas.append(h)
 
     return {
         "centro_col": centro_col,
@@ -308,8 +401,74 @@ def ensure_entrevistas_tables():
             fecha_baja TEXT NOT NULL
         )
     """)
+    # Override manual de un cruce respuesta<->salida — para cuando la misma
+    # persona aparece en las dos auditorías (p.ej. "FLORES, LENIN MICHAEL" en
+    # Salidas Totales vs "Lenin flores alvarado" en su propia respuesta) pero
+    # el cruce automático por nombre no llega a 1.0 de score. Sin esto, la
+    # única opción era "Registrar como salida" (que crea una salida NUEVA y
+    # cuenta a la persona dos veces).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entrevistas_matches_manual (
+            respuesta_id INTEGER PRIMARY KEY REFERENCES entrevistas_respuestas(id),
+            salida_id INTEGER NOT NULL REFERENCES entrevistas_salidas(id)
+        )
+    """)
     conn.commit()
     conn.close()
+    _migrar_alias_centro()
+
+
+def _migrar_alias_centro():
+    """Corrige datos que ya se importaron antes de existir _CENTRO_ALIASES —
+    tanto la columna 'centro' como el propio valor embebido en datos_json
+    (de ahí se vuelve a leer el centro cada vez que se calcula un reporte,
+    así que hay que corregir los dos sitios para que no queden desalineados)."""
+    conn = get_connection()
+    filas = conn.execute("SELECT id, centro, datos_json FROM entrevistas_respuestas").fetchall()
+    for fila in filas:
+        nuevo_centro = _normaliza_centro(fila["centro"])
+        datos = json.loads(fila["datos_json"])
+        cambiado = nuevo_centro != fila["centro"]
+        for k, v in datos.items():
+            if isinstance(v, str):
+                v_normalizado = _normaliza_centro(v)
+                if v_normalizado != v:
+                    datos[k] = v_normalizado
+                    cambiado = True
+        if cambiado:
+            conn.execute(
+                "UPDATE entrevistas_respuestas SET centro = ?, datos_json = ? WHERE id = ?",
+                (nuevo_centro, json.dumps(datos, ensure_ascii=False, default=str), fila["id"]),
+            )
+    for viejo, nuevo in _CENTRO_ALIASES.items():
+        conn.execute("UPDATE entrevistas_salidas SET centro = ? WHERE LOWER(centro) = ?", (nuevo, viejo))
+    conn.commit()
+    conn.close()
+
+
+def list_centros_conocidos(empresa="kk"):
+    """Todas las tiendas/centros conocidos de la empresa, no solo los que ya
+    tienen alguna respuesta — para poder dar de alta una salida manual en un
+    centro que todavía no aparece en ninguna oleada."""
+    if empresa == "kk":
+        return CENTROS_CONOCIDOS_KK
+    # Saona no tiene todavía un listado maestro de restaurantes (a diferencia
+    # de KK) — se usa la unión de todos los centros vistos alguna vez, tanto
+    # en respuestas como en salidas, de cualquier oleada de la empresa.
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT DISTINCT centro FROM (
+            SELECT r.centro AS centro FROM entrevistas_respuestas r
+            JOIN entrevistas_oleadas o ON o.id = r.oleada_id
+            WHERE o.empresa = ? AND r.centro IS NOT NULL
+            UNION
+            SELECT s.centro AS centro FROM entrevistas_salidas s
+            JOIN entrevistas_oleadas o ON o.id = s.oleada_id
+            WHERE o.empresa = ?
+        ) ORDER BY centro
+    """, (empresa, empresa)).fetchall()
+    conn.close()
+    return [r["centro"] for r in rows]
 
 
 def _hash_fila(fila):
@@ -386,14 +545,16 @@ def import_excel(file_bytes, archivo_nombre, subido_por, nueva_oleada=False, emp
     )
     importacion_id = cur.lastrowid
 
-    roles = _column_roles(list(filas[0].keys()))
+    roles = _column_roles(list(filas[0].keys()), filas)
     centro_col = roles["centro_col"]
 
     nuevas = 0
     ya_existian = 0
     centros_vistos = set()
     for fila in filas:
-        centro = str(fila.get(centro_col)).strip() if centro_col and fila.get(centro_col) else None
+        centro = _normaliza_centro(str(fila.get(centro_col)).strip()) if centro_col and fila.get(centro_col) else None
+        if centro_col:
+            fila[centro_col] = centro
         if centro:
             centros_vistos.add(centro)
         fila_hash = _hash_fila(fila)
@@ -461,25 +622,29 @@ def list_centros(oleada_id):
 
 
 def _fetch_respuestas(conn, oleada_id, centro):
+    """Devuelve [(respuesta_id, datos), ...] — el id hace falta para poder
+    guardar un match manual contra una respuesta concreta en compute_evolucion;
+    compute_reporte simplemente lo ignora."""
     if centro:
         rows = conn.execute(
-            "SELECT datos_json FROM entrevistas_respuestas WHERE oleada_id = ? AND centro = ?", (oleada_id, centro)
+            "SELECT id, datos_json FROM entrevistas_respuestas WHERE oleada_id = ? AND centro = ?", (oleada_id, centro)
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT datos_json FROM entrevistas_respuestas WHERE oleada_id = ?", (oleada_id,)
+            "SELECT id, datos_json FROM entrevistas_respuestas WHERE oleada_id = ?", (oleada_id,)
         ).fetchall()
-    return [json.loads(r["datos_json"]) for r in rows]
+    return [(r["id"], json.loads(r["datos_json"])) for r in rows]
 
 
 def compute_reporte(oleada_id, centro=None):
     conn = get_connection()
-    filas = _fetch_respuestas(conn, oleada_id, centro)
+    filas_con_id = _fetch_respuestas(conn, oleada_id, centro)
     conn.close()
-    if not filas:
+    if not filas_con_id:
         raise ValueError("No hay respuestas para este centro en esta oleada")
+    filas = [datos for _id, datos in filas_con_id]
 
-    roles = _column_roles(list(filas[0].keys()))
+    roles = _column_roles(list(filas[0].keys()), filas)
     n = len(filas)
 
     suma_global = 0
@@ -539,14 +704,46 @@ def compute_reporte(oleada_id, centro=None):
 def _fetch_salidas(conn, oleada_id, centro):
     if centro:
         rows = conn.execute(
-            "SELECT centro, nombre, fecha_baja FROM entrevistas_salidas WHERE oleada_id = ? AND centro = ?",
+            "SELECT id, centro, nombre, fecha_baja FROM entrevistas_salidas WHERE oleada_id = ? AND centro = ?",
             (oleada_id, centro),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT centro, nombre, fecha_baja FROM entrevistas_salidas WHERE oleada_id = ?", (oleada_id,)
+            "SELECT id, centro, nombre, fecha_baja FROM entrevistas_salidas WHERE oleada_id = ?", (oleada_id,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def _fetch_matches_manual(conn, respuesta_ids):
+    if not respuesta_ids:
+        return {}
+    placeholders = ",".join("?" for _ in respuesta_ids)
+    rows = conn.execute(
+        f"SELECT respuesta_id, salida_id FROM entrevistas_matches_manual WHERE respuesta_id IN ({placeholders})",
+        respuesta_ids,
+    ).fetchall()
+    return {r["respuesta_id"]: r["salida_id"] for r in rows}
+
+
+def set_match_manual(respuesta_id, salida_id):
+    """Fuerza que esta respuesta concreta cuente como la salida indicada —
+    para el caso de dos entradas que en realidad son la misma persona pero
+    el cruce automático por nombre no llegó a 1.0 de score."""
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO entrevistas_matches_manual (respuesta_id, salida_id) VALUES (?, ?) "
+        "ON CONFLICT(respuesta_id) DO UPDATE SET salida_id = excluded.salida_id",
+        (respuesta_id, salida_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def quitar_match_manual(respuesta_id):
+    conn = get_connection()
+    conn.execute("DELETE FROM entrevistas_matches_manual WHERE respuesta_id = ?", (respuesta_id,))
+    conn.commit()
+    conn.close()
 
 
 def add_salida(oleada_id, centro, nombre, fecha_baja):
@@ -571,53 +768,62 @@ def compute_evolucion(oleada_id, centro=None):
     Total Ponderado / Ítem Mínimo-Máximo por bloque y cobertura, cuatrimestre
     a cuatrimestre."""
     conn = get_connection()
-    filas = _fetch_respuestas(conn, oleada_id, centro)
+    filas_con_id = _fetch_respuestas(conn, oleada_id, centro)
     salidas = _fetch_salidas(conn, oleada_id, centro)
+    matches_manual = _fetch_matches_manual(conn, [rid for rid, _ in filas_con_id])
     conn.close()
-    if not filas:
+    if not filas_con_id:
         raise ValueError("No hay respuestas para este centro en esta oleada")
 
-    roles = _column_roles(list(filas[0].keys()))
+    roles = _column_roles(list(filas_con_id[0][1].keys()), [datos for _id, datos in filas_con_id])
     centro_col = roles["centro_col"]
     nombre_col = roles["metadata"].get("nombre")
     fecha_col = roles["metadata"].get("hora_inicio")
 
+    salidas_por_id = {s["id"]: s for s in salidas}
     salidas_por_centro = {}
     for s in salidas:
         salidas_por_centro.setdefault(s["centro"], []).append(s)
 
-    usadas = set()  # (centro, indice_en_su_lista)
+    usadas_ids = set()  # ids de entrevistas_salidas ya usados (fuzzy o manual)
     enriquecidas = []
     auditoria_g = []
-    for fila in filas:
+    for respuesta_id, fila in filas_con_id:
         centro_fila = fila.get(centro_col) if centro_col else None
         nombre_fila = fila.get(nombre_col) if nombre_col else None
         fecha_propia = fila.get(fecha_col) if fecha_col else None
         fecha_efectiva = fecha_propia
         matched = False
 
-        candidatas = salidas_por_centro.get(centro_fila, [])
-        for i, s in enumerate(candidatas):
-            key = (centro_fila, i)
-            if key in usadas:
-                continue
-            if nombre_fila and _nombre_score(nombre_fila, s["nombre"]) == 1:
-                usadas.add(key)
-                fecha_efectiva = s["fecha_baja"]
-                matched = True
-                break
+        # Un match manual (ver set_match_manual) tiene prioridad absoluta
+        # sobre el cruce automático por nombre — es la corrección explícita
+        # de un humano para un caso donde el fuzzy-match no llegó a 1.0.
+        salida_manual_id = matches_manual.get(respuesta_id)
+        if salida_manual_id is not None and salida_manual_id in salidas_por_id and salida_manual_id not in usadas_ids:
+            s = salidas_por_id[salida_manual_id]
+            usadas_ids.add(salida_manual_id)
+            fecha_efectiva = s["fecha_baja"]
+            matched = True
+        else:
+            for s in salidas_por_centro.get(centro_fila, []):
+                if s["id"] in usadas_ids:
+                    continue
+                if nombre_fila and _nombre_score(nombre_fila, s["nombre"]) == 1:
+                    usadas_ids.add(s["id"])
+                    fecha_efectiva = s["fecha_baja"]
+                    matched = True
+                    break
 
         if not matched:
-            auditoria_g.append({"nombre": nombre_fila, "fecha": fecha_propia, "centro": centro_fila})
+            auditoria_g.append({"respuesta_id": respuesta_id, "nombre": nombre_fila, "fecha": fecha_propia, "centro": centro_fila})
 
         cuat = get_cuatrimestre(fecha_efectiva)
         enriquecidas.append({"fila": fila, "cuatrimestre": cuat, "matched": matched})
 
     auditoria_f = [
-        {"nombre": s["nombre"], "fecha_baja": s["fecha_baja"], "centro": s["centro"]}
-        for centro_c, lista in salidas_por_centro.items()
-        for i, s in enumerate(lista)
-        if (centro_c, i) not in usadas
+        {"salida_id": s["id"], "nombre": s["nombre"], "fecha_baja": s["fecha_baja"], "centro": s["centro"]}
+        for s in salidas
+        if s["id"] not in usadas_ids
     ]
 
     periodos_map = {}

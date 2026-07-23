@@ -11,6 +11,8 @@ function aplicarBrandingEmpresa() {
   document.title = document.title.replace("Krispy Gestiones", "SAONA Gestiones");
   const icon = document.getElementById("brand-icon");
   if (icon) icon.textContent = "🌿";
+  const favicon = document.querySelector('link[rel="icon"]');
+  if (favicon) favicon.href = "assets/favicon-saona.png";
   const title = document.getElementById("brand-title");
   if (title) title.textContent = "SAONA Gestiones";
   document.documentElement.dataset.empresa = "saona";

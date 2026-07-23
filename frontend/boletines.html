@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krispy Gestiones · Boletines</title>
+<link rel="icon" type="image/png" href="assets/favicon-kk.png">
+<script>
+  (function () {
+    var guardado = localStorage.getItem("kt-theme");
+    if (guardado === "light" || guardado === "dark") {
+      document.documentElement.dataset.theme = guardado;
+    }
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css?v=20260723f">
+<style>
+  .boletines-wrap { max-width: 1000px; margin: 0 auto; padding: 0 0 60px; }
+  .boletines-toolbar { display: flex; justify-content: space-between; align-items: center; margin: 16px 0; }
+  .posts-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .posts-table th, .posts-table td { padding: 8px 10px; border-bottom: 1px solid var(--gridline); text-align: left; vertical-align: middle; }
+  .badge { padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .badge-draft { background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-secondary); }
+  .badge-publicado { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
+  .posts-table .acciones { display: flex; gap: 6px; flex-wrap: wrap; }
+  .editor-card, .contactos-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-top: 20px; }
+  .editor-field { margin-bottom: 12px; }
+  .editor-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+  .editor-field input, .editor-field textarea {
+    width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 14px; font-family: inherit;
+    box-sizing: border-box;
+  }
+  .editor-field textarea { min-height: 220px; resize: vertical; }
+  .editor-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .contactos-form { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .contactos-form input { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 14px; }
+  .contactos-lista { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
+  .contactos-lista li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--gridline); font-size: 14px; }
+  .contactos-lista li span { flex: 1; }
+  .envio-resultado { font-size: 13px; margin-top: 10px; white-space: pre-wrap; }
+  .staff-hint { color: var(--text-secondary); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">🍩</span>
+      <div>
+        <h1>Krispy Gestiones</h1>
+        <p class="subtitle">Boletines</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="btn btn-ghost hamburger-btn" title="Atrás" aria-label="Atrás" onclick="history.back()">←</button>
+      <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
+      <div class="hamburger-wrap">
+        <button id="btn-hamburger" class="btn btn-ghost hamburger-btn" aria-label="Menú" aria-haspopup="true" aria-expanded="false">☰</button>
+        <div id="hamburger-menu" class="hamburger-menu" hidden>
+          <span id="topbar-user" class="topbar-user" hidden></span>
+          <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema">🌙 Cambiar tema</button>
+          <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="boletines-wrap">
+    <div class="boletines-toolbar">
+      <p class="staff-hint">Publica boletines semanales y envíalos por email a quien elijas de tu lista de contactos.</p>
+      <button id="btn-nuevo-post" class="btn btn-primary" type="button">＋ Nuevo boletín</button>
+    </div>
+
+    <table class="posts-table">
+      <thead><tr><th>Título</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr></thead>
+      <tbody id="posts-tbody"></tbody>
+    </table>
+
+    <div class="editor-card" id="editor-card" hidden>
+      <h2 id="editor-titulo-h2" style="margin-top:0;">Nuevo boletín</h2>
+      <div class="editor-field">
+        <label for="post-titulo">Título</label>
+        <input type="text" id="post-titulo" placeholder="Título del boletín">
+      </div>
+      <div class="editor-field">
+        <label for="post-resumen">Resumen (aparece en el listado público)</label>
+        <input type="text" id="post-resumen" placeholder="Resumen breve">
+      </div>
+      <div class="editor-field">
+        <label for="post-contenido">Contenido (admite HTML simple: &lt;p&gt;, &lt;b&gt;, &lt;a&gt;, &lt;img&gt;...)</label>
+        <textarea id="post-contenido" placeholder="Escribe aquí el contenido del boletín..."></textarea>
+      </div>
+      <div class="editor-actions">
+        <button id="btn-guardar-post" class="btn btn-primary" type="button">Guardar</button>
+        <button id="btn-publicar-post" class="btn btn-ghost" type="button" hidden>Publicar</button>
+        <button id="btn-despublicar-post" class="btn btn-ghost" type="button" hidden>Despublicar</button>
+        <button id="btn-eliminar-post" class="btn btn-ghost" type="button" hidden>Eliminar</button>
+        <button id="btn-cerrar-editor" class="btn btn-ghost" type="button">Cerrar</button>
+      </div>
+
+      <div id="pdf-section" hidden>
+        <h3 style="font-size:15px; margin:20px 0 8px;">PDF adjunto</h3>
+        <p id="pdf-actual-txt" class="staff-hint"></p>
+        <label class="btn btn-ghost btn-upload">
+          ⬆ Subir/reemplazar PDF
+          <input type="file" id="input-pdf-upload" accept=".pdf" hidden>
+        </label>
+      </div>
+
+      <div id="envio-section" hidden>
+        <h3 style="font-size:15px; margin:20px 0 8px;">Enviar por email</h3>
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+          <button id="btn-seleccionar-todos" class="btn btn-ghost" type="button">Seleccionar todos</button>
+          <button id="btn-enviar" class="btn btn-primary" type="button">Enviar a seleccionados</button>
+        </div>
+        <ul class="contactos-lista" id="destinatarios-lista"></ul>
+        <div class="envio-resultado" id="envio-resultado"></div>
+      </div>
+    </div>
+
+    <div class="contactos-card">
+      <h2 style="margin-top:0;">Lista de contactos</h2>
+      <div class="contactos-form">
+        <input type="text" id="contacto-nombre" placeholder="Nombre">
+        <input type="email" id="contacto-email" placeholder="Email">
+        <button id="btn-agregar-contacto" class="btn btn-ghost" type="button">＋ Agregar contacto</button>
+        <label class="btn btn-ghost btn-upload">
+          ⬆ Importar Excel
+          <input type="file" id="input-contactos-upload" accept=".xlsx,.xls" hidden>
+        </label>
+      </div>
+      <ul class="contactos-lista" id="contactos-lista"></ul>
+    </div>
+  </div>
+</div>
+<script src="js/theme.js?v=20260723f"></script>
+<script src="js/auth-common.js?v=20260723f"></script>
+<script src="js/topbar-menu.js?v=20260723f"></script>
+<script src="js/boletines.js?v=20260723f"></script>
+</body>
+</html>

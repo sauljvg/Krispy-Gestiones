@@ -25,6 +25,7 @@ MODULOS = {
     "resenas": "Reseñas",
     "informes": "Informes",
     "clima": "Clima Laboral",
+    "boletines": "Boletines",
     "saona_resenas": "SAONA · Reseñas",
     "saona_informes": "SAONA · Informes",
     "saona_clima": "SAONA · Clima Laboral",

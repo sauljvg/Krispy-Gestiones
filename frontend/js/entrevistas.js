@@ -4,14 +4,13 @@ let ultimoReporte = null;
 let centrosActuales = [];
 let chartsBloques = [];
 let chartMotivos = null;
-let chartEvolucion = null;
+let chartEvolucionTotal = null;
+let chartEvolucionMinMax = null;
 let MARCA_COLOR = "#006838";
 
-// Mismos colores fijos por bloque que usaba el Apps Script original (rojo,
-// verde, dorado, azul) — así el gráfico de evolución se lee igual que en
-// las hojas de siempre, en vez de un color por empresa que no aporta nada
-// aquí (son 4 líneas distintas, no una sola serie de marca).
-const COLORES_BLOQUE = ["#c00000", "#38761d", "#bf9000", "#1155cc", "#6a3d9a", "#e08214"];
+// Un color por cuatrimestre (no por bloque) — valores por defecto, se
+// sobreescriben con los tokens de marca (KK o Saona) en cargarTokensDiseno().
+let COLORES_PERIODO = ["#38761d", "#c00000", "#1155cc", "#bf9000", "#6a3d9a", "#e08214"];
 
 const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" ? "saona" : "kk";
 function conEmpresa(params) {
@@ -36,9 +35,20 @@ async function cargarTokensDiseno() {
     const tokens = await res.json();
     const marca = EMPRESA === "saona" ? tokens.marca_saona : tokens.marca;
     MARCA_COLOR = marca.verde_kk;
+    const periodos = EMPRESA === "saona" ? tokens.periodos_saona : tokens.periodos;
+    if (periodos && periodos.lista) COLORES_PERIODO = periodos.lista;
   } catch (e) {
-    // Se queda con el verde KK por defecto.
+    // Se queda con los valores por defecto de arriba.
   }
+}
+
+function descargarChartPNG(canvasId, nombreArchivo) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const a = document.createElement("a");
+  a.href = canvas.toDataURL("image/png");
+  a.download = `${nombreArchivo}.png`;
+  a.click();
 }
 
 function aplicarBrandingEmpresa() {
@@ -46,6 +56,8 @@ function aplicarBrandingEmpresa() {
   document.title = document.title.replace("Krispy Gestiones", "SAONA Gestiones");
   const icon = document.getElementById("brand-icon");
   if (icon) icon.textContent = "🌿";
+  const favicon = document.querySelector('link[rel="icon"]');
+  if (favicon) favicon.href = "assets/favicon-saona.png";
   const title = document.getElementById("brand-title");
   if (title) title.textContent = "SAONA Gestiones";
   const logo = document.getElementById("entrevistas-report-logo");
@@ -77,8 +89,16 @@ async function loadCentros() {
   const res = await fetch(`${AUTH_API_BASE}/entrevistas/${currentOleada}/centros`);
   const centros = await res.json();
   centrosActuales = centros;
+
+  // El selector de "registrar salida manualmente" lista TODAS las tiendas
+  // conocidas de la empresa, no solo las que ya tienen alguna respuesta —
+  // si no, no se podría dar de alta una salida en un centro sin respuestas
+  // todavía.
+  const resConocidos = await fetch(`${AUTH_API_BASE}/entrevistas/centros-conocidos?${conEmpresa(new URLSearchParams())}`);
+  const centrosConocidos = resConocidos.ok ? await resConocidos.json() : centros;
   const selectManual = document.getElementById("salida-manual-centro");
-  if (selectManual) selectManual.innerHTML = centros.map((c) => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join("");
+  if (selectManual) selectManual.innerHTML = centrosConocidos.map((c) => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join("");
+
   const grid = document.getElementById("centro-grid");
   const cards = [`<div class="centro-card" data-centro="">🏢 Todos los centros</div>`].concat(
     centros.map((c) => `<div class="centro-card" data-centro="${escapeHTML(c)}">${escapeHTML(c)}</div>`)
@@ -154,23 +174,28 @@ function renderChartMotivos(items) {
   });
 }
 
-function renderChartEvolucion(statsPorPeriodo) {
-  const ctx = document.getElementById("chart-evolucion");
-  if (chartEvolucion) chartEvolucion.destroy();
+// Los dos gráficos que de verdad importan (según el usuario): el resumen
+// POR BLOQUE, no por pregunta suelta — y siempre diferenciando a qué
+// cuatrimestre pertenece cada línea (antes todo salía en un único color por
+// bloque, sin distinguir periodos). El eje X son los bloques; cada
+// cuatrimestre es una línea de color distinto.
+
+function renderChartEvolucionTotal(statsPorPeriodo) {
+  const ctx = document.getElementById("chart-evolucion-total");
+  if (chartEvolucionTotal) chartEvolucionTotal.destroy();
   ctx.parentElement.style.height = "320px";
   const colorTexto = colorTextoActual();
-  const labels = statsPorPeriodo.map((p) => p.label);
   const nombresBloque = statsPorPeriodo.length ? statsPorPeriodo[0].bloques.map((b) => b.nombre) : [];
-  const datasets = nombresBloque.map((nombre, i) => ({
-    label: nombre,
-    data: statsPorPeriodo.map((p) => p.bloques[i] ? p.bloques[i].total_ponderado : null),
-    borderColor: COLORES_BLOQUE[i % COLORES_BLOQUE.length],
-    backgroundColor: COLORES_BLOQUE[i % COLORES_BLOQUE.length],
+  const datasets = statsPorPeriodo.map((p, i) => ({
+    label: p.label,
+    data: p.bloques.map((b) => b.total_ponderado),
+    borderColor: COLORES_PERIODO[i % COLORES_PERIODO.length],
+    backgroundColor: COLORES_PERIODO[i % COLORES_PERIODO.length],
     tension: 0.15,
   }));
-  chartEvolucion = new Chart(ctx, {
+  chartEvolucionTotal = new Chart(ctx, {
     type: "line",
-    data: { labels, datasets },
+    data: { labels: nombresBloque, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -185,23 +210,143 @@ function renderChartEvolucion(statsPorPeriodo) {
   });
 }
 
-function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquetaVacio, accionRegistrar) {
+function renderChartEvolucionMinMax(statsPorPeriodo) {
+  const ctx = document.getElementById("chart-evolucion-minmax");
+  if (chartEvolucionMinMax) chartEvolucionMinMax.destroy();
+  ctx.parentElement.style.height = "320px";
+  const colorTexto = colorTextoActual();
+  const primerPeriodo = statsPorPeriodo[0];
+  const labels = primerPeriodo ? primerPeriodo.min_max.flatMap((m) => [`${m.bloque} (Mín)`, `${m.bloque} (Máx)`]) : [];
+  const datasets = statsPorPeriodo.map((p, i) => ({
+    label: p.label,
+    data: p.min_max.flatMap((m) => [m.min, m.max]),
+    borderColor: COLORES_PERIODO[i % COLORES_PERIODO.length],
+    backgroundColor: COLORES_PERIODO[i % COLORES_PERIODO.length],
+    tension: 0.15,
+  }));
+  chartEvolucionMinMax = new Chart(ctx, {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { min: 1, max: 5, ticks: { color: colorTexto }, grid: { color: "rgba(128,128,128,0.2)" } },
+        x: { ticks: { color: colorTexto, autoSkip: false, maxRotation: 45, minRotation: 0 }, grid: { display: false } },
+      },
+      plugins: {
+        legend: { position: "bottom", labels: { color: colorTexto, usePointStyle: true, pointStyle: "circle" } },
+      },
+    },
+  });
+}
+
+// Detalle por bloque, escondido detrás de un "mostrar más" — el desglose
+// pregunta por pregunta no es lo importante a simple vista (eso ya lo dijo
+// el usuario), pero se puede consultar sin recargar nada.
+function renderDetalleBloques(statsPorPeriodo) {
+  const wrap = document.getElementById("detalle-bloques-wrap");
+  if (!statsPorPeriodo.length) {
+    wrap.innerHTML = "";
+    return;
+  }
+  const nombresBloque = statsPorPeriodo[0].bloques.map((b) => b.nombre);
+  wrap.innerHTML = nombresBloque
+    .map((nombre, i) => {
+      const preguntas = statsPorPeriodo[0].bloques[i].items.map((it) => it.pregunta);
+      const filas = preguntas
+        .map((pregunta, pi) => {
+          const celdas = statsPorPeriodo
+            .map((p) => {
+              const item = p.bloques[i] && p.bloques[i].items[pi];
+              const media = item && item.media !== null ? item.media.toFixed(2) : "—";
+              return `<td>${media}</td>`;
+            })
+            .join("");
+          return `<tr><td>${escapeHTML(pregunta)}</td>${celdas}</tr>`;
+        })
+        .join("");
+      const cabecera = statsPorPeriodo.map((p) => `<th>${escapeHTML(p.label)}</th>`).join("");
+      return `
+        <details class="detalle-bloque-details">
+          <summary>${escapeHTML(nombre)} — ver detalle por pregunta</summary>
+          <table class="detalle-tabla">
+            <thead><tr><th>Pregunta</th>${cabecera}</tr></thead>
+            <tbody>${filas}</tbody>
+          </table>
+        </details>`;
+    })
+    .join("");
+}
+
+function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquetaVacio) {
   const wrap = document.getElementById(wrapId);
   const lista = document.getElementById(listaId);
   document.getElementById(summaryId).textContent = `${items.length} ${etiquetaVacio}`;
   wrap.hidden = items.length === 0;
-  lista.innerHTML = items
-    .map((it, i) => {
-      const texto = `<span>${escapeHTML(formatoItem(it))}</span>`;
-      if (!accionRegistrar) return `<li>${texto}</li>`;
-      return `<li>${texto}<button type="button" class="btn-registrar-salida" data-idx="${i}">＋ Registrar como salida</button></li>`;
-    })
+  lista.innerHTML = items.map((it) => `<li><span>${escapeHTML(formatoItem(it))}</span></li>`).join("");
+}
+
+// La auditoría G (respuestas que no cruzaron con ninguna salida) necesita
+// algo más que la F: cuando la misma persona real aparece en las dos listas
+// con el nombre escrito distinto (el caso real: "FLORES, LENIN MICHAEL" en
+// Salidas Totales vs "Lenin flores alvarado" en su propia respuesta, con un
+// score de fuzzy-match por debajo de 1.0), hay que poder vincularlas a mano
+// en vez de "registrar como salida" — eso último crearía una salida NUEVA y
+// la persona quedaría contada dos veces.
+function renderAuditoriaG(items, auditoriaF) {
+  const wrap = document.getElementById("auditoria-g-wrap");
+  const lista = document.getElementById("auditoria-g-lista");
+  document.getElementById("auditoria-g-summary").textContent = `${items.length} respuestas que no cruzaron con ninguna salida`;
+  wrap.hidden = items.length === 0;
+  const opcionesF = auditoriaF
+    .map((f) => `<option value="${f.salida_id}">${escapeHTML(f.nombre)} — ${escapeHTML(f.centro || "")} (baja: ${(f.fecha_baja || "").slice(0, 10)})</option>`)
     .join("");
-  if (accionRegistrar) {
-    lista.querySelectorAll(".btn-registrar-salida").forEach((btn) => {
-      btn.addEventListener("click", () => accionRegistrar(items[Number(btn.dataset.idx)]));
+  lista.innerHTML = items
+    .map(
+      (it, i) => `
+    <li>
+      <span>${escapeHTML(it.nombre)} — ${escapeHTML(it.centro || "")}</span>
+      <span class="auditoria-g-acciones">
+        <select class="select-vincular-salida" data-idx="${i}">
+          <option value="">¿Es la misma persona que...?</option>
+          ${opcionesF}
+        </select>
+        <button type="button" class="btn-registrar-salida btn-vincular" data-idx="${i}">🔗 Vincular</button>
+        <button type="button" class="btn-registrar-salida btn-registrar-nueva" data-idx="${i}">＋ Registrar como salida</button>
+      </span>
+    </li>`
+    )
+    .join("");
+  lista.querySelectorAll(".btn-vincular").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const idx = Number(btn.dataset.idx);
+      const select = lista.querySelector(`.select-vincular-salida[data-idx="${idx}"]`);
+      const salidaId = Number(select.value);
+      if (!salidaId) {
+        alert("Elige a qué salida corresponde esta respuesta.");
+        return;
+      }
+      await vincularRespuestaSalida(items[idx].respuesta_id, salidaId);
     });
+  });
+  lista.querySelectorAll(".btn-registrar-nueva").forEach((btn) => {
+    btn.addEventListener("click", () => registrarSalidaDesdeAuditoria(items[Number(btn.dataset.idx)]));
+  });
+}
+
+async function vincularRespuestaSalida(respuestaId, salidaId) {
+  const res = await fetch(`${AUTH_API_BASE}/entrevistas/${currentOleada}/matches`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ respuesta_id: respuestaId, salida_id: salidaId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "No se pudo vincular la respuesta a esa salida.");
+    return;
   }
+  await loadEvolucion(currentCentro);
 }
 
 async function registrarSalidaDesdeAuditoria(item) {
@@ -239,7 +384,9 @@ async function loadEvolucion(centro) {
     return;
   }
   evolucionCard.hidden = false;
-  renderChartEvolucion(data.stats_por_periodo);
+  renderChartEvolucionTotal(data.stats_por_periodo);
+  renderChartEvolucionMinMax(data.stats_por_periodo);
+  renderDetalleBloques(data.stats_por_periodo);
 
   const coberturaWrap = document.getElementById("cobertura-wrap");
   if (data.tiene_salidas_totales) {
@@ -255,12 +402,7 @@ async function loadEvolucion(centro) {
       data.auditoria_f, (a) => `${a.nombre} — ${a.centro || ""} (baja: ${(a.fecha_baja || "").slice(0, 10)})`,
       "salidas sin ninguna respuesta detectada"
     );
-    renderAuditoria(
-      "auditoria-g-wrap", "auditoria-g-summary", "auditoria-g-lista",
-      data.auditoria_g, (a) => `${a.nombre} — ${a.centro || ""}`,
-      "respuestas que no cruzaron con ninguna salida",
-      registrarSalidaDesdeAuditoria
-    );
+    renderAuditoriaG(data.auditoria_g, data.auditoria_f);
   } else {
     coberturaWrap.hidden = true;
     document.getElementById("total-salidas-txt").textContent = "";
@@ -297,12 +439,25 @@ async function loadReporte(centro) {
         <h2>${escapeHTML(b.nombre)}</h2>
         <div class="bloque-score">${b.promedio !== null ? b.promedio.toFixed(2) + " / 5" : "—"}</div>
       </div>
-      <div class="chart-wrap"><canvas id="chart-bloque-${i}"></canvas></div>
+      <details class="bloque-detalle-details">
+        <summary>Mostrar detalle por pregunta</summary>
+        <div class="chart-wrap"><canvas id="chart-bloque-${i}"></canvas></div>
+      </details>
     </div>`
     )
     .join("");
+  // Lo importante es el resumen por bloque (arriba); el desglose pregunta
+  // por pregunta solo se dibuja cuando el usuario abre el detalle — así no
+  // se sobrecarga la vista con un gráfico por cada pregunta suelta.
   chartsBloques.forEach((c) => c && c.destroy());
-  chartsBloques = data.bloques.map((b, i) => renderChartBloque(`chart-bloque-${i}`, null, b.preguntas));
+  chartsBloques = data.bloques.map(() => null);
+  bloquesWrap.querySelectorAll(".bloque-detalle-details").forEach((det, i) => {
+    det.addEventListener("toggle", () => {
+      if (det.open && !chartsBloques[i]) {
+        chartsBloques[i] = renderChartBloque(`chart-bloque-${i}`, null, data.bloques[i].preguntas);
+      }
+    });
+  });
 
   await loadEvolucion(centro);
 
@@ -350,6 +505,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await cargarTokensDiseno();
   await loadOleadas();
+
+  document.querySelectorAll(".btn-descargar-chart").forEach((btn) => {
+    btn.addEventListener("click", () => descargarChartPNG(btn.dataset.target, btn.dataset.nombre));
+  });
 
   document.getElementById("select-oleada").addEventListener("change", async (e) => {
     currentOleada = Number(e.target.value);
@@ -401,8 +560,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btn-theme-toggle").addEventListener("click", () => {
     setTimeout(() => {
       if (!ultimoReporte) return;
-      chartsBloques.forEach((c) => c && c.destroy());
-      chartsBloques = ultimoReporte.bloques.map((b, i) => renderChartBloque(`chart-bloque-${i}`, null, b.preguntas));
+      // Solo se redibujan (con los colores del nuevo tema) los bloques cuyo
+      // detalle ya estaba abierto — los demás siguen sin dibujarse hasta que
+      // el usuario los abra.
+      chartsBloques.forEach((c, i) => {
+        if (!c) return;
+        c.destroy();
+        chartsBloques[i] = renderChartBloque(`chart-bloque-${i}`, null, ultimoReporte.bloques[i].preguntas);
+      });
       if (ultimoReporte.motivos && ultimoReporte.motivos.length > 0) renderChartMotivos(ultimoReporte.motivos);
       loadEvolucion(currentCentro);
     }, 0);

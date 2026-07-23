@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krispy Gestiones · Boletines</title>
+<link rel="icon" type="image/png" href="assets/favicon-kk.png">
+<script>
+  (function () {
+    var guardado = localStorage.getItem("kt-theme");
+    if (guardado === "light" || guardado === "dark") {
+      document.documentElement.dataset.theme = guardado;
+    }
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css?v=20260723f">
+<style>
+  .blog-wrap { max-width: 760px; margin: 0 auto; padding: 20px 16px 60px; }
+  .blog-lista-card {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px; margin-bottom: 14px; cursor: pointer;
+  }
+  .blog-lista-card:hover { border-color: var(--series-blue); }
+  .blog-lista-card h2 { margin: 0 0 6px; font-size: 18px; }
+  .blog-lista-card p { margin: 0; color: var(--text-secondary); font-size: 14px; }
+  .blog-lista-card .fecha { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
+  .blog-post h1 { font-size: 24px; margin-bottom: 4px; }
+  .blog-post .fecha { color: var(--text-muted); font-size: 13px; margin-bottom: 20px; }
+  .blog-post .contenido { font-size: 16px; line-height: 1.6; }
+  .blog-pdf-wrap { margin-top: 24px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .blog-pdf-toolbar {
+    display: flex; justify-content: space-between; align-items: center; padding: 10px 14px;
+    background: var(--surface-1); font-size: 13px; border-bottom: 1px solid var(--border);
+  }
+  .blog-pdf-toolbar a { color: var(--series-blue); text-decoration: none; font-weight: 600; }
+  .blog-pdf-frame { width: 100%; height: 70vh; border: none; }
+  .btn-volver-blog { margin-bottom: 16px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">📰</span>
+      <div>
+        <h1>Krispy Gestiones</h1>
+        <p class="subtitle">Boletines</p>
+      </div>
+    </div>
+  </header>
+
+  <div class="blog-wrap">
+    <div id="blog-lista"></div>
+    <div id="blog-post" hidden></div>
+  </div>
+</div>
+<script src="js/theme.js?v=20260723f"></script>
+<script src="js/blog.js?v=20260723f"></script>
+</body>
+</html>

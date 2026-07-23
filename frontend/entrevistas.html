@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Krispy Gestiones · Entrevista de Salida</title>
+<link rel="icon" type="image/png" href="assets/favicon-kk.png">
 <script>
   (function () {
     var guardado = localStorage.getItem("kt-theme");
@@ -15,8 +16,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/styles.css?v=20260723b">
-<script src="js/vendor/chart.umd.min.js?v=20260723b"></script>
+<link rel="stylesheet" href="css/styles.css?v=20260723g">
+<script src="js/vendor/chart.umd.min.js?v=20260723g"></script>
 <style>
   .entrevistas-wrap { max-width: 1100px; margin: 0 auto; padding: 0 0 40px; }
   .entrevistas-report-title { text-align: center; margin: 6px 0 20px; }
@@ -54,13 +55,21 @@
 
   .evolucion-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 20px; }
   .evolucion-card h2 { margin: 0 0 12px; font-size: 17px; }
+  .evolucion-chart-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .evolucion-chart-head h2 { margin: 0; }
+  .btn-descargar-chart { font-size: 12px; padding: 5px 10px; }
   .cobertura-table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 10px; }
   .cobertura-table th { text-align: left; font-size: 12px; text-transform: uppercase; color: var(--text-muted); padding: 6px 10px; border-bottom: 1px solid var(--border); }
   .cobertura-table td { padding: 7px 10px; border-bottom: 1px solid var(--gridline); }
   .auditoria-details { margin-top: 12px; }
   .auditoria-details summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); padding: 4px 0; }
   .auditoria-details ul { margin: 6px 0 0; padding-left: 20px; font-size: 13px; color: var(--text-secondary); }
-  .auditoria-details li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 0; }
+  .auditoria-details li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; flex-wrap: wrap; }
+  .auditoria-g-acciones { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .select-vincular-salida {
+    padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 12px; max-width: 220px;
+  }
   .btn-registrar-salida {
     border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
     border-radius: 6px; padding: 2px 8px; font-size: 12px; cursor: pointer; white-space: nowrap;
@@ -73,6 +82,12 @@
     background: var(--surface-page); color: var(--text-primary); font-size: 13px;
   }
   .salida-manual-row input[type="text"] { flex: 1; min-width: 160px; }
+  .detalle-bloque-details { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+  .detalle-bloque-details summary { cursor: pointer; font-size: 14px; font-weight: 600; padding: 4px 0; }
+  .detalle-tabla { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+  .detalle-tabla th, .detalle-tabla td { padding: 6px 8px; border-bottom: 1px solid var(--gridline); text-align: left; }
+  .detalle-tabla th:not(:first-child), .detalle-tabla td:not(:first-child) { text-align: center; white-space: nowrap; }
+  .bloque-detalle-details summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); padding: 4px 0; }
 </style>
 </head>
 <body>
@@ -127,11 +142,20 @@
 
       <div class="satisfaccion-box" id="satisfaccion-box"></div>
 
-      <div id="bloques-wrap"></div>
-
       <div class="evolucion-card" id="evolucion-card" hidden>
-        <h2>Evolución por cuatrimestre — Total Ponderado por Bloque</h2>
-        <div class="chart-wrap"><canvas id="chart-evolucion"></canvas></div>
+        <div class="evolucion-chart-head">
+          <h2>Total Ponderado por Bloque</h2>
+          <button type="button" class="btn btn-ghost btn-descargar-chart" data-target="chart-evolucion-total" data-nombre="total_ponderado_por_bloque">⬇ PNG</button>
+        </div>
+        <div class="chart-wrap"><canvas id="chart-evolucion-total"></canvas></div>
+
+        <div class="evolucion-chart-head" style="margin-top:26px;">
+          <h2>Ítem Mínimo y Máximo por Bloque</h2>
+          <button type="button" class="btn btn-ghost btn-descargar-chart" data-target="chart-evolucion-minmax" data-nombre="item_minimo_maximo_por_bloque">⬇ PNG</button>
+        </div>
+        <div class="chart-wrap"><canvas id="chart-evolucion-minmax"></canvas></div>
+
+        <div id="detalle-bloques-wrap"></div>
 
         <div id="cobertura-wrap" hidden>
           <h2 style="margin-top:20px;">Cobertura por periodo</h2>
@@ -161,6 +185,8 @@
         </div>
       </div>
 
+      <div id="bloques-wrap"></div>
+
       <div class="motivos-card" id="motivos-card" hidden>
         <h2>Motivos de salida</h2>
         <div class="chart-wrap"><canvas id="chart-motivos"></canvas></div>
@@ -171,9 +197,9 @@
     </div>
   </div>
 </div>
-<script src="js/theme.js?v=20260723b"></script>
-<script src="js/auth-common.js?v=20260723b"></script>
-<script src="js/topbar-menu.js?v=20260723b"></script>
-<script src="js/entrevistas.js?v=20260723b"></script>
+<script src="js/theme.js?v=20260723g"></script>
+<script src="js/auth-common.js?v=20260723g"></script>
+<script src="js/topbar-menu.js?v=20260723g"></script>
+<script src="js/entrevistas.js?v=20260723g"></script>
 </body>
 </html>
