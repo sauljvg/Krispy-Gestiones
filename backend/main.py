@@ -23,6 +23,8 @@ from auth_routes import router as auth_router
 from boletines_routes import router as boletines_router
 from boletines_routes import router_publico as boletines_router_publico
 from clima_routes import router as clima_router
+from encuestas_routes import router as encuestas_router
+from encuestas_routes import router_publico as encuestas_router_publico
 from entrevistas_routes import router as entrevistas_router
 from informes_routes import router as informes_router
 from request_context import tiendas_permitidas_actual
@@ -78,6 +80,8 @@ app.include_router(clima_router, prefix="/api/clima")
 app.include_router(entrevistas_router, prefix="/api/entrevistas")
 app.include_router(boletines_router, prefix="/api/boletines")
 app.include_router(boletines_router_publico, prefix="/api/public/boletines")
+app.include_router(encuestas_router, prefix="/api/encuestas")
+app.include_router(encuestas_router_publico, prefix="/api/public/encuestas")
 app.include_router(router, prefix="/api", dependencies=[Depends(require_resenas)])
 
 

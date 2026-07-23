@@ -417,6 +417,37 @@ def _quiza_calcular_scoring(hojas):
     return nuevas
 
 
+def _insertar_hojas(conn, tipo_id, importacion_id, hojas):
+    """Inserta cada fila de cada hoja en informe_respuestas, con el mismo
+    dedup por hash que usa el import manual de Excel — factorizado aquí para
+    que el módulo de Test (encuestas.py) pueda alimentar Informes fila a fila
+    según se van recibiendo respuestas, sin duplicar esta lógica."""
+    resumen = {}
+    total_nuevas = 0
+    for hoja_nombre, filas in hojas.items():
+        nuevas = 0
+        ya_existian = 0
+        for fila in filas:
+            fila_hash = hash_fila(fila)
+            existe = conn.execute(
+                "SELECT id FROM informe_respuestas WHERE tipo_id = ? AND hoja = ? AND fila_hash = ?",
+                (tipo_id, hoja_nombre, fila_hash),
+            ).fetchone()
+            if existe:
+                ya_existian += 1
+                continue
+            datos_json = json.dumps(fila, ensure_ascii=False, default=str)
+            conn.execute(
+                "INSERT INTO informe_respuestas (tipo_id, importacion_id, hoja, fila_hash, datos_json) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (tipo_id, importacion_id, hoja_nombre, fila_hash, datos_json),
+            )
+            nuevas += 1
+        resumen[hoja_nombre] = {"total_en_excel": len(filas), "nuevas": nuevas, "ya_existian": ya_existian}
+        total_nuevas += nuevas
+    return resumen, total_nuevas
+
+
 def import_excel(tipo_clave, file_bytes, archivo_nombre, subido_por):
     tipo = get_tipo(tipo_clave)
     if tipo is None:
@@ -434,34 +465,39 @@ def import_excel(tipo_clave, file_bytes, archivo_nombre, subido_por):
     )
     importacion_id = cur.lastrowid
 
-    resumen = {}
-    total_nuevas = 0
-    for hoja_nombre, filas in hojas.items():
-        nuevas = 0
-        ya_existian = 0
-        for fila in filas:
-            fila_hash = hash_fila(fila)
-            existe = conn.execute(
-                "SELECT id FROM informe_respuestas WHERE tipo_id = ? AND hoja = ? AND fila_hash = ?",
-                (tipo["id"], hoja_nombre, fila_hash),
-            ).fetchone()
-            if existe:
-                ya_existian += 1
-                continue
-            datos_json = json.dumps(fila, ensure_ascii=False, default=str)
-            conn.execute(
-                "INSERT INTO informe_respuestas (tipo_id, importacion_id, hoja, fila_hash, datos_json) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (tipo["id"], importacion_id, hoja_nombre, fila_hash, datos_json),
-            )
-            nuevas += 1
-        resumen[hoja_nombre] = {"total_en_excel": len(filas), "nuevas": nuevas, "ya_existian": ya_existian}
-        total_nuevas += nuevas
+    resumen, total_nuevas = _insertar_hojas(conn, tipo["id"], importacion_id, hojas)
 
     conn.execute("UPDATE informe_importaciones SET num_respuestas = ? WHERE id = ?", (total_nuevas, importacion_id))
     conn.commit()
     conn.close()
     return {"hojas": resumen, "total_nuevas": total_nuevas}
+
+
+def ingest_fila_directa(tipo_clave, fila, origen="Formulario web"):
+    """Alimenta Informes con UNA fila recién recibida (p.ej. desde el módulo
+    de Test cuando alguien envía el formulario público) exactamente igual
+    que si viniera de un Excel: mismo detector de Valores y Competencias,
+    mismo cálculo de Scoring/Dashboard, mismo dedup por hash — así el
+    resultado aparece en Informes sin duplicar ninguna lógica."""
+    tipo = get_tipo(tipo_clave)
+    if tipo is None:
+        raise ValueError(f"Tipo de informe desconocido: {tipo_clave}")
+
+    hojas = _quiza_calcular_scoring({"Respuestas": [fila]})
+
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO informe_importaciones (tipo_id, archivo_nombre, subido_por, num_respuestas) VALUES (?, ?, ?, 0)",
+        (tipo["id"], origen, "sistema"),
+    )
+    importacion_id = cur.lastrowid
+
+    _resumen, total_nuevas = _insertar_hojas(conn, tipo["id"], importacion_id, hojas)
+
+    conn.execute("UPDATE informe_importaciones SET num_respuestas = ? WHERE id = ?", (total_nuevas, importacion_id))
+    conn.commit()
+    conn.close()
+    return total_nuevas
 
 
 def _detect_date_columns(columnas):
