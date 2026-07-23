@@ -15,7 +15,7 @@ from db import get_connection
 
 FONDOS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads", "encuestas_fondos"))
 
-TIPOS_PREGUNTA = {"texto", "email", "numero", "likert", "abierta", "opcion_multiple"}
+TIPOS_PREGUNTA = {"texto", "email", "numero", "likert", "abierta", "opcion_multiple", "prioridad"}
 
 LIKERT_OPCIONES = [
     "Totalmente en desacuerdo", "En desacuerdo", "Ni de acuerdo ni en desacuerdo",
@@ -380,14 +380,27 @@ def guardar_respuesta(slug, respuestas_por_pregunta, ip, user_agent):
         SELECT eq.id, eq.etiqueta FROM encuesta_preguntas eq
         JOIN encuesta_paginas ep ON ep.id = eq.pagina_id
         WHERE ep.encuesta_id = ?
+        ORDER BY ep.orden, eq.orden
     """, (encuesta_id,)).fetchall()
     etiqueta_por_id = {str(p["id"]): p["etiqueta"] for p in preguntas}
 
+    # Dos preguntas pueden compartir el mismo enunciado a propósito (p.ej. la
+    # misma pregunta de "Ordena las siguientes afirmaciones..." repetida en
+    # varias páginas con distintas frases, tal cual el test real de Krispy
+    # Kreme) — un dict simple perdería todas menos la última. Se numeran las
+    # repetidas; el motor de scoring solo busca que el texto CONTENGA la
+    # palabra clave, así que el sufijo no rompe la detección.
     fila_por_etiqueta = {}
-    for pid, valor in respuestas_por_pregunta.items():
-        etiqueta = etiqueta_por_id.get(str(pid))
-        if etiqueta:
-            fila_por_etiqueta[etiqueta] = valor
+    for pid, etiqueta in etiqueta_por_id.items():
+        if pid not in respuestas_por_pregunta:
+            continue
+        valor = respuestas_por_pregunta[pid]
+        clave = etiqueta
+        sufijo = 2
+        while clave in fila_por_etiqueta:
+            clave = f"{etiqueta} ({sufijo})"
+            sufijo += 1
+        fila_por_etiqueta[clave] = valor
 
     dispositivo = _detectar_dispositivo(user_agent)
     conn.execute(

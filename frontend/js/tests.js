@@ -162,6 +162,7 @@ const TIPOS_PREGUNTA_LABELS = {
   likert: "Escala (1-5)",
   abierta: "Comentario abierto",
   opcion_multiple: "Opción múltiple",
+  prioridad: "Ordenar prioridades",
 };
 
 function renderPaginas() {
@@ -268,6 +269,13 @@ function renderPaginas() {
       if (tipo === "opcion_multiple") {
         const texto = prompt("Escribe las opciones separadas por coma:");
         opciones = (texto || "").split(",").map((o) => o.trim()).filter(Boolean);
+      } else if (tipo === "prioridad") {
+        const texto = prompt("Escribe las afirmaciones a ordenar, separadas por coma (orden inicial = el que verá el candidato):");
+        opciones = (texto || "").split(",").map((o) => o.trim()).filter(Boolean);
+        if (opciones.length < 2) {
+          alert("Escribe al menos 2 afirmaciones para poder ordenarlas.");
+          return;
+        }
       }
       const res = await fetch(`${AUTH_API_BASE}/encuestas/paginas/${paginaId}/preguntas`, {
         method: "POST",

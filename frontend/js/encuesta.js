@@ -53,7 +53,53 @@ function renderPregunta(q) {
       </div>
     </div>`;
   }
+  if (q.tipo === "prioridad") {
+    if (!Array.isArray(respuestas[q.id])) {
+      respuestas[q.id] = [...q.opciones];
+    }
+    return `<div class="pregunta-bloque prioridad-bloque" data-pregunta-id="${q.id}">
+      <label class="pregunta-label">${escapeHTML(q.etiqueta)}${req}</label>
+      <p class="prioridad-ayuda">Ordena de mayor (arriba) a menor prioridad usando las flechas.</p>
+      <ol class="prioridad-lista" data-pregunta-id="${q.id}">${renderListaPrioridadHTML(q)}</ol>
+    </div>`;
+  }
   return "";
+}
+
+function renderListaPrioridadHTML(q) {
+  const orden = respuestas[q.id];
+  return orden
+    .map(
+      (texto, i) => `
+    <li class="prioridad-item">
+      <span class="prioridad-num">${i + 1}</span>
+      <span class="prioridad-texto">${escapeHTML(texto)}</span>
+      <span class="prioridad-flechas">
+        <button type="button" class="btn-prioridad-subir" data-idx="${i}" ${i === 0 ? "disabled" : ""} aria-label="Subir prioridad">↑</button>
+        <button type="button" class="btn-prioridad-bajar" data-idx="${i}" ${i === orden.length - 1 ? "disabled" : ""} aria-label="Bajar prioridad">↓</button>
+      </span>
+    </li>`
+    )
+    .join("");
+}
+
+function bindPrioridadBotones(ol) {
+  ol.querySelectorAll(".btn-prioridad-subir").forEach((btn) => {
+    btn.addEventListener("click", () => moverPrioridad(ol, Number(btn.dataset.idx), -1));
+  });
+  ol.querySelectorAll(".btn-prioridad-bajar").forEach((btn) => {
+    btn.addEventListener("click", () => moverPrioridad(ol, Number(btn.dataset.idx), 1));
+  });
+}
+
+function moverPrioridad(ol, idx, direccion) {
+  const qid = ol.dataset.preguntaId;
+  const orden = respuestas[qid];
+  const j = idx + direccion;
+  if (j < 0 || j >= orden.length) return;
+  [orden[idx], orden[j]] = [orden[j], orden[idx]];
+  ol.innerHTML = renderListaPrioridadHTML({ id: qid });
+  bindPrioridadBotones(ol);
 }
 
 const LIKERT_OPCIONES = [
@@ -128,6 +174,7 @@ function renderPagina(index) {
       respuestas[tr.dataset.preguntaId] = el.value;
     });
   });
+  card.querySelectorAll(".prioridad-lista").forEach((ol) => bindPrioridadBotones(ol));
 
   const btnAtras = document.getElementById("btn-atras");
   if (btnAtras) btnAtras.addEventListener("click", () => {
@@ -161,10 +208,14 @@ async function enviarRespuestas() {
   const btn = document.getElementById("btn-siguiente");
   btn.disabled = true;
   btn.textContent = "Enviando...";
+  const respuestasPlano = {};
+  for (const [k, v] of Object.entries(respuestas)) {
+    respuestasPlano[k] = Array.isArray(v) ? v.join(";") : v;
+  }
   const res = await fetch(`${API_BASE}/${encuesta.slug}/enviar`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ respuestas }),
+    body: JSON.stringify({ respuestas: respuestasPlano }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
