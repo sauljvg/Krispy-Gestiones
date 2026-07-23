@@ -78,6 +78,11 @@ def _likert_to_num(valor):
     if valor is None:
         return None
     s = _normaliza_header(str(valor))
+    # El módulo de Test manda directamente el punto (1-5) en vez de la
+    # leyenda — igual que _likert_points_strict en scoring_valores.py, esto
+    # deja reconocer las dos formas sin duplicar el resto de la función.
+    if s in ("1", "2", "3", "4", "5"):
+        return int(s)
     if "muy en desacuerdo" in s or "totalmente en desacuerdo" in s:
         return 1
     if "muy de acuerdo" in s or "totalmente de acuerdo" in s:
@@ -151,6 +156,24 @@ def _es_columna_likert(header, filas):
     return len(likert_vals) / len(valores) >= 0.6
 
 
+def _union_headers(filas):
+    """Encabezados de TODAS las filas, no solo la primera — un Excel siempre
+    tiene columnas homogéneas, pero filas que llegan del módulo de Test
+    pueden traer preguntas distintas de una tanda a otra (p.ej. el enunciado
+    se editó, o se mezclan respuestas de Excel con respuestas de Test). Si
+    solo se mirara filas[0], cualquier columna que no estuviera en esa fila
+    en concreto se perdería en silencio — ni se puntuaría ni aparecería como
+    comentario."""
+    vistos = set()
+    resultado = []
+    for fila in filas:
+        for k in fila.keys():
+            if k not in vistos:
+                vistos.add(k)
+                resultado.append(k)
+    return resultado
+
+
 def _column_roles(headers, filas=None):
     """Dos formatos reconocidos para las preguntas de escala, además de
     preguntas sueltas sin bloque:
@@ -171,7 +194,12 @@ def _column_roles(headers, filas=None):
 
     for h in headers:
         norm = _normaliza_header(h)
-        if "centro de trabajo" in norm or "centro" in norm:
+        # "Primero que aparece gana" (no "el último"): con _union_headers
+        # una oleada puede mezclar el encabezado real de un Excel con el
+        # de una pregunta de Test redactada distinto (misma idea, otro
+        # texto) — sin este orden, la columna nueva pisaría en silencio a
+        # la que ya tenía datos reales acumulados.
+        if ("centro de trabajo" in norm or "centro" in norm) and centro_col is None:
             centro_col = h
             continue
         if norm == "id":
@@ -180,13 +208,13 @@ def _column_roles(headers, filas=None):
             continue
         matched_meta = False
         for hint, campo in METADATA_HINTS.items():
-            if hint in norm:
+            if hint in norm and campo not in metadata_cols:
                 metadata_cols[campo] = h
                 matched_meta = True
                 break
         if matched_meta:
             continue
-        if "motivo" in norm and "salida" in norm:
+        if "motivo" in norm and "salida" in norm and motivo_col is None:
             motivo_col = h
             continue
         m = _BLOQUE_PREGUNTA_RE.match(h)
@@ -545,7 +573,7 @@ def import_excel(file_bytes, archivo_nombre, subido_por, nueva_oleada=False, emp
     )
     importacion_id = cur.lastrowid
 
-    roles = _column_roles(list(filas[0].keys()), filas)
+    roles = _column_roles(_union_headers(filas), filas)
     centro_col = roles["centro_col"]
 
     nuevas = 0
@@ -597,6 +625,59 @@ def import_excel(file_bytes, archivo_nombre, subido_por, nueva_oleada=False, emp
     }
 
 
+def ingest_fila_directa(empresa, fila, origen="Formulario web"):
+    """Alimenta Entrevista de Salida con UNA fila recién recibida (desde el
+    módulo de Test cuando alguien envía el formulario público) exactamente
+    igual que si viniera de un Excel: mismo detector de bloques/preguntas
+    por el texto del encabezado, mismo dedup por hash — así el módulo de
+    Test puede sustituir por completo al Excel de Forms para este formulario
+    también. IMPORTANTE: para que una pregunta de escala caiga en el bloque
+    correcto, su enunciado en el constructor de Test debe seguir el mismo
+    formato que ya reconoce _column_roles: "<Bloque>: [<Pregunta>]" (formato
+    Saona) o "<Categoria>.<Pregunta>" (formato Krispy Kreme) — un enunciado
+    libre sin ese formato cae en el bloque genérico o se trata como
+    comentario abierto, igual que pasaría con un Excel mal formado."""
+    oleada_id = get_or_create_oleada(nueva=False, empresa=empresa)
+
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO entrevistas_importaciones (oleada_id, archivo_nombre, subido_por, nuevas, ya_existian) "
+        "VALUES (?, ?, ?, 0, 0)",
+        (oleada_id, origen, "sistema"),
+    )
+    importacion_id = cur.lastrowid
+
+    roles = _column_roles(list(fila.keys()), [fila])
+    centro_col = roles["centro_col"]
+    centro = _normaliza_centro(str(fila.get(centro_col)).strip()) if centro_col and fila.get(centro_col) else None
+    if centro_col:
+        fila[centro_col] = centro
+
+    fila_hash = _hash_fila(fila)
+    existe = conn.execute(
+        "SELECT id FROM entrevistas_respuestas WHERE oleada_id = ? AND fila_hash = ?", (oleada_id, fila_hash)
+    ).fetchone()
+    nuevas = 0
+    ya_existian = 0
+    if existe:
+        ya_existian = 1
+    else:
+        datos_json = json.dumps(fila, ensure_ascii=False, default=str)
+        conn.execute(
+            "INSERT INTO entrevistas_respuestas (oleada_id, centro, fila_hash, datos_json) VALUES (?, ?, ?, ?)",
+            (oleada_id, centro, fila_hash, datos_json),
+        )
+        nuevas = 1
+
+    conn.execute(
+        "UPDATE entrevistas_importaciones SET nuevas = ?, ya_existian = ? WHERE id = ?",
+        (nuevas, ya_existian, importacion_id),
+    )
+    conn.commit()
+    conn.close()
+    return nuevas
+
+
 def list_oleadas(empresa="kk"):
     conn = get_connection()
     rows = conn.execute("""
@@ -644,7 +725,7 @@ def compute_reporte(oleada_id, centro=None):
         raise ValueError("No hay respuestas para este centro en esta oleada")
     filas = [datos for _id, datos in filas_con_id]
 
-    roles = _column_roles(list(filas[0].keys()), filas)
+    roles = _column_roles(_union_headers(filas), filas)
     n = len(filas)
 
     suma_global = 0
@@ -775,7 +856,8 @@ def compute_evolucion(oleada_id, centro=None):
     if not filas_con_id:
         raise ValueError("No hay respuestas para este centro en esta oleada")
 
-    roles = _column_roles(list(filas_con_id[0][1].keys()), [datos for _id, datos in filas_con_id])
+    _todas_las_filas = [datos for _id, datos in filas_con_id]
+    roles = _column_roles(_union_headers(_todas_las_filas), _todas_las_filas)
     centro_col = roles["centro_col"]
     nombre_col = roles["metadata"].get("nombre")
     fecha_col = roles["metadata"].get("hora_inicio")

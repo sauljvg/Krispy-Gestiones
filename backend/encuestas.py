@@ -10,6 +10,7 @@ import json
 import os
 import re
 
+import entrevistas as entrevistas_module
 import informes as informes_module
 from db import get_connection
 
@@ -38,6 +39,14 @@ def ensure_encuestas_tables():
             creado_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # tipo_informe_clave y tipo_entrevista_empresa son mutuamente excluyentes
+    # en la práctica (un test alimenta O un tipo de Informe O la Entrevista
+    # de Salida de una empresa, nunca las dos) — se guardan en columnas
+    # separadas en vez de una sola clave con prefijo para no tener que
+    # parsear un string compuesto en cada sitio que lo usa.
+    cols_encuestas = {row[1] for row in conn.execute("PRAGMA table_info(encuestas)")}
+    if "tipo_entrevista_empresa" not in cols_encuestas:
+        conn.execute("ALTER TABLE encuestas ADD COLUMN tipo_entrevista_empresa TEXT")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS encuesta_paginas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -172,6 +181,7 @@ def get_encuesta_publica(slug):
     encuesta["paginas"] = _fetch_estructura(conn, row["id"])
     conn.close()
     encuesta.pop("tipo_informe_clave", None)
+    encuesta.pop("tipo_entrevista_empresa", None)
     return encuesta
 
 
@@ -187,11 +197,13 @@ def create_encuesta(titulo):
     return encuesta_id
 
 
-def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave):
+def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None):
     conn = get_connection()
     conn.execute(
-        "UPDATE encuestas SET titulo = ?, mensaje_final = ?, color_boton = ?, tipo_informe_clave = ? WHERE id = ?",
-        (titulo.strip(), mensaje_final.strip(), color_boton.strip(), tipo_informe_clave or None, encuesta_id),
+        "UPDATE encuestas SET titulo = ?, mensaje_final = ?, color_boton = ?, tipo_informe_clave = ?, "
+        "tipo_entrevista_empresa = ? WHERE id = ?",
+        (titulo.strip(), mensaje_final.strip(), color_boton.strip(), tipo_informe_clave or None,
+         tipo_entrevista_empresa or None, encuesta_id),
     )
     conn.commit()
     conn.close()
@@ -436,6 +448,10 @@ def guardar_respuesta(slug, respuestas_por_pregunta, ip, user_agent):
     if tipo_informe_clave:
         informes_module.ingest_fila_directa(
             tipo_informe_clave, fila_por_etiqueta, origen=f"Test web: {row['titulo']}", columnas_extra=columnas_extra
+        )
+    if row["tipo_entrevista_empresa"]:
+        entrevistas_module.ingest_fila_directa(
+            row["tipo_entrevista_empresa"], fila_por_etiqueta, origen=f"Test web: {row['titulo']}"
         )
 
     return {"ok": True}

@@ -55,6 +55,7 @@ async function abrirEditor(testId) {
     document.getElementById("test-mensaje-final").value = currentTest.mensaje_final;
     document.getElementById("test-color-boton").value = currentTest.color_boton;
     document.getElementById("test-tipo-informe").value = currentTest.tipo_informe_clave || "";
+    document.getElementById("test-tipo-entrevista").value = currentTest.tipo_entrevista_empresa || "";
     document.getElementById("test-enlace-publico").value = `${location.origin}/encuesta.html?slug=${currentTest.slug}`;
     document.getElementById("fondo-preview").hidden = !currentTest.tiene_fondo;
     if (currentTest.tiene_fondo) {
@@ -73,6 +74,7 @@ async function abrirEditor(testId) {
     document.getElementById("test-mensaje-final").value = "Gracias por completar el formulario.";
     document.getElementById("test-color-boton").value = "#5b2a2a";
     document.getElementById("test-tipo-informe").value = "";
+    document.getElementById("test-tipo-entrevista").value = "";
     document.getElementById("test-enlace-publico").value = "";
     document.getElementById("fondo-preview").hidden = true;
     document.getElementById("btn-publicar-test").hidden = true;
@@ -116,6 +118,7 @@ async function guardarTest() {
     mensaje_final: document.getElementById("test-mensaje-final").value.trim(),
     color_boton: document.getElementById("test-color-boton").value,
     tipo_informe_clave: document.getElementById("test-tipo-informe").value || null,
+    tipo_entrevista_empresa: document.getElementById("test-tipo-entrevista").value || null,
   };
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}`, {
     method: "PUT",

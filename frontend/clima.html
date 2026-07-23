@@ -68,8 +68,21 @@
   .fo-titulo-centrado { text-align: center; font-size: 22px; margin: 24px 0 16px; }
   .fo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; margin: 10px 0 28px; align-items: stretch; }
   .fo-col-title { font-size: 16px; margin: 0 0 4px; text-align: center; }
-  .fo-title-fortaleza { color: var(--chip-fortaleza); }
+  /* El color de marca de "fortaleza" está pensado para chip de fondo sólido
+     con texto blanco encima — como texto suelto sobre el fondo de la
+     página, en modo oscuro se vuelve casi ilegible (navy de Saona, verde
+     oscuro de KK). --chip-fortaleza-titulo es una variante más clara SOLO
+     para este texto; el chip de fondo sigue igual. En modo claro no hace
+     falta aclarar nada, por eso solo se define dentro de los bloques de
+     modo oscuro (fuera de ahí cae al var(--chip-fortaleza) de siempre). */
+  .fo-title-fortaleza { color: var(--chip-fortaleza-titulo, var(--chip-fortaleza)); }
   .fo-title-oportunidad { color: var(--chip-oportunidad); }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) { --chip-fortaleza-titulo: #4caf7d; }
+    :root[data-empresa="saona"]:where(:not([data-theme="light"])) { --chip-fortaleza-titulo: #7A99AC; }
+  }
+  :root[data-theme="dark"] { --chip-fortaleza-titulo: #4caf7d; }
+  :root[data-empresa="saona"][data-theme="dark"] { --chip-fortaleza-titulo: #7A99AC; }
   .fo-chip { display: flex; align-items: center; padding: 14px 18px; border-radius: var(--radio-chip); font-size: 16px; font-weight: 600; color: #fff; line-height: 1.4; height: 100%; box-sizing: border-box; }
   .fo-chip-fortaleza { background: var(--chip-fortaleza); }
   .fo-chip-oportunidad { background: var(--chip-oportunidad); }
