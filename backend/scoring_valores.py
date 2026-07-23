@@ -260,13 +260,23 @@ def _detectar_fecha(headers, headers_norm):
     return None
 
 
-def calcular(filas):
+def calcular(filas, columnas_extra=None):
     """Recibe las filas crudas de la hoja "Respuestas" (lista de dicts
     columna->valor, tal como las devuelve read_workbook_sheets) y devuelve
     (scoring_rows, dashboard_rows) — mismas columnas que generaba el script
-    de Excel, más "Fecha del test" tomada de la hoja de respuestas."""
+    de Excel, más "Fecha del test" tomada de la hoja de respuestas.
+
+    columnas_extra: nombres de columna (normalmente preguntas abiertas o de
+    "ordenar prioridades" del módulo de Test) que se copian tal cual, sin
+    puntuar, a Scoring/Dashboard — así el resultado de cada candidato se ve
+    de un vistazo junto al puntaje, sin tener que ir a mirar la hoja
+    "Respuestas" aparte. No aplica a los Excel importados a mano (ahí no se
+    sabe qué columna es "abierta"): solo se activa cuando lo pide
+    explícitamente el módulo de Test, que sí conoce el tipo de cada
+    pregunta."""
     if not filas:
         return [], []
+    columnas_extra = columnas_extra or set()
 
     headers = list(filas[0].keys())
     headers_norm = [_normalize(h) for h in headers]
@@ -430,6 +440,13 @@ def calcular(filas):
         if fecha_col:
             scoring_row["Fecha del test"] = fecha_valor
             dashboard_row["Fecha del test"] = fecha_valor
+
+        if columnas_extra:
+            for h in headers:
+                if h in columnas_extra:
+                    valor_extra = fila.get(h)
+                    scoring_row[h] = valor_extra
+                    dashboard_row[h] = valor_extra
 
         scoring_rows.append(scoring_row)
         dashboard_rows.append(dashboard_row)

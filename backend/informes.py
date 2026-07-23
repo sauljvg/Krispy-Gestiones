@@ -397,20 +397,24 @@ def read_workbook_sheets(file_bytes):
     return resultado
 
 
-def _quiza_calcular_scoring(hojas):
+def _quiza_calcular_scoring(hojas, columnas_extra=None):
     """Si el Excel trae una hoja "Respuestas" cruda (export directo de Forms,
     sin Dashboard ya calculado) y se reconoce como de Valores y Competencias
     por sus preguntas, calculamos aquí el Scoring/Dashboard — así el usuario
     solo sube el Excel plano sin depender del script externo. Si el Excel ya
     trae su propio Dashboard (el flujo de siempre), no se toca nada. Funciona
     igual para cualquier tipo/empresa (Krispy Kreme, Saona...) porque detecta
-    el cuestionario por su contenido, no por el nombre del tipo."""
+    el cuestionario por su contenido, no por el nombre del tipo.
+
+    columnas_extra se reenvía tal cual a scoring_valores.calcular() — ver ahí
+    su propósito (solo lo usa el módulo de Test, nunca la importación manual
+    de Excel)."""
     respuestas = hojas.get("Respuestas")
     if not respuestas or "Dashboard" in hojas:
         return hojas
     if not scoring_valores.parece_valores_competencias(respuestas):
         return hojas
-    scoring_rows, dashboard_rows = scoring_valores.calcular(respuestas)
+    scoring_rows, dashboard_rows = scoring_valores.calcular(respuestas, columnas_extra)
     nuevas = dict(hojas)
     nuevas["Scoring"] = scoring_rows
     nuevas["Dashboard"] = dashboard_rows
@@ -473,17 +477,21 @@ def import_excel(tipo_clave, file_bytes, archivo_nombre, subido_por):
     return {"hojas": resumen, "total_nuevas": total_nuevas}
 
 
-def ingest_fila_directa(tipo_clave, fila, origen="Formulario web"):
+def ingest_fila_directa(tipo_clave, fila, origen="Formulario web", columnas_extra=None):
     """Alimenta Informes con UNA fila recién recibida (p.ej. desde el módulo
     de Test cuando alguien envía el formulario público) exactamente igual
     que si viniera de un Excel: mismo detector de Valores y Competencias,
     mismo cálculo de Scoring/Dashboard, mismo dedup por hash — así el
-    resultado aparece en Informes sin duplicar ninguna lógica."""
+    resultado aparece en Informes sin duplicar ninguna lógica.
+
+    columnas_extra: preguntas (abiertas / ordenar prioridades) que el
+    módulo de Test quiere ver tal cual en Scoring/Dashboard, no solo en la
+    hoja "Respuestas" — ver scoring_valores.calcular()."""
     tipo = get_tipo(tipo_clave)
     if tipo is None:
         raise ValueError(f"Tipo de informe desconocido: {tipo_clave}")
 
-    hojas = _quiza_calcular_scoring({"Respuestas": [fila]})
+    hojas = _quiza_calcular_scoring({"Respuestas": [fila]}, columnas_extra)
 
     conn = get_connection()
     cur = conn.execute(

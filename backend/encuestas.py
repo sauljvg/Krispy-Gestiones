@@ -377,12 +377,13 @@ def guardar_respuesta(slug, respuestas_por_pregunta, ip, user_agent):
     tipo_informe_clave = row["tipo_informe_clave"]
 
     preguntas = conn.execute("""
-        SELECT eq.id, eq.etiqueta FROM encuesta_preguntas eq
+        SELECT eq.id, eq.etiqueta, eq.tipo FROM encuesta_preguntas eq
         JOIN encuesta_paginas ep ON ep.id = eq.pagina_id
         WHERE ep.encuesta_id = ?
         ORDER BY ep.orden, eq.orden
     """, (encuesta_id,)).fetchall()
     etiqueta_por_id = {str(p["id"]): p["etiqueta"] for p in preguntas}
+    tipo_por_id = {str(p["id"]): p["tipo"] for p in preguntas}
 
     # Dos preguntas pueden compartir el mismo enunciado a propósito (p.ej. la
     # misma pregunta de "Ordena las siguientes afirmaciones..." repetida en
@@ -390,7 +391,13 @@ def guardar_respuesta(slug, respuestas_por_pregunta, ip, user_agent):
     # Kreme) — un dict simple perdería todas menos la última. Se numeran las
     # repetidas; el motor de scoring solo busca que el texto CONTENGA la
     # palabra clave, así que el sufijo no rompe la detección.
+    #
+    # columnas_extra: preguntas abiertas y de "ordenar prioridades" — no se
+    # puntúan, pero el candidato las respondió y son las que interesa ver de
+    # un vistazo en el resultado, así que van marcadas para que Informes las
+    # copie tal cual a Scoring/Dashboard (ver scoring_valores.calcular()).
     fila_por_etiqueta = {}
+    columnas_extra = set()
     for pid, etiqueta in etiqueta_por_id.items():
         if pid not in respuestas_por_pregunta:
             continue
@@ -401,6 +408,8 @@ def guardar_respuesta(slug, respuestas_por_pregunta, ip, user_agent):
             clave = f"{etiqueta} ({sufijo})"
             sufijo += 1
         fila_por_etiqueta[clave] = valor
+        if tipo_por_id[pid] in ("abierta", "prioridad"):
+            columnas_extra.add(clave)
 
     dispositivo = _detectar_dispositivo(user_agent)
     conn.execute(
@@ -411,7 +420,9 @@ def guardar_respuesta(slug, respuestas_por_pregunta, ip, user_agent):
     conn.close()
 
     if tipo_informe_clave:
-        informes_module.ingest_fila_directa(tipo_informe_clave, fila_por_etiqueta, origen=f"Test web: {row['titulo']}")
+        informes_module.ingest_fila_directa(
+            tipo_informe_clave, fila_por_etiqueta, origen=f"Test web: {row['titulo']}", columnas_extra=columnas_extra
+        )
 
     return {"ok": True}
 
