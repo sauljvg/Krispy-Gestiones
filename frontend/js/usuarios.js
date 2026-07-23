@@ -64,9 +64,13 @@ function modulosSeleccionadosNuevoUsuario() {
 async function actualizarVisibilidadDependientesNuevoUsuario() {
   const modulos = modulosSeleccionadosNuevoUsuario();
   document.getElementById("nu-tiendas-wrap").hidden = !modulos.includes("resenas");
+  // "Tipos de informe" es el mismo checklist para las dos empresas (los
+  // tipos de Saona ya vienen con el nombre prefijado "SAONA · " para
+  // distinguirse) — se muestra si tiene cualquiera de los dos módulos.
+  const tieneInformes = modulos.includes("informes") || modulos.includes("saona_informes");
   const tiposWrap = document.getElementById("nu-tipos-informe-wrap");
-  tiposWrap.hidden = !modulos.includes("informes");
-  if (modulos.includes("informes") && !tiposWrap.dataset.cargado) {
+  tiposWrap.hidden = !tieneInformes;
+  if (tieneInformes && !tiposWrap.dataset.cargado) {
     tiposWrap.dataset.cargado = "1";
     await renderNuTiposInformeChecklist();
   }

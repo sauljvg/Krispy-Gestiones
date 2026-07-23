@@ -75,13 +75,14 @@
 <div class="app">
   <header class="topbar">
     <div class="brand">
-      <span class="brand-icon">🍩</span>
+      <span class="brand-icon" id="brand-icon">🍩</span>
       <div>
-        <h1>Krispy Gestiones</h1>
+        <h1 id="brand-title">Krispy Gestiones</h1>
         <p class="subtitle">Informes</p>
       </div>
     </div>
     <div class="topbar-actions">
+      <button type="button" class="btn btn-ghost hamburger-btn" title="Atrás" aria-label="Atrás" onclick="history.back()">←</button>
       <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
       <div class="hamburger-wrap">
         <button id="btn-hamburger" class="btn btn-ghost hamburger-btn" aria-label="Menú" aria-haspopup="true" aria-expanded="false">☰</button>

@@ -6,6 +6,18 @@ let usuariosParaCompartir = [];
 let hiddenCols = new Set();
 let lastData = null;
 
+const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" ? "saona" : "kk";
+
+function aplicarBrandingEmpresa() {
+  if (EMPRESA !== "saona") return;
+  document.title = document.title.replace("Krispy Gestiones", "SAONA Gestiones");
+  const icon = document.getElementById("brand-icon");
+  if (icon) icon.textContent = "🌿";
+  const title = document.getElementById("brand-title");
+  if (title) title.textContent = "SAONA Gestiones";
+  document.documentElement.dataset.empresa = "saona";
+}
+
 const LARGO_TEXTO_UMBRAL = 100; // por encima de esto, una columna se oculta por defecto la primera vez
 
 function hiddenColsKey() {
@@ -64,7 +76,7 @@ function escapeHTML(str) {
 }
 
 async function loadTipos() {
-  const res = await fetch(`${AUTH_API_BASE}/informes/tipos`);
+  const res = await fetch(`${AUTH_API_BASE}/informes/tipos?empresa=${EMPRESA}`);
   const tipos = await res.json();
   const grid = document.getElementById("tipos-grid");
   grid.innerHTML = tipos
@@ -360,11 +372,13 @@ function cerrarModalCompartir() {
 document.addEventListener("DOMContentLoaded", async () => {
   const user = await checkAuth("/informes.html");
   if (!user) return;
-  if (!(user.modulos || []).includes("informes")) {
+  const moduloRequerido = EMPRESA === "saona" ? "saona_informes" : "informes";
+  if (!(user.modulos || []).includes(moduloRequerido)) {
     window.location.href = "/";
     return;
   }
   wireUserBar(user);
+  aplicarBrandingEmpresa();
 
   await loadTipos();
 
@@ -403,7 +417,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const res = await fetch(`${AUTH_API_BASE}/informes/tipos`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clave, nombre: nombre.trim() }),
+      body: JSON.stringify({ clave, nombre: nombre.trim(), empresa: EMPRESA }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));

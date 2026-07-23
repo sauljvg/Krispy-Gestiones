@@ -1,6 +1,12 @@
 let currentOleada = null;
 let currentCentro = null;
 
+const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" ? "saona" : "kk";
+function conEmpresa(params) {
+  params.set("empresa", EMPRESA);
+  return params;
+}
+
 // Valores por defecto — se sobreescriben con assets/design-tokens.json (la
 // misma fuente que usa el PDF) en cargarTokensDiseno(). Si el fetch fallara,
 // el gráfico se sigue viendo igual que hoy en vez de romperse.
@@ -18,17 +24,29 @@ async function cargarTokensDiseno() {
     const res = await fetch("assets/design-tokens.json");
     if (!res.ok) return;
     const tokens = await res.json();
+    // likert_saona sustituye la paleta verde-a-rojo genérica por tonos de
+    // marca Saona en las barras apiladas de Resultados/Impulsores.
+    const likert = EMPRESA === "saona" ? tokens.likert_saona : tokens.likert;
     COLOR_CATEGORIA = {
-      "Totalmente de acuerdo": tokens.likert.totalmente_de_acuerdo,
-      "De acuerdo": tokens.likert.de_acuerdo,
-      "Neutral": tokens.likert.neutral,
-      "En desacuerdo": tokens.likert.en_desacuerdo,
-      "Totalmente en desacuerdo": tokens.likert.totalmente_en_desacuerdo,
+      "Totalmente de acuerdo": likert.totalmente_de_acuerdo,
+      "De acuerdo": likert.de_acuerdo,
+      "Neutral": likert.neutral,
+      "En desacuerdo": likert.en_desacuerdo,
+      "Totalmente en desacuerdo": likert.totalmente_en_desacuerdo,
     };
     ORDEN_CATEGORIAS = Object.keys(COLOR_CATEGORIA);
+    // marca_saona sustituye a marca cuando el reporte es de Saona — mismas
+    // claves (verde_kk/gris_anterior), solo cambia el valor de color.
+    const marca = EMPRESA === "saona" ? tokens.marca_saona : tokens.marca;
     const raiz = document.documentElement.style;
-    raiz.setProperty("--kk-verde", tokens.marca.verde_kk);
-    raiz.setProperty("--kk-gris-anterior", tokens.marca.gris_anterior);
+    raiz.setProperty("--kk-verde", marca.verde_kk);
+    raiz.setProperty("--kk-gris-anterior", marca.gris_anterior);
+    // Segundo color de marca para el gráfico de Participación por tienda —
+    // en Saona no puede ser el mismo azul grisáceo que Engagement (quedaban
+    // idénticos, sin contraste), así que se usa el navy de su logo/fotos.
+    if (tokens.marca_saona && tokens.marca_saona.secundario) {
+      raiz.setProperty("--saona-secundario", tokens.marca_saona.secundario);
+    }
     raiz.setProperty("--chip-fortaleza", tokens.chips.fortaleza);
     raiz.setProperty("--chip-oportunidad", tokens.chips.oportunidad);
     raiz.setProperty("--radio-chip", `${tokens.radio.chip}px`);
@@ -36,6 +54,27 @@ async function cargarTokensDiseno() {
   } catch (e) {
     // Se queda con los valores por defecto de arriba.
   }
+}
+
+function aplicarBrandingEmpresa() {
+  if (EMPRESA !== "saona") return;
+  document.title = document.title.replace("Krispy Gestiones", "SAONA Gestiones");
+  const icon = document.getElementById("brand-icon");
+  if (icon) icon.textContent = "🌿";
+  const title = document.getElementById("brand-title");
+  if (title) title.textContent = "SAONA Gestiones";
+  const logo = document.getElementById("clima-report-logo");
+  if (logo) {
+    logo.src = "assets/saona-logo.png";
+    logo.alt = "Saona";
+    logo.style.height = "90px";
+  }
+  // Los locales de Saona son restaurantes, no tiendas — los títulos de los
+  // gráficos por centro se ajustan para que se lea natural.
+  document.querySelectorAll(".centros-chart-head h2").forEach((h2) => {
+    h2.textContent = h2.textContent.replace("tienda", "restaurante");
+  });
+  document.documentElement.dataset.empresa = "saona";
 }
 
 let chartResultados = null;
@@ -53,11 +92,11 @@ function escapeHTML(str) {
 }
 
 async function loadOleadas() {
-  const res = await fetch(`${AUTH_API_BASE}/clima/oleadas`);
+  const res = await fetch(`${AUTH_API_BASE}/clima/oleadas?${conEmpresa(new URLSearchParams())}`);
   const oleadas = await res.json();
   const select = document.getElementById("select-oleada");
   select.innerHTML = oleadas
-    .map((o) => `<option value="${o.id}">${o.etiqueta || `Oleada #${o.id}`} (${o.num_respuestas} respuestas · ${o.creado_en.slice(0, 10)})</option>`)
+    .map((o) => `<option value="${o.id}">${o.etiqueta || `Oleada #${o.numero}`} (${o.num_respuestas} respuestas · ${o.creado_en.slice(0, 10)})</option>`)
     .join("");
   if (oleadas.length === 0) {
     document.getElementById("centro-grid").innerHTML = `<p class="staff-hint">Todavía no has importado ningún Excel de Clima Laboral.</p>`;
@@ -167,6 +206,92 @@ function renderChart(canvasId, existingChart, items) {
   });
 }
 
+let chartCentrosEngagement = null;
+let chartCentrosParticipacion = null;
+let datosPorCentroCache = { oleada: null, datos: null };
+
+function mostrarGraficosCentroPreferido() {
+  return localStorage.getItem("kt-clima-mostrar-graficos-centro") !== "0";
+}
+
+function renderChartSimple(canvasId, existingChart, labels, valores, color) {
+  const ctx = document.getElementById(canvasId);
+  if (existingChart) existingChart.destroy();
+  ctx.parentElement.style.height = "280px";
+  const colorTexto = colorTextoActual();
+  return new Chart(ctx, {
+    type: "bar",
+    data: { labels, datasets: [{ data: valores, backgroundColor: color, borderRadius: 4 }] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { max: 100, ticks: { color: colorTexto, callback: (v) => `${v}%` }, grid: { color: "rgba(128,128,128,0.2)" } },
+        x: { ticks: { color: colorTexto }, grid: { display: false } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.parsed.y ?? 0}%` } },
+      },
+    },
+  });
+}
+
+// Los gráficos por tienda son un resumen de TODA la oleada (no cambian
+// según qué tienda esté seleccionada) — solo tienen sentido en la vista
+// "Todos los centros"; al entrar en una tienda concreta se ocultan.
+async function actualizarGraficosPorCentro(centro) {
+  const toggleWrap = document.getElementById("centros-charts-toggle-wrap");
+  if (centro) {
+    toggleWrap.hidden = true;
+    document.getElementById("centros-charts-row").hidden = true;
+    return;
+  }
+  toggleWrap.hidden = false;
+
+  if (datosPorCentroCache.oleada !== currentOleada) {
+    const res = await fetch(`${AUTH_API_BASE}/clima/${currentOleada}/por-centro`);
+    datosPorCentroCache = { oleada: currentOleada, datos: res.ok ? await res.json() : [] };
+  }
+  const datos = datosPorCentroCache.datos;
+  const labels = datos.map((d) => d.centro);
+  const verde = getComputedStyle(document.documentElement).getPropertyValue("--kk-verde").trim() || "#006838";
+  // Participación usa el segundo color de marca de cada empresa: rojo
+  // corporativo de Krispy Kreme (tomado del logo de La Voz), o el navy de
+  // Saona (distinto del azul grisáceo de Engagement, si no quedaban
+  // idénticos y sin contraste entre los dos gráficos).
+  const colorParticipacion = EMPRESA === "saona"
+    ? getComputedStyle(document.documentElement).getPropertyValue("--saona-secundario").trim() || "#1E2D4A"
+    : "#CE102A";
+
+  chartCentrosEngagement = renderChartSimple(
+    "chart-centros-engagement", chartCentrosEngagement, labels, datos.map((d) => d.engagement ?? 0), verde
+  );
+  chartCentrosParticipacion = renderChartSimple(
+    "chart-centros-participacion", chartCentrosParticipacion, labels, datos.map((d) => d.participacion ?? 0), colorParticipacion
+  );
+
+  aplicarPreferenciaGraficosCentro();
+}
+
+function aplicarPreferenciaGraficosCentro() {
+  const mostrar = mostrarGraficosCentroPreferido();
+  const palabra = EMPRESA === "saona" ? "restaurante" : "tienda";
+  document.getElementById("centros-charts-row").hidden = !mostrar;
+  document.getElementById("btn-toggle-centros-charts").textContent = mostrar
+    ? `📊 Ocultar gráficos por ${palabra}`
+    : `📊 Mostrar gráficos por ${palabra}`;
+}
+
+function descargarChartPNG(canvasId, nombreArchivo) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const a = document.createElement("a");
+  a.href = canvas.toDataURL("image/png");
+  a.download = `${nombreArchivo}.png`;
+  a.click();
+}
+
 async function loadReporte(centro) {
   currentCentro = centro;
   const params = new URLSearchParams();
@@ -184,6 +309,8 @@ async function loadReporte(centro) {
     <span>Empleados = <b>${data.empleados ?? "—"}</b></span>
     <span>Participación = <b>${data.participacion !== null ? data.participacion + "%" : "—"}</b></span>
   `;
+
+  await actualizarGraficosPorCentro(centro);
 
   document.getElementById("score-boxes").innerHTML = `
     <div class="score-box score-presente">
@@ -255,11 +382,13 @@ function renderListaComentarios(container, textos) {
 document.addEventListener("DOMContentLoaded", async () => {
   const user = await checkAuth("/clima.html");
   if (!user) return;
-  if (!(user.modulos || []).includes("clima")) {
+  const moduloRequerido = EMPRESA === "saona" ? "saona_clima" : "clima";
+  if (!(user.modulos || []).includes(moduloRequerido)) {
     window.location.href = "/";
     return;
   }
   wireUserBar(user);
+  aplicarBrandingEmpresa();
 
   await cargarTokensDiseno();
   await loadOleadas();
@@ -278,6 +407,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("nueva_oleada", nuevaOleada ? "true" : "false");
+    formData.append("empresa", EMPRESA);
     const res = await fetch(`${AUTH_API_BASE}/clima/importar`, { method: "POST", body: formData });
     e.target.value = "";
     document.getElementById("check-nueva-oleada").checked = false;
@@ -302,6 +432,17 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (!ultimoReporte) return;
       chartResultados = renderChart("chart-resultados", chartResultados, ultimoReporte.resultados_engagement);
       chartImpulsores = renderChart("chart-impulsores", chartImpulsores, ultimoReporte.impulsores_engagement);
+      if (!currentCentro && datosPorCentroCache.datos) actualizarGraficosPorCentro(null);
     }, 0);
+  });
+
+  document.getElementById("btn-toggle-centros-charts").addEventListener("click", () => {
+    const mostrarActual = mostrarGraficosCentroPreferido();
+    localStorage.setItem("kt-clima-mostrar-graficos-centro", mostrarActual ? "0" : "1");
+    aplicarPreferenciaGraficosCentro();
+  });
+
+  document.querySelectorAll(".btn-descargar-chart").forEach((btn) => {
+    btn.addEventListener("click", () => descargarChartPNG(btn.dataset.target, btn.dataset.nombre));
   });
 });

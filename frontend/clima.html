@@ -46,6 +46,14 @@
   .clima-header-stats { display: flex; justify-content: center; gap: 32px; flex-wrap: wrap; margin: 14px 0 24px; color: var(--text-secondary); font-size: 17px; text-align: center; }
   .clima-header-stats b { color: var(--text-primary); font-size: 19px; }
 
+  .centros-charts-toggle { text-align: center; margin: -10px 0 18px; }
+  .centros-charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  @media (max-width: 800px) { .centros-charts-row { grid-template-columns: 1fr; } }
+  .centros-chart-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .centros-chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 8px; }
+  .centros-chart-head h2 { font-size: 15px; margin: 0; }
+  .btn-descargar-chart { font-size: 12px; padding: 5px 10px; }
+
   .engagement-row { display: flex; gap: 32px; flex-wrap: wrap; margin-bottom: 28px; }
   .engagement-col { flex: 1; min-width: 280px; }
   .engagement-col h2 { margin: 0 0 12px; }
@@ -77,13 +85,14 @@
 <div class="app">
   <header class="topbar">
     <div class="brand">
-      <span class="brand-icon">🍩</span>
+      <span class="brand-icon" id="brand-icon">🍩</span>
       <div>
-        <h1>Krispy Gestiones</h1>
+        <h1 id="brand-title">Krispy Gestiones</h1>
         <p class="subtitle">Clima Laboral</p>
       </div>
     </div>
     <div class="topbar-actions">
+      <button type="button" class="btn btn-ghost hamburger-btn" title="Atrás" aria-label="Atrás" onclick="history.back()">←</button>
       <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
       <div class="hamburger-wrap">
         <button id="btn-hamburger" class="btn btn-ghost hamburger-btn" aria-label="Menú" aria-haspopup="true" aria-expanded="false">☰</button>
@@ -98,7 +107,7 @@
 
   <div class="clima-wrap">
     <div class="clima-report-title">
-      <img src="assets/la-voz-logo.png" alt="La Voz Krispy Kreme">
+      <img id="clima-report-logo" src="assets/la-voz-logo.png" alt="La Voz Krispy Kreme">
     </div>
 
     <div class="clima-toolbar">
@@ -121,6 +130,26 @@
 
     <div id="reporte-wrap" hidden>
       <div class="clima-header-stats" id="clima-header-stats"></div>
+
+      <div class="centros-charts-toggle" id="centros-charts-toggle-wrap" hidden>
+        <button type="button" id="btn-toggle-centros-charts" class="btn btn-ghost">📊 Ocultar gráficos por tienda</button>
+      </div>
+      <div class="centros-charts-row" id="centros-charts-row" hidden>
+        <div class="centros-chart-card">
+          <div class="centros-chart-head">
+            <h2>Engagement por tienda</h2>
+            <button type="button" class="btn btn-ghost btn-descargar-chart" data-target="chart-centros-engagement" data-nombre="engagement_por_tienda">⬇ PNG</button>
+          </div>
+          <div class="clima-chart-wrap"><canvas id="chart-centros-engagement"></canvas></div>
+        </div>
+        <div class="centros-chart-card">
+          <div class="centros-chart-head">
+            <h2>Participación por tienda</h2>
+            <button type="button" class="btn btn-ghost btn-descargar-chart" data-target="chart-centros-participacion" data-nombre="participacion_por_tienda">⬇ PNG</button>
+          </div>
+          <div class="clima-chart-wrap"><canvas id="chart-centros-participacion"></canvas></div>
+        </div>
+      </div>
 
       <div class="engagement-row">
         <div class="engagement-col">

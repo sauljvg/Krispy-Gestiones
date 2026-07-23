@@ -14,15 +14,28 @@ router = APIRouter()
 
 
 def require_informes(user: dict = Depends(get_current_user)) -> dict:
-    if not auth_module.tiene_modulo(user, "informes"):
+    """Puerta genérica para acciones que no son de un tipo concreto (listar
+    usuarios para compartir, compartir, CV) — basta con tener acceso a
+    Informes de CUALQUIERA de las dos empresas. La restricción precisa por
+    tipo/empresa la hace require_tipo_acceso en las rutas que sí tienen
+    tipo_clave."""
+    if not (auth_module.tiene_modulo(user, "informes") or auth_module.tiene_modulo(user, "saona_informes")):
         raise HTTPException(status_code=403, detail="No tienes acceso a Informes")
     return user
 
 
-def require_tipo_acceso(tipo_clave: str, user: dict = Depends(require_informes)) -> dict:
-    """Además del módulo, valida el tipo de informe concreto — un usuario
-    puede tener Informes pero solo para ciertos tipos (p.ej. solo Tiendas,
-    no Oficina)."""
+def require_tipo_acceso(tipo_clave: str, user: dict = Depends(get_current_user)) -> dict:
+    """La empresa se resuelve del propio tipo (no hace falta que el
+    frontend la repita en la URL): un tipo 'kk' exige el módulo "informes",
+    uno 'saona' exige "saona_informes". Además valida el tipo concreto — un
+    usuario puede tener Informes pero solo para ciertos tipos (p.ej. solo
+    Tiendas, no Oficina)."""
+    tipo = informes_module.get_tipo(tipo_clave)
+    if tipo is None:
+        raise HTTPException(status_code=404, detail=f"Tipo de informe desconocido: {tipo_clave}")
+    modulo = "saona_informes" if tipo.get("empresa") == "saona" else "informes"
+    if not auth_module.tiene_modulo(user, modulo):
+        raise HTTPException(status_code=403, detail="No tienes acceso a este módulo de Informes")
     permitidos = informes_module.get_tipos_permitidos(user["id"])
     if permitidos and tipo_clave not in permitidos:
         raise HTTPException(status_code=403, detail="No tienes acceso a este tipo de informe")
@@ -32,6 +45,7 @@ def require_tipo_acceso(tipo_clave: str, user: dict = Depends(require_informes))
 class NewTipoBody(BaseModel):
     clave: str
     nombre: str
+    empresa: str = "kk"
 
 
 class CompartirBody(BaseModel):
@@ -49,8 +63,18 @@ class HojaNombreBody(BaseModel):
 
 
 @router.get("/tipos")
-def list_tipos_route(user: dict = Depends(require_informes)):
-    tipos = informes_module.list_tipos()
+def list_tipos_route(empresa: str | None = None, user: dict = Depends(require_informes)):
+    # empresa=None (p.ej. desde la pantalla de Usuarios, para armar el
+    # checklist de permisos) devuelve los tipos de las dos empresas juntos —
+    # require_informes ya exige tener acceso a alguna. Si se pide una empresa
+    # concreta, hace falta el módulo de ESA empresa en concreto (si no, un
+    # usuario con solo saona_informes podría listar los tipos de KK, aunque
+    # no pudiera leer sus respuestas).
+    if empresa:
+        modulo = "saona_informes" if empresa == "saona" else "informes"
+        if not auth_module.tiene_modulo(user, modulo):
+            raise HTTPException(status_code=403, detail="No tienes acceso a ese módulo de Informes")
+    tipos = informes_module.list_tipos(empresa=empresa)
     permitidos = informes_module.get_tipos_permitidos(user["id"])
     if permitidos:
         tipos = [t for t in tipos if t["clave"] in permitidos]
@@ -58,9 +82,12 @@ def list_tipos_route(user: dict = Depends(require_informes)):
 
 
 @router.post("/tipos")
-def create_tipo_route(body: NewTipoBody, _user: dict = Depends(require_informes)):
+def create_tipo_route(body: NewTipoBody, user: dict = Depends(require_informes)):
+    modulo = "saona_informes" if body.empresa == "saona" else "informes"
+    if not auth_module.tiene_modulo(user, modulo):
+        raise HTTPException(status_code=403, detail="No tienes acceso a ese módulo de Informes")
     try:
-        tipo_id = informes_module.create_tipo(body.clave, body.nombre)
+        tipo_id = informes_module.create_tipo(body.clave, body.nombre, body.empresa)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"No se pudo crear el tipo (¿clave duplicada?): {exc}")
     return {"ok": True, "id": tipo_id}
@@ -75,13 +102,13 @@ def usuarios_para_compartir_route(_user: dict = Depends(require_informes)):
 
 
 @router.get("/compartidos")
-def get_compartidos_route(user: dict = Depends(get_current_user)):
-    return informes_module.get_compartidos_con(user["id"])
+def get_compartidos_route(empresa: str | None = None, user: dict = Depends(get_current_user)):
+    return informes_module.get_compartidos_con(user["id"], empresa=empresa)
 
 
 @router.get("/compartidos-por-mi")
-def get_compartidos_por_mi_route(user: dict = Depends(get_current_user)):
-    return informes_module.get_compartidos_por(user["username"])
+def get_compartidos_por_mi_route(empresa: str | None = None, user: dict = Depends(get_current_user)):
+    return informes_module.get_compartidos_por(user["username"], empresa=empresa)
 
 
 @router.get("/{tipo_clave}/hojas")

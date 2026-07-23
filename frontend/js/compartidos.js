@@ -4,6 +4,18 @@ function escapeHTML(str) {
   return div.innerHTML;
 }
 
+const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" ? "saona" : "kk";
+
+function aplicarBrandingEmpresa() {
+  if (EMPRESA !== "saona") return;
+  document.title = document.title.replace("Krispy Gestiones", "SAONA Gestiones");
+  const icon = document.getElementById("brand-icon");
+  if (icon) icon.textContent = "🌿";
+  const title = document.getElementById("brand-title");
+  if (title) title.textContent = "SAONA Gestiones";
+  document.documentElement.dataset.empresa = "saona";
+}
+
 function nombreCandidato(datos) {
   return datos["Nombre"] || datos["nombre"] || datos["Name"] || "(sin nombre)";
 }
@@ -81,8 +93,8 @@ function seccionHTML(titulo, grupos, etiquetaOtro, vacioMsg) {
 async function loadCompartidos() {
   const wrap = document.getElementById("compartidos-list");
   const [conmigo, porMi] = await Promise.all([
-    fetch(`${AUTH_API_BASE}/informes/compartidos`).then((r) => (r.ok ? r.json() : [])),
-    fetch(`${AUTH_API_BASE}/informes/compartidos-por-mi`).then((r) => (r.ok ? r.json() : [])),
+    fetch(`${AUTH_API_BASE}/informes/compartidos?empresa=${EMPRESA}`).then((r) => (r.ok ? r.json() : [])),
+    fetch(`${AUTH_API_BASE}/informes/compartidos-por-mi?empresa=${EMPRESA}`).then((r) => (r.ok ? r.json() : [])),
   ]);
 
   const gruposConmigo = agruparPorTanda(conmigo, "compartido_por");
@@ -108,5 +120,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   const user = await checkAuth("/compartidos.html");
   if (!user) return;
   wireUserBar(user);
+  aplicarBrandingEmpresa();
   await loadCompartidos();
 });

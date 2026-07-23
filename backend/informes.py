@@ -10,10 +10,22 @@ from db import get_connection
 
 # Estos son los que ya sabemos que existen; el admin puede añadir más desde
 # la pantalla de Informes a medida que surjan nuevas encuestas de Forms.
+# Entrevistas de Salida tiene su propio módulo dedicado (backend/entrevistas.py,
+# igual que Clima Laboral) — no vive aquí.
 DEFAULT_TIPOS = [
     ("valores_oficina", "Valores y Competencias — Oficina"),
     ("valores_tiendas", "Valores y Competencias — Tiendas"),
-    ("entrevistas_salida", "Entrevistas de Salida"),
+]
+
+# Equivalentes de Saona — mismo sistema genérico, separados solo por
+# "empresa" en informe_tipos. El prefijo "SAONA · " en el nombre es para que
+# se distingan en el checklist de permisos de Usuarios, donde tipos de las
+# dos empresas aparecen mezclados en una sola lista. Igual que Krispy Kreme,
+# Valores y Competencias se separa en Restaurantes/Oficina (dos poblaciones
+# distintas, no tiene sentido mezclarlas en un solo tipo).
+DEFAULT_TIPOS_SAONA = [
+    ("saona_valores_restaurantes", "SAONA · Valores y Competencias — Restaurantes"),
+    ("saona_valores_oficina", "SAONA · Valores y Competencias — Oficina"),
 ]
 
 CV_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads", "cv"))
@@ -96,6 +108,11 @@ def ensure_informe_tables():
     cols_tipos = {row[1] for row in conn.execute("PRAGMA table_info(informe_tipos)")}
     if "hoja_conteo" not in cols_tipos:
         conn.execute("ALTER TABLE informe_tipos ADD COLUMN hoja_conteo TEXT")
+    # empresa separa los tipos de Krispy Kreme de los de Saona (mismo sistema
+    # genérico de Informes, datos completamente aparte). Los tipos ya
+    # existentes son todos de Krispy Kreme, de ahí el default.
+    if "empresa" not in cols_tipos:
+        conn.execute("ALTER TABLE informe_tipos ADD COLUMN empresa TEXT NOT NULL DEFAULT 'kk'")
 
     _migrate_legacy_respuestas(conn)
 
@@ -107,6 +124,16 @@ def ensure_informe_tables():
         WHERE clave = 'valores_operativa'
     """)
 
+    # Mismo caso para Saona: el primer tipo de Valores y Competencias se creó
+    # sin distinguir Restaurantes/Oficina; al separarlo se reutiliza esa
+    # misma fila (sin respuestas todavía) para "Restaurantes" y se añade
+    # "Oficina" como tipo nuevo más abajo.
+    conn.execute("""
+        UPDATE informe_tipos SET clave = 'saona_valores_restaurantes',
+            nombre = 'SAONA · Valores y Competencias — Restaurantes'
+        WHERE clave = 'saona_valores'
+    """)
+
     # Clima Laboral pasó a tener su propio módulo dedicado (backend/clima.py)
     # — no encaja en el modelo genérico fila=candidato. Se quita de aquí solo
     # si nunca se llegó a usar (0 respuestas), para no perder datos reales.
@@ -114,9 +141,45 @@ def ensure_informe_tables():
         DELETE FROM informe_tipos WHERE clave = 'clima_laboral'
           AND id NOT IN (SELECT DISTINCT tipo_id FROM informe_respuestas)
     """)
+    # Mismo caso: Entrevistas de Salida pasó a tener su propio módulo
+    # dedicado (backend/entrevistas.py), igual que Clima Laboral. A
+    # diferencia de Clima, aquí se borra aunque tenga respuestas: es un
+    # volcado genérico obsoleto (el usuario ya subió el Excel real al módulo
+    # dedicado), así que se elimina en cascada para que la tarjeta desaparezca
+    # de Informes.
+    conn.execute("""
+        DELETE FROM informe_compartidos WHERE respuesta_id IN (
+            SELECT id FROM informe_respuestas WHERE tipo_id IN (
+                SELECT id FROM informe_tipos WHERE clave IN ('entrevistas_salida', 'saona_entrevistas_salida')
+            )
+        )
+    """)
+    conn.execute("""
+        DELETE FROM informe_respuestas WHERE tipo_id IN (
+            SELECT id FROM informe_tipos WHERE clave IN ('entrevistas_salida', 'saona_entrevistas_salida')
+        )
+    """)
+    conn.execute("""
+        DELETE FROM informe_importaciones WHERE tipo_id IN (
+            SELECT id FROM informe_tipos WHERE clave IN ('entrevistas_salida', 'saona_entrevistas_salida')
+        )
+    """)
+    conn.execute("""
+        DELETE FROM informe_hojas_ocultas WHERE tipo_id IN (
+            SELECT id FROM informe_tipos WHERE clave IN ('entrevistas_salida', 'saona_entrevistas_salida')
+        )
+    """)
+    conn.execute("""
+        DELETE FROM usuario_informe_tipos WHERE tipo_clave IN ('entrevistas_salida', 'saona_entrevistas_salida')
+    """)
+    conn.execute("""
+        DELETE FROM informe_tipos WHERE clave IN ('entrevistas_salida', 'saona_entrevistas_salida')
+    """)
 
     for clave, nombre in DEFAULT_TIPOS:
-        conn.execute("INSERT OR IGNORE INTO informe_tipos (clave, nombre) VALUES (?, ?)", (clave, nombre))
+        conn.execute("INSERT OR IGNORE INTO informe_tipos (clave, nombre, empresa) VALUES (?, ?, 'kk')", (clave, nombre))
+    for clave, nombre in DEFAULT_TIPOS_SAONA:
+        conn.execute("INSERT OR IGNORE INTO informe_tipos (clave, nombre, empresa) VALUES (?, ?, 'saona')", (clave, nombre))
 
     conn.commit()
     conn.close()
@@ -191,9 +254,14 @@ def _hoja_para_conteo(conn, tipo):
     return row["hoja"] if row else None
 
 
-def list_tipos():
+def list_tipos(empresa=None):
     conn = get_connection()
-    tipos = [dict(r) for r in conn.execute("SELECT * FROM informe_tipos ORDER BY id").fetchall()]
+    if empresa:
+        tipos = [dict(r) for r in conn.execute(
+            "SELECT * FROM informe_tipos WHERE empresa = ? ORDER BY id", (empresa,)
+        ).fetchall()]
+    else:
+        tipos = [dict(r) for r in conn.execute("SELECT * FROM informe_tipos ORDER BY id").fetchall()]
     for tipo in tipos:
         hoja = _hoja_para_conteo(conn, tipo)
         if hoja is None:
@@ -207,9 +275,9 @@ def list_tipos():
     return tipos
 
 
-def create_tipo(clave, nombre):
+def create_tipo(clave, nombre, empresa="kk"):
     conn = get_connection()
-    cur = conn.execute("INSERT INTO informe_tipos (clave, nombre) VALUES (?, ?)", (clave, nombre))
+    cur = conn.execute("INSERT INTO informe_tipos (clave, nombre, empresa) VALUES (?, ?, ?)", (clave, nombre, empresa))
     conn.commit()
     tipo_id = cur.lastrowid
     conn.close()
@@ -558,18 +626,23 @@ def set_tipos_permitidos(usuario_id: int, tipos: list[str]):
     conn.close()
 
 
-def get_compartidos_con(usuario_id):
+def get_compartidos_con(usuario_id, empresa=None):
     conn = get_connection()
-    rows = conn.execute("""
+    clauses = ["c.usuario_id = ?"]
+    params = [usuario_id]
+    if empresa:
+        clauses.append("t.empresa = ?")
+        params.append(empresa)
+    rows = conn.execute(f"""
         SELECT c.id AS compartido_id, c.compartido_en, c.compartido_por,
                r.id AS respuesta_id, r.datos_json, r.hoja, r.cv_ruta, r.cv_nombre_original,
                t.nombre AS tipo_nombre, t.clave AS tipo_clave
         FROM informe_compartidos c
         JOIN informe_respuestas r ON r.id = c.respuesta_id
         JOIN informe_tipos t ON t.id = r.tipo_id
-        WHERE c.usuario_id = ?
+        WHERE {' AND '.join(clauses)}
         ORDER BY c.compartido_en DESC
-    """, (usuario_id,)).fetchall()
+    """, params).fetchall()
     conn.close()
     resultado = []
     for row in rows:
@@ -588,12 +661,17 @@ def get_compartidos_con(usuario_id):
     return resultado
 
 
-def get_compartidos_por(username):
+def get_compartidos_por(username, empresa=None):
     """Candidatos que ESTE usuario ha compartido con otros (para su propia
     carpeta de Reclutamiento, sección "Compartidos por ti"). Incluye a quién
     se lo compartió, para poder agrupar por tanda + destinatario."""
     conn = get_connection()
-    rows = conn.execute("""
+    clauses = ["c.compartido_por = ?"]
+    params = [username]
+    if empresa:
+        clauses.append("t.empresa = ?")
+        params.append(empresa)
+    rows = conn.execute(f"""
         SELECT c.id AS compartido_id, c.compartido_en, c.compartido_por,
                u.nombre AS destinatario_nombre, u.username AS destinatario_username,
                r.id AS respuesta_id, r.datos_json, r.hoja, r.cv_ruta, r.cv_nombre_original,
@@ -602,9 +680,9 @@ def get_compartidos_por(username):
         JOIN informe_respuestas r ON r.id = c.respuesta_id
         JOIN informe_tipos t ON t.id = r.tipo_id
         JOIN usuarios u ON u.id = c.usuario_id
-        WHERE c.compartido_por = ?
+        WHERE {' AND '.join(clauses)}
         ORDER BY c.compartido_en DESC
-    """, (username,)).fetchall()
+    """, params).fetchall()
     conn.close()
     resultado = []
     for row in rows:

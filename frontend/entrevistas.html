@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krispy Gestiones · Entrevista de Salida</title>
+<script>
+  (function () {
+    var guardado = localStorage.getItem("kt-theme");
+    if (guardado === "light" || guardado === "dark") {
+      document.documentElement.dataset.theme = guardado;
+    }
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css?v=20260723b">
+<script src="js/vendor/chart.umd.min.js?v=20260723b"></script>
+<style>
+  .entrevistas-wrap { max-width: 1100px; margin: 0 auto; padding: 0 0 40px; }
+  .entrevistas-report-title { text-align: center; margin: 6px 0 20px; }
+  .entrevistas-report-title img { height: 130px; width: auto; }
+  .entrevistas-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 16px 0; }
+  .entrevistas-toolbar select { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 14px; }
+  .entrevistas-import-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+  .centro-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .centro-card {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; text-align: center; cursor: pointer; font-size: 14px; font-weight: 600;
+  }
+  .centro-card:hover { border-color: var(--series-blue); }
+  .centro-card.active { border-color: var(--status-good); background: color-mix(in srgb, var(--status-good) 12%, var(--surface-1)); }
+
+  .entrevistas-header-stats { display: flex; justify-content: center; gap: 32px; flex-wrap: wrap; margin: 14px 0 20px; color: var(--text-secondary); font-size: 17px; text-align: center; }
+  .entrevistas-header-stats b { color: var(--text-primary); font-size: 19px; }
+
+  .satisfaccion-box { max-width: 260px; margin: 0 auto 28px; border-radius: 10px; padding: 18px; color: #fff; text-align: center; background: var(--series-blue); }
+  .satisfaccion-box .label { font-size: 14px; opacity: 0.9; }
+  .satisfaccion-box .valor { font-size: 32px; font-weight: 700; margin-top: 4px; }
+
+  .bloque-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 18px; }
+  .bloque-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 8px; }
+  .bloque-head h2 { margin: 0; font-size: 17px; }
+  .bloque-score { font-size: 20px; font-weight: 700; color: var(--series-blue); }
+  .chart-wrap { position: relative; }
+
+  .motivos-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 20px; }
+  .motivos-card h2 { margin: 0 0 12px; font-size: 17px; }
+
+  .comentarios-lista { margin-bottom: 24px; }
+  .comentarios-lista ul { margin: 0; padding-left: 22px; max-height: 340px; overflow-y: auto; }
+  .comentarios-lista li { font-size: 15px; margin-bottom: 10px; color: var(--text-primary); line-height: 1.45; }
+
+  .evolucion-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 20px; }
+  .evolucion-card h2 { margin: 0 0 12px; font-size: 17px; }
+  .cobertura-table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 10px; }
+  .cobertura-table th { text-align: left; font-size: 12px; text-transform: uppercase; color: var(--text-muted); padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  .cobertura-table td { padding: 7px 10px; border-bottom: 1px solid var(--gridline); }
+  .auditoria-details { margin-top: 12px; }
+  .auditoria-details summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); padding: 4px 0; }
+  .auditoria-details ul { margin: 6px 0 0; padding-left: 20px; font-size: 13px; color: var(--text-secondary); }
+  .auditoria-details li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 0; }
+  .btn-registrar-salida {
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+    border-radius: 6px; padding: 2px 8px; font-size: 12px; cursor: pointer; white-space: nowrap;
+  }
+  .btn-registrar-salida:hover { border-color: var(--series-blue); }
+  .salida-manual-form { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .salida-manual-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .salida-manual-row select, .salida-manual-row input {
+    padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 13px;
+  }
+  .salida-manual-row input[type="text"] { flex: 1; min-width: 160px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon" id="brand-icon">🍩</span>
+      <div>
+        <h1 id="brand-title">Krispy Gestiones</h1>
+        <p class="subtitle">Entrevista de Salida</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="btn btn-ghost hamburger-btn" title="Atrás" aria-label="Atrás" onclick="history.back()">←</button>
+      <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
+      <div class="hamburger-wrap">
+        <button id="btn-hamburger" class="btn btn-ghost hamburger-btn" aria-label="Menú" aria-haspopup="true" aria-expanded="false">☰</button>
+        <div id="hamburger-menu" class="hamburger-menu" hidden>
+          <span id="topbar-user" class="topbar-user" hidden></span>
+          <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema">🌙 Cambiar tema</button>
+          <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="entrevistas-wrap">
+    <div class="entrevistas-report-title">
+      <img id="entrevistas-report-logo" src="assets/la-voz-logo.png" alt="La Voz Krispy Kreme">
+    </div>
+
+    <div class="entrevistas-toolbar">
+      <label for="select-oleada">Oleada</label>
+      <select id="select-oleada"></select>
+
+      <label class="btn btn-primary btn-upload">
+        ⬆ Importar Excel
+        <input type="file" id="input-entrevistas-upload" accept=".xlsx,.xls" hidden>
+      </label>
+      <label class="entrevistas-import-check">
+        <input type="checkbox" id="check-nueva-oleada">
+        Nuevo Registro
+      </label>
+
+      <button id="btn-exportar-pdf" class="btn btn-ghost" hidden>⬇ Exportar PDF</button>
+    </div>
+
+    <div class="centro-grid" id="centro-grid"></div>
+
+    <div id="reporte-wrap" hidden>
+      <div class="entrevistas-header-stats" id="entrevistas-header-stats"></div>
+
+      <div class="satisfaccion-box" id="satisfaccion-box"></div>
+
+      <div id="bloques-wrap"></div>
+
+      <div class="evolucion-card" id="evolucion-card" hidden>
+        <h2>Evolución por cuatrimestre — Total Ponderado por Bloque</h2>
+        <div class="chart-wrap"><canvas id="chart-evolucion"></canvas></div>
+
+        <div id="cobertura-wrap" hidden>
+          <h2 style="margin-top:20px;">Cobertura por periodo</h2>
+          <p id="total-salidas-txt" class="staff-hint" style="margin:4px 0 10px;"></p>
+          <table class="cobertura-table">
+            <thead><tr><th>Periodo</th><th>Debieron responder</th><th>Respondieron</th><th>% Respuesta</th></tr></thead>
+            <tbody id="cobertura-tbody"></tbody>
+          </table>
+          <details class="auditoria-details" id="auditoria-f-wrap">
+            <summary id="auditoria-f-summary"></summary>
+            <ul id="auditoria-f-lista"></ul>
+          </details>
+          <details class="auditoria-details" id="auditoria-g-wrap">
+            <summary id="auditoria-g-summary"></summary>
+            <ul id="auditoria-g-lista"></ul>
+          </details>
+        </div>
+
+        <div class="salida-manual-form">
+          <h3 style="font-size:14px; margin:16px 0 8px;">Registrar salida manualmente</h3>
+          <div class="salida-manual-row">
+            <select id="salida-manual-centro"></select>
+            <input type="text" id="salida-manual-nombre" placeholder="Nombre completo">
+            <input type="date" id="salida-manual-fecha">
+            <button id="btn-salida-manual-agregar" class="btn btn-ghost" type="button">＋ Agregar salida</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="motivos-card" id="motivos-card" hidden>
+        <h2>Motivos de salida</h2>
+        <div class="chart-wrap"><canvas id="chart-motivos"></canvas></div>
+      </div>
+
+      <h2 style="font-size:17px;">Comentarios abiertos</h2>
+      <div id="comentarios-wrap"></div>
+    </div>
+  </div>
+</div>
+<script src="js/theme.js?v=20260723b"></script>
+<script src="js/auth-common.js?v=20260723b"></script>
+<script src="js/topbar-menu.js?v=20260723b"></script>
+<script src="js/entrevistas.js?v=20260723b"></script>
+</body>
+</html>

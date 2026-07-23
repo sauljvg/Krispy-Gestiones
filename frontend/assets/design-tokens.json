@@ -6,6 +6,13 @@
     "gris_anterior": "#8a8a86"
   },
 
+  "marca_saona": {
+    "_comentario": "Equivalente a 'marca' pero para el reporte de Clima Laboral de Saona — azul grisáceo del logo Saona en vez del verde Krispy Kreme. El resto de colores (likert, chips) son universales y se comparten entre las dos empresas.",
+    "verde_kk": "#7A99AC",
+    "gris_anterior": "#8a8a86",
+    "secundario": "#1E2D4A"
+  },
+
   "likert": {
     "_comentario": "Paleta de las 5 categorías de las barras apiladas. Elegida para que se distingan incluso con daltonismo rojo-verde: dos verdes de luminosidad distinta, un gris claro neutro, un naranja y un rojo oscuro bien separados en tono. No es la misma que el verde de marca (verde_kk) a propósito — el verde de marca se reserva para logo/cajas de puntuación, y esta paleta se optimiza para diferenciar 5 valores de dato.",
     "totalmente_de_acuerdo": "#1b5e20",
@@ -13,6 +20,15 @@
     "neutral": "#bdbdbd",
     "en_desacuerdo": "#ffa726",
     "totalmente_en_desacuerdo": "#c62828"
+  },
+
+  "likert_saona": {
+    "_comentario": "Misma idea que 'likert' pero en tonos de marca Saona (azules, con los cálidos de la decoración para los dos niveles negativos) en vez del verde-a-rojo genérico, para que el informe se lea corporativo Saona de arriba a abajo.",
+    "totalmente_de_acuerdo": "#1E2D4A",
+    "de_acuerdo": "#5D7E96",
+    "neutral": "#B0BEC5",
+    "en_desacuerdo": "#E0A458",
+    "totalmente_en_desacuerdo": "#B8562E"
   },
 
   "chips": {

@@ -14,6 +14,7 @@ from reportlab.platypus.flowables import HRFlowable
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 LOGO_PATH = os.path.join(ASSETS_DIR, "la_voz_logo.png")
+LOGO_PATH_SAONA = os.path.join(ASSETS_DIR, "saona_logo.png")
 
 # Fuente única de verdad de colores/radios, compartida con la web (la lee
 # clima.js vía fetch). Cambiar un color aquí lo cambia en la web y el PDF a
@@ -40,6 +41,14 @@ try:
     FUENTE_BLOQUES = "BrandonPrinted"
 except Exception:
     pass  # si faltan los .ttf, se sigue viendo bien con las fuentes base de reportlab
+
+def _marca_para_empresa(empresa):
+    return TOKENS["marca_saona"] if empresa == "saona" else TOKENS["marca"]
+
+
+def _likert_para_empresa(empresa):
+    return TOKENS["likert_saona"] if empresa == "saona" else TOKENS["likert"]
+
 
 VERDE = colors.HexColor(TOKENS["marca"]["verde_kk"])
 VERDE_OSCURO = VERDE
@@ -325,7 +334,36 @@ def _chip(texto, tipo, alto=None):
     return tabla
 
 
-def generar_pdf(reporte):
+def generar_pdf(reporte, empresa="kk"):
+    # VERDE/VERDE_OSCURO son la referencia de marca para título, subtítulos,
+    # líneas de acento y la caja "Presente" — se recolorean aquí según la
+    # empresa del reporte antes de montar el story, así el resto de helpers
+    # (_titulo_seccion, _cajas_score, etc.) no necesitan saber de empresas.
+    global VERDE, VERDE_OSCURO
+    color_marca = colors.HexColor(_marca_para_empresa(empresa)["verde_kk"])
+    VERDE = color_marca
+    VERDE_OSCURO = color_marca
+    for estilo in (TITULO_STYLE, SUBTITULO_STYLE, SUBTITULO_CENTRADO_STYLE, SUBTITULO_COLUMNA_STYLE,
+                   COLUMNA_TITULO_FORTALEZA, COMENTARIO_TITULO_STYLE):
+        estilo.textColor = color_marca
+
+    # Igual que la web: las barras apiladas de Resultados/Impulsores usan
+    # tonos de marca Saona en vez de la escala verde-a-rojo genérica.
+    likert_tokens = _likert_para_empresa(empresa)
+    COLOR_POR_CATEGORIA.update({
+        "Totalmente de acuerdo": colors.HexColor(likert_tokens["totalmente_de_acuerdo"]),
+        "De acuerdo": colors.HexColor(likert_tokens["de_acuerdo"]),
+        "Neutral": colors.HexColor(likert_tokens["neutral"]),
+        "En desacuerdo": colors.HexColor(likert_tokens["en_desacuerdo"]),
+        "Totalmente en desacuerdo": colors.HexColor(likert_tokens["totalmente_en_desacuerdo"]),
+    })
+
+    logo_path = LOGO_PATH_SAONA if empresa == "saona" else LOGO_PATH
+    # Proporción real de cada logo (alto/ancho en px) — evita estirar el de
+    # Saona (409x1024) si se usara sin más la proporción del de La Voz.
+    logo_ratio_alto_ancho = 409 / 1024 if empresa == "saona" else 177 / 500
+    nombre_empresa = "Saona" if empresa == "saona" else "Krispy Kreme"
+
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=A4,
@@ -333,15 +371,15 @@ def generar_pdf(reporte):
     )
     story = []
 
-    if os.path.exists(LOGO_PATH):
+    if os.path.exists(logo_path):
         ancho_logo = 7.5 * cm
-        logo = Image(LOGO_PATH, width=ancho_logo, height=ancho_logo * 177 / 500)
+        logo = Image(logo_path, width=ancho_logo, height=ancho_logo * logo_ratio_alto_ancho)
         logo.hAlign = "CENTER"
         story.append(logo)
         story.append(Spacer(1, 8))
 
     titulo_centro = reporte["centro"] or "Todos los centros"
-    story.append(Paragraph(f"Clima Laboral Krispy Kreme — {titulo_centro}", TITULO_STYLE))
+    story.append(Paragraph(f"Clima Laboral {nombre_empresa} — {titulo_centro}", TITULO_STYLE))
 
     empleados_txt = reporte["empleados"] if reporte["empleados"] is not None else "—"
     participacion_txt = f'{reporte["participacion"]}%' if reporte["participacion"] is not None else "—"

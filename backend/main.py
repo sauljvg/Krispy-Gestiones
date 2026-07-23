@@ -21,6 +21,7 @@ import scrape_jobs
 from auth_routes import COOKIE_NAME, require_resenas
 from auth_routes import router as auth_router
 from clima_routes import router as clima_router
+from entrevistas_routes import router as entrevistas_router
 from informes_routes import router as informes_router
 from request_context import tiendas_permitidas_actual
 from routes import router
@@ -72,6 +73,7 @@ async def no_cachear_estaticos(request, call_next):
 app.include_router(auth_router, prefix="/api/auth")
 app.include_router(informes_router, prefix="/api/informes")
 app.include_router(clima_router, prefix="/api/clima")
+app.include_router(entrevistas_router, prefix="/api/entrevistas")
 app.include_router(router, prefix="/api", dependencies=[Depends(require_resenas)])
 
 

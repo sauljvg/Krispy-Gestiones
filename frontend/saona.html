@@ -3,13 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Krispy Gestiones · Inicio</title>
+<title>SAONA Gestiones · Inicio</title>
 <script>
   (function () {
     var guardado = localStorage.getItem("kt-theme");
     if (guardado === "light" || guardado === "dark") {
       document.documentElement.dataset.theme = guardado;
     }
+    document.documentElement.dataset.empresa = "saona";
   })();
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -22,19 +23,25 @@
   .home-title { max-width: 900px; margin: 0 auto; }
   .home-title h1 { margin: 0 0 4px; font-size: 22px; }
   .home-title p { margin: 0; color: var(--text-secondary); font-size: 13px; }
+  .home-card.disabled .home-tag-proximamente {
+    align-self: flex-start; font-size: 11px; padding: 3px 8px; border-radius: 999px;
+    background: var(--surface-page); color: var(--text-muted);
+  }
 </style>
 </head>
 <body>
 <div class="app home-wrap">
   <header class="topbar">
     <div class="brand">
-      <span class="brand-icon">🍩</span>
+      <span class="brand-icon">🌿</span>
       <div>
-        <h1>Krispy Gestiones</h1>
+        <h1>SAONA Gestiones</h1>
         <p class="subtitle">Portal interno</p>
       </div>
     </div>
     <div class="topbar-actions">
+      <button type="button" class="btn btn-ghost hamburger-btn" title="Atrás" aria-label="Atrás" onclick="history.back()">←</button>
+      <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
       <div class="hamburger-wrap">
         <button id="btn-hamburger" class="btn btn-ghost hamburger-btn" aria-label="Menú" aria-haspopup="true" aria-expanded="false">☰</button>
         <div id="hamburger-menu" class="hamburger-menu" hidden>
@@ -47,51 +54,42 @@
   </header>
 
   <div class="home-title">
-    <h1>¿A dónde quieres ir?</h1>
+    <h1>SAONA</h1>
     <p>Selecciona un apartado.</p>
   </div>
 
   <div class="home-grid" id="home-grid">
-    <a class="home-card" href="reviews.html" id="card-resenas" hidden>
-      <span class="home-icon">🍩</span>
+    <div class="home-card disabled" id="card-saona-resenas" hidden title="Necesitamos el listado de restaurantes Saona con su enlace de Google Maps para activar esto">
+      <span class="home-icon">🌿</span>
       <h2>Reseñas</h2>
-      <p>Analítica de reseñas de Google Maps de las 6 tiendas: ranking, sentimiento, horarios y más.</p>
-    </a>
-    <a class="home-card" href="informes.html" id="card-informes" hidden>
+      <p>Analítica de reseñas de Google Maps de los restaurantes Saona (scraping del navegador).</p>
+      <span class="home-tag-proximamente">Próximamente</span>
+    </div>
+    <a class="home-card" href="informes.html?empresa=saona" id="card-saona-informes" hidden>
       <span class="home-icon">📋</span>
       <h2>Informes</h2>
       <p>Valores y competencias y más encuestas de Microsoft Forms.</p>
     </a>
-    <a class="home-card" href="clima.html" id="card-clima" hidden>
+    <a class="home-card" href="clima.html?empresa=saona" id="card-saona-clima" hidden>
       <span class="home-icon">📊</span>
       <h2>Clima Laboral</h2>
       <p>Engagement por centro: resultados, impulsores, fortalezas y oportunidades.</p>
     </a>
-    <a class="home-card" href="entrevistas.html" id="card-entrevistas" hidden>
+    <a class="home-card" href="entrevistas.html?empresa=saona" id="card-saona-entrevistas" hidden>
       <span class="home-icon">🚪</span>
       <h2>Entrevista de Salida</h2>
       <p>Motivos de salida, satisfacción por bloque y comentarios abiertos.</p>
     </a>
-    <a class="home-card" href="compartidos.html" id="card-compartidos">
+    <a class="home-card" href="compartidos.html?empresa=saona" id="card-saona-compartidos">
       <span class="home-icon">📁</span>
       <h2>Reclutamiento</h2>
       <p>Candidatos y currículums que te han compartido desde Informes para entrevistar.</p>
-    </a>
-    <a class="home-card" href="saona.html" id="card-saona" hidden>
-      <img class="home-icon-img" src="assets/saona-logo.png" alt="Saona">
-      <h2>SAONA</h2>
-      <p>Informes, Clima Laboral, Reclutamiento y Reseñas del restaurante Saona.</p>
-    </a>
-    <a class="home-card" href="usuarios.html" id="card-usuarios" hidden>
-      <span class="home-icon">⚙️</span>
-      <h2>Usuarios</h2>
-      <p>Alta y baja de cuentas, contraseñas y niveles de acceso del portal.</p>
     </a>
   </div>
 </div>
 <script src="js/theme.js?v=20260722c"></script>
 <script src="js/auth-common.js?v=20260722c"></script>
 <script src="js/topbar-menu.js?v=20260722c"></script>
-<script src="js/home.js?v=20260722c"></script>
+<script src="js/saona.js?v=20260722c"></script>
 </body>
 </html>

@@ -47,6 +47,16 @@
   --series-yellow:  #c98500;
 }
 
+/* Páginas dentro del hub SAONA (clima.js/informes.js/compartidos.js ponen
+   este atributo cuando ?empresa=saona) reemplazan el azul de acento de
+   Krispy Kreme por el azul grisáceo de marca de Saona — como todo el resto
+   de componentes (botones, tabs, tarjetas, paginación...) ya usa
+   --series-blue en vez de un color fijo, este único cambio los reskinea
+   a todos sin tocar cada uno por separado. */
+:root[data-empresa="saona"] {
+  --series-blue: #7A99AC;
+}
+
 * { box-sizing: border-box; }
 /* Varios componentes fijan su propio "display" (flex/inline-flex) en la
    misma clase que se oculta con el atributo [hidden] — sin esto, ese
@@ -211,6 +221,7 @@ h3 {
 }
 .home-card:hover { border-color: var(--series-blue); }
 .home-card .home-icon { font-size: 36px; }
+.home-card .home-icon-img { height: 34px; width: auto; align-self: flex-start; }
 .home-card h2 { margin: 0; font-size: 17px; }
 .home-card p { margin: 0; color: var(--text-secondary); font-size: 13px; flex-grow: 1; }
 .home-card .home-tag {

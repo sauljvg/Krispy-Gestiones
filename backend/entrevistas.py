@@ -1,0 +1,695 @@
+"""Motor de cálculo de "Entrevista de Salida" — inspirado en el script de
+Apps Script del usuario, pero detectando bloques y preguntas por el
+CONTENIDO del encabezado en vez de una lista fija de preguntas por empresa.
+
+Los formularios de Krispy Kreme y Saona usan la misma convención de
+encabezado para las preguntas de escala: "Indica tu nivel de acuerdo con
+las siguientes afirmaciones sobre <bloque>: [<pregunta>]" — el bloque es el
+texto antes de los dos puntos, la pregunta el texto entre corchetes. Así
+funciona igual para las dos empresas aunque redacten "tu llegada a Saona"
+o "tu llegada a Krispy Kreme" de forma distinta.
+"""
+import hashlib
+import io
+import json
+import re
+from datetime import datetime
+
+from openpyxl import load_workbook
+
+from db import get_connection
+
+METADATA_HINTS = {
+    "marca temporal": "hora_inicio",
+    "hora de inicio": "hora_inicio",
+    "hora de finalizacion": "hora_fin",
+    "correo electronico": "correo",
+    "nombre": "nombre",
+    "puesto de trabajo": "puesto",
+}
+
+_RESPUESTAS_SIN_VALOR = {".", "..", "…", "-", "sin comentarios", "sin comentario"}
+
+
+def _normaliza_header(h):
+    return (h or "").strip().lower().replace("í", "i").replace("ó", "o").replace("á", "a").replace(
+        "é", "e"
+    ).replace("ú", "u")
+
+
+def _respuesta_con_valor(texto):
+    limpio = (texto or "").strip()
+    if not limpio:
+        return False
+    return limpio.lower() not in _RESPUESTAS_SIN_VALOR
+
+
+# Igual que likertToNum() del script: "muy de acuerdo"/"muy en desacuerdo" se
+# comprueban ANTES que "de acuerdo"/"en desacuerdo" a secas, porque los
+# contienen como subcadena. "Totalmente de/en desacuerdo" y "Ni de acuerdo
+# ni en desacuerdo" (las variantes que usa Clima Laboral) también se
+# reconocen, por si algún formulario mezcla las dos redacciones.
+def _likert_to_num(valor):
+    if valor is None:
+        return None
+    s = _normaliza_header(str(valor))
+    if "muy en desacuerdo" in s or "totalmente en desacuerdo" in s:
+        return 1
+    if "muy de acuerdo" in s or "totalmente de acuerdo" in s:
+        return 5
+    if "en desacuerdo" in s:
+        return 2
+    if "ni de acuerdo" in s or "neutral" in s:
+        return 3
+    if "de acuerdo" in s:
+        return 4
+    return None
+
+
+_BLOQUE_PREGUNTA_RE = re.compile(r"^(.*?):\s*\[(.+)\]\s*$")
+
+
+def _bloque_label(prefijo):
+    """"Indica tu nivel de acuerdo... sobre tu llegada a Saona" -> "Llegada
+    a Saona" — se queda con lo que va después de "sobre" (sin el artículo
+    inicial) para un título corto y legible, sin depender de qué empresa sea."""
+    texto = re.sub(r"^.*?\bsobre\s+", "", prefijo, flags=re.IGNORECASE).strip()
+    texto = re.sub(r"^(tu|tus|la|el|las|los)\s+", "", texto, flags=re.IGNORECASE)
+    if not texto:
+        return prefijo.strip()
+    return texto[0].upper() + texto[1:]
+
+
+def _column_roles(headers):
+    centro_col = None
+    metadata_cols = {}
+    motivo_col = None
+    bloques = {}  # bloque_label (orden de aparición) -> [(header, pregunta), ...]
+    abiertas = []
+
+    for h in headers:
+        norm = _normaliza_header(h)
+        if "centro de trabajo" in norm or "centro" in norm:
+            centro_col = h
+            continue
+        matched_meta = False
+        for hint, campo in METADATA_HINTS.items():
+            if hint in norm:
+                metadata_cols[campo] = h
+                matched_meta = True
+                break
+        if matched_meta:
+            continue
+        if "motivo" in norm and "salida" in norm:
+            motivo_col = h
+            continue
+        m = _BLOQUE_PREGUNTA_RE.match(h)
+        if m:
+            prefijo, pregunta = m.group(1).strip(), m.group(2).strip()
+            bloques.setdefault(_bloque_label(prefijo), []).append((h, pregunta))
+        else:
+            abiertas.append(h)
+
+    return {
+        "centro_col": centro_col,
+        "metadata": metadata_cols,
+        "motivo_col": motivo_col,
+        "bloques": bloques,
+        "abiertas": abiertas,
+    }
+
+
+# ======================= Cruce con "Salidas Totales" (cobertura/auditoría) =======================
+# Puerto fiel del cruce fuzzy del script de Apps Script del usuario: agrupa
+# "Salidas Totales" en secciones por centro (detectando el centro EN
+# CUALQUIER COLUMNA de la fila título, porque el Excel real las trae
+# desplazadas por celdas combinadas), y empareja cada respuesta con la
+# salida real de esa persona por nombre (tokens con tolerancia a errores de
+# tecleo), para poder asignar la fecha de baja real y calcular cobertura.
+
+def _normaliza_nombre(s):
+    s = _normaliza_header(str(s or ""))
+    s = re.sub(r"[^a-z\s]", "", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _levenshtein(a, b):
+    m, n = len(a), len(b)
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+    for i in range(m + 1):
+        dp[i][0] = i
+    for j in range(n + 1):
+        dp[0][j] = j
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            costo = 0 if a[i - 1] == b[j - 1] else 1
+            dp[i][j] = min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + costo)
+    return dp[m][n]
+
+
+def _tokens_equivalentes(t1, t2):
+    if t1 == t2:
+        return True
+    if len(t1) >= 3 and len(t2) >= 3 and (t2.startswith(t1) or t1.startswith(t2)):
+        return True
+    dist = _levenshtein(t1, t2)
+    umbral = 1 if max(len(t1), len(t2)) <= 5 else 2
+    return dist <= umbral
+
+
+def _nombre_score(nombre_a, nombre_b):
+    """1.0 = todos los tokens del nombre más corto encontraron pareja
+    equivalente en el más largo (mismo criterio que exige el script: solo se
+    acepta el cruce si el score es exactamente 1)."""
+    tokens_a = _normaliza_nombre(nombre_a).split()
+    tokens_b = _normaliza_nombre(nombre_b).split()
+    if not tokens_a or not tokens_b:
+        return 0
+    corto, largo = (tokens_a, tokens_b) if len(tokens_a) <= len(tokens_b) else (tokens_b, tokens_a)
+    usados = set()
+    matched = 0
+    for tc in corto:
+        for i, tl in enumerate(largo):
+            if i in usados:
+                continue
+            if _tokens_equivalentes(tc, tl):
+                matched += 1
+                usados.add(i)
+                break
+    return matched / len(corto)
+
+
+def _parse_fecha(valor):
+    if valor is None:
+        return None
+    if isinstance(valor, datetime):
+        return valor
+    if isinstance(valor, str):
+        try:
+            return datetime.fromisoformat(valor[:19])
+        except ValueError:
+            return None
+    return None
+
+
+def get_cuatrimestre(valor_fecha):
+    """4 meses por tramo (1: ene-abr, 2: may-ago, 3: sep-dic) — igual que
+    getCuatrimestre() del script. Etiqueta "nQaño" (ej. "2Q2026")."""
+    dt = _parse_fecha(valor_fecha)
+    if dt is None:
+        return None
+    n = 1 if dt.month <= 4 else (2 if dt.month <= 8 else 3)
+    return {"label": f"{n}Q{dt.year}", "sort_key": f"{dt.year}-C{n}", "n": n, "year": dt.year}
+
+
+def _sede_keywords_desde_centro(centro):
+    """Palabras significativas (>=4 letras) del nombre del centro, para
+    reconocer su sección dentro de "Salidas Totales" sin tener que
+    hardcodear una lista de sedes por empresa — cualquier fila título que
+    mencione alguna de estas palabras se asigna a ese centro."""
+    tokens = re.findall(r"[a-z]+", _normaliza_header(centro))
+    ignorar = {"saona", "krispy", "kreme", "centro", "trabajo", "tienda", "restaurante"}
+    return [t for t in tokens if len(t) >= 4 and t not in ignorar]
+
+
+def _parse_salidas_totales(ws, centros_conocidos):
+    sede_keywords = {c: _sede_keywords_desde_centro(c) for c in centros_conocidos}
+
+    def _detectar_centro_en_fila(row):
+        celdas = [str(c).strip() for c in row if c not in (None, "")]
+        if not celdas:
+            return None
+        texto = _normaliza_header(" ".join(celdas))
+        for centro, keywords in sede_keywords.items():
+            if any(kw in texto for kw in keywords):
+                return centro
+        return None
+
+    salidas = []
+    centro_actual = None
+    col_map = None
+    for row in ws.iter_rows(values_only=True):
+        row = list(row)
+        no_vacias = sum(1 for c in row if c not in (None, ""))
+        norm_cells = [_normaliza_header(str(c)) for c in row if c not in (None, "")]
+        texto_fila = " ".join(norm_cells)
+        has_trabajador = "trabajador" in texto_fila or "nombre" in texto_fila
+        has_fecha_baja = "fecha" in texto_fila and "baja" in texto_fila
+        centro_en_fila = _detectar_centro_en_fila(row)
+
+        if no_vacias == 0:
+            centro_actual = None
+            col_map = None
+            continue
+
+        if centro_en_fila and not has_trabajador and no_vacias <= 2:
+            centro_actual = centro_en_fila
+            col_map = None
+            continue
+
+        if centro_actual and col_map is None and has_trabajador and has_fecha_baja:
+            norm_por_col = [_normaliza_header(str(c)) if c not in (None, "") else "" for c in row]
+            idx_nombre = next((i for i, c in enumerate(norm_por_col) if "trabajador" in c or "nombre" in c), None)
+            idx_fecha = next((i for i, c in enumerate(norm_por_col) if "fecha" in c and "baja" in c), None)
+            if idx_nombre is not None and idx_fecha is not None:
+                col_map = {"nombre": idx_nombre, "fecha": idx_fecha}
+            continue
+
+        if centro_actual and col_map:
+            nombre = row[col_map["nombre"]]
+            fecha_baja = row[col_map["fecha"]]
+            if nombre and hasattr(fecha_baja, "isoformat"):
+                salidas.append({"centro": centro_actual, "nombre": str(nombre).strip(), "fecha_baja": fecha_baja.isoformat()})
+
+    return salidas
+
+
+def ensure_entrevistas_tables():
+    conn = get_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entrevistas_oleadas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            etiqueta TEXT,
+            empresa TEXT NOT NULL DEFAULT 'kk',
+            creado_en TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entrevistas_respuestas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            oleada_id INTEGER NOT NULL REFERENCES entrevistas_oleadas(id),
+            centro TEXT,
+            fila_hash TEXT NOT NULL,
+            datos_json TEXT NOT NULL,
+            creado_en TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(oleada_id, fila_hash)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entrevistas_importaciones (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            oleada_id INTEGER NOT NULL REFERENCES entrevistas_oleadas(id),
+            archivo_nombre TEXT,
+            subido_por TEXT,
+            subido_en TEXT NOT NULL DEFAULT (datetime('now')),
+            nuevas INTEGER NOT NULL DEFAULT 0,
+            ya_existian INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    # Solo centro/nombre/fecha de baja — lo mínimo que hace falta para
+    # calcular cobertura y cruzar con las respuestas. Nada de DNI, email
+    # personal ni demás datos sensibles de la hoja "Salidas Totales".
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entrevistas_salidas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            oleada_id INTEGER NOT NULL REFERENCES entrevistas_oleadas(id),
+            centro TEXT NOT NULL,
+            nombre TEXT NOT NULL,
+            fecha_baja TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def _hash_fila(fila):
+    blob = json.dumps(fila, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _read_sheet_rows(ws):
+    rows_iter = ws.iter_rows(values_only=True)
+    try:
+        header = [str(h).strip() if h is not None else "" for h in next(rows_iter)]
+    except StopIteration:
+        return []
+    filas = []
+    for row in rows_iter:
+        if row is None or all(v is None for v in row):
+            continue
+        datos = {}
+        for i, key in enumerate(header):
+            if not key:
+                continue
+            value = row[i] if i < len(row) else None
+            if hasattr(value, "isoformat"):
+                value = value.isoformat()
+            datos[key] = value
+        if datos:
+            filas.append(datos)
+    return filas
+
+
+def get_or_create_oleada(nueva, etiqueta=None, empresa="kk"):
+    conn = get_connection()
+    if not nueva:
+        row = conn.execute(
+            "SELECT id FROM entrevistas_oleadas WHERE empresa = ? ORDER BY id DESC LIMIT 1", (empresa,)
+        ).fetchone()
+        if row:
+            oleada_id = row[0]
+            conn.close()
+            return oleada_id
+    cur = conn.execute("INSERT INTO entrevistas_oleadas (etiqueta, empresa) VALUES (?, ?)", (etiqueta, empresa))
+    conn.commit()
+    oleada_id = cur.lastrowid
+    conn.close()
+    return oleada_id
+
+
+def get_oleada_empresa(oleada_id):
+    conn = get_connection()
+    row = conn.execute("SELECT empresa FROM entrevistas_oleadas WHERE id = ?", (oleada_id,)).fetchone()
+    conn.close()
+    return row["empresa"] if row else None
+
+
+def import_excel(file_bytes, archivo_nombre, subido_por, nueva_oleada=False, empresa="kk"):
+    try:
+        wb = load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=True)
+    except Exception as e:
+        raise ValueError(f"No se pudo leer el archivo Excel: {e}")
+
+    if "Respuestas" not in wb.sheetnames:
+        raise ValueError("El Excel debe tener una hoja llamada 'Respuestas'")
+
+    filas = _read_sheet_rows(wb["Respuestas"])
+    if not filas:
+        raise ValueError("La hoja 'Respuestas' no tiene filas de datos")
+
+    oleada_id = get_or_create_oleada(nueva_oleada, empresa=empresa)
+
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO entrevistas_importaciones (oleada_id, archivo_nombre, subido_por) VALUES (?, ?, ?)",
+        (oleada_id, archivo_nombre, subido_por),
+    )
+    importacion_id = cur.lastrowid
+
+    roles = _column_roles(list(filas[0].keys()))
+    centro_col = roles["centro_col"]
+
+    nuevas = 0
+    ya_existian = 0
+    centros_vistos = set()
+    for fila in filas:
+        centro = str(fila.get(centro_col)).strip() if centro_col and fila.get(centro_col) else None
+        if centro:
+            centros_vistos.add(centro)
+        fila_hash = _hash_fila(fila)
+        existe = conn.execute(
+            "SELECT id FROM entrevistas_respuestas WHERE oleada_id = ? AND fila_hash = ?", (oleada_id, fila_hash)
+        ).fetchone()
+        if existe:
+            ya_existian += 1
+            continue
+        datos_json = json.dumps(fila, ensure_ascii=False, default=str)
+        conn.execute(
+            "INSERT INTO entrevistas_respuestas (oleada_id, centro, fila_hash, datos_json) VALUES (?, ?, ?, ?)",
+            (oleada_id, centro, fila_hash, datos_json),
+        )
+        nuevas += 1
+
+    # "Salidas Totales" (si viene en el mismo Excel) es una foto completa de
+    # las bajas reales — se reemplaza entera en cada importación, no se
+    # acumula, para que siempre refleje la lista más reciente.
+    salidas_nuevas = 0
+    if "Salidas Totales" in wb.sheetnames and centros_vistos:
+        salidas = _parse_salidas_totales(wb["Salidas Totales"], centros_vistos)
+        conn.execute("DELETE FROM entrevistas_salidas WHERE oleada_id = ?", (oleada_id,))
+        for s in salidas:
+            conn.execute(
+                "INSERT INTO entrevistas_salidas (oleada_id, centro, nombre, fecha_baja) VALUES (?, ?, ?, ?)",
+                (oleada_id, s["centro"], s["nombre"], s["fecha_baja"]),
+            )
+        salidas_nuevas = len(salidas)
+
+    conn.execute(
+        "UPDATE entrevistas_importaciones SET nuevas = ?, ya_existian = ? WHERE id = ?",
+        (nuevas, ya_existian, importacion_id),
+    )
+    conn.commit()
+    conn.close()
+    return {
+        "oleada_id": oleada_id, "nuevas": nuevas, "ya_existian": ya_existian,
+        "total_en_excel": len(filas), "salidas_totales": salidas_nuevas,
+    }
+
+
+def list_oleadas(empresa="kk"):
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT o.id, o.etiqueta, o.creado_en, COUNT(r.id) AS num_respuestas,
+               ROW_NUMBER() OVER (ORDER BY o.id ASC) AS numero
+        FROM entrevistas_oleadas o
+        LEFT JOIN entrevistas_respuestas r ON r.oleada_id = o.id
+        WHERE o.empresa = ?
+        GROUP BY o.id ORDER BY o.id DESC
+    """, (empresa,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def list_centros(oleada_id):
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT DISTINCT centro FROM entrevistas_respuestas WHERE oleada_id = ? AND centro IS NOT NULL ORDER BY centro",
+        (oleada_id,),
+    ).fetchall()
+    conn.close()
+    return [r["centro"] for r in rows]
+
+
+def _fetch_respuestas(conn, oleada_id, centro):
+    if centro:
+        rows = conn.execute(
+            "SELECT datos_json FROM entrevistas_respuestas WHERE oleada_id = ? AND centro = ?", (oleada_id, centro)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT datos_json FROM entrevistas_respuestas WHERE oleada_id = ?", (oleada_id,)
+        ).fetchall()
+    return [json.loads(r["datos_json"]) for r in rows]
+
+
+def compute_reporte(oleada_id, centro=None):
+    conn = get_connection()
+    filas = _fetch_respuestas(conn, oleada_id, centro)
+    conn.close()
+    if not filas:
+        raise ValueError("No hay respuestas para este centro en esta oleada")
+
+    roles = _column_roles(list(filas[0].keys()))
+    n = len(filas)
+
+    suma_global = 0
+    cuenta_global = 0
+    bloques = []
+    for bloque_nombre, preguntas in roles["bloques"].items():
+        preguntas_detalle = []
+        suma_bloque = 0.0
+        count_bloque = 0
+        for header, texto_pregunta in preguntas:
+            valores = [v for v in (_likert_to_num(fila.get(header)) for fila in filas) if v is not None]
+            if not valores:
+                continue
+            promedio_p = sum(valores) / len(valores)
+            preguntas_detalle.append({"pregunta": texto_pregunta, "promedio": round(promedio_p, 2)})
+            suma_bloque += promedio_p
+            count_bloque += 1
+            suma_global += sum(valores)
+            cuenta_global += len(valores)
+        promedio_bloque = round(suma_bloque / count_bloque, 2) if count_bloque else None
+        bloques.append({"nombre": bloque_nombre, "promedio": promedio_bloque, "preguntas": preguntas_detalle})
+
+    satisfaccion_general = round(suma_global / cuenta_global, 2) if cuenta_global else None
+
+    motivos_map = {}
+    if roles["motivo_col"]:
+        for fila in filas:
+            m = fila.get(roles["motivo_col"]) or "Sin dato"
+            m = str(m).strip() or "Sin dato"
+            motivos_map[m] = motivos_map.get(m, 0) + 1
+    motivos = sorted(
+        [{"motivo": m, "cantidad": c, "porcentaje": round(c / n * 100, 1)} for m, c in motivos_map.items()],
+        key=lambda x: -x["cantidad"],
+    )
+
+    abiertas = {}
+    for header in roles["abiertas"]:
+        textos = [str(fila[header]).strip() for fila in filas if fila.get(header)]
+        textos = [t for t in textos if _respuesta_con_valor(t)]
+        # Preguntas que se eliminaron del formulario antes de que nadie llegara
+        # a contestarlas no aportan nada (siempre salen "sin comentarios") —
+        # se omiten en vez de mostrar una tarjeta vacía.
+        if textos:
+            abiertas[header] = textos
+
+    return {
+        "oleada_id": oleada_id,
+        "centro": centro,
+        "n": n,
+        "satisfaccion_general": satisfaccion_general,
+        "bloques": bloques,
+        "motivos": motivos,
+        "abiertas": abiertas,
+    }
+
+
+def _fetch_salidas(conn, oleada_id, centro):
+    if centro:
+        rows = conn.execute(
+            "SELECT centro, nombre, fecha_baja FROM entrevistas_salidas WHERE oleada_id = ? AND centro = ?",
+            (oleada_id, centro),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT centro, nombre, fecha_baja FROM entrevistas_salidas WHERE oleada_id = ?", (oleada_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_salida(oleada_id, centro, nombre, fecha_baja):
+    """Registra una salida real a mano, sin depender del Excel de "Salidas
+    Totales" — sirve tanto para dar de alta a alguien que no vino en la hoja
+    como para confirmar una respuesta que no cruzó automáticamente (se le
+    pasa su propio nombre/centro/fecha y queda contada igual que si viniera
+    del Excel)."""
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO entrevistas_salidas (oleada_id, centro, nombre, fecha_baja) VALUES (?, ?, ?, ?)",
+        (oleada_id, centro, nombre, fecha_baja),
+    )
+    conn.commit()
+    conn.close()
+
+
+def compute_evolucion(oleada_id, centro=None):
+    """Evolución por cuatrimestre — equivalente a Resumen_General del
+    script: cruza cada respuesta con su baja real (por centro + nombre) para
+    saber a qué cuatrimestre pertenece de verdad, y a partir de ahí calcula
+    Total Ponderado / Ítem Mínimo-Máximo por bloque y cobertura, cuatrimestre
+    a cuatrimestre."""
+    conn = get_connection()
+    filas = _fetch_respuestas(conn, oleada_id, centro)
+    salidas = _fetch_salidas(conn, oleada_id, centro)
+    conn.close()
+    if not filas:
+        raise ValueError("No hay respuestas para este centro en esta oleada")
+
+    roles = _column_roles(list(filas[0].keys()))
+    centro_col = roles["centro_col"]
+    nombre_col = roles["metadata"].get("nombre")
+    fecha_col = roles["metadata"].get("hora_inicio")
+
+    salidas_por_centro = {}
+    for s in salidas:
+        salidas_por_centro.setdefault(s["centro"], []).append(s)
+
+    usadas = set()  # (centro, indice_en_su_lista)
+    enriquecidas = []
+    auditoria_g = []
+    for fila in filas:
+        centro_fila = fila.get(centro_col) if centro_col else None
+        nombre_fila = fila.get(nombre_col) if nombre_col else None
+        fecha_propia = fila.get(fecha_col) if fecha_col else None
+        fecha_efectiva = fecha_propia
+        matched = False
+
+        candidatas = salidas_por_centro.get(centro_fila, [])
+        for i, s in enumerate(candidatas):
+            key = (centro_fila, i)
+            if key in usadas:
+                continue
+            if nombre_fila and _nombre_score(nombre_fila, s["nombre"]) == 1:
+                usadas.add(key)
+                fecha_efectiva = s["fecha_baja"]
+                matched = True
+                break
+
+        if not matched:
+            auditoria_g.append({"nombre": nombre_fila, "fecha": fecha_propia, "centro": centro_fila})
+
+        cuat = get_cuatrimestre(fecha_efectiva)
+        enriquecidas.append({"fila": fila, "cuatrimestre": cuat, "matched": matched})
+
+    auditoria_f = [
+        {"nombre": s["nombre"], "fecha_baja": s["fecha_baja"], "centro": s["centro"]}
+        for centro_c, lista in salidas_por_centro.items()
+        for i, s in enumerate(lista)
+        if (centro_c, i) not in usadas
+    ]
+
+    periodos_map = {}
+    for e in enriquecidas:
+        if not e["cuatrimestre"]:
+            continue
+        sk = e["cuatrimestre"]["sort_key"]
+        periodos_map.setdefault(sk, {"label": e["cuatrimestre"]["label"], "sort_key": sk, "filas": []})
+        periodos_map[sk]["filas"].append(e["fila"])
+    periodos = sorted(periodos_map.values(), key=lambda p: p["sort_key"])
+
+    stats_por_periodo = []
+    for p in periodos:
+        bloques_stats = []
+        for bloque_nombre, preguntas in roles["bloques"].items():
+            items = []
+            for header, texto_pregunta in preguntas:
+                valores = [v for v in (_likert_to_num(f.get(header)) for f in p["filas"]) if v is not None]
+                media = sum(valores) / len(valores) if valores else None
+                items.append({"pregunta": texto_pregunta, "media": media, "n": len(valores)})
+            validos = [it for it in items if it["media"] is not None]
+            total_n = sum(it["n"] for it in validos)
+            total_ponderado = (sum(it["media"] * it["n"] for it in validos) / total_n) if total_n else None
+            bloques_stats.append({
+                "nombre": bloque_nombre,
+                "total_ponderado": round(total_ponderado, 2) if total_ponderado is not None else None,
+                "items": items,
+            })
+        min_max = []
+        for bl in bloques_stats:
+            validos = [it for it in bl["items"] if it["media"] is not None]
+            if not validos:
+                min_max.append({"bloque": bl["nombre"], "item_min": None, "min": None, "item_max": None, "max": None})
+                continue
+            item_min = min(validos, key=lambda it: it["media"])
+            item_max = max(validos, key=lambda it: it["media"])
+            min_max.append({
+                "bloque": bl["nombre"],
+                "item_min": item_min["pregunta"], "min": round(item_min["media"], 2),
+                "item_max": item_max["pregunta"], "max": round(item_max["media"], 2),
+            })
+        stats_por_periodo.append({
+            "label": p["label"], "sort_key": p["sort_key"], "n": len(p["filas"]),
+            "bloques": bloques_stats, "min_max": min_max,
+        })
+
+    cobertura_map = {}
+    for s in salidas:
+        cuat = get_cuatrimestre(s["fecha_baja"])
+        if not cuat:
+            continue
+        cobertura_map.setdefault(cuat["sort_key"], {"label": cuat["label"], "sort_key": cuat["sort_key"], "debieron": 0, "respondieron": 0})
+        cobertura_map[cuat["sort_key"]]["debieron"] += 1
+    for e in enriquecidas:
+        if not e["matched"] or not e["cuatrimestre"]:
+            continue
+        sk = e["cuatrimestre"]["sort_key"]
+        cobertura_map.setdefault(sk, {"label": e["cuatrimestre"]["label"], "sort_key": sk, "debieron": 0, "respondieron": 0})
+        cobertura_map[sk]["respondieron"] += 1
+    cobertura = sorted(cobertura_map.values(), key=lambda c: c["sort_key"])
+    for c in cobertura:
+        c["porcentaje"] = round(c["respondieron"] / c["debieron"] * 100, 1) if c["debieron"] else None
+
+    return {
+        "centro": centro,
+        "tiene_salidas_totales": len(salidas) > 0,
+        "total_salidas": len(salidas),
+        "stats_por_periodo": stats_por_periodo,
+        "cobertura": cobertura,
+        "auditoria_f": auditoria_f,
+        "auditoria_g": auditoria_g,
+    }
+
+
+ensure_entrevistas_tables()
