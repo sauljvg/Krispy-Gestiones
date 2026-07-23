@@ -51,11 +51,25 @@
   .pregunta-row .tipo-badge { font-size: 11px; padding: 2px 6px; border-radius: 6px; background: var(--surface-1); color: var(--text-secondary); white-space: nowrap; }
   .pregunta-row .etiqueta-txt { flex: 1; min-width: 200px; font-size: 14px; }
   .pregunta-row .obligatoria-txt { font-size: 11px; color: var(--text-muted); }
+  .dashboard-badge { font-size: 11px; padding: 2px 6px; border-radius: 6px; background: color-mix(in srgb, var(--series-blue) 18%, transparent); color: var(--series-blue); white-space: nowrap; }
 
-  .nueva-pregunta-form { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+  .nueva-pregunta-form { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); display: flex; flex-direction: column; gap: 8px; }
+  .nueva-pregunta-form-fila { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   .nueva-pregunta-form select, .nueva-pregunta-form input { padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 13px; }
   .nueva-pregunta-form input.etiqueta { flex: 1; min-width: 220px; }
   .nueva-pregunta-form label.chk { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+
+  .opciones-editor { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; }
+  .opciones-editor-filas { display: flex; flex-direction: column; gap: 6px; }
+  .opcion-editor-row { display: flex; gap: 6px; align-items: center; }
+  .opcion-editor-input { flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 13px; }
+  .btn-opcion-agregar { align-self: flex-start; }
+
+  .pregunta-edit-form { display: flex; flex-direction: column; gap: 8px; padding: 10px; margin: 6px 0; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; }
+  .pregunta-edit-etiqueta { width: 100%; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 13px; box-sizing: border-box; }
+  .pregunta-edit-flags { display: flex; gap: 14px; flex-wrap: wrap; }
+  .pregunta-edit-flags label.chk { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+  .pregunta-edit-acciones { display: flex; gap: 8px; }
 
   .fondo-preview { max-width: 220px; max-height: 120px; border-radius: 8px; border: 1px solid var(--border); display: block; margin-top: 6px; }
   .respuestas-tabla { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }

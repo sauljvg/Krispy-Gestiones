@@ -57,6 +57,17 @@ def ensure_encuestas_tables():
             opciones_json TEXT
         )
     """)
+    # mostrar_dashboard: marca explícita de "esta respuesta quiero verla en
+    # Scoring/Dashboard de Informes, no solo en la hoja Respuestas" — antes
+    # era automático para abierta/prioridad; ahora es una casilla que el
+    # admin puede activar en CUALQUIER tipo de pregunta (p.ej. una opción
+    # múltiple de una pregunta situacional también puede ser útil de ver de
+    # un vistazo). Las preguntas abiertas/prioridad ya existentes se migran
+    # activadas para no perder el comportamiento que ya tenían.
+    cols_preguntas = {row[1] for row in conn.execute("PRAGMA table_info(encuesta_preguntas)")}
+    if "mostrar_dashboard" not in cols_preguntas:
+        conn.execute("ALTER TABLE encuesta_preguntas ADD COLUMN mostrar_dashboard INTEGER NOT NULL DEFAULT 0")
+        conn.execute("UPDATE encuesta_preguntas SET mostrar_dashboard = 1 WHERE tipo IN ('abierta', 'prioridad')")
     # Sin fila_hash/dedup a propósito: cada persona real puede responder una
     # sola vez desde el propio flujo (no hay reenvío), y a diferencia de
     # Informes esto no se alimenta por Excel donde sí hace falta deduplicar
@@ -128,6 +139,7 @@ def _fetch_estructura(conn, encuesta_id):
             qd = dict(q)
             qd["opciones"] = json.loads(qd.pop("opciones_json") or "[]")
             qd["obligatoria"] = bool(qd["obligatoria"])
+            qd["mostrar_dashboard"] = bool(qd["mostrar_dashboard"])
             preguntas_dict.append(qd)
         pd = dict(p)
         pd["preguntas"] = preguntas_dict
@@ -287,7 +299,7 @@ def mover_pagina(pagina_id, direccion):
     conn.close()
 
 
-def add_pregunta(pagina_id, tipo, etiqueta, obligatoria=True, opciones=None):
+def add_pregunta(pagina_id, tipo, etiqueta, obligatoria=True, opciones=None, mostrar_dashboard=False):
     if tipo not in TIPOS_PREGUNTA:
         raise ValueError(f"Tipo de pregunta desconocido: {tipo}")
     conn = get_connection()
@@ -295,9 +307,10 @@ def add_pregunta(pagina_id, tipo, etiqueta, obligatoria=True, opciones=None):
         "SELECT COALESCE(MAX(orden), 0) + 1 FROM encuesta_preguntas WHERE pagina_id = ?", (pagina_id,)
     ).fetchone()[0]
     cur = conn.execute(
-        "INSERT INTO encuesta_preguntas (pagina_id, orden, tipo, etiqueta, obligatoria, opciones_json) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (pagina_id, orden, tipo, etiqueta.strip(), 1 if obligatoria else 0, json.dumps(opciones or [], ensure_ascii=False)),
+        "INSERT INTO encuesta_preguntas (pagina_id, orden, tipo, etiqueta, obligatoria, opciones_json, mostrar_dashboard) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (pagina_id, orden, tipo, etiqueta.strip(), 1 if obligatoria else 0,
+         json.dumps(opciones or [], ensure_ascii=False), 1 if mostrar_dashboard else 0),
     )
     pregunta_id = cur.lastrowid
     conn.commit()
@@ -305,11 +318,12 @@ def add_pregunta(pagina_id, tipo, etiqueta, obligatoria=True, opciones=None):
     return pregunta_id
 
 
-def update_pregunta(pregunta_id, etiqueta, obligatoria, opciones=None):
+def update_pregunta(pregunta_id, etiqueta, obligatoria, opciones=None, mostrar_dashboard=False):
     conn = get_connection()
     conn.execute(
-        "UPDATE encuesta_preguntas SET etiqueta = ?, obligatoria = ?, opciones_json = ? WHERE id = ?",
-        (etiqueta.strip(), 1 if obligatoria else 0, json.dumps(opciones or [], ensure_ascii=False), pregunta_id),
+        "UPDATE encuesta_preguntas SET etiqueta = ?, obligatoria = ?, opciones_json = ?, mostrar_dashboard = ? WHERE id = ?",
+        (etiqueta.strip(), 1 if obligatoria else 0, json.dumps(opciones or [], ensure_ascii=False),
+         1 if mostrar_dashboard else 0, pregunta_id),
     )
     conn.commit()
     conn.close()
@@ -377,13 +391,13 @@ def guardar_respuesta(slug, respuestas_por_pregunta, ip, user_agent):
     tipo_informe_clave = row["tipo_informe_clave"]
 
     preguntas = conn.execute("""
-        SELECT eq.id, eq.etiqueta, eq.tipo FROM encuesta_preguntas eq
+        SELECT eq.id, eq.etiqueta, eq.mostrar_dashboard FROM encuesta_preguntas eq
         JOIN encuesta_paginas ep ON ep.id = eq.pagina_id
         WHERE ep.encuesta_id = ?
         ORDER BY ep.orden, eq.orden
     """, (encuesta_id,)).fetchall()
     etiqueta_por_id = {str(p["id"]): p["etiqueta"] for p in preguntas}
-    tipo_por_id = {str(p["id"]): p["tipo"] for p in preguntas}
+    mostrar_dashboard_por_id = {str(p["id"]): bool(p["mostrar_dashboard"]) for p in preguntas}
 
     # Dos preguntas pueden compartir el mismo enunciado a propósito (p.ej. la
     # misma pregunta de "Ordena las siguientes afirmaciones..." repetida en
@@ -392,10 +406,10 @@ def guardar_respuesta(slug, respuestas_por_pregunta, ip, user_agent):
     # repetidas; el motor de scoring solo busca que el texto CONTENGA la
     # palabra clave, así que el sufijo no rompe la detección.
     #
-    # columnas_extra: preguntas abiertas y de "ordenar prioridades" — no se
-    # puntúan, pero el candidato las respondió y son las que interesa ver de
-    # un vistazo en el resultado, así que van marcadas para que Informes las
-    # copie tal cual a Scoring/Dashboard (ver scoring_valores.calcular()).
+    # columnas_extra: preguntas marcadas por el admin como "mostrar en el
+    # dashboard" — no cambia su puntuación, pero Informes las copia tal cual
+    # a Scoring/Dashboard para verlas de un vistazo (ver
+    # scoring_valores.calcular()).
     fila_por_etiqueta = {}
     columnas_extra = set()
     for pid, etiqueta in etiqueta_por_id.items():
@@ -408,7 +422,7 @@ def guardar_respuesta(slug, respuestas_por_pregunta, ip, user_agent):
             clave = f"{etiqueta} ({sufijo})"
             sufijo += 1
         fila_por_etiqueta[clave] = valor
-        if tipo_por_id[pid] in ("abierta", "prioridad"):
+        if mostrar_dashboard_por_id[pid]:
             columnas_extra.add(clave)
 
     dispositivo = _detectar_dispositivo(user_agent)

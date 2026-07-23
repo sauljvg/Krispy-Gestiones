@@ -41,6 +41,7 @@ async function loadTests() {
 }
 
 async function abrirEditor(testId) {
+  if (testId !== currentTestId) editandoPreguntas.clear();
   currentTestId = testId;
   const editorCard = document.getElementById("editor-card");
   editorCard.hidden = false;
@@ -165,6 +166,68 @@ const TIPOS_PREGUNTA_LABELS = {
   prioridad: "Ordenar prioridades",
 };
 
+// Tipos cuya respuesta es una lista de frases/opciones editable (en vez de
+// un prompt() con comas, una fila por opción — como en Microsoft Forms).
+const TIPOS_CON_OPCIONES = new Set(["opcion_multiple", "prioridad"]);
+
+// Preguntas que interesa ver de un vistazo en el dashboard de resultados
+// (Scoring/Dashboard de Informes) vienen con esta casilla premarcada por
+// defecto — el admin puede activarla o desactivarla para cualquier tipo.
+function mostrarDashboardPorDefecto(tipo) {
+  return tipo === "abierta" || tipo === "prioridad";
+}
+
+const editandoPreguntas = new Set();
+
+function opcionesEditorHTML(tipo, opciones) {
+  if (!TIPOS_CON_OPCIONES.has(tipo)) return "";
+  const lista = opciones && opciones.length ? opciones : ["", ""];
+  return `<div class="opciones-editor">
+    <div class="opciones-editor-filas">
+      ${lista
+        .map(
+          (op, i) => `
+        <div class="opcion-editor-row">
+          <input type="text" class="opcion-editor-input" value="${escapeHTML(op)}" placeholder="Opción ${i + 1}">
+          <button type="button" class="btn-mini btn-opcion-quitar" title="Quitar esta opción">🗑</button>
+        </div>`
+        )
+        .join("")}
+    </div>
+    <button type="button" class="btn btn-ghost btn-mini btn-opcion-agregar">＋ Agregar opción</button>
+  </div>`;
+}
+
+function bindOpcionesEditor(root) {
+  root.querySelectorAll(".opciones-editor").forEach((editor) => {
+    const filas = editor.querySelector(".opciones-editor-filas");
+    editor.querySelectorAll(".btn-opcion-quitar").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (filas.children.length <= 2) return;
+        btn.closest(".opcion-editor-row").remove();
+      });
+    });
+    const btnAgregar = editor.querySelector(".btn-opcion-agregar");
+    btnAgregar?.addEventListener("click", () => {
+      const row = document.createElement("div");
+      row.className = "opcion-editor-row";
+      row.innerHTML = `<input type="text" class="opcion-editor-input" placeholder="Nueva opción"><button type="button" class="btn-mini btn-opcion-quitar" title="Quitar esta opción">🗑</button>`;
+      filas.appendChild(row);
+      row.querySelector(".btn-opcion-quitar").addEventListener("click", () => {
+        if (filas.children.length <= 2) return;
+        row.remove();
+      });
+    });
+  });
+}
+
+function leerOpciones(editorRoot) {
+  if (!editorRoot) return [];
+  return Array.from(editorRoot.querySelectorAll(".opcion-editor-input"))
+    .map((el) => el.value.trim())
+    .filter(Boolean);
+}
+
 function renderPaginas() {
   const wrap = document.getElementById("paginas-wrap");
   wrap.innerHTML = currentTest.paginas
@@ -181,32 +244,62 @@ function renderPaginas() {
       </div>
       <div class="preguntas-lista" data-pagina-id="${p.id}">
         ${p.preguntas
-          .map(
-            (q, qi) => `
-          <div class="pregunta-row" data-pregunta-id="${q.id}">
-            <span class="tipo-badge">${TIPOS_PREGUNTA_LABELS[q.tipo] || q.tipo}</span>
-            <span class="etiqueta-txt">${escapeHTML(q.etiqueta)}</span>
-            <span class="obligatoria-txt">${q.obligatoria ? "obligatoria" : "opcional"}</span>
-            <span class="pregunta-acciones">
-              <button type="button" class="btn-mini btn-pregunta-subir" data-pregunta-id="${q.id}" ${qi === 0 ? "disabled" : ""}>↑</button>
-              <button type="button" class="btn-mini btn-pregunta-bajar" data-pregunta-id="${q.id}" ${qi === p.preguntas.length - 1 ? "disabled" : ""}>↓</button>
-              <button type="button" class="btn-mini btn-pregunta-borrar" data-pregunta-id="${q.id}">🗑</button>
-            </span>
-          </div>`
-          )
+          .map((q, qi) => {
+            if (editandoPreguntas.has(q.id)) {
+              return `
+          <div class="pregunta-item pregunta-editando" data-pregunta-id="${q.id}" data-tipo="${q.tipo}">
+            <div class="pregunta-edit-form">
+              <span class="tipo-badge">${TIPOS_PREGUNTA_LABELS[q.tipo] || q.tipo}</span>
+              <input type="text" class="pregunta-edit-etiqueta" value="${escapeHTML(q.etiqueta)}" placeholder="Enunciado de la pregunta...">
+              <div class="pregunta-edit-opciones">${opcionesEditorHTML(q.tipo, q.opciones)}</div>
+              <div class="pregunta-edit-flags">
+                <label class="chk"><input type="checkbox" class="pregunta-edit-obligatoria" ${q.obligatoria ? "checked" : ""}> Obligatoria</label>
+                <label class="chk"><input type="checkbox" class="pregunta-edit-dashboard" ${q.mostrar_dashboard ? "checked" : ""}> Mostrar en el dashboard de resultados</label>
+              </div>
+              <div class="pregunta-edit-acciones">
+                <button type="button" class="btn btn-primary btn-mini btn-pregunta-guardar" data-pregunta-id="${q.id}">Guardar</button>
+                <button type="button" class="btn btn-ghost btn-mini btn-pregunta-cancelar" data-pregunta-id="${q.id}">Cancelar</button>
+              </div>
+            </div>
+          </div>`;
+            }
+            return `
+          <div class="pregunta-item" data-pregunta-id="${q.id}">
+            <div class="pregunta-row" data-pregunta-id="${q.id}">
+              <span class="tipo-badge">${TIPOS_PREGUNTA_LABELS[q.tipo] || q.tipo}</span>
+              <span class="etiqueta-txt">${escapeHTML(q.etiqueta)}</span>
+              <span class="obligatoria-txt">${q.obligatoria ? "obligatoria" : "opcional"}</span>
+              ${q.mostrar_dashboard ? `<span class="dashboard-badge" title="Esta respuesta aparece en el dashboard de resultados">📊 dashboard</span>` : ""}
+              <span class="pregunta-acciones">
+                <button type="button" class="btn-mini btn-pregunta-editar" data-pregunta-id="${q.id}">✎</button>
+                <button type="button" class="btn-mini btn-pregunta-subir" data-pregunta-id="${q.id}" ${qi === 0 ? "disabled" : ""}>↑</button>
+                <button type="button" class="btn-mini btn-pregunta-bajar" data-pregunta-id="${q.id}" ${qi === p.preguntas.length - 1 ? "disabled" : ""}>↓</button>
+                <button type="button" class="btn-mini btn-pregunta-borrar" data-pregunta-id="${q.id}">🗑</button>
+              </span>
+            </div>
+          </div>`;
+          })
           .join("")}
       </div>
       <div class="nueva-pregunta-form">
-        <select class="nueva-pregunta-tipo" data-pagina-id="${p.id}">
-          ${Object.entries(TIPOS_PREGUNTA_LABELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}
-        </select>
-        <input type="text" class="etiqueta nueva-pregunta-etiqueta" data-pagina-id="${p.id}" placeholder="Enunciado de la pregunta...">
-        <label class="chk"><input type="checkbox" class="nueva-pregunta-obligatoria" data-pagina-id="${p.id}" checked> Obligatoria</label>
-        <button type="button" class="btn btn-ghost btn-agregar-pregunta" data-pagina-id="${p.id}">＋ Añadir pregunta</button>
+        <div class="nueva-pregunta-form-fila">
+          <select class="nueva-pregunta-tipo" data-pagina-id="${p.id}">
+            ${Object.entries(TIPOS_PREGUNTA_LABELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}
+          </select>
+          <input type="text" class="etiqueta nueva-pregunta-etiqueta" data-pagina-id="${p.id}" placeholder="Enunciado de la pregunta...">
+        </div>
+        <div class="nueva-pregunta-opciones" data-pagina-id="${p.id}"></div>
+        <div class="nueva-pregunta-form-fila">
+          <label class="chk"><input type="checkbox" class="nueva-pregunta-obligatoria" data-pagina-id="${p.id}" checked> Obligatoria</label>
+          <label class="chk"><input type="checkbox" class="nueva-pregunta-dashboard" data-pagina-id="${p.id}"> Mostrar en el dashboard de resultados</label>
+          <button type="button" class="btn btn-ghost btn-agregar-pregunta" data-pagina-id="${p.id}">＋ Añadir pregunta</button>
+        </div>
       </div>
     </div>`
     )
     .join("");
+
+  bindOpcionesEditor(wrap);
 
   wrap.querySelectorAll(".pagina-instrucciones").forEach((el) => {
     el.addEventListener("blur", async () => {
@@ -255,32 +348,81 @@ function renderPaginas() {
       await abrirEditor(currentTestId);
     })
   );
+  wrap.querySelectorAll(".btn-pregunta-editar").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      editandoPreguntas.add(Number(btn.dataset.preguntaId));
+      renderPaginas();
+    })
+  );
+  wrap.querySelectorAll(".btn-pregunta-cancelar").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      editandoPreguntas.delete(Number(btn.dataset.preguntaId));
+      renderPaginas();
+    })
+  );
+  wrap.querySelectorAll(".btn-pregunta-guardar").forEach((btn) =>
+    btn.addEventListener("click", async () => {
+      const preguntaId = Number(btn.dataset.preguntaId);
+      const item = wrap.querySelector(`.pregunta-item[data-pregunta-id="${preguntaId}"]`);
+      const etiqueta = item.querySelector(".pregunta-edit-etiqueta").value.trim();
+      if (!etiqueta) {
+        alert("Escribe el enunciado de la pregunta.");
+        return;
+      }
+      const obligatoria = item.querySelector(".pregunta-edit-obligatoria").checked;
+      const mostrarDashboard = item.querySelector(".pregunta-edit-dashboard").checked;
+      const editorOpciones = item.querySelector(".pregunta-edit-opciones .opciones-editor");
+      const opciones = editorOpciones ? leerOpciones(editorOpciones) : [];
+      if (editorOpciones && opciones.length < 2) {
+        alert("Escribe al menos 2 opciones.");
+        return;
+      }
+      const res = await fetch(`${AUTH_API_BASE}/encuestas/preguntas/${preguntaId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tipo: item.dataset.tipo, etiqueta, obligatoria, opciones, mostrar_dashboard: mostrarDashboard }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || "No se pudo guardar la pregunta.");
+        return;
+      }
+      editandoPreguntas.delete(preguntaId);
+      await abrirEditor(currentTestId);
+    })
+  );
+  wrap.querySelectorAll(".nueva-pregunta-tipo").forEach((select) => {
+    select.addEventListener("change", () => {
+      const paginaId = select.dataset.paginaId;
+      const slot = wrap.querySelector(`.nueva-pregunta-opciones[data-pagina-id="${paginaId}"]`);
+      slot.innerHTML = opcionesEditorHTML(select.value, null);
+      bindOpcionesEditor(slot);
+      const dashboardChk = wrap.querySelector(`.nueva-pregunta-dashboard[data-pagina-id="${paginaId}"]`);
+      dashboardChk.checked = mostrarDashboardPorDefecto(select.value);
+    });
+  });
   wrap.querySelectorAll(".btn-agregar-pregunta").forEach((btn) =>
     btn.addEventListener("click", async () => {
       const paginaId = btn.dataset.paginaId;
       const tipo = wrap.querySelector(`.nueva-pregunta-tipo[data-pagina-id="${paginaId}"]`).value;
       const etiqueta = wrap.querySelector(`.nueva-pregunta-etiqueta[data-pagina-id="${paginaId}"]`).value.trim();
       const obligatoria = wrap.querySelector(`.nueva-pregunta-obligatoria[data-pagina-id="${paginaId}"]`).checked;
+      const mostrarDashboard = wrap.querySelector(`.nueva-pregunta-dashboard[data-pagina-id="${paginaId}"]`).checked;
       if (!etiqueta) {
         alert("Escribe el enunciado de la pregunta.");
         return;
       }
-      let opciones = [];
-      if (tipo === "opcion_multiple") {
-        const texto = prompt("Escribe las opciones separadas por coma:");
-        opciones = (texto || "").split(",").map((o) => o.trim()).filter(Boolean);
-      } else if (tipo === "prioridad") {
-        const texto = prompt("Escribe las afirmaciones a ordenar, separadas por coma (orden inicial = el que verá el candidato):");
-        opciones = (texto || "").split(",").map((o) => o.trim()).filter(Boolean);
-        if (opciones.length < 2) {
-          alert("Escribe al menos 2 afirmaciones para poder ordenarlas.");
-          return;
-        }
+      const slot = wrap.querySelector(`.nueva-pregunta-opciones[data-pagina-id="${paginaId}"]`);
+      const editorOpciones = slot.querySelector(".opciones-editor");
+      const opciones = editorOpciones ? leerOpciones(editorOpciones) : [];
+      if (editorOpciones && opciones.length < 2) {
+        alert("Escribe al menos 2 opciones.");
+        return;
       }
       const res = await fetch(`${AUTH_API_BASE}/encuestas/paginas/${paginaId}/preguntas`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tipo, etiqueta, obligatoria, opciones }),
+        body: JSON.stringify({ tipo, etiqueta, obligatoria, opciones, mostrar_dashboard: mostrarDashboard }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));

@@ -37,6 +37,7 @@ class PreguntaIn(BaseModel):
     etiqueta: str
     obligatoria: bool = True
     opciones: list[str] = []
+    mostrar_dashboard: bool = False
 
 
 class RespuestaIn(BaseModel):
@@ -166,7 +167,9 @@ def add_pregunta_route(pagina_id: int, body: PreguntaIn, _user: dict = Depends(r
     if not body.etiqueta.strip():
         raise HTTPException(status_code=400, detail="El enunciado de la pregunta es obligatorio")
     try:
-        pregunta_id = encuestas_module.add_pregunta(pagina_id, body.tipo, body.etiqueta, body.obligatoria, body.opciones)
+        pregunta_id = encuestas_module.add_pregunta(
+            pagina_id, body.tipo, body.etiqueta, body.obligatoria, body.opciones, body.mostrar_dashboard
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True, "id": pregunta_id}
@@ -174,7 +177,7 @@ def add_pregunta_route(pagina_id: int, body: PreguntaIn, _user: dict = Depends(r
 
 @router.put("/preguntas/{pregunta_id}")
 def update_pregunta_route(pregunta_id: int, body: PreguntaIn, _user: dict = Depends(require_tests)):
-    encuestas_module.update_pregunta(pregunta_id, body.etiqueta, body.obligatoria, body.opciones)
+    encuestas_module.update_pregunta(pregunta_id, body.etiqueta, body.obligatoria, body.opciones, body.mostrar_dashboard)
     return {"ok": True}
 
 
