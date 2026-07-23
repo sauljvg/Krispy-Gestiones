@@ -171,7 +171,7 @@ MAP_STJ = [
      "targetComp": "Capacidad de análisis", "scenarioName": "Caso Análisis Pedido", "targetValueCheck": "Determinación"},
     {"colTitle": ["teatro", "interrumpiendo", "constantemente"],
      "key": ["indicaciones", "breves", "atiendo", "inversion", "anote", "dudas", "observe"],
-     "targetComp": "Liderazgo", "scenarioName": "Caso Liderazgo", "targetValueCheck": "Liderazgo"},
+     "targetComp": "Liderazgo", "scenarioName": "Caso Liderazgo", "targetValueCheck": "Determinación"},
     {"colTitle": ["bandeja", "incorrecto"], "key": ["aviso", "limpio", "erratas", "disculpas", "envio"],
      "targetComp": "Responsabilidad", "scenarioName": "Caso Error/Bandeja", "targetValueCheck": "Integridad"},
     {"colTitle": ["afluencia", "humanamente"], "key": ["mantengo", "calma", "quedo", "extra", "terminar"],
@@ -379,7 +379,11 @@ def calcular(filas, columnas_extra=None):
         alerts = []
         for m in MAP_STJ:
             target_val = m.get("targetValueCheck")
-            if target_val and stj_tracker[m["targetComp"]]["evaluated"]:
+            # target_val debe ser uno de los 4 VALORES (no una competencia) —
+            # esta comprobación evita que un futuro error de tipeo en
+            # targetValueCheck tumbe todo el cálculo de puntuación en vez de
+            # simplemente no generar esa alerta concreta.
+            if target_val and target_val in final_val_scores and stj_tracker[m["targetComp"]]["evaluated"]:
                 val_score = final_val_scores[target_val]
                 tr = stj_tracker[m["targetComp"]]
                 if val_score >= LIKERT_THRESHOLD_FOR_LIE and not tr["passed"]:

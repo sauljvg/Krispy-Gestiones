@@ -9,10 +9,16 @@
 <style>
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
+  /* Esta página siempre es clara a propósito (foto de fondo + tarjeta
+     blanca, como Microsoft Forms), sin importar el tema oscuro/claro que
+     el candidato tenga guardado de haber visitado antes el panel interno
+     — por eso el color va explícito y no hereda var(--text-primary) del
+     hoja de estilos compartida (esa sí cambia con el tema). */
   body {
     margin: 0; min-height: 100vh; font-family: "Brandon Grotesque", system-ui, sans-serif;
     background: #f5f0e8 center / cover no-repeat fixed;
     display: flex; align-items: center; justify-content: center; padding: 24px 12px;
+    color: #222;
   }
   body.con-fondo { background-image: var(--fondo-url); }
   .encuesta-card {
