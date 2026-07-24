@@ -33,10 +33,73 @@
   .tanda-body { padding: 4px 18px 14px; }
   .candidato-card { background: var(--surface-page); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 12px; }
   .candidato-card:last-child { margin-bottom: 0; }
-  .candidato-card h3 { margin: 0 0 4px; font-size: 16px; }
+  .candidato-card h3 { margin: 0 0 4px; font-size: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .candidato-meta { color: var(--text-secondary); font-size: 12px; margin-bottom: 12px; }
   .candidato-datos { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 16px; font-size: 13px; }
   .candidato-datos .campo-nombre { color: var(--text-muted); font-size: 11px; }
+  .candidato-acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .candidato-notas { margin-top: 10px; }
+  .candidato-notas textarea {
+    width: 100%; min-height: 44px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-primary); font-size: 13px; font-family: inherit; box-sizing: border-box;
+  }
+
+  .badge-estado { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .badge-pendiente { background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-secondary); }
+  .badge-entrevistado { background: color-mix(in srgb, var(--series-blue) 18%, transparent); color: var(--series-blue); }
+  .badge-contratado { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
+  .badge-descartado { background: color-mix(in srgb, var(--status-critical) 16%, transparent); color: var(--status-critical); }
+
+  .reclu-candidatos-wrap { margin-bottom: 30px; }
+  .candidatos-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+  .candidatos-toolbar input, .candidatos-toolbar select {
+    padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 13px;
+  }
+  .candidatos-toolbar input { flex: 1; min-width: 160px; }
+  .candidatos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .candidato-mini-card {
+    background: var(--surface-page); border: 1px solid var(--border); border-radius: 12px; padding: 14px;
+    cursor: pointer; transition: border-color 0.15s;
+  }
+  .candidato-mini-card:hover { border-color: var(--series-blue); }
+  .candidato-mini-card h4 { margin: 0 0 4px; font-size: 14px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .candidato-mini-card p { margin: 2px 0; font-size: 12px; color: var(--text-secondary); }
+
+  .candidato-form { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+  .candidato-form h3 { margin-top: 0; }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 14px; margin-bottom: 12px; }
+  .form-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+  .form-field input, .form-field select, .form-field textarea {
+    width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 13px; font-family: inherit; box-sizing: border-box;
+  }
+  .form-field-full { grid-column: 1 / -1; }
+  .form-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .subir-cv-row { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .extraccion-aviso { font-size: 12px; padding: 8px 10px; border-radius: 8px; margin-bottom: 12px; }
+  .extraccion-aviso.local { background: color-mix(in srgb, var(--status-warning) 18%, transparent); color: #9a6b00; }
+  .extraccion-aviso.gemini { background: color-mix(in srgb, var(--status-good) 14%, transparent); color: var(--status-good); }
+  .extra-editor { display: flex; flex-direction: column; gap: 6px; }
+  .extra-editor-row { display: flex; gap: 6px; }
+  .extra-editor-row input { flex: 1; }
+  .archivos-lista { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px; }
+  .archivos-lista a { font-size: 13px; }
+
+  .badge-vacante-estado { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .badge-abierta { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
+  .badge-cubierta { background: color-mix(in srgb, var(--series-blue) 18%, transparent); color: var(--series-blue); }
+  .badge-cancelada { background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-secondary); }
+  .vacante-mini-card {
+    background: var(--surface-page); border: 1px solid var(--border); border-radius: 12px; padding: 14px;
+    cursor: pointer; transition: border-color 0.15s;
+  }
+  .vacante-mini-card:hover { border-color: var(--series-blue); }
+  .vacante-mini-card.activa { border-color: var(--series-blue); box-shadow: 0 0 0 2px color-mix(in srgb, var(--series-blue) 20%, transparent); }
+  .vacante-mini-card h4 { margin: 0 0 4px; font-size: 14px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .vacante-mini-card p { margin: 2px 0; font-size: 12px; color: var(--text-secondary); }
+  .vacante-form { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+  .vacante-form h3 { margin-top: 0; }
 </style>
 </head>
 <body>
@@ -63,11 +126,48 @@
     </div>
   </header>
 
-  <div class="compartidos-wrap" id="compartidos-list"></div>
+  <div class="compartidos-wrap">
+    <div class="reclu-candidatos-wrap" id="reclu-candidatos-wrap" hidden>
+      <h2 class="reclu-seccion">Vacantes</h2>
+      <p class="staff-hint">Agrupa candidatos bajo una solicitud de reclutamiento concreta (puesto + centro) para hacer seguimiento de cuánto lleva abierta.</p>
+      <div class="candidatos-toolbar">
+        <select id="vacantes-filtro-estado">
+          <option value="abierta">Abiertas</option>
+          <option value="">Todas</option>
+          <option value="cubierta">Cubiertas</option>
+          <option value="cancelada">Canceladas</option>
+        </select>
+        <button id="btn-nueva-vacante" class="btn btn-primary" type="button">＋ Nueva vacante</button>
+      </div>
+      <div id="vacantes-grid" class="candidatos-grid"></div>
+      <div id="vacante-form-wrap"></div>
+
+      <h2 class="reclu-seccion">Base de candidatos</h2>
+      <div class="candidatos-toolbar">
+        <input type="text" id="candidatos-buscar" placeholder="Buscar por nombre, teléfono, email o puesto...">
+        <select id="candidatos-filtro-estado">
+          <option value="">Todos los estados</option>
+          <option value="pendiente">Pendiente</option>
+          <option value="entrevistado">Entrevistado</option>
+          <option value="contratado">Contratado</option>
+          <option value="descartado">Descartado</option>
+        </select>
+        <select id="candidatos-filtro-vacante">
+          <option value="">Todos los candidatos</option>
+          <option value="sin_vacante">Sin vacante asignada</option>
+        </select>
+        <button id="btn-nuevo-candidato" class="btn btn-primary" type="button">＋ Nuevo candidato</button>
+      </div>
+      <div id="candidatos-grid" class="candidatos-grid"></div>
+      <div id="form-wrap"></div>
+    </div>
+
+    <div id="compartidos-list"></div>
+  </div>
 </div>
-<script src="js/theme.js?v=20260723g"></script>
-<script src="js/auth-common.js?v=20260723g"></script>
-<script src="js/topbar-menu.js?v=20260723g"></script>
-<script src="js/compartidos.js?v=20260723g"></script>
+<script src="js/theme.js?v=20260724a"></script>
+<script src="js/auth-common.js?v=20260724a"></script>
+<script src="js/topbar-menu.js?v=20260724a"></script>
+<script src="js/compartidos.js?v=20260724a"></script>
 </body>
 </html>

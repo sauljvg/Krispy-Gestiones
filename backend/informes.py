@@ -5,6 +5,7 @@ import os
 
 from openpyxl import load_workbook
 
+import reclutamiento as reclutamiento_module
 import scoring_valores
 from db import get_connection
 
@@ -113,6 +114,15 @@ def ensure_informe_tables():
     # existentes son todos de Krispy Kreme, de ahí el default.
     if "empresa" not in cols_tipos:
         conn.execute("ALTER TABLE informe_tipos ADD COLUMN empresa TEXT NOT NULL DEFAULT 'kk'")
+
+    # candidato_id enlaza cada "compartido" con su ficha en candidatos
+    # (backend/reclutamiento.py) — se rellena al compartir (ver
+    # compartir_respuestas). Las filas de antes de esta columna se resuelven
+    # también en compartir_respuestas la próxima vez que se vuelvan a
+    # compartir; mientras tanto quedan como NULL sin romper nada.
+    cols_compartidos = {row[1] for row in conn.execute("PRAGMA table_info(informe_compartidos)")}
+    if "candidato_id" not in cols_compartidos:
+        conn.execute("ALTER TABLE informe_compartidos ADD COLUMN candidato_id INTEGER REFERENCES candidatos(id)")
 
     _migrate_legacy_respuestas(conn)
 
@@ -611,20 +621,54 @@ def guardar_cv(respuesta_id, archivo_nombre, contenido):
     conn.close()
 
 
+def _candidato_id_para_respuesta(respuesta_id, compartido_por):
+    """Devuelve el candidato ya asociado a esta respuesta o crea uno nuevo
+    (origen='informe'), mapeando datos_json a los campos conocidos del
+    candidato (ver reclutamiento.mapear_datos_a_candidato) y enlazando el CV
+    ya subido, si lo hay. Así "compartir" deja una ficha real y editable en
+    vez de una vista de solo lectura del Excel."""
+    existente = reclutamiento_module.get_candidato_por_respuesta(respuesta_id)
+    if existente is not None:
+        return existente
+
+    respuesta = get_respuesta(respuesta_id)
+    if respuesta is None:
+        raise ValueError("Respuesta no encontrada")
+
+    conn = get_connection()
+    tipo_row = conn.execute("SELECT empresa FROM informe_tipos WHERE id = ?", (respuesta["tipo_id"],)).fetchone()
+    conn.close()
+    empresa = tipo_row["empresa"] if tipo_row else "kk"
+
+    datos = json.loads(respuesta["datos_json"])
+    campos, extra = reclutamiento_module.mapear_datos_a_candidato(datos)
+    campos["extra_fields"] = extra
+    candidato_id = reclutamiento_module.crear_candidato(
+        campos, empresa=empresa, origen="informe", respuesta_id=respuesta_id, creado_por=compartido_por
+    )
+    if respuesta["cv_ruta"]:
+        reclutamiento_module.registrar_archivo_existente(
+            candidato_id, respuesta["cv_nombre_original"] or "cv", respuesta["cv_ruta"]
+        )
+    return candidato_id
+
+
 def compartir_respuestas(respuesta_ids, usuario_id, compartido_por):
     conn = get_connection()
     for rid in respuesta_ids:
+        candidato_id = _candidato_id_para_respuesta(rid, compartido_por)
         # Upsert en vez de INSERT OR IGNORE: si ya se había compartido antes,
         # volver a compartir debe refrescar la fecha (y quién lo hizo), para
         # que el orden de Reclutamiento refleje la última vez que se compartió.
         conn.execute(
             """
-            INSERT INTO informe_compartidos (respuesta_id, usuario_id, compartido_por)
-            VALUES (?, ?, ?)
+            INSERT INTO informe_compartidos (respuesta_id, usuario_id, compartido_por, candidato_id)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(respuesta_id, usuario_id)
-            DO UPDATE SET compartido_por = excluded.compartido_por, compartido_en = datetime('now')
+            DO UPDATE SET compartido_por = excluded.compartido_por, compartido_en = datetime('now'),
+                          candidato_id = excluded.candidato_id
             """,
-            (rid, usuario_id, compartido_por),
+            (rid, usuario_id, compartido_por, candidato_id),
         )
     conn.commit()
     conn.close()
@@ -678,12 +722,15 @@ def get_compartidos_con(usuario_id, empresa=None):
         clauses.append("t.empresa = ?")
         params.append(empresa)
     rows = conn.execute(f"""
-        SELECT c.id AS compartido_id, c.compartido_en, c.compartido_por,
+        SELECT c.id AS compartido_id, c.compartido_en, c.compartido_por, c.candidato_id,
                r.id AS respuesta_id, r.datos_json, r.hoja, r.cv_ruta, r.cv_nombre_original,
-               t.nombre AS tipo_nombre, t.clave AS tipo_clave
+               t.nombre AS tipo_nombre, t.clave AS tipo_clave,
+               cand.estado AS candidato_estado, cand.notas AS candidato_notas,
+               cand.telefono AS candidato_telefono, cand.puesto_solicitado AS candidato_puesto
         FROM informe_compartidos c
         JOIN informe_respuestas r ON r.id = c.respuesta_id
         JOIN informe_tipos t ON t.id = r.tipo_id
+        LEFT JOIN candidatos cand ON cand.id = c.candidato_id
         WHERE {' AND '.join(clauses)}
         ORDER BY c.compartido_en DESC
     """, params).fetchall()
@@ -701,6 +748,11 @@ def get_compartidos_con(usuario_id, empresa=None):
             "cv_nombre": row["cv_nombre_original"],
             "tipo_nombre": row["tipo_nombre"],
             "tipo_clave": row["tipo_clave"],
+            "candidato_id": row["candidato_id"],
+            "estado": row["candidato_estado"],
+            "notas": row["candidato_notas"],
+            "telefono": row["candidato_telefono"],
+            "puesto_solicitado": row["candidato_puesto"],
         })
     return resultado
 
@@ -716,14 +768,17 @@ def get_compartidos_por(username, empresa=None):
         clauses.append("t.empresa = ?")
         params.append(empresa)
     rows = conn.execute(f"""
-        SELECT c.id AS compartido_id, c.compartido_en, c.compartido_por,
+        SELECT c.id AS compartido_id, c.compartido_en, c.compartido_por, c.candidato_id,
                u.nombre AS destinatario_nombre, u.username AS destinatario_username,
                r.id AS respuesta_id, r.datos_json, r.hoja, r.cv_ruta, r.cv_nombre_original,
-               t.nombre AS tipo_nombre, t.clave AS tipo_clave
+               t.nombre AS tipo_nombre, t.clave AS tipo_clave,
+               cand.estado AS candidato_estado, cand.notas AS candidato_notas,
+               cand.telefono AS candidato_telefono, cand.puesto_solicitado AS candidato_puesto
         FROM informe_compartidos c
         JOIN informe_respuestas r ON r.id = c.respuesta_id
         JOIN informe_tipos t ON t.id = r.tipo_id
         JOIN usuarios u ON u.id = c.usuario_id
+        LEFT JOIN candidatos cand ON cand.id = c.candidato_id
         WHERE {' AND '.join(clauses)}
         ORDER BY c.compartido_en DESC
     """, params).fetchall()
@@ -742,6 +797,11 @@ def get_compartidos_por(username, empresa=None):
             "cv_nombre": row["cv_nombre_original"],
             "tipo_nombre": row["tipo_nombre"],
             "tipo_clave": row["tipo_clave"],
+            "candidato_id": row["candidato_id"],
+            "estado": row["candidato_estado"],
+            "notas": row["candidato_notas"],
+            "telefono": row["candidato_telefono"],
+            "puesto_solicitado": row["candidato_puesto"],
         })
     return resultado
 

@@ -27,6 +27,7 @@ from encuestas_routes import router as encuestas_router
 from encuestas_routes import router_publico as encuestas_router_publico
 from entrevistas_routes import router as entrevistas_router
 from informes_routes import router as informes_router
+from reclutamiento_routes import router as reclutamiento_router
 from request_context import tiendas_permitidas_actual
 from routes import router
 
@@ -76,6 +77,7 @@ async def no_cachear_estaticos(request, call_next):
 # endpoint de esos routers.
 app.include_router(auth_router, prefix="/api/auth")
 app.include_router(informes_router, prefix="/api/informes")
+app.include_router(reclutamiento_router, prefix="/api/reclutamiento")
 app.include_router(clima_router, prefix="/api/clima")
 app.include_router(entrevistas_router, prefix="/api/entrevistas")
 app.include_router(boletines_router, prefix="/api/boletines")

@@ -134,30 +134,55 @@ function moverPrioridad(ol, idx, direccion) {
   bindPrioridadBotones(ol);
 }
 
+// Las preguntas de escala guardan la etiqueta completa "Categoria.Pregunta"
+// (KK) o "Preámbulo: [Pregunta]" (Saona) porque entrevistas.py necesita ese
+// formato exacto para agrupar por bloque en el informe — pero mostrarla tal
+// cual en cada fila de la tabla repite el nombre del bloque en todas las
+// preguntas. Aquí se deriva solo la parte "pregunta" para el candidato; lo
+// que se envía al guardar sigue siendo el valor de la escala, no el texto.
+function etiquetaVisible(q) {
+  if (q.tipo !== "likert") return q.etiqueta;
+  const mSaona = q.etiqueta.match(/^(.*?):\s*\[(.+)\]\s*$/);
+  if (mSaona) return mSaona[2].trim();
+  const punto = q.etiqueta.indexOf(".");
+  if (punto !== -1 && q.etiqueta.slice(punto + 1).trim().length > 3) {
+    return q.etiqueta.slice(punto + 1).trim();
+  }
+  return q.etiqueta;
+}
+
 const LIKERT_OPCIONES_DEFAULT = [
   "Totalmente en desacuerdo", "En desacuerdo", "Ni de acuerdo ni en desacuerdo", "De acuerdo", "Totalmente de acuerdo",
 ];
 
 function renderGrupoLikert(preguntas) {
-  // El puntaje enviado es SIEMPRE la posición (1-5), nunca el texto de la
-  // leyenda — así cada pregunta de escala puede tener sus propias etiquetas
-  // sin arriesgar la puntuación. Todas las preguntas del grupo comparten la
-  // escala de la primera (es una sola tabla con un encabezado compartido).
+  // El puntaje enviado es SIEMPRE la posición ORIGINAL en `escala` (1-5),
+  // nunca el texto de la leyenda — así cada pregunta de escala puede tener
+  // sus propias etiquetas sin arriesgar la puntuación. Todas las preguntas
+  // del grupo comparten la escala de la primera (es una sola tabla con un
+  // encabezado compartido).
   const escala = preguntas[0].opciones && preguntas[0].opciones.length === 5 ? preguntas[0].opciones : LIKERT_OPCIONES_DEFAULT;
+  // Orden visual: "Totalmente de acuerdo" a la izquierda, "Totalmente en
+  // desacuerdo" a la derecha (ley general para todos los Likert) — se
+  // invierte solo el ORDEN DE PINTADO de las columnas, nunca el valor que
+  // viaja en cada radio (sigue siendo la posición original +1), para no
+  // romper la puntuación ya calculada sobre respuestas anteriores a este
+  // cambio.
+  const ordenVisual = escala.map((_, i) => i).reverse();
   const filas = preguntas
     .map(
       (q) => `
     <tr data-pregunta-id="${q.id}">
-      <td class="likert-etiqueta">${escapeHTML(q.etiqueta)}${q.obligatoria ? ' <span class="req">*</span>' : ""}</td>
-      ${escala.map(
-        (_, i) => `<td><input type="radio" name="pregunta-${q.id}" value="${i + 1}" ${respuestas[q.id] === String(i + 1) ? "checked" : ""}></td>`
+      <td class="likert-etiqueta">${escapeHTML(etiquetaVisible(q))}${q.obligatoria ? ' <span class="req">*</span>' : ""}</td>
+      ${ordenVisual.map(
+        (i) => `<td><input type="radio" name="pregunta-${q.id}" value="${i + 1}" ${respuestas[q.id] === String(i + 1) ? "checked" : ""}></td>`
       ).join("")}
     </tr>`
     )
     .join("");
   return `
     <table class="likert-tabla">
-      <thead><tr><th></th>${escala.map((op) => `<th>${escapeHTML(op)}</th>`).join("")}</tr></thead>
+      <thead><tr><th></th>${ordenVisual.map((i) => `<th>${escapeHTML(escala[i])}</th>`).join("")}</tr></thead>
       <tbody>${filas}</tbody>
     </table>`;
 }

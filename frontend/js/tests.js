@@ -46,7 +46,13 @@ async function loadTests() {
   });
 }
 
-async function abrirEditor(testId) {
+// scroll=false se usa para refrescos "en el sitio" tras guardar algo dentro
+// de un test que ya está abierto (guardar campos, mover/borrar una página o
+// pregunta, etc.) — así el admin puede seguir editando sin que la pantalla
+// salte arriba en cada acción, como si recargara toda la página. scroll=true
+// (por defecto) se mantiene para abrir el editor por primera vez (desde la
+// lista o "Nuevo test"), donde sí conviene llevar la vista hacia la tarjeta.
+async function abrirEditor(testId, { scroll = true } = {}) {
   if (testId !== currentTestId) editandoPreguntas.clear();
   currentTestId = testId;
   const editorCard = document.getElementById("editor-card");
@@ -94,7 +100,7 @@ async function abrirEditor(testId) {
     document.getElementById("btn-nueva-pagina").hidden = true;
     document.getElementById("paginas-wrap").innerHTML = "";
   }
-  editorCard.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (scroll) editorCard.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function cerrarEditor() {
@@ -142,13 +148,13 @@ async function guardarTest() {
     return;
   }
   await loadTests();
-  await abrirEditor(currentTestId);
+  await abrirEditor(currentTestId, { scroll: false });
 }
 
 async function publicarTest(publicar) {
   await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/${publicar ? "publicar" : "despublicar"}`, { method: "POST" });
   await loadTests();
-  await abrirEditor(currentTestId);
+  await abrirEditor(currentTestId, { scroll: false });
 }
 
 async function eliminarTest() {
@@ -167,7 +173,7 @@ async function subirFondo(file) {
     alert(err.detail || "No se pudo subir la imagen.");
     return;
   }
-  await abrirEditor(currentTestId);
+  await abrirEditor(currentTestId, { scroll: false });
 }
 
 const TIPOS_PREGUNTA_LABELS = {
@@ -198,6 +204,23 @@ function mostrarDashboardPorDefecto(tipo) {
 }
 
 const editandoPreguntas = new Set();
+
+// Las preguntas de escala guardan la etiqueta completa "Categoria.Pregunta"
+// (KK) o "Preámbulo: [Pregunta]" (Saona) porque entrevistas.py necesita ese
+// formato exacto para agrupar por bloque en el informe — pero mostrar ese
+// texto completo en cada fila de la lista repite el nombre del bloque en
+// todas las preguntas. Aquí se deriva solo la parte "pregunta" para
+// mostrarla en el listado; el valor guardado/editado no cambia.
+function etiquetaVisible(q) {
+  if (q.tipo !== "likert") return q.etiqueta;
+  const mSaona = q.etiqueta.match(/^(.*?):\s*\[(.+)\]\s*$/);
+  if (mSaona) return mSaona[2].trim();
+  const punto = q.etiqueta.indexOf(".");
+  if (punto !== -1 && q.etiqueta.slice(punto + 1).trim().length > 3) {
+    return q.etiqueta.slice(punto + 1).trim();
+  }
+  return q.etiqueta;
+}
 
 function opcionesEditorHTML(tipo, opciones) {
   if (tipo === "likert") {
@@ -365,7 +388,7 @@ function renderPaginas() {
           <div class="pregunta-item" data-pregunta-id="${q.id}">
             <div class="pregunta-row" data-pregunta-id="${q.id}">
               <span class="tipo-badge">${TIPOS_PREGUNTA_LABELS[q.tipo] || q.tipo}</span>
-              <span class="etiqueta-txt">${escapeHTML(q.etiqueta)}</span>
+              <span class="etiqueta-txt">${escapeHTML(etiquetaVisible(q))}</span>
               <span class="obligatoria-txt">${q.obligatoria ? "obligatoria" : "opcional"}</span>
               ${q.mostrar_dashboard ? `<span class="dashboard-badge" title="Esta respuesta aparece en el dashboard de resultados">📊 dashboard</span>` : ""}
               <span class="pregunta-acciones">
@@ -405,7 +428,7 @@ function renderPaginas() {
   wrap.querySelectorAll(".pagina-condicion-pregunta").forEach((select) => {
     select.addEventListener("change", async () => {
       await guardarCondicionPagina(select.dataset.paginaId);
-      await abrirEditor(currentTestId);
+      await abrirEditor(currentTestId, { scroll: false });
     });
   });
   wrap.querySelectorAll(".pagina-condicion-valor").forEach((chk) => {
@@ -417,39 +440,39 @@ function renderPaginas() {
   wrap.querySelectorAll(".btn-pagina-subir").forEach((btn) =>
     btn.addEventListener("click", async () => {
       await fetch(`${AUTH_API_BASE}/encuestas/paginas/${btn.dataset.paginaId}/mover-arriba`, { method: "POST" });
-      await abrirEditor(currentTestId);
+      await abrirEditor(currentTestId, { scroll: false });
     })
   );
   wrap.querySelectorAll(".btn-pagina-bajar").forEach((btn) =>
     btn.addEventListener("click", async () => {
       await fetch(`${AUTH_API_BASE}/encuestas/paginas/${btn.dataset.paginaId}/mover-abajo`, { method: "POST" });
-      await abrirEditor(currentTestId);
+      await abrirEditor(currentTestId, { scroll: false });
     })
   );
   wrap.querySelectorAll(".btn-pagina-borrar").forEach((btn) =>
     btn.addEventListener("click", async () => {
       if (!confirm("¿Eliminar esta página y sus preguntas?")) return;
       await fetch(`${AUTH_API_BASE}/encuestas/paginas/${btn.dataset.paginaId}`, { method: "DELETE" });
-      await abrirEditor(currentTestId);
+      await abrirEditor(currentTestId, { scroll: false });
     })
   );
   wrap.querySelectorAll(".btn-pregunta-subir").forEach((btn) =>
     btn.addEventListener("click", async () => {
       await fetch(`${AUTH_API_BASE}/encuestas/preguntas/${btn.dataset.preguntaId}/mover-arriba`, { method: "POST" });
-      await abrirEditor(currentTestId);
+      await abrirEditor(currentTestId, { scroll: false });
     })
   );
   wrap.querySelectorAll(".btn-pregunta-bajar").forEach((btn) =>
     btn.addEventListener("click", async () => {
       await fetch(`${AUTH_API_BASE}/encuestas/preguntas/${btn.dataset.preguntaId}/mover-abajo`, { method: "POST" });
-      await abrirEditor(currentTestId);
+      await abrirEditor(currentTestId, { scroll: false });
     })
   );
   wrap.querySelectorAll(".btn-pregunta-borrar").forEach((btn) =>
     btn.addEventListener("click", async () => {
       if (!confirm("¿Eliminar esta pregunta?")) return;
       await fetch(`${AUTH_API_BASE}/encuestas/preguntas/${btn.dataset.preguntaId}`, { method: "DELETE" });
-      await abrirEditor(currentTestId);
+      await abrirEditor(currentTestId, { scroll: false });
     })
   );
   wrap.querySelectorAll(".btn-pregunta-editar").forEach((btn) =>
@@ -492,7 +515,7 @@ function renderPaginas() {
         return;
       }
       editandoPreguntas.delete(preguntaId);
-      await abrirEditor(currentTestId);
+      await abrirEditor(currentTestId, { scroll: false });
     })
   );
   wrap.querySelectorAll(".nueva-pregunta-tipo").forEach((select) => {
@@ -533,7 +556,7 @@ function renderPaginas() {
         alert(err.detail || "No se pudo añadir la pregunta.");
         return;
       }
-      await abrirEditor(currentTestId);
+      await abrirEditor(currentTestId, { scroll: false });
     })
   );
 }
@@ -544,7 +567,7 @@ async function agregarPagina() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ instrucciones: "" }),
   });
-  await abrirEditor(currentTestId);
+  await abrirEditor(currentTestId, { scroll: false });
 }
 
 async function verRespuestas() {
