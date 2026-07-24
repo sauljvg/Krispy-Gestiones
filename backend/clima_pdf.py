@@ -450,10 +450,10 @@ def generar_pdf(reporte, empresa="kk"):
             texto_izq = f'{i["pregunta"]} — {i["top2box"]}% de acuerdo'
         if idx < len(reporte["oportunidades"]):
             i = reporte["oportunidades"][idx]
-            if i.get("bottom2box", 0) > 0:
-                texto_der = f'{i["pregunta"]} — {i["bottom2box"]}% en desacuerdo'
-            else:
-                texto_der = f'{i["pregunta"]} — {i["top2box"]}% de acuerdo'
+            # Espejo negativo del top2box de fortalezas (En desacuerdo +
+            # Totalmente en desacuerdo) — un plan de acción no debe mostrar
+            # un % "de acuerdo" aunque el desacuerdo real sea bajo.
+            texto_der = f'{i["pregunta"]} — {i["bottom2box"]}% en desacuerdo'
 
         # Cada chip es su propia mini-tabla con fondo de color — sin forzar
         # la misma altura explícita en los dos, el par de una fila quedaba

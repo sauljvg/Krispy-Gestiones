@@ -827,6 +827,17 @@ def quitar_match_manual(respuesta_id):
     conn.close()
 
 
+def borrar_respuesta(respuesta_id):
+    """Elimina una respuesta de Entrevista de Salida por completo (p.ej. un
+    registro de prueba) — junto con su vínculo manual a una salida si tenía
+    uno, para no dejar una fila huérfana en entrevistas_matches_manual."""
+    conn = get_connection()
+    conn.execute("DELETE FROM entrevistas_matches_manual WHERE respuesta_id = ?", (respuesta_id,))
+    conn.execute("DELETE FROM entrevistas_respuestas WHERE id = ?", (respuesta_id,))
+    conn.commit()
+    conn.close()
+
+
 def add_salida(oleada_id, centro, nombre, fecha_baja):
     """Registra una salida real a mano, sin depender del Excel de "Salidas
     Totales" — sirve tanto para dar de alta a alguien que no vino en la hoja

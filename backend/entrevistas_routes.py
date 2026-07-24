@@ -108,6 +108,12 @@ def borrar_match_route(oleada_id: int, respuesta_id: int, _user: dict = Depends(
     return {"ok": True}
 
 
+@router.delete("/{oleada_id}/respuestas/{respuesta_id}")
+def borrar_respuesta_route(oleada_id: int, respuesta_id: int, _user: dict = Depends(require_entrevistas_oleada)):
+    entrevistas_module.borrar_respuesta(respuesta_id)
+    return {"ok": True}
+
+
 @router.get("/{oleada_id}/reporte.pdf")
 def reporte_pdf_route(oleada_id: int, centro: str | None = None, _user: dict = Depends(require_entrevistas_oleada)):
     try:

@@ -351,8 +351,12 @@ async function loadReporte(centro) {
     const f = data.fortalezas[i];
     const o = data.oportunidades[i];
     filasFoHtml += f ? `<span class="fo-chip fo-chip-fortaleza">${escapeHTML(f.pregunta)} — ${f.top2box}% de acuerdo</span>` : "<span></span>";
-    const textoOportunidad = o && o.bottom2box > 0 ? `${o.bottom2box}% en desacuerdo` : o ? `${o.top2box}% de acuerdo` : "";
-    filasFoHtml += o ? `<span class="fo-chip fo-chip-oportunidad">${escapeHTML(o.pregunta)} — ${textoOportunidad}</span>` : "<span></span>";
+    // El "down2box" (En desacuerdo + Totalmente en desacuerdo) es el
+    // espejo negativo del top2box de las fortalezas — un plan de acción no
+    // debe mostrar un % "de acuerdo" (framing positivo), aunque ese % de
+    // desacuerdo real sea bajo o incluso 0 (la pregunta entró aquí por el
+    // resto de la escala: neutral, etc., no por el número que se muestra).
+    filasFoHtml += o ? `<span class="fo-chip fo-chip-oportunidad">${escapeHTML(o.pregunta)} — ${o.bottom2box}% en desacuerdo</span>` : "<span></span>";
   }
   document.getElementById("fo-grid").innerHTML = `
     <h3 class="fo-col-title fo-title-fortaleza">¡Celébralo con el equipo!</h3>

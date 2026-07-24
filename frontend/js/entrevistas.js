@@ -314,6 +314,7 @@ function renderAuditoriaG(items, auditoriaF) {
         </select>
         <button type="button" class="btn-registrar-salida btn-vincular" data-idx="${i}">🔗 Vincular</button>
         <button type="button" class="btn-registrar-salida btn-registrar-nueva" data-idx="${i}">＋ Registrar como salida</button>
+        <button type="button" class="btn-registrar-salida btn-ghost btn-eliminar-respuesta" data-idx="${i}">🗑 Eliminar</button>
       </span>
     </li>`
     )
@@ -333,6 +334,25 @@ function renderAuditoriaG(items, auditoriaF) {
   lista.querySelectorAll(".btn-registrar-nueva").forEach((btn) => {
     btn.addEventListener("click", () => registrarSalidaDesdeAuditoria(items[Number(btn.dataset.idx)]));
   });
+  lista.querySelectorAll(".btn-eliminar-respuesta").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const item = items[Number(btn.dataset.idx)];
+      if (!confirm(`¿Eliminar la respuesta de "${item.nombre}"? Esta acción no se puede deshacer.`)) return;
+      eliminarRespuesta(item.respuesta_id);
+    });
+  });
+}
+
+async function eliminarRespuesta(respuestaId) {
+  const res = await fetch(`${AUTH_API_BASE}/entrevistas/${currentOleada}/respuestas/${respuestaId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "No se pudo eliminar la respuesta.");
+    return;
+  }
+  await loadEvolucion(currentCentro);
 }
 
 async function vincularRespuestaSalida(respuestaId, salidaId) {
