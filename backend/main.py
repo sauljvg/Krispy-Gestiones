@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 import auth as auth_module
+import backups as backups_module
 import scrape_jobs
 from auth_routes import COOKIE_NAME, require_resenas
 from auth_routes import router as auth_router
@@ -90,6 +91,11 @@ app.include_router(router, prefix="/api", dependencies=[Depends(require_resenas)
 @app.on_event("startup")
 def _start_daily_scraper():
     scrape_jobs.start_daily_scheduler()
+
+
+@app.on_event("startup")
+def _start_db_backups():
+    backups_module.start_scheduler()
 
 
 @app.get("/api/health")
