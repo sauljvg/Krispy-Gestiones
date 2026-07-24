@@ -160,7 +160,10 @@ MAP_STJ = [
      "targetComp": "Comunicación", "scenarioName": "Caso Duda/Procedimiento"},
     {"colTitle": ["cobraron", "proveedor", "molesto"], "key": ["solucion", "rapida", "escucho", "desahogarse"],
      "targetComp": "Orientación al cliente", "scenarioName": "Caso Cliente Molesto", "targetValueCheck": "Positividad"},
-    {"colTitle": ["quedandoatras", "atras", "cierre"], "key": ["ayudo", "echo", "mano", "ayudar", "ofrezco"],
+    # "cierre" a secas es demasiado genérico (también aparece en "cierre
+    # definitivo del TPV" de Restaurantes) — se usa la frase completa para
+    # no capturar por error el caso de Arqueo de Caja de más abajo.
+    {"colTitle": ["quedandoatras", "atras", "semanadecierre"], "key": ["ayudo", "echo", "mano", "ayudar", "ofrezco"],
      "targetComp": "Trabajo en equipo", "scenarioName": "Caso Ayuda Compañero", "targetValueCheck": "Generosidad"},
     {"colTitle": ["maquinade", "sistema", "maquina"],
      "key": ["informo", "alternativas", "aviso", "organizar", "papel", "alternativo", "formato"],
@@ -176,6 +179,24 @@ MAP_STJ = [
      "targetComp": "Responsabilidad", "scenarioName": "Caso Error/Bandeja", "targetValueCheck": "Integridad"},
     {"colTitle": ["afluencia", "humanamente"], "key": ["mantengo", "calma", "quedo", "extra", "terminar"],
      "targetComp": "Trabajo bajo presión", "scenarioName": "Caso Sobrecarga", "targetValueCheck": "Determinación"},
+    # A partir de aquí: escenarios propios del cuestionario "SAONA - Restaurantes"
+    # (sala/cocina), que usan un vocabulario distinto al de KK/Oficina de arriba.
+    {"colTitle": ["mancha"], "key": ["servilleta", "impecable"],
+     "targetComp": "Atención al detalle", "scenarioName": "Caso Mancha en el Plato"},
+    {"colTitle": ["desbordado"], "key": ["cobrar", "centrarse"],
+     "targetComp": "Trabajo en equipo", "scenarioName": "Caso Compañero Desbordado", "targetValueCheck": "Generosidad"},
+    {"colTitle": ["agotado"], "key": ["alternativas", "entusiasmo"],
+     "targetComp": "Orientación al cliente", "scenarioName": "Caso Plato Agotado"},
+    {"colTitle": ["arqueo"], "key": ["repasamos", "registrado"],
+     "targetComp": "Responsabilidad", "scenarioName": "Caso Arqueo de Caja", "targetValueCheck": "Integridad"},
+    {"colTitle": ["pidieron"], "key": ["ticket", "impreso"],
+     "targetComp": "Capacidad de análisis", "scenarioName": "Caso Plato Equivocado", "targetValueCheck": "Determinación"},
+    {"colTitle": ["bloqueando"], "key": ["escoba", "reorganizar"],
+     "targetComp": "Liderazgo", "scenarioName": "Caso Copas Rotas", "targetValueCheck": "Determinación"},
+    {"colTitle": ["derrama"], "key": ["mermas", "apunte"],
+     "targetComp": "Responsabilidad", "scenarioName": "Caso Botella Derramada", "targetValueCheck": "Integridad"},
+    {"colTitle": ["concentracion"], "key": ["priorizo", "consciente"],
+     "targetComp": "Trabajo bajo presión", "scenarioName": "Caso Hora Punta", "targetValueCheck": "Determinación"},
 ]
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]")
