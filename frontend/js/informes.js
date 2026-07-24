@@ -20,8 +20,6 @@ function aplicarBrandingEmpresa() {
   document.documentElement.dataset.empresa = "saona";
 }
 
-const LARGO_TEXTO_UMBRAL = 100; // por encima de esto, una columna se oculta por defecto la primera vez
-
 function hiddenColsKey() {
   return `kt-informes-hidden-${currentTipo}-${currentHoja}`;
 }
@@ -29,21 +27,13 @@ function hiddenColsKey() {
 function aplicarPreferenciaColumnas(data) {
   const key = hiddenColsKey();
   const guardado = localStorage.getItem(key);
-  if (guardado !== null) {
-    hiddenCols = new Set(JSON.parse(guardado));
-    return;
-  }
-  // Primera vez que se ve esta hoja: ocultar por defecto las columnas de
-  // texto muy largo (p.ej. "ALERTA DETALLADA"), para que la tabla no se
-  // estire. El usuario puede reactivarlas desde "Columnas" cuando quiera.
-  const porDefecto = new Set();
-  data.columnas.forEach((c) => {
-    const valores = data.respuestas.map((r) => String(r.datos[c] ?? ""));
-    const maximo = valores.reduce((acc, v) => Math.max(acc, v.length), 0);
-    if (maximo > LARGO_TEXTO_UMBRAL) porDefecto.add(c);
-  });
-  hiddenCols = porDefecto;
-  localStorage.setItem(key, JSON.stringify(Array.from(hiddenCols)));
+  // Antes, la primera vez que se veía una hoja se ocultaban por defecto las
+  // columnas de texto muy largo (>100 caracteres) — pensado para "ALERTA
+  // DETALLADA", pero de paso se comía las respuestas de las preguntas
+  // abiertas del Test (que también son texto largo), sin que el usuario se
+  // diera cuenta de que existía el panel "Columnas" para reactivarlas. Ahora
+  // no se oculta nada por defecto — el usuario decide qué ocultar desde ahí.
+  hiddenCols = guardado !== null ? new Set(JSON.parse(guardado)) : new Set();
 }
 
 function guardarPreferenciaColumnas() {
