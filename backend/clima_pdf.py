@@ -313,6 +313,16 @@ CHIP_PAD_H = 12
 CHIP_PAD_V = 9
 
 
+def _texto_oportunidad(i):
+    """Los neutrales cuentan como oportunidad, no solo el desacuerdo real:
+    "De acuerdo" (sin llegar a "Totalmente"), Neutral, En desacuerdo y
+    Totalmente en desacuerdo son todos, en distinto grado, gente que no dio
+    el máximo compromiso — el % que se muestra es todo eso junto
+    (equivalente a 100% − % de "Totalmente de acuerdo")."""
+    pct = round(100 - i["porcentajes"]["Totalmente de acuerdo"], 1)
+    return f'{i["pregunta"]} — {pct}% no muestra acuerdo total'
+
+
 def _altura_texto_chip(texto, estilo):
     """Alto natural que ocupará el texto dentro del chip, para poder igualar
     la altura de los dos chips (fortaleza/oportunidad) de una misma fila."""
@@ -449,11 +459,7 @@ def generar_pdf(reporte, empresa="kk"):
             i = reporte["fortalezas"][idx]
             texto_izq = f'{i["pregunta"]} — {i["top2box"]}% de acuerdo'
         if idx < len(reporte["oportunidades"]):
-            i = reporte["oportunidades"][idx]
-            # Espejo negativo del top2box de fortalezas (En desacuerdo +
-            # Totalmente en desacuerdo) — un plan de acción no debe mostrar
-            # un % "de acuerdo" aunque el desacuerdo real sea bajo.
-            texto_der = f'{i["pregunta"]} — {i["bottom2box"]}% en desacuerdo'
+            texto_der = _texto_oportunidad(reporte["oportunidades"][idx])
 
         # Cada chip es su propia mini-tabla con fondo de color — sin forzar
         # la misma altura explícita en los dos, el par de una fila quedaba

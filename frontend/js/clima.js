@@ -94,6 +94,16 @@ function escapeHTML(str) {
   return div.innerHTML;
 }
 
+// Los neutrales cuentan como oportunidad, no solo el desacuerdo real: "De
+// acuerdo" (sin llegar a "Totalmente"), Neutral, En desacuerdo y Totalmente
+// en desacuerdo son todos, en distinto grado, gente que no dio el máximo
+// compromiso — así que el % que se muestra es todo eso junto (equivalente a
+// 100% − % de "Totalmente de acuerdo"), nunca solo el desacuerdo puro.
+function textoOportunidad(o) {
+  const pct = Math.round((100 - o.porcentajes["Totalmente de acuerdo"]) * 10) / 10;
+  return `${pct}% no muestra acuerdo total`;
+}
+
 async function loadOleadas() {
   const res = await fetch(`${AUTH_API_BASE}/clima/oleadas?${conEmpresa(new URLSearchParams())}`);
   const oleadas = await res.json();
@@ -351,12 +361,7 @@ async function loadReporte(centro) {
     const f = data.fortalezas[i];
     const o = data.oportunidades[i];
     filasFoHtml += f ? `<span class="fo-chip fo-chip-fortaleza">${escapeHTML(f.pregunta)} — ${f.top2box}% de acuerdo</span>` : "<span></span>";
-    // El "down2box" (En desacuerdo + Totalmente en desacuerdo) es el
-    // espejo negativo del top2box de las fortalezas — un plan de acción no
-    // debe mostrar un % "de acuerdo" (framing positivo), aunque ese % de
-    // desacuerdo real sea bajo o incluso 0 (la pregunta entró aquí por el
-    // resto de la escala: neutral, etc., no por el número que se muestra).
-    filasFoHtml += o ? `<span class="fo-chip fo-chip-oportunidad">${escapeHTML(o.pregunta)} — ${o.bottom2box}% en desacuerdo</span>` : "<span></span>";
+    filasFoHtml += o ? `<span class="fo-chip fo-chip-oportunidad">${escapeHTML(o.pregunta)} — ${textoOportunidad(o)}</span>` : "<span></span>";
   }
   document.getElementById("fo-grid").innerHTML = `
     <h3 class="fo-col-title fo-title-fortaleza">¡Celébralo con el equipo!</h3>
