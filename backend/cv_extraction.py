@@ -131,7 +131,31 @@ def _normalizar(s: str) -> str:
     return s.lower()
 
 
+# Muchos ATS (InfoJobs, Bizneo...) exportan cada candidato de una búsqueda
+# con una línea "Nombre Apellido NN%" (el % de encaje con la vacante) justo
+# debajo del encabezado de página, que además se REPITE IDÉNTICO en todas
+# las páginas del PDF (es el título de la búsqueda, no el candidato). Buscar
+# solo "líneas con palabras en mayúscula" confundía ese encabezado repetido,
+# o el nombre de una empresa anterior en el CV, con el nombre real — esta
+# marca es mucho más específica y fiable cuando aparece, así que se
+# comprueba primero.
+_MARCADOR_PORCENTAJE_RE = re.compile(r"^(.+?)\s+\d{1,3}\s*%\s*$")
+
+
+def _nombre_por_marcador_porcentaje(lineas: list[str]) -> str:
+    for linea in lineas[:10]:
+        m = _MARCADOR_PORCENTAJE_RE.match(linea)
+        if m:
+            nombre = m.group(1).strip()
+            if nombre and len(nombre) <= 60:
+                return nombre
+    return ""
+
+
 def _adivinar_nombre(lineas: list[str]) -> str:
+    nombre = _nombre_por_marcador_porcentaje(lineas)
+    if nombre:
+        return nombre
     patron = re.compile(r"^[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ'-]*(\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ'-]*){1,3}$")
     for linea in lineas[:8]:
         if patron.match(linea):
@@ -221,17 +245,26 @@ def _extraer_de_texto(texto_crudo: str) -> dict:
 
 def _segmentar_paginas_por_candidato(reader) -> list[str]:
     """Sin IA no hay forma fiable de "entender" dónde termina un CV y
-    empieza el siguiente en un PDF por lotes — se usa una heurística simple:
-    cada página cuyas primeras líneas parecen un nombre propio (misma
-    heurística que _adivinar_nombre) se trata como el inicio de un candidato
-    nuevo; las páginas siguientes que NO empiecen con un nombre se asumen
-    continuación del candidato anterior (un CV de 2 páginas, por ejemplo)."""
+    empieza el siguiente en un PDF por lotes. Primero se comprueba si el
+    documento entero usa la marca "Nombre NN%" de exportaciones de ATS (ver
+    _nombre_por_marcador_porcentaje) en varias páginas — si es así, se usa
+    ESA marca en exclusiva para decidir dónde empieza cada candidato: mezclarla
+    con la heurística genérica de "línea con mayúsculas" da falsos positivos
+    con nombres de empresas anteriores dentro del propio CV de un candidato
+    (p.ej. un CV de varias páginas con un largo historial laboral). Solo si
+    el documento NO trae esa marca en ninguna página se usa la heurística
+    genérica como respaldo (para PDFs de un único CV suelto, sin esa marca)."""
+    textos_paginas = [page.extract_text() or "" for page in reader.pages]
+    primeras_lineas_por_pagina = [
+        [l.strip() for l in texto.split("\n") if l.strip()][:10] for texto in textos_paginas
+    ]
+    marcadores_por_pagina = [_nombre_por_marcador_porcentaje(lineas) for lineas in primeras_lineas_por_pagina]
+    usar_solo_marcador = sum(1 for m in marcadores_por_pagina if m) >= 2
+
     segmentos = []
     actual = []
-    for page in reader.pages:
-        texto_pagina = page.extract_text() or ""
-        primeras_lineas = [l.strip() for l in texto_pagina.split("\n") if l.strip()][:8]
-        es_candidato_nuevo = bool(_adivinar_nombre(primeras_lineas))
+    for texto_pagina, lineas, marcador in zip(textos_paginas, primeras_lineas_por_pagina, marcadores_por_pagina):
+        es_candidato_nuevo = bool(marcador) if usar_solo_marcador else bool(_adivinar_nombre(lineas[:8]))
         if es_candidato_nuevo and actual:
             segmentos.append("\n".join(actual))
             actual = [texto_pagina]
