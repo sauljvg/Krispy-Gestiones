@@ -281,17 +281,23 @@ async function guardarVacante() {
   }
   const centro = document.getElementById("vacante-centro").value.trim() || null;
   const notas = document.getElementById("vacante-notas").value.trim() || null;
+  let res;
   if (vacanteEditando) {
     const estado = document.getElementById("vacante-estado-form").value;
-    await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}`, {
+    res = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ puesto, centro, notas, estado }),
     });
   } else {
-    await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes`, {
+    res = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ empresa: EMPRESA, puesto, centro, notas }),
     });
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || `No se pudo guardar la vacante (error ${res.status}).`);
+    return;
   }
   cerrarVacanteForm();
   await refreshVacantes();
@@ -300,7 +306,11 @@ async function guardarVacante() {
 async function eliminarVacanteActual() {
   if (!vacanteEditando) return;
   if (!confirm(`¿Eliminar la vacante "${vacanteEditando.puesto}"? Los candidatos ya creados no se borran, quedarán sin vacante asignada.`)) return;
-  await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}`, { method: "DELETE" });
+  const res = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}`, { method: "DELETE" });
+  if (!res.ok) {
+    alert(`No se pudo eliminar la vacante (error ${res.status}).`);
+    return;
+  }
   cerrarVacanteForm();
   await refreshVacantes();
   await loadCandidatos();
@@ -563,12 +573,20 @@ async function crearCandidatosMultiples() {
   const btn = document.getElementById("btn-crear-multiples");
   btn.disabled = true;
   btn.textContent = "Creando...";
+  let errores = 0;
   for (const campos of seleccionados) {
-    await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos`, {
+    const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...campos, empresa: EMPRESA, vacante_id }),
     });
+    if (!res.ok) errores++;
+  }
+  if (errores > 0) {
+    alert(`No se pudieron crear ${errores} de ${seleccionados.length} candidatos. Revisa la conexión e inténtalo de nuevo.`);
+    btn.disabled = false;
+    btn.textContent = "Crear candidatos seleccionados";
+    return;
   }
   cerrarForm();
   await refreshVacantes();
@@ -618,15 +636,25 @@ async function guardarCandidato() {
   let candidatoId;
   if (candidatoEditando) {
     campos.estado = document.getElementById("candidato-estado-form").value;
-    await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}`, {
+    const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(campos),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.detail || `No se pudo guardar el candidato (error ${res.status}).`);
+      return;
+    }
     candidatoId = candidatoEditando.id;
   } else {
     campos.empresa = EMPRESA;
     const resp = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(campos),
     });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      alert(err.detail || `No se pudo crear el candidato (error ${resp.status}).`);
+      return;
+    }
     const data = await resp.json();
     candidatoId = data.id;
     const inputCv = document.getElementById("input-cv-nuevo");
@@ -637,13 +665,18 @@ async function guardarCandidato() {
     }
   }
   cerrarForm();
+  await refreshVacantes();
   await loadCandidatos();
 }
 
 async function eliminarCandidatoActual() {
   if (!candidatoEditando) return;
   if (!confirm(`¿Seguro que quieres eliminar a ${candidatoEditando.nombre_completo || "este candidato"}? Esta acción no se puede deshacer.`)) return;
-  await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}`, { method: "DELETE" });
+  const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}`, { method: "DELETE" });
+  if (!res.ok) {
+    alert(`No se pudo eliminar el candidato (error ${res.status}).`);
+    return;
+  }
   cerrarForm();
   await loadCandidatos();
 }
