@@ -113,9 +113,56 @@ def ensure_encuestas_tables():
             creado_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # Notificación de "hay respuestas nuevas" junto al menú hamburguesa: por
+    # usuario, guarda desde cuándo cuenta como "ya visto" — todo lo que llegó
+    # después de esa marca es "nuevo". Al crear la tabla no hay fila para
+    # nadie todavía; get_notificaciones_tests() la crea con la hora actual en
+    # la primera llamada de cada usuario, así el historial ya acumulado no
+    # aparece de golpe como "nuevo" la primera vez que alguien entra tras
+    # desplegar esto.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS notificaciones_vistas (
+            usuario_id INTEGER PRIMARY KEY REFERENCES usuarios(id),
+            visto_en TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
     conn.commit()
     conn.close()
     os.makedirs(FONDOS_DIR, exist_ok=True)
+
+
+def get_notificaciones_tests(usuario_id):
+    conn = get_connection()
+    row = conn.execute("SELECT visto_en FROM notificaciones_vistas WHERE usuario_id = ?", (usuario_id,)).fetchone()
+    if row is None:
+        conn.execute(
+            "INSERT INTO notificaciones_vistas (usuario_id, visto_en) VALUES (?, datetime('now'))", (usuario_id,)
+        )
+        conn.commit()
+        conn.close()
+        return {"total": 0, "tests": []}
+    visto_en = row["visto_en"]
+    rows = conn.execute("""
+        SELECT e.id, e.titulo, COUNT(r.id) AS nuevas
+        FROM encuesta_respuestas r
+        JOIN encuestas e ON e.id = r.encuesta_id
+        WHERE r.creado_en > ?
+        GROUP BY e.id
+        ORDER BY MAX(r.creado_en) DESC
+    """, (visto_en,)).fetchall()
+    conn.close()
+    tests = [{"id": r["id"], "titulo": r["titulo"], "nuevas": r["nuevas"]} for r in rows]
+    return {"total": sum(t["nuevas"] for t in tests), "tests": tests}
+
+
+def marcar_notificaciones_vistas(usuario_id):
+    conn = get_connection()
+    conn.execute("""
+        INSERT INTO notificaciones_vistas (usuario_id, visto_en) VALUES (?, datetime('now'))
+        ON CONFLICT(usuario_id) DO UPDATE SET visto_en = excluded.visto_en
+    """, (usuario_id,))
+    conn.commit()
+    conn.close()
 
 
 def _slugify(titulo):

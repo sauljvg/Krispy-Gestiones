@@ -49,6 +49,19 @@ class RespuestaIn(BaseModel):
 
 # ------------------------------- Admin -------------------------------
 
+@router.get("/notificaciones")
+def notificaciones_route(user: dict = Depends(require_tests)):
+    """Para el globo junto al menú hamburguesa: qué tests han recibido
+    respuestas nuevas desde la última vez que este usuario las revisó."""
+    return encuestas_module.get_notificaciones_tests(user["id"])
+
+
+@router.post("/notificaciones/marcar-vistas")
+def marcar_notificaciones_route(user: dict = Depends(require_tests)):
+    encuestas_module.marcar_notificaciones_vistas(user["id"])
+    return {"ok": True}
+
+
 @router.get("/tipos-informe-disponibles")
 def tipos_informe_disponibles_route(_user: dict = Depends(require_tests)):
     """Para el desplegable "¿A qué informe alimenta?" del editor."""
