@@ -26,6 +26,74 @@ function soloDigitos(tel) {
   return (tel || "").replace(/\D/g, "");
 }
 
+// ---------------------------------------------------------------------
+// Campaña de WhatsApp: sin API de WhatsApp Business no hay forma segura de
+// enviar automáticamente (cualquier "auto-clic" en WhatsApp Web viola sus
+// términos y puede acabar en un bloqueo del número) — en su lugar, se
+// escribe UNA plantilla con {nombre}, y se genera un enlace wa.me por
+// candidato con el mensaje ya escrito; el propio usuario pulsa "Enviar" y
+// confirma el envío en WhatsApp, uno por uno pero sin tener que redactar
+// cada mensaje a mano.
+// ---------------------------------------------------------------------
+
+let campanaCandidatos = [];
+
+function candidatoWhatsappRowHTML(c, i) {
+  const tieneTelefono = !!c.telefono;
+  return `
+    <div class="candidato-mini-card candidato-whatsapp-row">
+      <div>
+        <h4>${escapeHTML(c.nombre_completo || `Candidato ${i + 1}`)}</h4>
+        <p>${escapeHTML(c.telefono || "Sin teléfono guardado")}</p>
+      </div>
+      ${tieneTelefono
+        ? `<a class="btn btn-ghost btn-whatsapp-campana" data-idx="${i}" target="_blank" rel="noopener">💬 Enviar</a>`
+        : ""}
+    </div>`;
+}
+
+function actualizarEnlacesCampana() {
+  const plantilla = document.getElementById("campana-mensaje").value;
+  campanaCandidatos.forEach((c, i) => {
+    const link = document.querySelector(`.btn-whatsapp-campana[data-idx="${i}"]`);
+    if (!link) return;
+    const primerNombre = (c.nombre_completo || "").trim().split(/\s+/)[0] || "";
+    const mensaje = plantilla.replaceAll("{nombre}", primerNombre);
+    link.href = `https://wa.me/${soloDigitos(c.telefono)}?text=${encodeURIComponent(mensaje)}`;
+  });
+}
+
+function cerrarCampanaWhatsapp() {
+  campanaCandidatos = [];
+  document.getElementById("campana-whatsapp-wrap").innerHTML = "";
+}
+
+function abrirCampanaWhatsapp(candidatos) {
+  campanaCandidatos = candidatos;
+  const conTelefono = candidatos.filter((c) => c.telefono).length;
+  const wrap = document.getElementById("campana-whatsapp-wrap");
+  wrap.innerHTML = `
+    <div class="vacante-form">
+      <h3>💬 Mensaje por WhatsApp</h3>
+      <p class="staff-hint">
+        Escribe el mensaje una sola vez — usa <code>{nombre}</code> para insertar el nombre de pila de cada candidato.
+        Cada botón "Enviar" abre WhatsApp con el mensaje ya escrito para esa persona; tú confirmas el envío allí.
+      </p>
+      <div class="form-field form-field-full" style="margin-bottom:10px;">
+        <textarea id="campana-mensaje" style="min-height:80px;" placeholder="Hola {nombre}, te escribimos sobre tu candidatura...">Hola {nombre}, te escribimos sobre tu candidatura. ¿Podrías confirmarnos tu disponibilidad para una entrevista?</textarea>
+      </div>
+      <p class="staff-hint">${conTelefono} de ${candidatos.length} candidatos tienen teléfono guardado.</p>
+      <div class="candidatos-grid">${candidatos.map(candidatoWhatsappRowHTML).join("")}</div>
+      <div class="form-actions">
+        <button type="button" id="btn-cerrar-campana" class="btn btn-ghost">Cerrar</button>
+      </div>
+    </div>`;
+  document.getElementById("campana-mensaje").addEventListener("input", actualizarEnlacesCampana);
+  document.getElementById("btn-cerrar-campana").addEventListener("click", cerrarCampanaWhatsapp);
+  actualizarEnlacesCampana();
+  wrap.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 const ESTADOS = ["pendiente", "entrevistado", "contratado", "descartado"];
 const ESTADO_LABELS = { pendiente: "Pendiente", entrevistado: "Entrevistado", contratado: "Contratado", descartado: "Descartado" };
 
@@ -251,6 +319,7 @@ function vacanteFormHTML() {
       ${v ? `<p class="staff-hint">Solicitada el ${escapeHTML(fmtFechaHora(v.fecha_solicitud))}${v.fecha_cierre ? ` · cerrada el ${escapeHTML(fmtFechaHora(v.fecha_cierre))}` : ""}</p>` : ""}
       <div class="form-actions">
         <button type="button" id="btn-guardar-vacante" class="btn btn-primary">Guardar</button>
+        ${v && v.candidatos.length ? `<button type="button" id="btn-whatsapp-vacante" class="btn btn-ghost">💬 Mensaje a los candidatos de esta vacante</button>` : ""}
         ${v ? `<button type="button" id="btn-eliminar-vacante" class="btn btn-ghost">Eliminar vacante</button>` : ""}
         <button type="button" id="btn-cerrar-vacante-form" class="btn btn-ghost">Cancelar</button>
       </div>
@@ -264,6 +333,8 @@ function renderVacanteForm() {
   document.getElementById("btn-cerrar-vacante-form").addEventListener("click", cerrarVacanteForm);
   if (vacanteEditando) {
     document.getElementById("btn-eliminar-vacante").addEventListener("click", eliminarVacanteActual);
+    const btnWhatsapp = document.getElementById("btn-whatsapp-vacante");
+    if (btnWhatsapp) btnWhatsapp.addEventListener("click", () => abrirCampanaWhatsapp(vacanteEditando.candidatos));
   }
   wrap.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -538,6 +609,7 @@ function renderRevisionMultiple(candidatos) {
       <label>Asignar todos a la vacante</label>
       ${vacanteSelectHTML(vacantePreseleccionada(), "revision-vacante-select")}
     </div>
+    <p class="staff-hint" id="revision-contador"></p>
     <div class="candidatos-grid">
       ${candidatos
         .map(
@@ -559,6 +631,13 @@ function renderRevisionMultiple(candidatos) {
     </div>`;
   document.getElementById("btn-crear-multiples").addEventListener("click", crearCandidatosMultiples);
   document.getElementById("btn-cancelar-multiples").addEventListener("click", cerrarForm);
+  const checks = wrap.querySelectorAll(".revision-multiple-check");
+  const actualizarContador = () => {
+    const marcados = wrap.querySelectorAll(".revision-multiple-check:checked").length;
+    document.getElementById("revision-contador").textContent = `${marcados} seleccionados de ${checks.length} detectados`;
+  };
+  checks.forEach((chk) => chk.addEventListener("change", actualizarContador));
+  actualizarContador();
 }
 
 async function crearCandidatosMultiples() {
@@ -692,17 +771,62 @@ async function agregarArchivoAlCandidato() {
   renderForm();
 }
 
+// Selección múltiple: activada bajo demanda para armar una campaña de
+// WhatsApp con un grupo elegido a mano (independiente de una vacante
+// concreta). Mientras está activa, hacer clic en una ficha la selecciona en
+// vez de abrirla para editar.
+let modoSeleccionCandidatos = false;
+let candidatosSeleccionadosIds = new Set();
+let ultimosCandidatosCargados = [];
+
 function candidatoMiniCardHTML(c) {
   const linea2 = [c.telefono, c.email].filter(Boolean).join(" · ");
   const vacante = vacantesTodasCache.find((v) => v.id === c.vacante_id);
   const vacanteTxt = vacante ? `📁 ${vacante.puesto}${vacante.centro ? ` · ${vacante.centro}` : ""}` : "Sin vacante asignada";
+  const seleccionada = modoSeleccionCandidatos && candidatosSeleccionadosIds.has(c.id);
+  const checkbox = modoSeleccionCandidatos ? `<input type="checkbox" ${seleccionada ? "checked" : ""} style="margin-right:4px;">` : "";
   return `
-    <div class="candidato-mini-card" data-candidato-id="${c.id}">
-      <h4>${escapeHTML(c.nombre_completo || "(sin nombre)")} ${estadoBadgeHTML(c.estado)}</h4>
+    <div class="candidato-mini-card ${seleccionada ? "seleccionada" : ""}" data-candidato-id="${c.id}">
+      <h4>${checkbox}${escapeHTML(c.nombre_completo || "(sin nombre)")} ${estadoBadgeHTML(c.estado)}</h4>
       <p>${escapeHTML(c.puesto_solicitado || "")}</p>
       <p>${escapeHTML(linea2)}</p>
       <p style="color:var(--text-muted);">${escapeHTML(vacanteTxt)}</p>
     </div>`;
+}
+
+function actualizarBotonWhatsappSeleccionados() {
+  const btn = document.getElementById("btn-whatsapp-seleccionados");
+  const n = candidatosSeleccionadosIds.size;
+  btn.hidden = !modoSeleccionCandidatos || n === 0;
+  btn.textContent = `💬 Mensaje por WhatsApp (${n})`;
+}
+
+function toggleModoSeleccion() {
+  modoSeleccionCandidatos = !modoSeleccionCandidatos;
+  candidatosSeleccionadosIds.clear();
+  document.getElementById("btn-modo-seleccion").textContent = modoSeleccionCandidatos ? "✕ Cancelar selección" : "☑ Selección múltiple";
+  actualizarBotonWhatsappSeleccionados();
+  renderCandidatosGrid();
+}
+
+function renderCandidatosGrid() {
+  const grid = document.getElementById("candidatos-grid");
+  grid.innerHTML = ultimosCandidatosCargados.length
+    ? ultimosCandidatosCargados.map(candidatoMiniCardHTML).join("")
+    : `<p class="staff-hint">Todavía no hay candidatos en la base de datos.</p>`;
+  grid.querySelectorAll(".candidato-mini-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      const id = Number(card.dataset.candidatoId);
+      if (modoSeleccionCandidatos) {
+        if (candidatosSeleccionadosIds.has(id)) candidatosSeleccionadosIds.delete(id);
+        else candidatosSeleccionadosIds.add(id);
+        actualizarBotonWhatsappSeleccionados();
+        renderCandidatosGrid();
+      } else {
+        abrirEdicionCandidato(card.dataset.candidatoId);
+      }
+    });
+  });
 }
 
 async function loadCandidatos() {
@@ -714,14 +838,13 @@ async function loadCandidatos() {
   if (estado) params.set("estado", estado);
   if (vacanteFiltro === "sin_vacante") params.set("sin_vacante", "true");
   else if (vacanteFiltro) params.set("vacante_id", vacanteFiltro);
-  const candidatos = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos?${params}`).then((r) => (r.ok ? r.json() : []));
-  const grid = document.getElementById("candidatos-grid");
-  grid.innerHTML = candidatos.length
-    ? candidatos.map(candidatoMiniCardHTML).join("")
-    : `<p class="staff-hint">Todavía no hay candidatos en la base de datos.</p>`;
-  grid.querySelectorAll(".candidato-mini-card").forEach((card) => {
-    card.addEventListener("click", () => abrirEdicionCandidato(card.dataset.candidatoId));
-  });
+  ultimosCandidatosCargados = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos?${params}`).then((r) => (r.ok ? r.json() : []));
+  renderCandidatosGrid();
+}
+
+function abrirCampanaWhatsappSeleccionados() {
+  const candidatos = ultimosCandidatosCargados.filter((c) => candidatosSeleccionadosIds.has(c.id));
+  abrirCampanaWhatsapp(candidatos);
 }
 
 async function abrirEdicionCandidato(candidatoId) {
@@ -746,6 +869,8 @@ async function initBaseCandidatos(user) {
   wrap.hidden = false;
   document.getElementById("btn-nuevo-candidato").addEventListener("click", abrirNuevoCandidato);
   document.getElementById("btn-nueva-vacante").addEventListener("click", abrirNuevaVacante);
+  document.getElementById("btn-modo-seleccion").addEventListener("click", toggleModoSeleccion);
+  document.getElementById("btn-whatsapp-seleccionados").addEventListener("click", abrirCampanaWhatsappSeleccionados);
   document.getElementById("vacantes-filtro-estado").addEventListener("change", refreshVacantes);
   document.getElementById("candidatos-filtro-estado").addEventListener("change", loadCandidatos);
   document.getElementById("candidatos-filtro-vacante").addEventListener("change", () => {

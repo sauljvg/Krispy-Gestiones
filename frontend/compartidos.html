@@ -65,6 +65,10 @@
   .candidato-mini-card:hover { border-color: var(--series-blue); }
   .candidato-mini-card h4 { margin: 0 0 4px; font-size: 14px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .candidato-mini-card p { margin: 2px 0; font-size: 12px; color: var(--text-secondary); }
+  .candidato-mini-card.seleccionada { border-color: var(--series-blue); box-shadow: 0 0 0 2px color-mix(in srgb, var(--series-blue) 20%, transparent); }
+  .candidato-whatsapp-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; cursor: default; }
+  .candidato-whatsapp-row h4 { margin: 0; }
+  .candidato-whatsapp-row p { margin: 2px 0 0; }
 
   .candidato-form { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
   .candidato-form h3 { margin-top: 0; }
@@ -128,6 +132,8 @@
 
   <div class="compartidos-wrap">
     <div class="reclu-candidatos-wrap" id="reclu-candidatos-wrap" hidden>
+      <div id="campana-whatsapp-wrap"></div>
+
       <h2 class="reclu-seccion">Vacantes</h2>
       <p class="staff-hint">Agrupa candidatos bajo una solicitud de reclutamiento concreta (puesto + centro) para hacer seguimiento de cuánto lleva abierta.</p>
       <div class="candidatos-toolbar">
@@ -156,6 +162,8 @@
           <option value="">Todos los candidatos</option>
           <option value="sin_vacante">Sin vacante asignada</option>
         </select>
+        <button id="btn-modo-seleccion" class="btn btn-ghost" type="button">☑ Selección múltiple</button>
+        <button id="btn-whatsapp-seleccionados" class="btn btn-ghost" type="button" hidden>💬 Mensaje por WhatsApp</button>
         <button id="btn-nuevo-candidato" class="btn btn-primary" type="button">＋ Nuevo candidato</button>
       </div>
       <div id="candidatos-grid" class="candidatos-grid"></div>
