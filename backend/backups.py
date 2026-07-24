@@ -12,6 +12,7 @@ import shutil
 import threading
 import time
 
+import storage_sync
 from db import DB_PATH
 
 BACKUP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backups"))
@@ -26,8 +27,14 @@ def hacer_backup():
         return
     os.makedirs(BACKUP_DIR, exist_ok=True)
     marca = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    destino = os.path.join(BACKUP_DIR, f"krispy_kreme_{marca}.db")
+    nombre = f"krispy_kreme_{marca}.db"
+    destino = os.path.join(BACKUP_DIR, nombre)
     shutil.copy2(DB_PATH, destino)
+    # El disco local también se pierde en cada reinicio de Autoscale, así
+    # que la copia local sola no basta como red de seguridad — se sube
+    # además a Object Storage (persistente de verdad) para poder restaurarla
+    # al arrancar si el disco viene vacío (ver storage_sync.py).
+    storage_sync.subir_backup(destino, nombre)
     _rotar_backups()
 
 

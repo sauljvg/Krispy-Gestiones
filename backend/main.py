@@ -4,6 +4,15 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 
+# Tiene que ejecutarse ANTES de cualquier import que toque db.py (auth,
+# encuestas, informes...): ese módulo crea krispy_kreme.db vacío en cuanto
+# se importa si el archivo no existe, y si eso pasara primero ya no
+# tendríamos forma de distinguir "disco recién reseteado por Autoscale" de
+# "base de datos real". Ver storage_sync.py para el porqué completo.
+import storage_sync
+
+storage_sync.restaurar_si_hace_falta()
+
 # En Windows, mimetypes no siempre trae registrados los tipos de fuentes
 # (depende del registro del sistema) — sin esto, StaticFiles las sirve como
 # application/octet-stream y Chrome rechaza silenciosamente los @font-face.
