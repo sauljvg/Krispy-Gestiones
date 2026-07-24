@@ -55,6 +55,16 @@ def ensure_encuestas_tables():
             instrucciones TEXT
         )
     """)
+    # Ramificación: una página puede depender de la respuesta a una pregunta
+    # de una página ANTERIOR (p.ej. "Centro de Trabajo" -> mostrar solo el
+    # bloque de "Puesto" que corresponda a ese centro), igual que las
+    # secciones condicionales de Microsoft Forms/Google Forms. NULL en
+    # condicion_pregunta_id = página siempre visible (comportamiento previo,
+    # así que no hace falta migrar datos existentes).
+    cols_paginas = {row[1] for row in conn.execute("PRAGMA table_info(encuesta_paginas)")}
+    if "condicion_pregunta_id" not in cols_paginas:
+        conn.execute("ALTER TABLE encuesta_paginas ADD COLUMN condicion_pregunta_id INTEGER")
+        conn.execute("ALTER TABLE encuesta_paginas ADD COLUMN condicion_valores TEXT")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS encuesta_preguntas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,6 +161,7 @@ def _fetch_estructura(conn, encuesta_id):
             qd["mostrar_dashboard"] = bool(qd["mostrar_dashboard"])
             preguntas_dict.append(qd)
         pd = dict(p)
+        pd["condicion_valores"] = json.loads(pd.get("condicion_valores") or "[]")
         pd["preguntas"] = preguntas_dict
         resultado.append(pd)
     return resultado
@@ -248,14 +259,16 @@ def delete_encuesta(encuesta_id):
         os.remove(ruta)
 
 
-def add_pagina(encuesta_id, instrucciones=""):
+def add_pagina(encuesta_id, instrucciones="", condicion_pregunta_id=None, condicion_valores=None):
     conn = get_connection()
     orden = conn.execute(
         "SELECT COALESCE(MAX(orden), 0) + 1 FROM encuesta_paginas WHERE encuesta_id = ?", (encuesta_id,)
     ).fetchone()[0]
     cur = conn.execute(
-        "INSERT INTO encuesta_paginas (encuesta_id, orden, instrucciones) VALUES (?, ?, ?)",
-        (encuesta_id, orden, instrucciones),
+        "INSERT INTO encuesta_paginas (encuesta_id, orden, instrucciones, condicion_pregunta_id, condicion_valores) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (encuesta_id, orden, instrucciones, condicion_pregunta_id,
+         json.dumps(condicion_valores or [], ensure_ascii=False)),
     )
     pagina_id = cur.lastrowid
     conn.commit()
@@ -263,9 +276,12 @@ def add_pagina(encuesta_id, instrucciones=""):
     return pagina_id
 
 
-def update_pagina(pagina_id, instrucciones):
+def update_pagina(pagina_id, instrucciones, condicion_pregunta_id=None, condicion_valores=None):
     conn = get_connection()
-    conn.execute("UPDATE encuesta_paginas SET instrucciones = ? WHERE id = ?", (instrucciones, pagina_id))
+    conn.execute(
+        "UPDATE encuesta_paginas SET instrucciones = ?, condicion_pregunta_id = ?, condicion_valores = ? WHERE id = ?",
+        (instrucciones, condicion_pregunta_id, json.dumps(condicion_valores or [], ensure_ascii=False), pagina_id),
+    )
     conn.commit()
     conn.close()
 

@@ -31,6 +31,8 @@ class EncuestaEditarIn(BaseModel):
 
 class PaginaIn(BaseModel):
     instrucciones: str = ""
+    condicion_pregunta_id: int | None = None
+    condicion_valores: list[str] = []
 
 
 class PreguntaIn(BaseModel):
@@ -138,13 +140,13 @@ def list_respuestas_route(encuesta_id: int, _user: dict = Depends(require_tests)
 def add_pagina_route(encuesta_id: int, body: PaginaIn, _user: dict = Depends(require_tests)):
     if not encuestas_module.get_encuesta(encuesta_id):
         raise HTTPException(status_code=404, detail="Encuesta no encontrada")
-    pagina_id = encuestas_module.add_pagina(encuesta_id, body.instrucciones)
+    pagina_id = encuestas_module.add_pagina(encuesta_id, body.instrucciones, body.condicion_pregunta_id, body.condicion_valores)
     return {"ok": True, "id": pagina_id}
 
 
 @router.put("/paginas/{pagina_id}")
 def update_pagina_route(pagina_id: int, body: PaginaIn, _user: dict = Depends(require_tests)):
-    encuestas_module.update_pagina(pagina_id, body.instrucciones)
+    encuestas_module.update_pagina(pagina_id, body.instrucciones, body.condicion_pregunta_id, body.condicion_valores)
     return {"ok": True}
 
 

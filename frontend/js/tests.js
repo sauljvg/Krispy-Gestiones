@@ -269,6 +269,62 @@ function leerOpciones(editorRoot) {
     .filter(Boolean);
 }
 
+// Preguntas de opción múltiple de páginas ANTERIORES a "pi" — únicas que
+// tiene sentido usar como origen de una ramificación (un valor fijo entre
+// varias opciones, no texto libre ni escala).
+function preguntasRamificablesAntesDe(pi) {
+  const lista = [];
+  currentTest.paginas.forEach((pagina, i) => {
+    if (i >= pi) return;
+    pagina.preguntas.forEach((q) => {
+      if (q.tipo === "opcion_multiple") lista.push(q);
+    });
+  });
+  return lista;
+}
+
+function condicionEditorHTML(p, pi) {
+  const opciones = preguntasRamificablesAntesDe(pi);
+  if (opciones.length === 0) return "";
+  const preguntaSeleccionada = opciones.find((q) => q.id === p.condicion_pregunta_id);
+  return `
+    <div class="pagina-condicion" data-pagina-id="${p.id}">
+      <label>Mostrar esta página solo si...</label>
+      <select class="pagina-condicion-pregunta" data-pagina-id="${p.id}">
+        <option value="">— Siempre mostrar —</option>
+        ${opciones
+          .map((q) => `<option value="${q.id}" ${q.id === p.condicion_pregunta_id ? "selected" : ""}>${escapeHTML(q.etiqueta.slice(0, 60))}</option>`)
+          .join("")}
+      </select>
+      <div class="pagina-condicion-valores" data-pagina-id="${p.id}">
+        ${
+          preguntaSeleccionada
+            ? preguntaSeleccionada.opciones
+                .map(
+                  (op) => `<label class="chk"><input type="checkbox" class="pagina-condicion-valor" value="${escapeHTML(op)}" ${p.condicion_valores.includes(op) ? "checked" : ""}> ${escapeHTML(op)}</label>`
+                )
+                .join("")
+            : ""
+        }
+      </div>
+    </div>`;
+}
+
+async function guardarCondicionPagina(paginaId) {
+  const card = document.querySelector(`.pagina-card[data-pagina-id="${paginaId}"]`);
+  const instrucciones = card.querySelector(".pagina-instrucciones").value;
+  const select = card.querySelector(".pagina-condicion-pregunta");
+  const condicionPreguntaId = select && select.value ? Number(select.value) : null;
+  const condicionValores = condicionPreguntaId
+    ? Array.from(card.querySelectorAll(".pagina-condicion-valor:checked")).map((el) => el.value)
+    : [];
+  await fetch(`${AUTH_API_BASE}/encuestas/paginas/${paginaId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instrucciones, condicion_pregunta_id: condicionPreguntaId, condicion_valores: condicionValores }),
+  });
+}
+
 function renderPaginas() {
   const wrap = document.getElementById("paginas-wrap");
   wrap.innerHTML = currentTest.paginas
@@ -283,6 +339,7 @@ function renderPaginas() {
           <button type="button" class="btn-mini btn-pagina-borrar" data-pagina-id="${p.id}">🗑</button>
         </div>
       </div>
+      ${condicionEditorHTML(p, pi)}
       <div class="preguntas-lista" data-pagina-id="${p.id}">
         ${p.preguntas
           .map((q, qi) => {
@@ -343,12 +400,18 @@ function renderPaginas() {
   bindOpcionesEditor(wrap);
 
   wrap.querySelectorAll(".pagina-instrucciones").forEach((el) => {
-    el.addEventListener("blur", async () => {
-      await fetch(`${AUTH_API_BASE}/encuestas/paginas/${el.dataset.paginaId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ instrucciones: el.value }),
-      });
+    el.addEventListener("blur", () => guardarCondicionPagina(el.dataset.paginaId));
+  });
+  wrap.querySelectorAll(".pagina-condicion-pregunta").forEach((select) => {
+    select.addEventListener("change", async () => {
+      await guardarCondicionPagina(select.dataset.paginaId);
+      await abrirEditor(currentTestId);
+    });
+  });
+  wrap.querySelectorAll(".pagina-condicion-valor").forEach((chk) => {
+    chk.addEventListener("change", () => {
+      const paginaId = chk.closest(".pagina-condicion-valores").dataset.paginaId;
+      guardarCondicionPagina(paginaId);
     });
   });
   wrap.querySelectorAll(".btn-pagina-subir").forEach((btn) =>

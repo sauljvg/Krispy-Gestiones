@@ -4,6 +4,21 @@ let encuesta = null;
 let paginaActual = 0;
 const respuestas = {}; // pregunta_id -> valor
 
+// Ramificación: una página con condicion_pregunta_id solo se muestra si la
+// respuesta guardada para esa pregunta (de una página anterior) está dentro
+// de condicion_valores — igual que las secciones condicionales de Forms.
+// Se recalcula en cada render (no se cachea) porque el candidato puede
+// volver atrás y cambiar la respuesta de la que depende la ramificación.
+function paginaVisible(pagina) {
+  if (!pagina.condicion_pregunta_id) return true;
+  const valor = respuestas[pagina.condicion_pregunta_id];
+  return Array.isArray(pagina.condicion_valores) && pagina.condicion_valores.includes(valor);
+}
+
+function indicesVisibles() {
+  return encuesta.paginas.map((_, i) => i).filter((i) => paginaVisible(encuesta.paginas[i]));
+}
+
 function escapeHTML(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";
@@ -149,7 +164,9 @@ function renderGrupoLikert(preguntas) {
 
 function renderPagina(index) {
   const pagina = encuesta.paginas[index];
-  const totalPaginas = encuesta.paginas.length;
+  const visibles = indicesVisibles();
+  const posActual = visibles.indexOf(index);
+  const totalPaginas = visibles.length;
   let bloquesHtml = "";
   let i = 0;
   while (i < pagina.preguntas.length) {
@@ -167,7 +184,7 @@ function renderPagina(index) {
     }
   }
 
-  const esUltima = index === totalPaginas - 1;
+  const esUltima = posActual === totalPaginas - 1;
   const card = document.getElementById("encuesta-card");
   card.innerHTML = `
     ${index === 0 ? `<h1 class="encuesta-titulo">${escapeHTML(encuesta.titulo)}</h1>` : ""}
@@ -175,14 +192,14 @@ function renderPagina(index) {
     ${index === 0 ? `<p class="encuesta-obligatorio-nota">* Obligatorio</p>` : ""}
     <div id="pagina-contenido">${bloquesHtml}</div>
     <div class="encuesta-nav">
-      ${index > 0 ? `<button type="button" class="encuesta-btn secundario" id="btn-atras">Atrás</button>` : `<span></span>`}
+      ${posActual > 0 ? `<button type="button" class="encuesta-btn secundario" id="btn-atras">Atrás</button>` : `<span></span>`}
       <div class="spacer"></div>
       <div style="text-align:right;">
         <button type="button" class="encuesta-btn" id="btn-siguiente">${esUltima ? "Enviar" : "Siguiente"}</button>
-        <div class="encuesta-progreso-txt">Página ${index + 1} de ${totalPaginas}</div>
+        <div class="encuesta-progreso-txt">Página ${posActual + 1} de ${totalPaginas}</div>
       </div>
     </div>
-    <div class="encuesta-progreso-barra"><div class="encuesta-progreso-fill" style="width:${((index + 1) / totalPaginas) * 100}%"></div></div>
+    <div class="encuesta-progreso-barra"><div class="encuesta-progreso-fill" style="width:${((posActual + 1) / totalPaginas) * 100}%"></div></div>
   `;
 
   card.querySelectorAll("input[type='text'], input[type='email'], input[type='number'], input[type='date'], textarea").forEach((el) => {
@@ -210,7 +227,7 @@ function renderPagina(index) {
 
   const btnAtras = document.getElementById("btn-atras");
   if (btnAtras) btnAtras.addEventListener("click", () => {
-    paginaActual--;
+    paginaActual = visibles[posActual - 1];
     renderPagina(paginaActual);
     window.scrollTo({ top: 0 });
   });
@@ -219,7 +236,10 @@ function renderPagina(index) {
     if (esUltima) {
       enviarRespuestas();
     } else {
-      paginaActual++;
+      // Se recalcula aquí (no se reutiliza "visibles") porque la respuesta
+      // que se acaba de validar en esta misma página puede ser justo la que
+      // decide qué página de ramificación toca mostrar a continuación.
+      paginaActual = indicesVisibles()[posActual + 1];
       renderPagina(paginaActual);
       window.scrollTo({ top: 0 });
     }
