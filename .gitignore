@@ -12,3 +12,4 @@ scraper/chrome_profile_work/
 uploads/
 *.pid
 
+*.db
