@@ -37,6 +37,33 @@ function soloDigitos(tel) {
 // ---------------------------------------------------------------------
 
 let campanaCandidatos = [];
+let campanaTestsAbiertos = [];
+let campanaEnlaceTest = "";
+
+async function cargarTestsAbiertosCampana() {
+  try {
+    const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas`);
+    if (!res.ok) return [];
+    const tests = await res.json();
+    return tests.filter((t) => t.estado === "abierta");
+  } catch {
+    return [];
+  }
+}
+
+function campanaTestSelectHTML() {
+  // Solo tiene sentido ofrecer tests ABIERTOS — el enlace de uno cerrado no
+  // deja responder a nadie que lo reciba.
+  if (campanaTestsAbiertos.length === 0) return "";
+  return `
+    <div class="form-field form-field-full" style="margin-bottom:10px;">
+      <label>Adjuntar enlace de un test (opcional)</label>
+      <select id="campana-test">
+        <option value="">— Sin enlace de test —</option>
+        ${campanaTestsAbiertos.map((t) => `<option value="${t.slug}">${escapeHTML(t.titulo)}</option>`).join("")}
+      </select>
+    </div>`;
+}
 
 function candidatoWhatsappRowHTML(c, i) {
   const tieneTelefono = !!c.telefono;
@@ -58,27 +85,45 @@ function actualizarEnlacesCampana() {
     const link = document.querySelector(`.btn-whatsapp-campana[data-idx="${i}"]`);
     if (!link) return;
     const primerNombre = (c.nombre_completo || "").trim().split(/\s+/)[0] || "";
-    const mensaje = plantilla.replaceAll("{nombre}", primerNombre);
+    const mensaje = plantilla.replaceAll("{nombre}", primerNombre).replaceAll("{enlace}", campanaEnlaceTest);
     link.href = `https://wa.me/${soloDigitos(c.telefono)}?text=${encodeURIComponent(mensaje)}`;
   });
 }
 
+function onCambiaTestCampana() {
+  const select = document.getElementById("campana-test");
+  campanaEnlaceTest = select.value ? `${location.origin}/encuesta.html?slug=${select.value}` : "";
+  const textarea = document.getElementById("campana-mensaje");
+  // Primera vez que se elige un test en este envío: si el mensaje todavía no
+  // menciona el enlace, se añade solo para que quede a la vista — si el
+  // admin ya lo había escrito o borrado a mano, no se le vuelve a imponer.
+  if (select.value && !textarea.value.includes("{enlace}")) {
+    textarea.value = `${textarea.value}\n\n{enlace}`;
+  }
+  actualizarEnlacesCampana();
+}
+
 function cerrarCampanaWhatsapp() {
   campanaCandidatos = [];
+  campanaEnlaceTest = "";
   document.getElementById("campana-whatsapp-wrap").innerHTML = "";
 }
 
-function abrirCampanaWhatsapp(candidatos) {
+async function abrirCampanaWhatsapp(candidatos) {
   campanaCandidatos = candidatos;
+  campanaEnlaceTest = "";
+  campanaTestsAbiertos = await cargarTestsAbiertosCampana();
   const conTelefono = candidatos.filter((c) => c.telefono).length;
   const wrap = document.getElementById("campana-whatsapp-wrap");
   wrap.innerHTML = `
     <div class="vacante-form">
       <h3>💬 Mensaje por WhatsApp</h3>
       <p class="staff-hint">
-        Escribe el mensaje una sola vez — usa <code>{nombre}</code> para insertar el nombre de pila de cada candidato.
+        Escribe el mensaje una sola vez — usa <code>{nombre}</code> para insertar el nombre de pila de cada candidato
+        ${campanaTestsAbiertos.length ? `y <code>{enlace}</code> para el enlace del test que elijas abajo` : ""}.
         Cada botón "Enviar" abre WhatsApp con el mensaje ya escrito para esa persona; tú confirmas el envío allí.
       </p>
+      ${campanaTestSelectHTML()}
       <div class="form-field form-field-full" style="margin-bottom:10px;">
         <textarea id="campana-mensaje" style="min-height:80px;" placeholder="Hola {nombre}, te escribimos sobre tu candidatura...">Hola {nombre}, te escribimos sobre tu candidatura. ¿Podrías confirmarnos tu disponibilidad para una entrevista?</textarea>
       </div>
@@ -90,6 +135,8 @@ function abrirCampanaWhatsapp(candidatos) {
     </div>`;
   document.getElementById("campana-mensaje").addEventListener("input", actualizarEnlacesCampana);
   document.getElementById("btn-cerrar-campana").addEventListener("click", cerrarCampanaWhatsapp);
+  const testSelect = document.getElementById("campana-test");
+  if (testSelect) testSelect.addEventListener("change", onCambiaTestCampana);
   actualizarEnlacesCampana();
   wrap.scrollIntoView({ behavior: "smooth", block: "start" });
 }

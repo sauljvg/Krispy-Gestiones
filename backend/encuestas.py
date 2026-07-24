@@ -16,7 +16,7 @@ from db import get_connection
 
 FONDOS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads", "encuestas_fondos"))
 
-TIPOS_PREGUNTA = {"texto", "email", "numero", "likert", "abierta", "opcion_multiple", "prioridad", "fecha", "calificacion"}
+TIPOS_PREGUNTA = {"texto", "email", "numero", "likert", "abierta", "opcion_simple", "opcion_multiple", "prioridad", "fecha", "calificacion"}
 
 LIKERT_OPCIONES = [
     "Totalmente en desacuerdo", "En desacuerdo", "Ni de acuerdo ni en desacuerdo",
@@ -87,6 +87,17 @@ def ensure_encuestas_tables():
     if "mostrar_dashboard" not in cols_preguntas:
         conn.execute("ALTER TABLE encuesta_preguntas ADD COLUMN mostrar_dashboard INTEGER NOT NULL DEFAULT 0")
         conn.execute("UPDATE encuesta_preguntas SET mostrar_dashboard = 1 WHERE tipo IN ('abierta', 'prioridad')")
+    # "opcion_multiple" originalmente solo dejaba marcar UNA opción (radio) —
+    # el nombre no correspondía al comportamiento. Se separa en dos tipos:
+    # "opcion_simple" (una sola respuesta, igual que antes) y "opcion_multiple"
+    # (ahora sí, varias marcadas a la vez). Todo lo que ya existía en la BD
+    # con tipo 'opcion_multiple' era en realidad de una sola respuesta, así
+    # que se renombra una única vez (marcador de columna para no repetir esta
+    # migración si un admin crea preguntas nuevas de opción múltiple real
+    # después).
+    if "migrada_opcion_simple" not in cols_preguntas:
+        conn.execute("ALTER TABLE encuesta_preguntas ADD COLUMN migrada_opcion_simple INTEGER NOT NULL DEFAULT 0")
+        conn.execute("UPDATE encuesta_preguntas SET tipo = 'opcion_simple' WHERE tipo = 'opcion_multiple'")
     # Sin fila_hash/dedup a propósito: cada persona real puede responder una
     # sola vez desde el propio flujo (no hay reenvío), y a diferencia de
     # Informes esto no se alimenta por Excel donde sí hace falta deduplicar

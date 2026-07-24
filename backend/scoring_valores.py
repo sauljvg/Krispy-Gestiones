@@ -474,8 +474,16 @@ def calcular(filas, columnas_extra=None):
             dashboard_row["Fecha del test"] = fecha_valor
 
         if columnas_extra:
+            # name_col/email_col/fecha_col ya están en la fila bajo su clave
+            # canónica ("Nombre", "Correo", "Fecha del test") — si esa misma
+            # pregunta también tiene "Mostrar en el dashboard" marcado (el
+            # checkbox ahora está disponible en cualquier tipo de pregunta,
+            # no solo abiertas/prioridad), se añadía OTRA VEZ con su etiqueta
+            # original, y el valor aparecía duplicado: una vez al principio
+            # (columna canónica) y otra vez al final (columna extra).
+            ya_incluidas = {c for c in (name_col, email_col, fecha_col) if c}
             for h in headers:
-                if h in columnas_extra:
+                if h in columnas_extra and h not in ya_incluidas:
                     valor_extra = fila.get(h)
                     scoring_row[h] = valor_extra
                     dashboard_row[h] = valor_extra

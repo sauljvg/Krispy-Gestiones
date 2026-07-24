@@ -184,13 +184,14 @@ const TIPOS_PREGUNTA_LABELS = {
   calificacion: "Calificación (estrellas)",
   likert: "Escala (1-5)",
   abierta: "Comentario abierto",
+  opcion_simple: "Opción simple",
   opcion_multiple: "Opción múltiple",
   prioridad: "Ordenar prioridades",
 };
 
 // Tipos cuya respuesta es una lista de frases/opciones editable (en vez de
 // un prompt() con comas, una fila por opción — como en Microsoft Forms).
-const TIPOS_CON_OPCIONES = new Set(["opcion_multiple", "prioridad"]);
+const TIPOS_CON_OPCIONES = new Set(["opcion_simple", "opcion_multiple", "prioridad"]);
 
 const LIKERT_DEFAULT_LABELS = [
   "Totalmente en desacuerdo", "En desacuerdo", "Ni de acuerdo ni en desacuerdo", "De acuerdo", "Totalmente de acuerdo",
@@ -292,15 +293,16 @@ function leerOpciones(editorRoot) {
     .filter(Boolean);
 }
 
-// Preguntas de opción múltiple de páginas ANTERIORES a "pi" — únicas que
-// tiene sentido usar como origen de una ramificación (un valor fijo entre
-// varias opciones, no texto libre ni escala).
+// Preguntas de opción SIMPLE (una sola respuesta) de páginas ANTERIORES a
+// "pi" — únicas que tiene sentido usar como origen de una ramificación (un
+// valor fijo entre varias opciones, no texto libre, escala ni una lista de
+// varias marcadas a la vez).
 function preguntasRamificablesAntesDe(pi) {
   const lista = [];
   currentTest.paginas.forEach((pagina, i) => {
     if (i >= pi) return;
     pagina.preguntas.forEach((q) => {
-      if (q.tipo === "opcion_multiple") lista.push(q);
+      if (q.tipo === "opcion_simple") lista.push(q);
     });
   });
   return lista;
@@ -570,6 +572,18 @@ async function agregarPagina() {
   await abrirEditor(currentTestId, { scroll: false });
 }
 
+// creado_en llega como "YYYY-MM-DD HH:MM:SS" en UTC (datetime('now') de
+// SQLite, sin sufijo de zona) — hay que decírselo explícitamente a Date
+// (añadiendo "Z") para que el navegador la convierta a la hora local de
+// quien lo está viendo; si no, se ve la hora UTC tal cual y parece 1-2h
+// desfasada respecto a cuándo el candidato hizo el test en realidad.
+function formatearFechaHoraLocal(sqlUtc) {
+  if (!sqlUtc) return "—";
+  const fecha = new Date(sqlUtc.replace(" ", "T") + "Z");
+  if (isNaN(fecha.getTime())) return sqlUtc;
+  return fecha.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 async function verRespuestas() {
   const wrap = document.getElementById("respuestas-wrap");
   const visible = !wrap.hidden;
@@ -587,7 +601,7 @@ async function verRespuestas() {
       .map(
         (r) => `
       <tr>
-        <td>${(r.creado_en || "").slice(0, 16)}</td>
+        <td>${formatearFechaHoraLocal(r.creado_en)}</td>
         <td>${escapeHTML(r.ip || "—")}</td>
         <td>${escapeHTML(r.dispositivo || "—")}</td>
         <td><details><summary>Ver</summary><pre style="white-space:pre-wrap;">${escapeHTML(JSON.stringify(r.datos, null, 2))}</pre></details></td>

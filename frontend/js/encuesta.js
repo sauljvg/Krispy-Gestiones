@@ -56,13 +56,26 @@ function renderPregunta(q) {
       <textarea data-pregunta-id="${q.id}">${escapeHTML(valorActual)}</textarea>
     </div>`;
   }
-  if (q.tipo === "opcion_multiple") {
+  if (q.tipo === "opcion_simple") {
     return `<div class="pregunta-bloque" data-pregunta-id="${q.id}">
       <label class="pregunta-label">${escapeHTML(q.etiqueta)}${req}</label>
       <div class="opcion-multiple-lista">
         ${q.opciones
           .map(
             (op) => `<label><input type="radio" name="pregunta-${q.id}" value="${escapeHTML(op)}" ${valorActual === op ? "checked" : ""}> ${escapeHTML(op)}</label>`
+          )
+          .join("")}
+      </div>
+    </div>`;
+  }
+  if (q.tipo === "opcion_multiple") {
+    const seleccionadas = Array.isArray(respuestas[q.id]) ? respuestas[q.id] : [];
+    return `<div class="pregunta-bloque" data-pregunta-id="${q.id}">
+      <label class="pregunta-label">${escapeHTML(q.etiqueta)}${req}</label>
+      <div class="opcion-multiple-lista">
+        ${q.opciones
+          .map(
+            (op) => `<label><input type="checkbox" name="pregunta-${q.id}" value="${escapeHTML(op)}" ${seleccionadas.includes(op) ? "checked" : ""}> ${escapeHTML(op)}</label>`
           )
           .join("")}
       </div>
@@ -175,16 +188,18 @@ function renderGrupoLikert(preguntas) {
     <tr data-pregunta-id="${q.id}">
       <td class="likert-etiqueta">${escapeHTML(etiquetaVisible(q))}${q.obligatoria ? ' <span class="req">*</span>' : ""}</td>
       ${ordenVisual.map(
-        (i) => `<td><input type="radio" name="pregunta-${q.id}" value="${i + 1}" ${respuestas[q.id] === String(i + 1) ? "checked" : ""}></td>`
+        (i) => `<td data-label="${escapeHTML(escala[i])}"><input type="radio" name="pregunta-${q.id}" value="${i + 1}" ${respuestas[q.id] === String(i + 1) ? "checked" : ""}></td>`
       ).join("")}
     </tr>`
     )
     .join("");
   return `
-    <table class="likert-tabla">
-      <thead><tr><th></th>${ordenVisual.map((i) => `<th>${escapeHTML(escala[i])}</th>`).join("")}</tr></thead>
-      <tbody>${filas}</tbody>
-    </table>`;
+    <div class="likert-tabla-wrap">
+      <table class="likert-tabla">
+        <thead><tr><th></th>${ordenVisual.map((i) => `<th>${escapeHTML(escala[i])}</th>`).join("")}</tr></thead>
+        <tbody>${filas}</tbody>
+      </table>
+    </div>`;
 }
 
 function renderPagina(index) {
@@ -238,6 +253,14 @@ function renderPagina(index) {
       respuestas[tr.dataset.preguntaId] = el.value;
     });
   });
+  card.querySelectorAll("input[type='checkbox']").forEach((el) => {
+    el.addEventListener("change", () => {
+      const bloque = el.closest("[data-pregunta-id]");
+      const qid = bloque.dataset.preguntaId;
+      const marcadas = Array.from(bloque.querySelectorAll("input[type='checkbox']:checked")).map((c) => c.value);
+      respuestas[qid] = marcadas;
+    });
+  });
   card.querySelectorAll(".prioridad-lista").forEach((ol) => bindPrioridadBotones(ol));
   card.querySelectorAll(".calificacion-estrellas").forEach((wrap) => {
     wrap.querySelectorAll(".btn-estrella").forEach((btn) => {
@@ -273,7 +296,9 @@ function renderPagina(index) {
 
 function validarPagina(pagina) {
   for (const q of pagina.preguntas) {
-    if (q.obligatoria && !respuestas[q.id]) {
+    const valor = respuestas[q.id];
+    const sinResponder = Array.isArray(valor) && q.tipo !== "prioridad" ? valor.length === 0 : !valor;
+    if (q.obligatoria && sinResponder) {
       alert("Por favor, responde todas las preguntas obligatorias (*) antes de continuar.");
       return false;
     }

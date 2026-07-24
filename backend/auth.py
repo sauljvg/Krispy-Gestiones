@@ -215,9 +215,13 @@ def reset_pin(user_id: int):
 
 def set_pin_si_no_tiene(username: str, pin: str) -> bool:
     """Activación de cuenta: solo deja crear el PIN si el usuario todavía no
-    tenía uno (evita que cualquiera con solo el username lo sobreescriba)."""
+    tenía uno (evita que cualquiera con solo el username lo sobreescriba).
+    COLLATE NOCASE para que coincida con get_user_by_username — si no, un
+    usuario creado como "Berta" que activa su cuenta escribiendo "berta" no
+    encontraba la fila (esta consulta sí distinguía mayúsculas), y recibía
+    el mensaje engañoso de "ya tiene un PIN" sin haberlo llegado a crear."""
     conn = get_connection()
-    row = conn.execute("SELECT id, pin FROM usuarios WHERE username = ?", (username,)).fetchone()
+    row = conn.execute("SELECT id, pin FROM usuarios WHERE username = ? COLLATE NOCASE", (username,)).fetchone()
     if row is None or row["pin"] is not None:
         conn.close()
         return False

@@ -25,6 +25,10 @@
     background: rgba(255,255,255,0.97); border-radius: 18px; box-shadow: 0 12px 40px rgba(0,0,0,0.16);
     max-width: 640px; width: 100%; padding: 32px 36px; position: relative;
   }
+  @media (max-width: 480px) {
+    body { padding: 12px 8px; }
+    .encuesta-card { padding: 24px 16px; }
+  }
   .encuesta-titulo { font-family: "Gelica", system-ui, sans-serif; font-size: 24px; font-weight: 600; margin: 0 0 6px; color: #222; letter-spacing: -0.01em; }
   .encuesta-instrucciones { font-size: 14px; color: #555; margin: 0 0 22px; line-height: 1.5; white-space: pre-wrap; }
   .encuesta-obligatorio-nota { font-size: 12px; color: #900; margin-bottom: 16px; }
@@ -46,13 +50,37 @@
   .btn-estrella { border: none; background: none; font-size: 30px; line-height: 1; cursor: pointer; color: #d8d8d8; padding: 2px; }
   .btn-estrella.activa { color: var(--color-boton, #5b2a2a); }
 
+  .likert-tabla-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .likert-tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
   .likert-tabla th { font-weight: 500; color: #555; padding: 6px 4px; text-align: center; vertical-align: bottom; width: 15%; }
   .likert-tabla td { padding: 10px 4px; border-top: 1px solid #eee; text-align: center; }
   .likert-tabla td.likert-etiqueta { text-align: left; font-size: 14px; color: #222; padding-right: 10px; width: 25%; }
   .likert-tabla input[type="radio"] { width: 18px; height: 18px; cursor: pointer; }
 
+  /* En pantallas estrechas no caben 5 columnas + etiqueta sin aplastar el
+     texto ("Totalmente en desacuerdo" quedaba cortado fuera de la tarjeta,
+     y obligar a deslizar para verlo es incómodo) — por debajo de 560px la
+     tabla deja de comportarse como tabla: cada pregunta pasa a ser un
+     bloque con sus 5 opciones en una lista vertical (radio + su etiqueta
+     completa), igual que hace Microsoft/Google Forms en móvil. Nada se
+     corta ni hace falta deslizar; solo cambia el layout, el valor que se
+     envía (la posición 1-5) es exactamente el mismo. */
+  @media (max-width: 560px) {
+    .likert-tabla, .likert-tabla thead, .likert-tabla tbody, .likert-tabla tr, .likert-tabla td { display: block; width: auto; }
+    .likert-tabla thead { display: none; }
+    .likert-tabla tr { padding: 14px 0; border-top: 1px solid #eee; }
+    .likert-tabla tr:first-child { border-top: none; padding-top: 0; }
+    .likert-tabla td { border-top: none; padding: 0; text-align: left; }
+    .likert-tabla td.likert-etiqueta { padding-bottom: 10px; font-weight: 600; }
+    .likert-tabla td:not(.likert-etiqueta) {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 10px 2px; border-top: 1px solid #f2f2f2;
+    }
+    .likert-tabla td:not(.likert-etiqueta)::before { content: attr(data-label); font-size: 13px; color: #333; }
+  }
+
   .opcion-multiple-lista label { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 8px; cursor: pointer; }
+  .opcion-multiple-lista input[type="radio"], .opcion-multiple-lista input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; flex-shrink: 0; }
 
   .prioridad-ayuda { font-size: 12px; color: #777; margin: 0 0 10px; }
   .prioridad-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
