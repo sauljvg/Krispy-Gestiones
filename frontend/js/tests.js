@@ -13,7 +13,13 @@ async function loadTiposInforme() {
   const select = document.getElementById("test-tipo-informe");
   select.innerHTML =
     `<option value="">— No calcular puntuación —</option>` +
-    tipos.map((t) => `<option value="${escapeHTML(t.clave)}">${escapeHTML(t.nombre)}</option>`).join("");
+    `<optgroup label="Informes">` +
+    tipos.map((t) => `<option value="informe:${escapeHTML(t.clave)}">${escapeHTML(t.nombre)}</option>`).join("") +
+    `</optgroup>` +
+    `<optgroup label="Entrevista de Salida">` +
+    `<option value="entrevista:kk">Entrevista de Salida — Krispy Kreme</option>` +
+    `<option value="entrevista:saona">Entrevista de Salida — SAONA</option>` +
+    `</optgroup>`;
 }
 
 async function loadTests() {
@@ -54,8 +60,13 @@ async function abrirEditor(testId) {
     document.getElementById("test-titulo").value = currentTest.titulo;
     document.getElementById("test-mensaje-final").value = currentTest.mensaje_final;
     document.getElementById("test-color-boton").value = currentTest.color_boton;
-    document.getElementById("test-tipo-informe").value = currentTest.tipo_informe_clave || "";
-    document.getElementById("test-tipo-entrevista").value = currentTest.tipo_entrevista_empresa || "";
+    if (currentTest.tipo_entrevista_empresa) {
+      document.getElementById("test-tipo-informe").value = `entrevista:${currentTest.tipo_entrevista_empresa}`;
+    } else if (currentTest.tipo_informe_clave) {
+      document.getElementById("test-tipo-informe").value = `informe:${currentTest.tipo_informe_clave}`;
+    } else {
+      document.getElementById("test-tipo-informe").value = "";
+    }
     document.getElementById("test-enlace-publico").value = `${location.origin}/encuesta.html?slug=${currentTest.slug}`;
     document.getElementById("fondo-preview").hidden = !currentTest.tiene_fondo;
     if (currentTest.tiene_fondo) {
@@ -74,7 +85,6 @@ async function abrirEditor(testId) {
     document.getElementById("test-mensaje-final").value = "Gracias por completar el formulario.";
     document.getElementById("test-color-boton").value = "#5b2a2a";
     document.getElementById("test-tipo-informe").value = "";
-    document.getElementById("test-tipo-entrevista").value = "";
     document.getElementById("test-enlace-publico").value = "";
     document.getElementById("fondo-preview").hidden = true;
     document.getElementById("btn-publicar-test").hidden = true;
@@ -113,12 +123,13 @@ async function guardarTest() {
     const data = await res.json();
     currentTestId = data.id;
   }
+  const destino = document.getElementById("test-tipo-informe").value;
   const body = {
     titulo,
     mensaje_final: document.getElementById("test-mensaje-final").value.trim(),
     color_boton: document.getElementById("test-color-boton").value,
-    tipo_informe_clave: document.getElementById("test-tipo-informe").value || null,
-    tipo_entrevista_empresa: document.getElementById("test-tipo-entrevista").value || null,
+    tipo_informe_clave: destino.startsWith("informe:") ? destino.slice("informe:".length) : null,
+    tipo_entrevista_empresa: destino.startsWith("entrevista:") ? destino.slice("entrevista:".length) : null,
   };
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}`, {
     method: "PUT",
