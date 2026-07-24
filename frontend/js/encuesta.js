@@ -194,10 +194,12 @@ function renderGrupoLikert(preguntas) {
     )
     .join("");
   return `
-    <table class="likert-tabla">
-      <thead><tr><th></th>${ordenVisual.map((i) => `<th>${escapeHTML(escala[i])}</th>`).join("")}</tr></thead>
-      <tbody>${filas}</tbody>
-    </table>`;
+    <div class="likert-tabla-wrap">
+      <table class="likert-tabla">
+        <thead><tr><th></th>${ordenVisual.map((i) => `<th>${escapeHTML(escala[i])}</th>`).join("")}</tr></thead>
+        <tbody>${filas}</tbody>
+      </table>
+    </div>`;
 }
 
 function renderPagina(index) {
