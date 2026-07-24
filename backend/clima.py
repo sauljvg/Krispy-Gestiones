@@ -509,30 +509,26 @@ def compute_reporte(oleada_id, centro=None):
     else:
         engagement_score = None
 
-    # Empate en top2box se resuelve por % "Totalmente de acuerdo" (más
-    # exigente que "De acuerdo"), para que el orden sea siempre el mismo.
-    ordenado_top2box = sorted(
+    # Comparación lexicográfica categoría a categoría: en el momento en que
+    # dos preguntas empatan en una categoría, les queda exactamente el mismo
+    # "resto" por repartir entre las categorías siguientes (los porcentajes
+    # siempre suman 100%), así que seguir comparando la siguiente categoría
+    # de la lista sigue siendo una comparación válida sobre ese resto — sin
+    # necesidad de sumar top2box/bottom2box ni de un criterio de repuesto
+    # cuando no hay desacuerdo. Fortalezas recorre la escala de mejor a peor
+    # (más "Totalmente de acuerdo" gana, empates se resuelven por "De
+    # acuerdo", luego por menos "Neutral", etc.); oportunidades recorre la
+    # misma escala al revés, de peor a mejor.
+    fortalezas = sorted(
         todas_preguntas_top2box,
-        key=lambda i: (i["top2box"], i["porcentajes"]["Totalmente de acuerdo"]),
+        key=lambda i: tuple(i["porcentajes"][cat] for cat in LIKERT_ORDEN),
         reverse=True,
-    )
-    fortalezas = ordenado_top2box[:2]
-
-    # El plan de acción debe salir de lo peor evaluado en negativo real
-    # (suma de "En desacuerdo" + "Totalmente en desacuerdo"), no solo de la
-    # falta de acuerdo — así se prioriza donde de verdad hay rechazo. Si
-    # nadie marcó esas opciones (bottom2box en 0 para todo), no hay señal
-    # negativa que priorizar y se cae al criterio anterior: lo peor evaluado
-    # por top2box más bajo.
-    ordenado_bottom2box = sorted(
+    )[:2]
+    oportunidades = sorted(
         todas_preguntas_top2box,
-        key=lambda i: (i["bottom2box"], i["porcentajes"]["Totalmente en desacuerdo"]),
+        key=lambda i: tuple(i["porcentajes"][cat] for cat in reversed(LIKERT_ORDEN)),
         reverse=True,
-    )
-    if ordenado_bottom2box[0]["bottom2box"] > 0:
-        oportunidades = ordenado_bottom2box[:2]
-    else:
-        oportunidades = list(reversed(ordenado_top2box[-2:]))
+    )[:2]
 
     abiertas = {}
     nube_palabras = {}
