@@ -435,9 +435,16 @@ def _insertar_hojas(conn, tipo_id, importacion_id, hojas):
     """Inserta cada fila de cada hoja en informe_respuestas, con el mismo
     dedup por hash que usa el import manual de Excel — factorizado aquí para
     que el módulo de Test (encuestas.py) pueda alimentar Informes fila a fila
-    según se van recibiendo respuestas, sin duplicar esta lógica."""
+    según se van recibiendo respuestas, sin duplicar esta lógica.
+
+    ids_por_hoja: id de la fila insertada (o ya existente) en cada hoja —
+    para una importación de Excel con muchas filas por hoja solo queda el
+    último, pero a quien SÍ le interesa esto es ingest_fila_directa (una
+    fila por hoja), para poder enlazar la respuesta del Test directamente
+    con su fila en Informes."""
     resumen = {}
     total_nuevas = 0
+    ids_por_hoja = {}
     for hoja_nombre, filas in hojas.items():
         nuevas = 0
         ya_existian = 0
@@ -449,17 +456,19 @@ def _insertar_hojas(conn, tipo_id, importacion_id, hojas):
             ).fetchone()
             if existe:
                 ya_existian += 1
+                ids_por_hoja[hoja_nombre] = existe["id"]
                 continue
             datos_json = json.dumps(fila, ensure_ascii=False, default=str)
-            conn.execute(
+            cur = conn.execute(
                 "INSERT INTO informe_respuestas (tipo_id, importacion_id, hoja, fila_hash, datos_json) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (tipo_id, importacion_id, hoja_nombre, fila_hash, datos_json),
             )
+            ids_por_hoja[hoja_nombre] = cur.lastrowid
             nuevas += 1
         resumen[hoja_nombre] = {"total_en_excel": len(filas), "nuevas": nuevas, "ya_existian": ya_existian}
         total_nuevas += nuevas
-    return resumen, total_nuevas
+    return resumen, total_nuevas, ids_por_hoja
 
 
 def import_excel(tipo_clave, file_bytes, archivo_nombre, subido_por):
@@ -479,7 +488,7 @@ def import_excel(tipo_clave, file_bytes, archivo_nombre, subido_por):
     )
     importacion_id = cur.lastrowid
 
-    resumen, total_nuevas = _insertar_hojas(conn, tipo["id"], importacion_id, hojas)
+    resumen, total_nuevas, _ids_por_hoja = _insertar_hojas(conn, tipo["id"], importacion_id, hojas)
 
     conn.execute("UPDATE informe_importaciones SET num_respuestas = ? WHERE id = ?", (total_nuevas, importacion_id))
     conn.commit()
@@ -496,7 +505,11 @@ def ingest_fila_directa(tipo_clave, fila, origen="Formulario web", columnas_extr
 
     columnas_extra: preguntas (abiertas / ordenar prioridades) que el
     módulo de Test quiere ver tal cual en Scoring/Dashboard, no solo en la
-    hoja "Respuestas" — ver scoring_valores.calcular()."""
+    hoja "Respuestas" — ver scoring_valores.calcular().
+
+    Devuelve además en qué fila de Informes quedó esta respuesta concreta
+    (hoja + id), para que el módulo de Test pueda enlazar directamente a
+    "cuál fue la respuesta registrada" en vez de solo el JSON crudo interno."""
     tipo = get_tipo(tipo_clave)
     if tipo is None:
         raise ValueError(f"Tipo de informe desconocido: {tipo_clave}")
@@ -510,12 +523,22 @@ def ingest_fila_directa(tipo_clave, fila, origen="Formulario web", columnas_extr
     )
     importacion_id = cur.lastrowid
 
-    _resumen, total_nuevas = _insertar_hojas(conn, tipo["id"], importacion_id, hojas)
+    _resumen, total_nuevas, ids_por_hoja = _insertar_hojas(conn, tipo["id"], importacion_id, hojas)
 
     conn.execute("UPDATE informe_importaciones SET num_respuestas = ? WHERE id = ?", (total_nuevas, importacion_id))
     conn.commit()
     conn.close()
-    return total_nuevas
+
+    # Preferimos enlazar a "Dashboard" (vista resumida con puntuación) si el
+    # cuestionario se reconoció como Valores y Competencias; si no (p.ej. un
+    # tipo de Informe sin scoring), a la propia hoja "Respuestas".
+    hoja_destino = "Dashboard" if "Dashboard" in ids_por_hoja else "Respuestas"
+    return {
+        "total_nuevas": total_nuevas,
+        "tipo_clave": tipo_clave,
+        "hoja": hoja_destino,
+        "respuesta_id": ids_por_hoja.get(hoja_destino),
+    }
 
 
 def _detect_date_columns(columnas):

@@ -6,6 +6,7 @@ Microsoft Forms: mismo aspecto (fondo de imagen, tarjeta centrada, barra de
 progreso, Atrás/Siguiente) y, si la encuesta se vincula a un tipo de
 Informe, la respuesta se puntúa automáticamente (motor de scoring_valores)
 igual que si se hubiera subido el Excel de Forms a mano."""
+import datetime
 import json
 import os
 import re
@@ -113,6 +114,15 @@ def ensure_encuestas_tables():
             creado_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # Enlace a la fila que esta respuesta generó en Informes (o NULL si el
+    # test no alimenta ningún tipo de Informe) — para poder llevar al admin
+    # directamente a "cuál fue la respuesta registrada" desde "Ver respuestas"
+    # en vez de solo el JSON crudo interno.
+    cols_respuestas = {row[1] for row in conn.execute("PRAGMA table_info(encuesta_respuestas)")}
+    if "informe_respuesta_id" not in cols_respuestas:
+        conn.execute("ALTER TABLE encuesta_respuestas ADD COLUMN informe_tipo_clave TEXT")
+        conn.execute("ALTER TABLE encuesta_respuestas ADD COLUMN informe_hoja TEXT")
+        conn.execute("ALTER TABLE encuesta_respuestas ADD COLUMN informe_respuesta_id INTEGER")
     # Notificación de "hay respuestas nuevas" junto al menú hamburguesa: por
     # usuario, guarda desde cuándo cuenta como "ya visto" — todo lo que llegó
     # después de esa marca es "nuevo". Al crear la tabla no hay fila para
@@ -512,17 +522,33 @@ def guardar_respuesta(slug, respuestas_por_pregunta, ip, user_agent):
             columnas_extra.add(clave)
 
     dispositivo = _detectar_dispositivo(user_agent)
-    conn.execute(
+    cur = conn.execute(
         "INSERT INTO encuesta_respuestas (encuesta_id, datos_json, ip, user_agent, dispositivo) VALUES (?, ?, ?, ?, ?)",
         (encuesta_id, json.dumps(fila_por_etiqueta, ensure_ascii=False, default=str), ip, user_agent, dispositivo),
     )
+    respuesta_id = cur.lastrowid
     conn.commit()
     conn.close()
 
     if tipo_informe_clave:
-        informes_module.ingest_fila_directa(
-            tipo_informe_clave, fila_por_etiqueta, origen=f"Test web: {row['titulo']}", columnas_extra=columnas_extra
+        # "Fecha del test" solo se manda a Informes (no se guarda en el
+        # datos_json interno de encuesta_respuestas, que ya tiene su propio
+        # creado_en) — scoring_valores._detectar_fecha la reconoce por su
+        # nombre exacto y así no confunde con ella ninguna pregunta cuyo
+        # enunciado contenga "fecha"/"hora" de pasada.
+        fila_para_informes = dict(fila_por_etiqueta)
+        fila_para_informes["Fecha del test"] = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        enlace = informes_module.ingest_fila_directa(
+            tipo_informe_clave, fila_para_informes, origen=f"Test web: {row['titulo']}", columnas_extra=columnas_extra
         )
+        if enlace.get("respuesta_id"):
+            conn2 = get_connection()
+            conn2.execute(
+                "UPDATE encuesta_respuestas SET informe_tipo_clave = ?, informe_hoja = ?, informe_respuesta_id = ? WHERE id = ?",
+                (enlace["tipo_clave"], enlace["hoja"], enlace["respuesta_id"], respuesta_id),
+            )
+            conn2.commit()
+            conn2.close()
     if row["tipo_entrevista_empresa"]:
         entrevistas_module.ingest_fila_directa(
             row["tipo_entrevista_empresa"], fila_por_etiqueta, origen=f"Test web: {row['titulo']}"
@@ -534,7 +560,8 @@ def guardar_respuesta(slug, respuestas_por_pregunta, ip, user_agent):
 def list_respuestas(encuesta_id):
     conn = get_connection()
     rows = conn.execute(
-        "SELECT id, datos_json, ip, user_agent, dispositivo, creado_en FROM encuesta_respuestas "
+        "SELECT id, datos_json, ip, user_agent, dispositivo, creado_en, "
+        "informe_tipo_clave, informe_hoja, informe_respuesta_id FROM encuesta_respuestas "
         "WHERE encuesta_id = ? ORDER BY creado_en DESC",
         (encuesta_id,),
     ).fetchall()

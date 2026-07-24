@@ -264,7 +264,7 @@ function renderTable() {
   const thead = document.getElementById("tipo-detail-thead");
   thead.innerHTML =
     `<th><input type="checkbox" id="check-all"></th>` +
-    columnasVisibles.map((c) => `<th>${escapeHTML(c)}</th>`).join("") +
+    columnasVisibles.map((c) => `<th title="${escapeHTML(c)}">${escapeHTML(c)}</th>`).join("") +
     `<th>CV</th>`;
 
   const tbody = document.getElementById("tipo-detail-tbody");
@@ -344,6 +344,24 @@ async function openTipo(clave, nombre) {
   document.getElementById("tipo-detail").scrollIntoView({ behavior: "smooth" });
 }
 
+async function abrirRespuestaDesdeEnlace(tipoClave, hoja, respuestaId) {
+  const card = document.querySelector(`.home-card[data-clave="${tipoClave}"]`);
+  if (!card) return; // tipo de otra empresa o sin permiso — no hay tarjeta cargada
+  await openTipo(tipoClave, card.dataset.nombre);
+  if (hoja && hoja !== currentHoja && todasLasHojas.some((h) => h.hoja === hoja)) {
+    currentHoja = hoja;
+    selectedIds.clear();
+    renderHojasPanel();
+    await loadRespuestas();
+  }
+  const fila = document.querySelector(`#tipo-detail-tbody tr[data-id="${respuestaId}"]`);
+  if (fila) {
+    fila.scrollIntoView({ behavior: "smooth", block: "center" });
+    fila.classList.add("fila-destacada");
+    setTimeout(() => fila.classList.remove("fila-destacada"), 3000);
+  }
+}
+
 async function abrirModalCompartir() {
   if (selectedIds.size === 0) return;
   if (usuariosParaCompartir.length === 0) {
@@ -373,6 +391,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   aplicarBrandingEmpresa();
 
   await loadTipos();
+
+  // Enlace directo desde "Ver respuestas" del módulo de Test — ?tipo=&hoja=&respuesta=
+  // te deja justo en la fila que se registró, en vez de tener que buscarla a mano.
+  const params = new URLSearchParams(location.search);
+  const tipoParam = params.get("tipo");
+  const respuestaParam = params.get("respuesta");
+  if (tipoParam && respuestaParam) {
+    await abrirRespuestaDesdeEnlace(tipoParam, params.get("hoja"), Number(respuestaParam));
+  }
 
   document.getElementById("input-informe-upload").addEventListener("change", async (e) => {
     const file = e.target.files[0];

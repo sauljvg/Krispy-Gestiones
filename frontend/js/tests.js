@@ -598,18 +598,37 @@ async function verRespuestas() {
     tbody.innerHTML = `<tr><td colspan="4" class="staff-hint">Todavía no hay respuestas.</td></tr>`;
   } else {
     tbody.innerHTML = respuestas
-      .map(
-        (r) => `
+      .map((r) => {
+        // Solo hay enlace al informe si el test alimenta un tipo de Informe
+        // y esa fila concreta llegó a calcularse ahí (ver guardar_respuesta
+        // en encuestas.py) — si no, solo queda el JSON crudo interno.
+        const enlaceInforme = r.informe_respuesta_id
+          ? (() => {
+              const empresa = r.informe_tipo_clave.startsWith("saona_") ? "saona" : "kk";
+              const params = new URLSearchParams({
+                tipo: r.informe_tipo_clave, hoja: r.informe_hoja || "", respuesta: r.informe_respuesta_id, empresa,
+              });
+              return `<a href="/informes.html?${params.toString()}" target="_blank" class="btn btn-ghost btn-mini">Ver en Informes</a>`;
+            })()
+          : "";
+        return `
       <tr>
         <td>${formatearFechaHoraLocal(r.creado_en)}</td>
         <td>${escapeHTML(r.ip || "—")}</td>
         <td>${escapeHTML(r.dispositivo || "—")}</td>
-        <td><details><summary>Ver</summary><pre style="white-space:pre-wrap;">${escapeHTML(JSON.stringify(r.datos, null, 2))}</pre></details></td>
-      </tr>`
-      )
+        <td>
+          ${enlaceInforme}
+          <details><summary>Ver JSON</summary><pre style="white-space:pre-wrap;">${escapeHTML(JSON.stringify(r.datos, null, 2))}</pre></details>
+        </td>
+      </tr>`;
+      })
       .join("");
   }
   wrap.hidden = false;
+  // Este panel se pinta DESPUÉS de todas las páginas/preguntas del test, así
+  // que en un test largo (20+ páginas) se abre muy por debajo del viewport
+  // sin que se note — parecía que el botón no hacía nada.
+  wrap.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 document.addEventListener("DOMContentLoaded", async () => {

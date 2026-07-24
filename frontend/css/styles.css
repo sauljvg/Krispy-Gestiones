@@ -172,6 +172,15 @@ h3 {
 .hamburger-menu .btn { width: 100%; text-align: left; justify-content: flex-start; }
 .hamburger-menu-sep { border: none; border-top: 1px solid var(--border); margin: 4px 0; width: 100%; }
 
+/* Fila resaltada momentáneamente al llegar por un enlace directo (p.ej.
+   desde "Ver respuestas" del módulo de Test), para que el ojo la encuentre
+   sin tener que buscarla entre el resto de la tabla. */
+.fila-destacada { animation: fila-destacada-flash 3s ease-out; }
+@keyframes fila-destacada-flash {
+  0%, 40% { background: color-mix(in srgb, var(--series-blue) 22%, transparent); }
+  100% { background: transparent; }
+}
+
 /* Notificación de "hay respuestas nuevas de Test" junto al menú hamburguesa
    — mismo patrón visual que .checklist-popover, pero con el globo rojo de
    conteo típico de una campanita de notificaciones. */

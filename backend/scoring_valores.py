@@ -200,7 +200,8 @@ MAP_STJ = [
 ]
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]")
-_FECHA_CANDIDATAS = ["Hora de finalización", "Hora de finalizacion", "Hora de inicio"]
+_FECHA_CANDIDATAS = ["Hora de finalización", "Hora de finalizacion", "Hora de inicio", "Fecha del test"]
+_FECHA_MAX_LEN = 30  # por debajo de esto es un nombre de columna, no el enunciado de una pregunta
 
 
 def _normalize(s):
@@ -282,8 +283,13 @@ def _detectar_fecha(headers, headers_norm):
         for h, hn in zip(headers, headers_norm):
             if hn == cn:
                 return h
+    # Fallback para nombres de columna de fecha atípicos que no vienen del
+    # export de Forms — con guarda de longitud, igual que _detectar_columna,
+    # porque si no, una pregunta cuyo ENUNCIADO contiene "hora" de pasada
+    # (p.ej. "Es hora punta en el Teatro...") se detectaba por error como la
+    # columna de fecha, mostrando la respuesta de esa pregunta en su lugar.
     for h in headers:
-        if any(hint in h.lower() for hint in ("fecha", "hora", "date")):
+        if len(h) < _FECHA_MAX_LEN and any(hint in h.lower() for hint in ("fecha", "hora", "date")):
             return h
     return None
 
