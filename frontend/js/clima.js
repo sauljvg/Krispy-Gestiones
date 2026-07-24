@@ -351,7 +351,8 @@ async function loadReporte(centro) {
     const f = data.fortalezas[i];
     const o = data.oportunidades[i];
     filasFoHtml += f ? `<span class="fo-chip fo-chip-fortaleza">${escapeHTML(f.pregunta)} — ${f.top2box}% de acuerdo</span>` : "<span></span>";
-    filasFoHtml += o ? `<span class="fo-chip fo-chip-oportunidad">${escapeHTML(o.pregunta)} — ${o.top2box}% de acuerdo</span>` : "<span></span>";
+    const textoOportunidad = o && o.bottom2box > 0 ? `${o.bottom2box}% en desacuerdo` : o ? `${o.top2box}% de acuerdo` : "";
+    filasFoHtml += o ? `<span class="fo-chip fo-chip-oportunidad">${escapeHTML(o.pregunta)} — ${textoOportunidad}</span>` : "<span></span>";
   }
   document.getElementById("fo-grid").innerHTML = `
     <h3 class="fo-col-title fo-title-fortaleza">¡Celébralo con el equipo!</h3>

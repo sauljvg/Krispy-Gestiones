@@ -397,8 +397,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   const params = new URLSearchParams(location.search);
   const tipoParam = params.get("tipo");
   const respuestaParam = params.get("respuesta");
-  if (tipoParam && respuestaParam) {
-    await abrirRespuestaDesdeEnlace(tipoParam, params.get("hoja"), Number(respuestaParam));
+  if (tipoParam) {
+    await abrirRespuestaDesdeEnlace(tipoParam, params.get("hoja"), respuestaParam ? Number(respuestaParam) : null);
   }
 
   document.getElementById("input-informe-upload").addEventListener("change", async (e) => {

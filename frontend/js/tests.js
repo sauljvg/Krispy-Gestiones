@@ -22,6 +22,25 @@ async function loadTiposInforme() {
     `</optgroup>`;
 }
 
+// El numero de respuestas en el listado enlaza al informe donde se acumulan
+// (Informes para tests de Valores/Competencias, Entrevistas de Salida para
+// los de ese tipo) — asi no hay que abrir el test y buscar "Ver respuestas"
+// para llegar al mismo sitio. Sin tipo configurado (o sin respuestas aun) el
+// numero se queda como texto plano.
+function enlaceRespuestasTest(t) {
+  if (!t.num_respuestas) return `${t.num_respuestas}`;
+  if (t.tipo_informe_clave) {
+    const empresa = t.tipo_informe_clave.startsWith("saona_") ? "saona" : "kk";
+    const params = new URLSearchParams({ tipo: t.tipo_informe_clave, empresa });
+    return `<a href="/informes.html?${params.toString()}" target="_blank">${t.num_respuestas}</a>`;
+  }
+  if (t.tipo_entrevista_empresa) {
+    const params = new URLSearchParams({ empresa: t.tipo_entrevista_empresa });
+    return `<a href="/entrevistas.html?${params.toString()}" target="_blank">${t.num_respuestas}</a>`;
+  }
+  return `${t.num_respuestas}`;
+}
+
 async function loadTests() {
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas`);
   const tests = await res.json();
@@ -36,7 +55,7 @@ async function loadTests() {
     <tr>
       <td>${escapeHTML(t.titulo)}</td>
       <td><span class="badge ${t.estado === "abierta" ? "badge-abierta" : "badge-cerrada"}">${t.estado === "abierta" ? "Abierta" : "Cerrada"}</span></td>
-      <td>${t.num_respuestas}</td>
+      <td>${enlaceRespuestasTest(t)}</td>
       <td><button class="btn btn-ghost btn-editar-test" data-id="${t.id}" type="button">Editar</button></td>
     </tr>`
     )

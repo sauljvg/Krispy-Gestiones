@@ -450,7 +450,10 @@ def generar_pdf(reporte, empresa="kk"):
             texto_izq = f'{i["pregunta"]} — {i["top2box"]}% de acuerdo'
         if idx < len(reporte["oportunidades"]):
             i = reporte["oportunidades"][idx]
-            texto_der = f'{i["pregunta"]} — {i["top2box"]}% de acuerdo'
+            if i.get("bottom2box", 0) > 0:
+                texto_der = f'{i["pregunta"]} — {i["bottom2box"]}% en desacuerdo'
+            else:
+                texto_der = f'{i["pregunta"]} — {i["top2box"]}% de acuerdo'
 
         # Cada chip es su propia mini-tabla con fondo de color — sin forzar
         # la misma altura explícita en los dos, el par de una fila quedaba

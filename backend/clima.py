@@ -477,7 +477,8 @@ def compute_reporte(oleada_id, centro=None):
         else:
             porcentajes = {cat: round(conteo[cat] / respondidas * 100, 1) for cat in LIKERT_ORDEN}
         top2box = round(porcentajes["Totalmente de acuerdo"] + porcentajes["De acuerdo"], 1)
-        return porcentajes, top2box
+        bottom2box = round(porcentajes["En desacuerdo"] + porcentajes["Totalmente en desacuerdo"], 1)
+        return porcentajes, top2box, bottom2box
 
     primera_categoria = roles["categorias_orden"][0] if roles["categorias_orden"] else None
 
@@ -486,8 +487,14 @@ def compute_reporte(oleada_id, centro=None):
     todas_preguntas_top2box = []
 
     for header, categoria, pregunta in roles["likert"]:
-        porcentajes, top2box = stats_pregunta(header)
-        item = {"pregunta": pregunta, "categoria": categoria, "porcentajes": porcentajes, "top2box": top2box}
+        porcentajes, top2box, bottom2box = stats_pregunta(header)
+        item = {
+            "pregunta": pregunta,
+            "categoria": categoria,
+            "porcentajes": porcentajes,
+            "top2box": top2box,
+            "bottom2box": bottom2box,
+        }
         if categoria == primera_categoria:
             resultados_engagement.append(item)
         else:
@@ -510,7 +517,22 @@ def compute_reporte(oleada_id, centro=None):
         reverse=True,
     )
     fortalezas = ordenado_top2box[:2]
-    oportunidades = list(reversed(ordenado_top2box[-2:]))
+
+    # El plan de acción debe salir de lo peor evaluado en negativo real
+    # (suma de "En desacuerdo" + "Totalmente en desacuerdo"), no solo de la
+    # falta de acuerdo — así se prioriza donde de verdad hay rechazo. Si
+    # nadie marcó esas opciones (bottom2box en 0 para todo), no hay señal
+    # negativa que priorizar y se cae al criterio anterior: lo peor evaluado
+    # por top2box más bajo.
+    ordenado_bottom2box = sorted(
+        todas_preguntas_top2box,
+        key=lambda i: (i["bottom2box"], i["porcentajes"]["Totalmente en desacuerdo"]),
+        reverse=True,
+    )
+    if ordenado_bottom2box[0]["bottom2box"] > 0:
+        oportunidades = ordenado_bottom2box[:2]
+    else:
+        oportunidades = list(reversed(ordenado_top2box[-2:]))
 
     abiertas = {}
     nube_palabras = {}
