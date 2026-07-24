@@ -350,6 +350,14 @@ async function init() {
     return;
   }
   document.title = encuesta.titulo;
+  // La encuesta pública no expone tipo_informe_clave/tipo_entrevista_empresa
+  // (son detalle interno de administración) — el título es lo único que
+  // distingue un test SAONA de uno de Krispy Kreme aquí, y todos los tests
+  // SAONA llevan "SAONA" en el nombre por convención (ver tests.js).
+  if (/saona/i.test(encuesta.titulo)) {
+    const favicon = document.querySelector('link[rel="icon"]');
+    if (favicon) favicon.href = "assets/favicon-saona.png";
+  }
   document.documentElement.style.setProperty("--color-boton", encuesta.color_boton || "#5b2a2a");
   if (encuesta.tiene_fondo) {
     document.documentElement.style.setProperty("--fondo-url", `url("${API_BASE}/${slug}/fondo")`);
