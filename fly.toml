@@ -8,6 +8,11 @@ primary_region = 'iad'
 
 [build]
 
+[env]
+  # backend/main.py escucha en esta variable de entorno (por defecto 8000
+  # si no está puesta) - tiene que coincidir con internal_port de abajo.
+  PORT = '8080'
+
 [http_service]
   internal_port = 8080
   force_https = true
