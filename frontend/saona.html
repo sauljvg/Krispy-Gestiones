@@ -14,13 +14,11 @@
     document.documentElement.dataset.empresa = "saona";
   })();
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260724d">
+<link rel="stylesheet" href="css/styles.css?v=20260725a">
 <style>
   .home-wrap { min-height: 100vh; }
-  .home-wrap .home-grid { max-width: 900px; margin: 40px auto 0; gap: 20px; }
+  .home-wrap .home-grid { max-width: 900px; margin: 24px auto 0; gap: 20px; }
   .home-title { max-width: 900px; margin: 0 auto; }
-  .home-title h1 { margin: 0 0 4px; font-size: 22px; }
-  .home-title p { margin: 0; color: var(--text-secondary); font-size: 13px; }
   .home-card.disabled .home-tag-proximamente {
     align-self: flex-start; font-size: 11px; padding: 3px 8px; border-radius: 999px;
     background: var(--surface-page); color: var(--text-muted);
@@ -51,35 +49,36 @@
     </div>
   </header>
 
-  <div class="home-title">
+  <div class="home-title hero-banner">
+    <span class="eyebrow">Portal interno</span>
     <h1>SAONA</h1>
-    <p>Selecciona un apartado.</p>
+    <p>Selecciona un apartado para empezar.</p>
   </div>
 
   <div class="home-grid" id="home-grid">
     <div class="home-card disabled" id="card-saona-resenas" hidden title="Necesitamos el listado de restaurantes Saona con su enlace de Google Maps para activar esto">
-      <span class="home-icon">🌿</span>
+      <span class="icon-badge"><span class="home-icon">🌿</span></span>
       <h2>Reseñas</h2>
       <p>Analítica de reseñas de Google Maps de los restaurantes Saona (scraping del navegador).</p>
       <span class="home-tag-proximamente">Próximamente</span>
     </div>
     <a class="home-card" href="informes.html?empresa=saona" id="card-saona-informes" hidden>
-      <span class="home-icon">📋</span>
+      <span class="icon-badge"><span class="home-icon">📋</span></span>
       <h2>Informes</h2>
       <p>Valores y competencias y más encuestas de Microsoft Forms.</p>
     </a>
     <a class="home-card" href="clima.html?empresa=saona" id="card-saona-clima" hidden>
-      <span class="home-icon">📊</span>
+      <span class="icon-badge"><span class="home-icon">📊</span></span>
       <h2>Clima Laboral</h2>
       <p>Engagement por centro: resultados, impulsores, fortalezas y oportunidades.</p>
     </a>
     <a class="home-card" href="entrevistas.html?empresa=saona" id="card-saona-entrevistas" hidden>
-      <span class="home-icon">🚪</span>
+      <span class="icon-badge"><span class="home-icon">🚪</span></span>
       <h2>Entrevista de Salida</h2>
       <p>Motivos de salida, satisfacción por bloque y comentarios abiertos.</p>
     </a>
     <a class="home-card" href="compartidos.html?empresa=saona" id="card-saona-compartidos">
-      <span class="home-icon">📁</span>
+      <span class="icon-badge"><span class="home-icon">📁</span></span>
       <h2>Reclutamiento</h2>
       <p>Candidatos y currículums que te han compartido desde Informes para entrevistar.</p>
     </a>

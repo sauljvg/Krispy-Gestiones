@@ -20,8 +20,8 @@ function renderTimelineChart(timeline) {
       datasets: [{
         label: "Reseñas por mes",
         data: counts,
-        borderColor: cssVar("--series-blue"),
-        backgroundColor: cssVar("--series-blue") + "26",
+        borderColor: cssVar("--acento"),
+        backgroundColor: cssVar("--acento") + "26",
         borderWidth: 2,
         pointRadius: 3,
         fill: true,
@@ -53,7 +53,7 @@ function renderDistributionChart(distribucion) {
       datasets: [{
         label: "Reseñas",
         data: counts,
-        backgroundColor: cssVar("--series-blue"),
+        backgroundColor: cssVar("--acento"),
         borderRadius: 4,
         maxBarThickness: 46,
       }],
@@ -79,7 +79,7 @@ function renderHoraChart(porHora) {
       datasets: [{
         label: "Reseñas",
         data: porHora.map((h) => h.cantidad),
-        backgroundColor: cssVar("--series-blue"),
+        backgroundColor: cssVar("--acento"),
         borderRadius: 4,
         maxBarThickness: 22,
       }],
@@ -112,7 +112,7 @@ function renderDiaSemanaChart(porDia) {
       datasets: [{
         label: "Reseñas",
         data: porDia.map((d) => d.cantidad),
-        backgroundColor: cssVar("--series-blue"),
+        backgroundColor: cssVar("--acento"),
         borderRadius: 4,
         maxBarThickness: 46,
       }],

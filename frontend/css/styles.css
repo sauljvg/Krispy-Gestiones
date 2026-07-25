@@ -1,18 +1,33 @@
+/* @import DEBE ir antes que cualquier otra regla (incluido :root) — si no,
+   el navegador la descarta en silencio y la tipografía cae al fallback sin
+   avisar. Serif editorial para titulares grandes (banners, secciones de
+   datos), contraste deliberado con la sans utilitaria del cuerpo. Variable,
+   trae cursiva propia (se usa para textos de estado tipo "cargando..."). */
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,500&display=swap');
+
 :root {
   color-scheme: light;
-  --surface-1:      #fcfcfb;
+  --surface-1:      #fffdfa;
   --surface-page:   #FDF4EB;
   --text-primary:   #0b0b0b;
   --text-secondary: #52514e;
   --text-muted:     #898781;
   --gridline:       #e1e0d9;
   --border:         rgba(11,11,11,0.10);
-  --series-blue:    #2a78d6;
+  /* Acento = color de marca principal (botones, links, foco, tabs activos,
+     bordes en hover). Verde Krispy Kreme por defecto; el bloque
+     [data-empresa="saona"] de más abajo lo cambia por el azul grisáceo de
+     Saona. --acento-calido es el segundo tono de marca (naranja cálido /
+     terracota) para realces puntuales: eyebrows, subrayados, chips,
+     tendencias — el "acento del acento", no el color de acción principal. */
+  --acento:         #0b6b3a;
+  --acento-calido:  #e07b00;
   --series-aqua:    #1baf7a;
   --series-yellow:  #eda100;
   --status-good:    #0ca30c;
   --status-warning: #fab219;
   --status-critical:#d03b3b;
+  --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -25,7 +40,8 @@
     --text-muted:     #898781;
     --gridline:       #2c2c2a;
     --border:         rgba(255,255,255,0.10);
-    --series-blue:    #3987e5;
+    --acento:         #3ec37e;
+    --acento-calido:  #f0973a;
     --series-aqua:    #199e70;
     --series-yellow:  #c98500;
     --status-good:    #0ca30c;
@@ -42,19 +58,21 @@
   --text-muted:     #898781;
   --gridline:       #2c2c2a;
   --border:         rgba(255,255,255,0.10);
-  --series-blue:    #3987e5;
+  --acento:         #3ec37e;
+  --acento-calido:  #f0973a;
   --series-aqua:    #199e70;
   --series-yellow:  #c98500;
 }
 
 /* Páginas dentro del hub SAONA (clima.js/informes.js/compartidos.js ponen
-   este atributo cuando ?empresa=saona) reemplazan el azul de acento de
-   Krispy Kreme por el azul grisáceo de marca de Saona — como todo el resto
-   de componentes (botones, tabs, tarjetas, paginación...) ya usa
-   --series-blue en vez de un color fijo, este único cambio los reskinea
-   a todos sin tocar cada uno por separado. */
+   este atributo cuando ?empresa=saona) reemplazan el acento verde de
+   Krispy Kreme por los tonos de marca Saona (navy grisáceo + terracota) —
+   como todo el resto de componentes (botones, tabs, tarjetas, paginación...)
+   ya usa --acento/--acento-calido en vez de un color fijo, este único
+   cambio los reskinea a todos sin tocar cada uno por separado. */
 :root[data-empresa="saona"] {
-  --series-blue: #7A99AC;
+  --acento: #7A99AC;
+  --acento-calido: #B8562E;
 }
 
 * { box-sizing: border-box; }
@@ -117,7 +135,7 @@ h3 {
 /* Foco visible consistente en toda la web — antes dependía del estilo por
    defecto del navegador (poco visible sobre --surface-1 en modo oscuro). */
 :focus-visible {
-  outline: 2px solid var(--series-blue);
+  outline: 2px solid var(--acento);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -177,7 +195,7 @@ h3 {
    sin tener que buscarla entre el resto de la tabla. */
 .fila-destacada { animation: fila-destacada-flash 3s ease-out; }
 @keyframes fila-destacada-flash {
-  0%, 40% { background: color-mix(in srgb, var(--series-blue) 22%, transparent); }
+  0%, 40% { background: color-mix(in srgb, var(--acento) 22%, transparent); }
   100% { background: transparent; }
 }
 
@@ -222,7 +240,7 @@ h3 {
 }
 .checklist-popover.visible { display: block; }
 .checklist-popover-actions { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
-.checklist-popover-actions button { font-size: 11px; background: none; border: none; color: var(--series-blue); cursor: pointer; padding: 0; }
+.checklist-popover-actions button { font-size: 11px; background: none; border: none; color: var(--acento); cursor: pointer; padding: 0; }
 .checklist-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; }
 .checklist-row label { flex: 1; cursor: pointer; }
 .topbar-user { font-size: 12px; color: var(--text-secondary); }
@@ -246,8 +264,8 @@ h3 {
 }
 .topbar-store select:focus {
   outline: none;
-  border-color: var(--series-blue);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--series-blue) 18%, transparent);
+  border-color: var(--acento);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--acento) 18%, transparent);
 }
 
 .btn {
@@ -261,19 +279,19 @@ h3 {
   cursor: pointer;
   transition: border-color .15s ease, background-color .15s ease, transform .1s ease, box-shadow .15s ease;
 }
-.btn:hover { border-color: var(--series-blue); background: color-mix(in srgb, var(--series-blue) 6%, var(--surface-1)); }
+.btn:hover { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 6%, var(--surface-1)); }
 .btn:active { transform: translateY(1px); }
 .btn-primary {
-  background: var(--series-blue); color: #fff; border-color: var(--series-blue);
-  box-shadow: 0 2px 10px color-mix(in srgb, var(--series-blue) 35%, transparent);
+  background: var(--acento); color: #fff; border-color: var(--acento);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--acento) 35%, transparent);
 }
 .btn-primary:hover {
-  background: color-mix(in srgb, var(--series-blue) 88%, black);
-  border-color: color-mix(in srgb, var(--series-blue) 88%, black);
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--series-blue) 45%, transparent);
+  background: color-mix(in srgb, var(--acento) 88%, black);
+  border-color: color-mix(in srgb, var(--acento) 88%, black);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--acento) 45%, transparent);
 }
 .btn-ghost { background: transparent; box-shadow: none; }
-.btn-ghost:hover { background: color-mix(in srgb, var(--series-blue) 8%, transparent); }
+.btn-ghost:hover { background: color-mix(in srgb, var(--acento) 8%, transparent); }
 
 /* Tarjetas tipo "módulo" — mismo patrón visual en Inicio y en Informes
    ("Selecciona un informe"), para que ambas pantallas de selección se lean
@@ -297,7 +315,7 @@ h3 {
   transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
 .home-card:hover {
-  border-color: var(--series-blue);
+  border-color: var(--acento);
   transform: translateY(-2px);
   box-shadow: 0 10px 24px rgba(0,0,0,0.08);
 }
@@ -432,7 +450,7 @@ h3 {
   line-height: 1;
   padding: 0;
 }
-.scrape-info-btn:hover { color: var(--series-blue); }
+.scrape-info-btn:hover { color: var(--acento); }
 .scrape-info-tooltip {
   display: none;
   position: absolute;
@@ -452,7 +470,7 @@ h3 {
 }
 .scrape-info-wrap:hover .scrape-info-tooltip,
 .scrape-info-wrap:focus-within .scrape-info-tooltip { display: block; }
-.scrape-info-tooltip b { color: var(--series-blue); }
+.scrape-info-tooltip b { color: var(--acento); }
 
 /* Botón ⓘ genérico para explicar un título sin ensuciar la pantalla con el
    texto siempre visible — hover en desktop, tap en móvil (la clase "open" la
@@ -467,7 +485,7 @@ h3 {
   line-height: 1;
   padding: 0;
 }
-.info-tip-btn:hover { color: var(--series-blue); }
+.info-tip-btn:hover { color: var(--acento); }
 .info-tip-box {
   display: none;
   position: absolute;
@@ -501,7 +519,7 @@ h3 {
 .scrape-progress-fill {
   height: 100%;
   width: 30%;
-  background: var(--series-blue);
+  background: var(--acento);
   border-radius: 999px;
   animation: scrape-indeterminate 1.2s ease-in-out infinite;
 }
@@ -534,8 +552,8 @@ h3 {
 }
 .filter-group select:focus, .filter-group input:focus {
   outline: none;
-  border-color: var(--series-blue);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--series-blue) 18%, transparent);
+  border-color: var(--acento);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--acento) 18%, transparent);
 }
 .filter-search { flex: 1 1 220px; }
 .filter-search input { width: 100%; }
@@ -595,7 +613,7 @@ h3 {
 .staff-table tr:last-child td { border-bottom: none; }
 .staff-table tbody tr { cursor: pointer; }
 .staff-table tbody tr:hover { background: var(--surface-page); }
-.staff-table tbody tr.active { background: color-mix(in srgb, var(--series-blue) 16%, transparent); }
+.staff-table tbody tr.active { background: color-mix(in srgb, var(--acento) 16%, transparent); }
 
 .staff-hint { margin: -6px 0 10px; font-size: 12px; color: var(--text-muted); }
 
@@ -604,7 +622,7 @@ h3 {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  background: color-mix(in srgb, var(--series-blue) 14%, transparent);
+  background: color-mix(in srgb, var(--acento) 14%, transparent);
   border-radius: 8px;
   padding: 6px 10px;
   margin-bottom: 10px;
@@ -683,6 +701,118 @@ h3 {
   font-size: 13px;
   transition: border-color .15s ease, background-color .15s ease;
 }
-.pagination button:not([disabled]):hover { border-color: var(--series-blue); }
+.pagination button:not([disabled]):hover { border-color: var(--acento); }
 .pagination button[disabled] { opacity: .4; cursor: default; }
-.pagination button.active { background: var(--series-blue); color: #fff; border-color: var(--series-blue); }
+.pagination button.active { background: var(--acento); color: #fff; border-color: var(--acento); }
+
+/* ============================================================
+   Lavado de cara 2026 — capa de componentes por encima del resto
+   del archivo. Todo lo de arriba sigue funcionando igual (mismas
+   variables, ahora con valores de marca real en vez de un azul
+   genérico); lo de aquí abajo son piezas nuevas para dar carácter
+   editorial a titulares, cabeceras y tarjetas de KPI.
+   ============================================================ */
+
+/* Radio y sombra un punto más generosos que antes en las superficies
+   "tarjeta" — el mismo valor en todas para que se lean como una sola
+   familia de componente. */
+.chart-card, .keywords-card, .reviews-card, .staff-card,
+.filters-row, .stat-tile, .home-card {
+  border-radius: 18px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+/* Etiqueta pequeña en mayúsculas con tracking — el "eyebrow" editorial que
+   antecede a un titular grande (mismo tratamiento que .stat-label, pero
+   como utilidad independiente para usarla fuera de los KPI). */
+.eyebrow {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+  color: var(--acento-calido);
+  margin: 0 0 8px;
+}
+.hero-banner .eyebrow { color: color-mix(in srgb, var(--acento-calido) 55%, #fff); }
+
+/* Titular grande en serif — para portadas de módulo y cabeceras de
+   sección, nunca para el wordmark de marca (.brand h1 sigue en Gelica). */
+.display-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+
+/* Banner de cabecera con el color de marca a toda anchura — sustituye al
+   típico "topbar blanco + h1 pequeño" por un bloque con presencia, al
+   estilo de los dashboards de referencia. Degradado sutil hacia un tono
+   más oscuro del mismo --acento para dar profundidad sin depender de
+   fotografía (no hay banco de fotos por tienda todavía). */
+.hero-banner {
+  background: linear-gradient(135deg, var(--acento), color-mix(in srgb, var(--acento) 74%, black));
+  color: #fff;
+  border-radius: 22px;
+  padding: 30px 34px;
+  margin-bottom: 24px;
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--acento) 25%, transparent);
+}
+.hero-banner h1 {
+  margin: 0 0 4px;
+  font-size: 30px;
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.hero-banner p { margin: 0; color: rgba(255,255,255,0.78); font-size: 14px; }
+
+/* Icono envuelto en una insignia circular — el mismo emoji de siempre,
+   pero con el peso visual de un ícono de producto en vez de "texto suelto
+   con un emoji al lado". */
+.icon-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--acento) 12%, var(--surface-1));
+  font-size: 22px;
+  flex-shrink: 0;
+}
+.icon-badge img { height: 24px; width: auto; }
+
+/* Control segmentado tipo "pill" (rangos de fecha, alternar vistas) —
+   pieza nueva reutilizable, mismo lenguaje visual que .pagination pero
+   para grupos de opciones mutuamente excluyentes que no son páginas. */
+.segmented {
+  display: inline-flex;
+  background: var(--surface-page);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+}
+.segmented button {
+  border: none;
+  background: transparent;
+  padding: 7px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color .15s ease, color .15s ease;
+}
+.segmented button:hover { color: var(--text-primary); }
+.segmented button.active { background: var(--acento); color: #fff; }
+
+/* Indicador de tendencia (KPI sube/baja) con flecha — para usar junto a un
+   .stat-value grande, al estilo "-3.5" en rojo de los paneles de KPIs. */
+.kpi-delta { font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 2px; }
+.kpi-delta.up::before { content: "▲"; font-size: 9px; }
+.kpi-delta.down::before { content: "▼"; font-size: 9px; }
+.kpi-delta.up { color: var(--status-good); }
+.kpi-delta.down { color: var(--status-critical); }
