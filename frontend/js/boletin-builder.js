@@ -166,15 +166,15 @@ const BoletinBuilder = (function () {
                  espaciadoParrafos: 10, paddingSup: 6, paddingInf: 6 };
       case "imagen":
         return { id: nuevoId(), tipo, imagenId: null, imagenDataUrl: null, anchoModo: "mediana", ancho: 380,
-                 alineacion: "centro", radio: 8, pie: "", enlace: "" };
+                 alineacion: "centro", radio: 8, pie: "", enlace: "", fondo: "" };
       case "boton":
         return { id: nuevoId(), tipo, texto: "Más información", url: "", color: "#0b6b3a", fuente: "brandon",
                  colorTexto: "#ffffff", tamanoFuente: 15, interlineado: 1.2, espaciadoLetras: 0,
-                 alineacion: "centro", tamano: "mediano", radio: 8 };
+                 alineacion: "centro", tamano: "mediano", radio: 8, fondo: "" };
       case "divisor":
-        return { id: nuevoId(), tipo, color: "#dddddd", grosor: 1, estilo: "solid" };
+        return { id: nuevoId(), tipo, color: "#dddddd", grosor: 1, estilo: "solid", fondo: "" };
       case "espaciador":
-        return { id: nuevoId(), tipo, altura: 28 };
+        return { id: nuevoId(), tipo, altura: 28, fondo: "" };
       case "columnas":
         return { id: nuevoId(), tipo, imagenId: null, imagenDataUrl: null, imagenLado: "izquierda", tituloColumna: "",
                  anchoImagen: 200, texto: "<p>Escribe aquí...</p>", fuente: "brandon", alineacion: "izquierda", fondo: "",
@@ -242,8 +242,14 @@ const BoletinBuilder = (function () {
     const espLetras = numOr(b.espaciadoLetras, 0);
     const mSup = numOr(b.margenSup, 22);
     const mInf = numOr(b.margenInf, 8);
-    const fondo = b.fondo && /^#[0-9a-fA-F]{6}$/.test(b.fondo) ? `background:${b.fondo};padding:8px 20px;` : "";
-    return `<h2 style="margin:${mSup}px 20px ${mInf}px;font-family:${fuente};font-size:${tam}px;font-weight:700;color:${colorTexto};text-align:${align};line-height:${interlineado};letter-spacing:${espLetras}px;${fondo}">${escapeHTML(b.texto || "")}</h2>`;
+    // El fondo va en un envoltorio a todo el ancho, con el margen vertical
+    // FUERA de la zona coloreada y el padding horizontal DENTRO — antes el
+    // margen de 20px a cada lado estaba en el propio <h2> (que también
+    // llevaba el fondo), así que la franja de color se quedaba corta por
+    // ambos lados en vez de llegar a los bordes del bloque.
+    const conFondo = b.fondo && /^#[0-9a-fA-F]{6}$/.test(b.fondo);
+    const fondoCss = conFondo ? `background:${b.fondo};` : "";
+    return `<div style="margin:${mSup}px 0 ${mInf}px;padding:0 20px;${fondoCss}"><h2 style="margin:0;padding:${conFondo ? "10px 0" : "0"};font-family:${fuente};font-size:${tam}px;font-weight:700;color:${colorTexto};text-align:${align};line-height:${interlineado};letter-spacing:${espLetras}px;">${escapeHTML(b.texto || "")}</h2></div>`;
   }
 
   function htmlTexto(b) {
@@ -275,7 +281,8 @@ const BoletinBuilder = (function () {
     const pie = b.pie
       ? `<div style="font-size:12px;color:#666666;margin-top:6px;font-family:Arial,Helvetica,sans-serif;">${escapeHTML(b.pie)}</div>`
       : "";
-    return `<div style="text-align:${align};padding:12px 20px;">${conEnlace}${pie}</div>`;
+    const fondo = b.fondo && /^#[0-9a-fA-F]{6}$/.test(b.fondo) ? `background:${b.fondo};` : "";
+    return `<div style="text-align:${align};padding:12px 20px;${fondo}">${conEnlace}${pie}</div>`;
   }
 
   function htmlBoton(b) {
@@ -289,22 +296,31 @@ const BoletinBuilder = (function () {
     const radio = numOr(b.radio, 8, { "": 0 });
     const padding = BOTON_PADDING[b.tamano] || BOTON_PADDING.mediano;
     const align = ALINEACIONES[b.alineacion] || "center";
+    // "fondo" es la franja detrás del botón (todo el ancho del bloque), no
+    // el color del propio botón (ese es "color") — así se puede resaltar la
+    // sección completa donde vive el botón, no solo la pastilla.
+    const fondoFranja = b.fondo && /^#[0-9a-fA-F]{6}$/.test(b.fondo) ? `background:${b.fondo};` : "";
     // Un botón sin URL todavía es válido mientras se está montando el
     // boletín — se muestra igual (con "#" de relleno) para que la vista
     // previa no lo esconda; conviene rellenar la URL antes de enviar.
-    return `<div style="text-align:${align};padding:16px 20px;"><a href="${escapeAttr(b.url || "#")}" style="display:inline-block;background:${color};color:${colorTexto};text-decoration:none;font-family:${fuente};font-size:${tam}px;line-height:${interlineado};letter-spacing:${espLetras}px;font-weight:700;padding:${padding};border-radius:${radio}px;">${escapeHTML(b.texto)}</a></div>`;
+    return `<div style="text-align:${align};padding:16px 20px;${fondoFranja}"><a href="${escapeAttr(b.url || "#")}" style="display:inline-block;background:${color};color:${colorTexto};text-decoration:none;font-family:${fuente};font-size:${tam}px;line-height:${interlineado};letter-spacing:${espLetras}px;font-weight:700;padding:${padding};border-radius:${radio}px;">${escapeHTML(b.texto)}</a></div>`;
   }
 
   function htmlDivisor(b) {
     const color = colorHex(b.color, "#dddddd");
     const grosor = numOr(b.grosor, 1);
     const estilo = ["solid", "dashed", "dotted", "double"].includes(b.estilo) ? b.estilo : "solid";
-    return `<div style="padding:0 20px;"><hr style="border:none;border-top:${grosor}px ${estilo} ${color};margin:14px 0;"></div>`;
+    // El espacio vertical alrededor de la línea vive en el envoltorio (no en
+    // el <hr>), para que el fondo -si se pone- cubra también ese aire y no
+    // solo la línea misma.
+    const fondo = b.fondo && /^#[0-9a-fA-F]{6}$/.test(b.fondo) ? `background:${b.fondo};` : "";
+    return `<div style="padding:14px 20px;${fondo}"><hr style="border:none;border-top:${grosor}px ${estilo} ${color};margin:0;"></div>`;
   }
 
   function htmlEspaciador(b) {
     const alto = numOr(b.altura, 28, TAMANOS_ESPACIADOR);
-    return `<div style="height:${alto}px;line-height:${alto}px;font-size:1px;">&nbsp;</div>`;
+    const fondo = b.fondo && /^#[0-9a-fA-F]{6}$/.test(b.fondo) ? `background:${b.fondo};` : "";
+    return `<div style="height:${alto}px;line-height:${alto}px;font-size:1px;${fondo}">&nbsp;</div>`;
   }
 
   function htmlColumnas(b) {
@@ -560,7 +576,8 @@ const BoletinBuilder = (function () {
       ${campoAlineacion("Alineación", "alineacion", b.alineacion)}
       ${campoNumero("Redondeo de esquinas", "radio", numOr(b.radio, 8, { "": 0 }), 0, 40)}
       ${campoTexto("Pie de foto (opcional)", "pie", b.pie, "")}
-      ${campoUrl("Enlace al hacer clic (opcional)", "enlace", b.enlace)}`;
+      ${campoUrl("Enlace al hacer clic (opcional)", "enlace", b.enlace)}
+      ${campoColor("Color de fondo (opcional)", "fondo", b.fondo, "#ffffff", true)}`;
   }
 
   function formBoton(b) {
@@ -570,19 +587,22 @@ const BoletinBuilder = (function () {
       ${campoAlineacion("Posición del botón", "alineacion", b.alineacion)}
       ${campoSelect("Tamaño del botón", "tamano", b.tamano || "mediano", [["pequeno", "Pequeño"], ["mediano", "Mediano"], ["grande", "Grande"]])}
       ${campoNumero("Redondeo de esquinas", "radio", numOr(b.radio, 8, { "": 0 }), 0, 40)}
-      ${campoColor("Color de fondo", "color", b.color, "#0b6b3a")}`;
+      ${campoColor("Color del botón", "color", b.color, "#0b6b3a")}
+      ${campoColor("Color de fondo de la franja (opcional)", "fondo", b.fondo, "#ffffff", true)}`;
   }
 
   function formDivisor(b) {
     return `<p class="staff-hint">Una línea para separar secciones.</p>
       ${campoSelect("Estilo de línea", "estilo", b.estilo || "solid", [["solid", "Continua"], ["dashed", "Discontinua (guiones)"], ["dotted", "Punteada"], ["double", "Doble"]])}
       ${campoNumero("Grosor", "grosor", numOr(b.grosor, 1), 1, 12)}
-      ${campoColor("Color de la línea", "color", b.color, "#dddddd")}`;
+      ${campoColor("Color de la línea", "color", b.color, "#dddddd")}
+      ${campoColor("Color de fondo (opcional)", "fondo", b.fondo, "#ffffff", true)}`;
   }
 
   function formEspaciador(b) {
     return `<p class="staff-hint">Espacio en blanco entre bloques.</p>
-      ${campoNumero("Alto del espacio", "altura", numOr(b.altura, 28, TAMANOS_ESPACIADOR), 4, 160)}`;
+      ${campoNumero("Alto del espacio", "altura", numOr(b.altura, 28, TAMANOS_ESPACIADOR), 4, 160)}
+      ${campoColor("Color de fondo (opcional)", "fondo", b.fondo, "#ffffff", true)}`;
   }
 
   function formColumnas(b) {

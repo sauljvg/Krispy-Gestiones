@@ -4,6 +4,7 @@ let currentColumnas = [];
 let selectedIds = new Set();
 let usuariosParaCompartir = [];
 let hiddenCols = new Set();
+let colOrder = [];
 let lastData = null;
 
 const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" ? "saona" : "kk";
@@ -24,6 +25,10 @@ function hiddenColsKey() {
   return `kt-informes-hidden-${currentTipo}-${currentHoja}`;
 }
 
+function colOrderKey() {
+  return `kt-informes-orden-${currentTipo}-${currentHoja}`;
+}
+
 function aplicarPreferenciaColumnas(data) {
   const key = hiddenColsKey();
   const guardado = localStorage.getItem(key);
@@ -34,18 +39,54 @@ function aplicarPreferenciaColumnas(data) {
   // diera cuenta de que existía el panel "Columnas" para reactivarlas. Ahora
   // no se oculta nada por defecto — el usuario decide qué ocultar desde ahí.
   hiddenCols = guardado !== null ? new Set(JSON.parse(guardado)) : new Set();
+
+  const ordenGuardado = localStorage.getItem(colOrderKey());
+  let base;
+  if (ordenGuardado !== null) {
+    base = JSON.parse(ordenGuardado).filter((c) => data.columnas.includes(c));
+  } else {
+    // Primera vez que se ve esta hoja: las columnas de fecha se adelantan al
+    // principio (algunos orígenes, como las respuestas del Test, la añaden
+    // siempre al final) — a partir de aquí el usuario puede reordenar como
+    // quiera desde el panel "Columnas", y esa elección queda guardada.
+    const fechas = data.columnas.filter((c) => /fecha|hora/i.test(c));
+    const resto = data.columnas.filter((c) => !fechas.includes(c));
+    base = [...fechas, ...resto];
+  }
+  const faltantes = data.columnas.filter((c) => !base.includes(c));
+  colOrder = [...base, ...faltantes];
+  guardarOrdenColumnas();
 }
 
 function guardarPreferenciaColumnas() {
   localStorage.setItem(hiddenColsKey(), JSON.stringify(Array.from(hiddenCols)));
 }
 
+function guardarOrdenColumnas() {
+  localStorage.setItem(colOrderKey(), JSON.stringify(colOrder));
+}
+
+function moverColumna(col, delta) {
+  const i = colOrder.indexOf(col);
+  if (i === -1) return;
+  const j = i + delta;
+  if (j < 0 || j >= colOrder.length) return;
+  const tmp = colOrder[i];
+  colOrder[i] = colOrder[j];
+  colOrder[j] = tmp;
+  guardarOrdenColumnas();
+  renderColumnasPanel();
+  renderTable();
+}
+
 function renderColumnasPanel() {
   const list = document.getElementById("columnas-checklist");
-  list.innerHTML = currentColumnas
+  list.innerHTML = colOrder
     .map(
       (c, i) => `
       <div class="columna-check-row">
+        <button type="button" class="btn-col-mover" data-col="${escapeHTML(c)}" data-delta="-1" title="Subir" ${i === 0 ? "disabled" : ""}>▲</button>
+        <button type="button" class="btn-col-mover" data-col="${escapeHTML(c)}" data-delta="1" title="Bajar" ${i === colOrder.length - 1 ? "disabled" : ""}>▼</button>
         <input type="checkbox" id="colchk-${i}" data-col="${escapeHTML(c)}" ${hiddenCols.has(c) ? "" : "checked"}>
         <label for="colchk-${i}">${escapeHTML(c)}</label>
       </div>`
@@ -58,6 +99,9 @@ function renderColumnasPanel() {
       guardarPreferenciaColumnas();
       renderTable();
     });
+  });
+  list.querySelectorAll(".btn-col-mover").forEach((btn) => {
+    btn.addEventListener("click", () => moverColumna(btn.dataset.col, Number(btn.dataset.delta)));
   });
 }
 
@@ -259,7 +303,7 @@ async function loadRespuestas() {
 function renderTable() {
   const data = lastData;
   if (!data) return;
-  const columnasVisibles = data.columnas.filter((c) => !hiddenCols.has(c));
+  const columnasVisibles = colOrder.filter((c) => data.columnas.includes(c) && !hiddenCols.has(c));
 
   const thead = document.getElementById("tipo-detail-thead");
   thead.innerHTML =

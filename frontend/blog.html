@@ -33,12 +33,22 @@
   .blog-lista-card h2 { margin: 0 0 8px; font-size: 19px; }
   .blog-lista-card p { margin: 0; color: var(--text-secondary); font-size: 14px; line-height: 1.5; }
   .blog-lista-card .fecha { font-size: 12px; color: var(--text-muted); margin-top: 10px; }
+  .blog-lista-card .blog-lista-pdf {
+    display: inline-block; margin-top: 10px; font-size: 12px; font-weight: 600;
+    color: var(--acento); text-decoration: none;
+  }
+  .blog-lista-card .blog-lista-pdf:hover { text-decoration: underline; }
 
-  .blog-post { max-width: 800px; }
-  .blog-post h1 { font-size: 30px; margin-bottom: 4px; line-height: 1.2; }
+  .blog-post { max-width: 1000px; }
+  .blog-post h1 { font-size: 32px; margin-bottom: 4px; line-height: 1.2; }
   .blog-post .fecha { color: var(--text-muted); font-size: 13px; margin-bottom: 24px; }
   .blog-post .contenido { font-size: 16px; line-height: 1.6; }
   .blog-post .contenido img { max-width: 100%; height: auto; }
+  /* El HTML del boletín (generado por boletin-builder.js) trae un ancho de
+     600px fijo por dentro, pensado para que se vea bien también en el email
+     — aquí, en la página web, se puede aprovechar mucho más espacio. Hace
+     falta !important porque viene como estilo inline en ese div. */
+  .blog-post .contenido > div { max-width: 900px !important; }
   .blog-pdf-wrap { margin-top: 24px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   .blog-pdf-toolbar {
     display: flex; justify-content: space-between; align-items: center; padding: 10px 14px;
@@ -90,6 +100,6 @@
   </div>
 </div>
 <script src="js/theme.js?v=20260723f"></script>
-<script src="js/blog.js?v=20260725b"></script>
+<script src="js/blog.js?v=20260725c"></script>
 </body>
 </html>

@@ -62,11 +62,15 @@ function mostrarLista() {
         <h2>${escapeHTML(p.titulo)}</h2>
         <p>${escapeHTML(p.resumen || "")}</p>
         <div class="fecha">${(p.publicado_en || "").slice(0, 10)}</div>
+        ${p.tiene_pdf ? `<a href="${API_BASE}/posts/${p.id}/pdf" download class="blog-lista-pdf" data-pdf-card>⬇ Descargar PDF</a>` : ""}
       </div>`
       )
       .join("")}</div>`;
     listaEl.querySelectorAll(".blog-lista-card").forEach((card) => {
-      card.addEventListener("click", () => mostrarPost(Number(card.dataset.id)));
+      card.addEventListener("click", (e) => {
+        if (e.target.closest("[data-pdf-card]")) return;
+        mostrarPost(Number(card.dataset.id));
+      });
     });
   }
   renderSidebar();

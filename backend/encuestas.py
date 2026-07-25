@@ -10,6 +10,7 @@ import datetime
 import json
 import os
 import re
+from zoneinfo import ZoneInfo
 
 import entrevistas as entrevistas_module
 import informes as informes_module
@@ -537,7 +538,12 @@ def guardar_respuesta(slug, respuestas_por_pregunta, ip, user_agent):
         # nombre exacto y así no confunde con ella ninguna pregunta cuyo
         # enunciado contenga "fecha"/"hora" de pasada.
         fila_para_informes = dict(fila_por_etiqueta)
-        fila_para_informes["Fecha del test"] = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        # A diferencia de creado_en (que se guarda en UTC y se convierte a
+        # hora local en el navegador al mostrarlo, ver tests.js
+        # formatearFechaHoraLocal), esta columna se copia tal cual dentro de
+        # datos_json y se muestra literal en Informes — por eso aquí hace
+        # falta calcular ya la hora local, o se ve 2h por detrás de la real.
+        fila_para_informes["Fecha del test"] = datetime.datetime.now(ZoneInfo("Europe/Madrid")).strftime("%Y-%m-%d %H:%M:%S")
         enlace = informes_module.ingest_fila_directa(
             tipo_informe_clave, fila_para_informes, origen=f"Test web: {row['titulo']}", columnas_extra=columnas_extra
         )

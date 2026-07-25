@@ -61,8 +61,15 @@
   .columnas-panel.visible { display: block; }
   .columnas-panel-actions { display: flex; justify-content: space-between; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
   .columnas-panel-actions button { font-size: 11px; background: none; border: none; color: var(--acento); cursor: pointer; padding: 0; }
-  .columna-check-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; }
+  .columna-check-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 13px; }
   .columna-check-row label { flex: 1; cursor: pointer; }
+  .btn-col-mover {
+    width: 20px; height: 20px; line-height: 1; padding: 0; border-radius: 5px;
+    border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary);
+    font-size: 11px; cursor: pointer; flex: none;
+  }
+  .btn-col-mover:hover:not(:disabled) { border-color: var(--acento); color: var(--acento); }
+  .btn-col-mover:disabled { opacity: 0.3; cursor: not-allowed; }
 
   #tipo-detail-table td, #tipo-detail-table th {
     max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -207,6 +214,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260723g"></script>
-<script src="js/informes.js?v=20260723g"></script>
+<script src="js/informes.js?v=20260725a"></script>
 </body>
 </html>
