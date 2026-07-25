@@ -13,9 +13,9 @@ import threading
 import time
 
 import storage_sync
-from db import DB_PATH
+from db import DATA_DIR, DB_PATH
 
-BACKUP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backups"))
+BACKUP_DIR = os.path.join(DATA_DIR, "backups")
 BACKUP_INTERVAL_HOURS = 6
 BACKUPS_A_CONSERVAR = 20  # ~5 dias de historial a razon de una copia cada 6h
 

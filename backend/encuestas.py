@@ -14,9 +14,9 @@ from zoneinfo import ZoneInfo
 
 import entrevistas as entrevistas_module
 import informes as informes_module
-from db import get_connection
+from db import DATA_DIR, get_connection
 
-FONDOS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads", "encuestas_fondos"))
+FONDOS_DIR = os.path.join(DATA_DIR, "uploads", "encuestas_fondos")
 
 TIPOS_PREGUNTA = {"texto", "email", "numero", "likert", "abierta", "opcion_simple", "opcion_multiple", "prioridad", "fecha", "calificacion"}
 

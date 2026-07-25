@@ -7,7 +7,7 @@ from openpyxl import load_workbook
 
 import reclutamiento as reclutamiento_module
 import scoring_valores
-from db import get_connection
+from db import DATA_DIR, get_connection
 
 # Estos son los que ya sabemos que existen; el admin puede añadir más desde
 # la pantalla de Informes a medida que surjan nuevas encuestas de Forms.
@@ -29,7 +29,7 @@ DEFAULT_TIPOS_SAONA = [
     ("saona_valores_oficina", "SAONA · Valores y Competencias — Oficina"),
 ]
 
-CV_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads", "cv"))
+CV_DIR = os.path.join(DATA_DIR, "uploads", "cv")
 
 DATE_HINTS = ("fecha", "hora", "date")
 

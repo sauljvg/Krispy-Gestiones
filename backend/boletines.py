@@ -9,11 +9,11 @@ import os
 import requests
 from openpyxl import load_workbook
 
-from db import get_connection
+from db import DATA_DIR, get_connection
 
 RESEND_API_URL = "https://api.resend.com/emails"
-PDF_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads", "boletines"))
-IMAGENES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads", "boletines_imagenes"))
+PDF_DIR = os.path.join(DATA_DIR, "uploads", "boletines")
+IMAGENES_DIR = os.path.join(DATA_DIR, "uploads", "boletines_imagenes")
 
 
 def ensure_boletin_tables():

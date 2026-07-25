@@ -1,7 +1,14 @@
 import os
 import sqlite3
 
-DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "krispy_kreme.db"))
+# DATA_DIR: raíz del repo por defecto (comportamiento de siempre, tanto en
+# local como en Replit). En un hosting con disco realmente persistente
+# (p.ej. un volumen montado en Fly.io) se fija esta variable de entorno
+# apuntando a esa ruta montada, para que krispy_kreme.db y las carpetas de
+# subidas vivan ahí en vez de en el disco efímero del contenedor — sin esto,
+# cada redeploy perdería los datos igual que pasaba en Replit Autoscale.
+DATA_DIR = os.environ.get("DATA_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+DB_PATH = os.path.join(DATA_DIR, "krispy_kreme.db")
 
 
 def get_connection():

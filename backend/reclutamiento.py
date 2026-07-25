@@ -1,9 +1,9 @@
 import json
 import os
 
-from db import get_connection
+from db import DATA_DIR, get_connection
 
-UPLOADS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads", "candidatos"))
+UPLOADS_DIR = os.path.join(DATA_DIR, "uploads", "candidatos")
 
 ESTADOS = ["pendiente", "entrevistado", "contratado", "descartado"]
 

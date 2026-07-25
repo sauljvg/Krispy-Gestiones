@@ -12,7 +12,11 @@ antes de importar cualquier otro módulo del backend.
 """
 import os
 
-DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "krispy_kreme.db"))
+# Misma variable DATA_DIR que db.py (ver ahí el porqué) — se recalcula aquí
+# en vez de importarla porque este módulo no puede depender de db.py, según
+# se explica arriba.
+DATA_DIR = os.environ.get("DATA_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+DB_PATH = os.path.join(DATA_DIR, "krispy_kreme.db")
 PREFIJO = "backups/"
 # Una base con solo el esquema (sin datos reales) pesa unos 8 KB — muy por
 # debajo de lo que pesa la base real con datos de producción. Se usa de
