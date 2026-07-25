@@ -13,7 +13,8 @@
     }
   })();
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260725a">
+<link rel="stylesheet" href="css/styles.css?v=20260725f">
+<link rel="stylesheet" href="css/boletin-builder.css?v=20260725e">
 <style>
   .boletines-wrap { max-width: 1000px; margin: 0 auto; padding: 0 0 60px; }
   .boletines-toolbar { display: flex; justify-content: space-between; align-items: center; margin: 16px 0; }
@@ -94,8 +95,34 @@
         <input type="text" id="post-resumen" placeholder="Resumen breve">
       </div>
       <div class="editor-field">
-        <label for="post-contenido">Contenido (admite HTML simple: &lt;p&gt;, &lt;b&gt;, &lt;a&gt;, &lt;img&gt;...)</label>
-        <textarea id="post-contenido" placeholder="Escribe aquí el contenido del boletín..."></textarea>
+        <label>Contenido del boletín</label>
+        <div id="builder-root" class="builder-root">
+          <div class="builder-toolbar">
+            <div class="builder-paleta">
+              <button type="button" class="paleta-btn" data-tipo="encabezado">🏷️<span>Encabezado</span></button>
+              <button type="button" class="paleta-btn" data-tipo="titulo">🔠<span>Título</span></button>
+              <button type="button" class="paleta-btn" data-tipo="texto">📝<span>Texto</span></button>
+              <button type="button" class="paleta-btn" data-tipo="imagen">🖼️<span>Imagen</span></button>
+              <button type="button" class="paleta-btn" data-tipo="boton">🔘<span>Botón</span></button>
+              <button type="button" class="paleta-btn" data-tipo="divisor">➖<span>Divisor</span></button>
+              <button type="button" class="paleta-btn" data-tipo="espaciador">↕️<span>Espacio</span></button>
+              <button type="button" class="paleta-btn" data-tipo="columnas">▥<span>Dos columnas</span></button>
+            </div>
+            <div class="builder-plantillas">
+              <span class="staff-hint">Empezar con una plantilla:</span>
+              <button type="button" class="btn btn-ghost btn-mini" data-plantilla="aviso_simple">Aviso simple</button>
+              <button type="button" class="btn btn-ghost btn-mini" data-plantilla="aviso_imagen">Aviso con imagen</button>
+            </div>
+            <button type="button" class="link-modo-avanzado" data-tipo="html_avanzado">¿Necesitas algo que no está aquí? Modo avanzado (HTML)</button>
+          </div>
+          <div class="builder-dos-columnas">
+            <div class="builder-lista"></div>
+            <div class="builder-preview-wrap">
+              <div class="builder-preview-head">Vista previa</div>
+              <div class="builder-preview-body"></div>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="editor-actions">
         <button id="btn-guardar-post" class="btn btn-primary" type="button">Guardar</button>
@@ -143,6 +170,7 @@
 <script src="js/theme.js?v=20260723f"></script>
 <script src="js/auth-common.js?v=20260723f"></script>
 <script src="js/topbar-menu.js?v=20260723f"></script>
-<script src="js/boletines.js?v=20260723f"></script>
+<script src="js/boletin-builder.js?v=20260725e"></script>
+<script src="js/boletines.js?v=20260725e"></script>
 </body>
 </html>

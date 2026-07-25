@@ -1,34 +1,76 @@
 const API_BASE = `${window.location.origin}/api/public/boletines`;
 
+let todosPosts = [];
+let ordenDescendente = true; // true = más recientes primero
+let postIdActual = null; // null = viendo la lista
+
 function escapeHTML(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";
   return div.innerHTML;
 }
 
-async function mostrarLista() {
-  document.getElementById("blog-post").hidden = true;
-  const listaEl = document.getElementById("blog-lista");
-  listaEl.hidden = false;
+async function cargarTodosPosts() {
   const res = await fetch(`${API_BASE}/posts`);
-  const posts = await res.json();
+  todosPosts = await res.json();
+}
+
+function postsOrdenados() {
+  const copia = [...todosPosts];
+  copia.sort((a, b) => {
+    const fa = a.publicado_en || "";
+    const fb = b.publicado_en || "";
+    return ordenDescendente ? fb.localeCompare(fa) : fa.localeCompare(fb);
+  });
+  return copia;
+}
+
+function renderSidebar() {
+  const cont = document.getElementById("blog-sidebar-lista");
+  const posts = postsOrdenados();
   if (posts.length === 0) {
-    listaEl.innerHTML = `<p class="staff-hint">Todavía no hay boletines publicados.</p>`;
+    cont.innerHTML = `<p class="staff-hint">Todavía no hay boletines publicados.</p>`;
     return;
   }
-  listaEl.innerHTML = posts
+  cont.innerHTML = posts
     .map(
       (p) => `
-    <div class="blog-lista-card" data-id="${p.id}">
-      <h2>${escapeHTML(p.titulo)}</h2>
-      <p>${escapeHTML(p.resumen || "")}</p>
+    <div class="blog-sidebar-item ${p.id === postIdActual ? "activo" : ""}" data-id="${p.id}">
+      <div class="titulo">${escapeHTML(p.titulo)}</div>
       <div class="fecha">${(p.publicado_en || "").slice(0, 10)}</div>
     </div>`
     )
     .join("");
-  listaEl.querySelectorAll(".blog-lista-card").forEach((card) => {
-    card.addEventListener("click", () => mostrarPost(Number(card.dataset.id)));
+  cont.querySelectorAll(".blog-sidebar-item").forEach((el) => {
+    el.addEventListener("click", () => mostrarPost(Number(el.dataset.id)));
   });
+}
+
+function mostrarLista() {
+  postIdActual = null;
+  document.getElementById("blog-post").hidden = true;
+  const listaEl = document.getElementById("blog-lista");
+  listaEl.hidden = false;
+  const posts = postsOrdenados();
+  if (posts.length === 0) {
+    listaEl.innerHTML = `<p class="staff-hint">Todavía no hay boletines publicados.</p>`;
+  } else {
+    listaEl.innerHTML = `<div class="blog-lista-grid">${posts
+      .map(
+        (p) => `
+      <div class="blog-lista-card" data-id="${p.id}">
+        <h2>${escapeHTML(p.titulo)}</h2>
+        <p>${escapeHTML(p.resumen || "")}</p>
+        <div class="fecha">${(p.publicado_en || "").slice(0, 10)}</div>
+      </div>`
+      )
+      .join("")}</div>`;
+    listaEl.querySelectorAll(".blog-lista-card").forEach((card) => {
+      card.addEventListener("click", () => mostrarPost(Number(card.dataset.id)));
+    });
+  }
+  renderSidebar();
+  history.pushState({}, "", "/blog.html");
 }
 
 async function mostrarPost(id) {
@@ -38,6 +80,7 @@ async function mostrarPost(id) {
     return;
   }
   const post = await res.json();
+  postIdActual = id;
   document.getElementById("blog-lista").hidden = true;
   const postEl = document.getElementById("blog-post");
   postEl.hidden = false;
@@ -61,14 +104,20 @@ async function mostrarPost(id) {
       ${pdfHtml}
     </div>
   `;
-  postEl.querySelector(".btn-volver-blog").addEventListener("click", () => {
-    history.pushState({}, "", "/blog.html");
-    mostrarLista();
-  });
+  postEl.querySelector(".btn-volver-blog").addEventListener("click", mostrarLista);
+  renderSidebar();
   history.pushState({}, "", `/blog.html?post=${id}`);
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
+  await cargarTodosPosts();
+
+  document.getElementById("btn-orden-sidebar").addEventListener("click", (e) => {
+    ordenDescendente = !ordenDescendente;
+    e.target.textContent = ordenDescendente ? "Más recientes" : "Más antiguas";
+    renderSidebar();
+  });
+
   const postId = new URLSearchParams(location.search).get("post");
   if (postId) {
     mostrarPost(Number(postId));

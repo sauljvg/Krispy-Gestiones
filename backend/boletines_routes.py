@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -16,10 +18,14 @@ def require_boletines(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
+EXTENSIONES_IMAGEN = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+
+
 class PostIn(BaseModel):
     titulo: str
     resumen: str = ""
     contenido_html: str
+    contenido_bloques: str | None = None
 
 
 class ContactoIn(BaseModel):
@@ -50,7 +56,9 @@ def get_post_route(post_id: int, _user: dict = Depends(require_boletines)):
 def create_post_route(body: PostIn, user: dict = Depends(require_boletines)):
     if not body.titulo.strip() or not body.contenido_html.strip():
         raise HTTPException(status_code=400, detail="Título y contenido son obligatorios")
-    post_id = boletines_module.create_post(body.titulo.strip(), body.resumen.strip(), body.contenido_html, user["username"])
+    post_id = boletines_module.create_post(
+        body.titulo.strip(), body.resumen.strip(), body.contenido_html, user["username"], body.contenido_bloques
+    )
     return {"ok": True, "id": post_id}
 
 
@@ -58,7 +66,7 @@ def create_post_route(body: PostIn, user: dict = Depends(require_boletines)):
 def update_post_route(post_id: int, body: PostIn, _user: dict = Depends(require_boletines)):
     if not boletines_module.get_post(post_id):
         raise HTTPException(status_code=404, detail="Boletín no encontrado")
-    boletines_module.update_post(post_id, body.titulo.strip(), body.resumen.strip(), body.contenido_html)
+    boletines_module.update_post(post_id, body.titulo.strip(), body.resumen.strip(), body.contenido_html, body.contenido_bloques)
     return {"ok": True}
 
 
@@ -105,6 +113,34 @@ def descargar_pdf_route(post_id: int, _user: dict = Depends(require_boletines)):
         pdf_info["ruta"], media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{pdf_info["nombre"]}"'},
     )
+
+
+@router.post("/posts/{post_id}/imagenes")
+async def subir_imagen_route(post_id: int, file: UploadFile = File(...), _user: dict = Depends(require_boletines)):
+    ext = "." + file.filename.rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else ""
+    if ext not in EXTENSIONES_IMAGEN:
+        raise HTTPException(status_code=400, detail="Sube una imagen (jpg, png o webp)")
+    content = await file.read()
+    try:
+        imagen_id = boletines_module.guardar_imagen(post_id, file.filename, ext, content)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"ok": True, "id": imagen_id}
+
+
+@router.get("/posts/{post_id}/imagenes/{imagen_id}")
+def descargar_imagen_route(post_id: int, imagen_id: int, _user: dict = Depends(require_boletines)):
+    imagen = boletines_module.get_imagen_info(post_id, imagen_id)
+    if not imagen:
+        raise HTTPException(status_code=404, detail="Imagen no encontrada")
+    ext = os.path.splitext(imagen["ruta"])[1].lower()
+    return FileResponse(imagen["ruta"], media_type=EXTENSIONES_IMAGEN.get(ext, "application/octet-stream"))
+
+
+@router.delete("/posts/{post_id}/imagenes/{imagen_id}")
+def borrar_imagen_route(post_id: int, imagen_id: int, _user: dict = Depends(require_boletines)):
+    boletines_module.borrar_imagen(post_id, imagen_id)
+    return {"ok": True}
 
 
 @router.get("/posts/{post_id}/envios")

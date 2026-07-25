@@ -1,0 +1,990 @@
+// Constructor visual de boletines por bloques. Sustituye al textarea de HTML
+// crudo: cada bloque se edita con controles simples y el HTML final (el que
+// se manda por email y se muestra en /blog.html) se genera aquí mismo, con
+// estilos inline y colores en hex literal porque los clientes de correo no
+// cargan hojas de estilo externas ni variables CSS.
+const BoletinBuilder = (function () {
+  // Presets antiguos de tamaño de imagen/espaciador — solo se usan para
+  // traducir boletines guardados antes de que el tamaño fuera libre (número).
+  const TAMANOS_IMAGEN = { pequena: 220, mediana: 380, grande: 560 };
+  const TAMANOS_ESPACIADOR = { chico: 12, mediano: 28, grande: 52 };
+  const BOTON_PADDING = { pequeno: "8px 18px", mediano: "13px 30px", grande: "18px 44px" };
+  // Boletines guardados antes de que el color fuera libre (hex) usaban estas
+  // 4 claves fijas — se traducen al vuelo para no romper contenido antiguo.
+  const PRESETS_ANTIGUOS = { verde: "#0b6b3a", naranja: "#e07b00", azul: "#2454a6", gris: "#5a5a5a" };
+  const ALINEACIONES = { izquierda: "left", centro: "center", derecha: "right", justificado: "justify" };
+  // Las 3 primeras son las fuentes de marca ya cargadas en styles.css
+  // (@font-face con archivos propios); Fraunces viene de Google Fonts. Se
+  // listan con su pila de resguardo por si el cliente de correo no las carga.
+  // Comillas SIMPLES a propósito: la pila se inserta dentro de un atributo
+  // style="..." con comillas dobles — un nombre de fuente con comillas
+  // dobles rompe el atributo a la mitad (nos pasó y se ve como un bug
+  // rarísimo: el resto del bloque desaparece). CSS acepta comillas simples
+  // igual de bien para font-family.
+  const FUENTES = {
+    brandon: { etiqueta: "Brandon Grotesque (texto)", pila: "'Brandon Grotesque', Arial, Helvetica, sans-serif" },
+    gelica: { etiqueta: "Gelica (títulos)", pila: "'Gelica', Arial, Helvetica, sans-serif" },
+    brandon_printed: { etiqueta: "Brandon Printed (llamativa)", pila: "'Brandon Printed', Arial, Helvetica, sans-serif" },
+    fraunces: { etiqueta: "Fraunces (serif editorial)", pila: "'Fraunces', Georgia, serif" },
+    georgia: { etiqueta: "Georgia (serif clásica)", pila: "Georgia, 'Times New Roman', serif" },
+    arial: { etiqueta: "Arial (predeterminada)", pila: "Arial, Helvetica, sans-serif" },
+  };
+  // Se antepone una vez al HTML final para que los clientes que sí soportan
+  // @font-face en el cuerpo del correo (Apple Mail, y el propio /blog.html)
+  // muestren la tipografía de marca real; el resto cae a la pila de resguardo.
+  function fontFaceHtml() {
+    const base = window.location.origin;
+    return `<style>
+      @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700&display=swap');
+      @font-face { font-family: "Gelica"; src: url("${base}/assets/fonts/Gelica-SemiBold.otf") format("opentype"); font-weight: 600; }
+      @font-face { font-family: "Brandon Grotesque"; src: url("${base}/assets/fonts/BrandonGrotesque-Regular.otf") format("opentype"); font-weight: 400; }
+      @font-face { font-family: "Brandon Printed"; src: url("${base}/assets/fonts/BrandonPrinted-One.ttf") format("truetype"); font-weight: 400; }
+    </style>`;
+  }
+  function colorHex(valor, porDefecto) {
+    if (valor && PRESETS_ANTIGUOS[valor]) return PRESETS_ANTIGUOS[valor];
+    return /^#[0-9a-fA-F]{6}$/.test(valor || "") ? valor : porDefecto;
+  }
+  function fuentePila(clave, porDefecto) {
+    return (FUENTES[clave] || FUENTES[porDefecto]).pila;
+  }
+  // Devuelve el número si es válido (>0), si no el valor por defecto. Sirve
+  // para todos los campos numéricos (tamaño de letra, grosor, alto, radio...)
+  // y de paso traduce presets antiguos tipo "mediano" -> px vía el mapa dado.
+  function numOr(valor, porDefecto, mapaPresets) {
+    if (mapaPresets && typeof valor === "string" && mapaPresets[valor] != null) return mapaPresets[valor];
+    const n = Number(valor);
+    // Se admite 0 (esquinas rectas = radio 0); solo se rechaza NaN/negativo.
+    return Number.isFinite(n) && n >= 0 ? n : porDefecto;
+  }
+
+  const DEFINICIONES = {
+    encabezado: { etiqueta: "Encabezado", icono: "🏷️" },
+    titulo: { etiqueta: "Título de sección", icono: "🔠" },
+    texto: { etiqueta: "Texto", icono: "📝" },
+    imagen: { etiqueta: "Imagen", icono: "🖼️" },
+    boton: { etiqueta: "Botón", icono: "🔘" },
+    divisor: { etiqueta: "Divisor", icono: "➖" },
+    espaciador: { etiqueta: "Espacio", icono: "↕️" },
+    columnas: { etiqueta: "Dos columnas", icono: "▥" },
+    html_avanzado: { etiqueta: "HTML avanzado", icono: "💻" },
+  };
+
+  let postId = null;
+  let bloques = [];
+  let contador = 1;
+  let elToolbar, elLista, elPreview;
+  let arrastrandoId = null;
+
+  // ------------------------------- utilidades -------------------------------
+
+  function escapeHTML(str) {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  }
+
+  function escapeAttr(str) {
+    return escapeHTML(str).replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+  }
+
+  function sanitizarHTML(html) {
+    const PERMITIDOS = ["b", "strong", "i", "em", "u", "a", "ul", "ol", "li", "br", "p", "div", "span"];
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html || "";
+    for (let pasada = 0; pasada < 6; pasada++) {
+      const malos = tmp.querySelectorAll(`*:not(${PERMITIDOS.join(",")})`);
+      if (malos.length === 0) break;
+      malos.forEach((el) => {
+        while (el.firstChild) el.parentNode.insertBefore(el.firstChild, el);
+        el.remove();
+      });
+    }
+    tmp.querySelectorAll("*").forEach((el) => {
+      [...el.attributes].forEach((attr) => {
+        if (el.tagName === "A" && attr.name === "href") {
+          const val = attr.value.trim();
+          if (!/^https?:\/\//i.test(val) && !/^mailto:/i.test(val)) el.removeAttribute("href");
+        } else {
+          el.removeAttribute(attr.name);
+        }
+      });
+    });
+    return tmp.innerHTML;
+  }
+
+  // El editor de texto rico guarda <p> tal cual los deja el navegador, que
+  // por defecto llevan su propio margen (~1em) — invisible mientras se
+  // edita, pero produce huecos raros al lado del padding del bloque. Se
+  // sustituye por un margen inferior controlado (espaciadoParrafos) para
+  // que el usuario pueda quitarlo sin que el texto se pegue todo junto.
+  function aplicarEspaciadoParrafos(html, espaciado) {
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html || "";
+    tmp.querySelectorAll("p").forEach((p) => { p.style.margin = `0 0 ${espaciado}px`; });
+    return tmp.innerHTML;
+  }
+
+  function fileToDataURL(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function blobToDataURL(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function nuevoId() {
+    return contador++;
+  }
+
+  // ------------------------------- modelo de bloques -------------------------------
+
+  function crearBloque(tipo) {
+    switch (tipo) {
+      case "encabezado":
+        return { id: nuevoId(), tipo, titulo: "Título del boletín", subtitulo: "", imagenId: null, imagenDataUrl: null,
+                 color: "#0b6b3a", fuente: "gelica", colorTitulo: "#ffffff", tamanoTitulo: 26,
+                 fuenteSubtitulo: "brandon", colorSubtitulo: "#ffffff", tamanoSubtitulo: 15,
+                 modoImagen: "logo", tamanoLogo: 56, altura: 240 };
+      case "titulo":
+        return { id: nuevoId(), tipo, texto: "Título de sección", fuente: "brandon", alineacion: "izquierda",
+                 colorTexto: "#1a1a1a", tamanoFuente: 19, fondo: "", interlineado: 1.3, espaciadoLetras: 0,
+                 margenSup: 22, margenInf: 8 };
+      case "texto":
+        return { id: nuevoId(), tipo, html: "<p>Escribe aquí el contenido...</p>", fuente: "brandon", alineacion: "izquierda",
+                 fondo: "", colorTexto: "#1a1a1a", tamanoFuente: 15, interlineado: 1.6, espaciadoLetras: 0,
+                 espaciadoParrafos: 10, paddingSup: 6, paddingInf: 6 };
+      case "imagen":
+        return { id: nuevoId(), tipo, imagenId: null, imagenDataUrl: null, anchoModo: "mediana", ancho: 380,
+                 alineacion: "centro", radio: 8, pie: "", enlace: "" };
+      case "boton":
+        return { id: nuevoId(), tipo, texto: "Más información", url: "", color: "#0b6b3a", fuente: "brandon",
+                 colorTexto: "#ffffff", tamanoFuente: 15, interlineado: 1.2, espaciadoLetras: 0,
+                 alineacion: "centro", tamano: "mediano", radio: 8 };
+      case "divisor":
+        return { id: nuevoId(), tipo, color: "#dddddd", grosor: 1, estilo: "solid" };
+      case "espaciador":
+        return { id: nuevoId(), tipo, altura: 28 };
+      case "columnas":
+        return { id: nuevoId(), tipo, imagenId: null, imagenDataUrl: null, imagenLado: "izquierda", tituloColumna: "",
+                 anchoImagen: 200, texto: "<p>Escribe aquí...</p>", fuente: "brandon", alineacion: "izquierda", fondo: "",
+                 colorTexto: "#1a1a1a", tamanoFuente: 14, interlineado: 1.6, espaciadoLetras: 0, espaciadoParrafos: 10,
+                 paddingSup: 14, paddingInf: 14 };
+      case "html_avanzado":
+        return { id: nuevoId(), tipo, html: "" };
+      default:
+        return null;
+    }
+  }
+
+  const PLANTILLAS = {
+    aviso_simple: () => [
+      { ...crearBloque("encabezado"), titulo: "Aviso importante" },
+      crearBloque("texto"),
+      crearBloque("boton"),
+    ],
+    aviso_imagen: () => [
+      { ...crearBloque("encabezado"), titulo: "Aviso importante" },
+      crearBloque("imagen"),
+      crearBloque("texto"),
+    ],
+  };
+
+  // ------------------------------- conversor bloques -> HTML -------------------------------
+
+  function htmlEncabezado(b) {
+    const color = colorHex(b.color, "#0b6b3a");
+    const fuente = fuentePila(b.fuente, "gelica");
+    const colorTitulo = colorHex(b.colorTitulo, "#ffffff");
+    const tamTitulo = numOr(b.tamanoTitulo, 26);
+    const titulo = `<h1 style="margin:0;color:${colorTitulo};font-family:${fuente};font-size:${tamTitulo}px;font-weight:700;line-height:1.2;">${escapeHTML(b.titulo || "")}</h1>`;
+    const fuenteSub = fuentePila(b.fuenteSubtitulo, "brandon");
+    const colorSub = colorHex(b.colorSubtitulo, colorTitulo);
+    const tamSub = numOr(b.tamanoSubtitulo, Math.max(12, Math.round(tamTitulo * 0.58)));
+    const sub = b.subtitulo
+      ? `<p style="margin:8px 0 0;color:${colorSub};font-family:${fuenteSub};font-size:${tamSub}px;opacity:0.92;">${escapeHTML(b.subtitulo)}</p>`
+      : "";
+
+    // Modo "fondo": la imagen cubre todo el encabezado y el texto va
+    // superpuesto encima, sobre una capa oscura semitransparente para que se
+    // lea. Se hace con una tabla (background en la celda) porque es lo único
+    // que respetan también los clientes de correo antiguos.
+    if (b.modoImagen === "fondo" && b.imagenDataUrl) {
+      const altura = numOr(b.altura, 240);
+      return `<table role="presentation" width="100%" style="border-collapse:collapse;background-color:${color};background-image:url('${b.imagenDataUrl}');background-size:cover;background-position:center;">
+        <tr><td height="${altura}" valign="middle" style="padding:32px 24px;text-align:center;background:rgba(0,0,0,0.4);">${titulo}${sub}</td></tr>
+      </table>`;
+    }
+
+    const tamLogo = numOr(b.tamanoLogo, 56);
+    const logo = b.imagenDataUrl
+      ? `<img src="${b.imagenDataUrl}" alt="" style="max-height:${tamLogo}px;display:block;margin:0 auto 14px;">`
+      : "";
+    return `<div style="text-align:center;padding:32px 24px;background:${color};">${logo}${titulo}${sub}</div>`;
+  }
+
+  function htmlTitulo(b) {
+    const fuente = fuentePila(b.fuente, "brandon");
+    const align = ALINEACIONES[b.alineacion] || "left";
+    const colorTexto = colorHex(b.colorTexto, "#1a1a1a");
+    const tam = numOr(b.tamanoFuente, 19);
+    const interlineado = numOr(b.interlineado, 1.3);
+    const espLetras = numOr(b.espaciadoLetras, 0);
+    const mSup = numOr(b.margenSup, 22);
+    const mInf = numOr(b.margenInf, 8);
+    const fondo = b.fondo && /^#[0-9a-fA-F]{6}$/.test(b.fondo) ? `background:${b.fondo};padding:8px 20px;` : "";
+    return `<h2 style="margin:${mSup}px 20px ${mInf}px;font-family:${fuente};font-size:${tam}px;font-weight:700;color:${colorTexto};text-align:${align};line-height:${interlineado};letter-spacing:${espLetras}px;${fondo}">${escapeHTML(b.texto || "")}</h2>`;
+  }
+
+  function htmlTexto(b) {
+    const limpio = aplicarEspaciadoParrafos(sanitizarHTML(b.html || ""), numOr(b.espaciadoParrafos, 10));
+    if (!limpio.replace(/<[^>]+>/g, "").trim()) return "";
+    const fuente = fuentePila(b.fuente, "brandon");
+    const align = ALINEACIONES[b.alineacion] || "left";
+    const colorTexto = colorHex(b.colorTexto, "#1a1a1a");
+    const tam = numOr(b.tamanoFuente, 15);
+    const interlineado = numOr(b.interlineado, 1.6);
+    const espLetras = numOr(b.espaciadoLetras, 0);
+    const pSup = numOr(b.paddingSup, 6);
+    const pInf = numOr(b.paddingInf, 6);
+    const fondo = b.fondo && /^#[0-9a-fA-F]{6}$/.test(b.fondo) ? `background:${b.fondo};` : "";
+    return `<div style="font-family:${fuente};font-size:${tam}px;line-height:${interlineado};letter-spacing:${espLetras}px;color:${colorTexto};padding:${pSup}px 20px ${pInf}px;text-align:${align};${fondo}">${limpio}</div>`;
+  }
+
+  function htmlImagen(b) {
+    if (!b.imagenDataUrl) return "";
+    const radio = numOr(b.radio, 8, { "": 0 });
+    const align = ALINEACIONES[b.alineacion] || "center";
+    // Ancho: si es "completa" ocupa todo el ancho disponible; si no, el
+    // número de píxeles elegido (con presets antiguos traducidos).
+    const anchoCss = b.anchoModo === "completa"
+      ? "width:100%;"
+      : `width:${numOr(b.ancho, 380, TAMANOS_IMAGEN)}px;`;
+    const img = `<img src="${b.imagenDataUrl}" alt="${escapeAttr(b.pie || "")}" style="max-width:100%;${anchoCss}border-radius:${radio}px;display:inline-block;">`;
+    const conEnlace = b.enlace ? `<a href="${escapeAttr(b.enlace)}">${img}</a>` : img;
+    const pie = b.pie
+      ? `<div style="font-size:12px;color:#666666;margin-top:6px;font-family:Arial,Helvetica,sans-serif;">${escapeHTML(b.pie)}</div>`
+      : "";
+    return `<div style="text-align:${align};padding:12px 20px;">${conEnlace}${pie}</div>`;
+  }
+
+  function htmlBoton(b) {
+    if (!b.texto || !b.texto.trim()) return "";
+    const color = colorHex(b.color, "#0b6b3a");
+    const colorTexto = colorHex(b.colorTexto, "#ffffff");
+    const fuente = fuentePila(b.fuente, "brandon");
+    const tam = numOr(b.tamanoFuente, 15);
+    const interlineado = numOr(b.interlineado, 1.2);
+    const espLetras = numOr(b.espaciadoLetras, 0);
+    const radio = numOr(b.radio, 8, { "": 0 });
+    const padding = BOTON_PADDING[b.tamano] || BOTON_PADDING.mediano;
+    const align = ALINEACIONES[b.alineacion] || "center";
+    // Un botón sin URL todavía es válido mientras se está montando el
+    // boletín — se muestra igual (con "#" de relleno) para que la vista
+    // previa no lo esconda; conviene rellenar la URL antes de enviar.
+    return `<div style="text-align:${align};padding:16px 20px;"><a href="${escapeAttr(b.url || "#")}" style="display:inline-block;background:${color};color:${colorTexto};text-decoration:none;font-family:${fuente};font-size:${tam}px;line-height:${interlineado};letter-spacing:${espLetras}px;font-weight:700;padding:${padding};border-radius:${radio}px;">${escapeHTML(b.texto)}</a></div>`;
+  }
+
+  function htmlDivisor(b) {
+    const color = colorHex(b.color, "#dddddd");
+    const grosor = numOr(b.grosor, 1);
+    const estilo = ["solid", "dashed", "dotted", "double"].includes(b.estilo) ? b.estilo : "solid";
+    return `<div style="padding:0 20px;"><hr style="border:none;border-top:${grosor}px ${estilo} ${color};margin:14px 0;"></div>`;
+  }
+
+  function htmlEspaciador(b) {
+    const alto = numOr(b.altura, 28, TAMANOS_ESPACIADOR);
+    return `<div style="height:${alto}px;line-height:${alto}px;font-size:1px;">&nbsp;</div>`;
+  }
+
+  function htmlColumnas(b) {
+    const limpio = aplicarEspaciadoParrafos(sanitizarHTML(b.texto || ""), numOr(b.espaciadoParrafos, 10));
+    const fuente = fuentePila(b.fuente, "brandon");
+    const align = ALINEACIONES[b.alineacion] || "left";
+    const colorTexto = colorHex(b.colorTexto, "#1a1a1a");
+    const tam = numOr(b.tamanoFuente, 14);
+    const interlineado = numOr(b.interlineado, 1.6);
+    const espLetras = numOr(b.espaciadoLetras, 0);
+    const pSup = numOr(b.paddingSup, 14);
+    const pInf = numOr(b.paddingInf, 14);
+    const anchoImg = numOr(b.anchoImagen, 200);
+    const fondo = b.fondo && /^#[0-9a-fA-F]{6}$/.test(b.fondo) ? ` background:${b.fondo};` : "";
+    const colImg = `<td style="width:${anchoImg}px;padding:14px 10px;vertical-align:top;">${b.imagenDataUrl ? `<img src="${b.imagenDataUrl}" style="max-width:100%;border-radius:8px;display:block;">` : ""}</td>`;
+    const colTxt = `<td style="padding:${pSup}px 10px ${pInf}px;vertical-align:top;font-family:${fuente};font-size:${tam}px;line-height:${interlineado};letter-spacing:${espLetras}px;color:${colorTexto};text-align:${align};">${b.tituloColumna ? `<b style="display:block;margin-bottom:6px;">${escapeHTML(b.tituloColumna)}</b>` : ""}${limpio}</td>`;
+    const celdas = b.imagenLado === "derecha" ? colTxt + colImg : colImg + colTxt;
+    return `<table role="presentation" width="100%" style="border-collapse:collapse;${fondo}"><tr>${celdas}</tr></table>`;
+  }
+
+  function htmlAvanzado(b) {
+    return `<div style="padding:10px 20px;">${b.html || ""}</div>`;
+  }
+
+  function renderBloque(b) {
+    switch (b.tipo) {
+      case "encabezado": return htmlEncabezado(b);
+      case "titulo": return htmlTitulo(b);
+      case "texto": return htmlTexto(b);
+      case "imagen": return htmlImagen(b);
+      case "boton": return htmlBoton(b);
+      case "divisor": return htmlDivisor(b);
+      case "espaciador": return htmlEspaciador(b);
+      case "columnas": return htmlColumnas(b);
+      case "html_avanzado": return htmlAvanzado(b);
+      default: return "";
+    }
+  }
+
+  function getHtml() {
+    const cuerpo = bloques.map(renderBloque).join("\n");
+    return `${fontFaceHtml()}<div style="max-width:600px;margin:0 auto;background:#ffffff;font-family:Arial,Helvetica,sans-serif;">${cuerpo}</div>`;
+  }
+
+  // ------------------------------- formularios de edición -------------------------------
+
+  function campoTexto(label, campo, valor, placeholder) {
+    return `<div class="bloque-campo">
+      <label>${escapeHTML(label)}</label>
+      <input type="text" data-campo="${campo}" value="${escapeAttr(valor || "")}" placeholder="${escapeAttr(placeholder || "")}">
+    </div>`;
+  }
+
+  function campoUrl(label, campo, valor) {
+    return `<div class="bloque-campo">
+      <label>${escapeHTML(label)}</label>
+      <input type="url" data-campo="${campo}" value="${escapeAttr(valor || "")}" placeholder="https://">
+    </div>`;
+  }
+
+  function campoSelect(label, campo, valor, opciones, recargar) {
+    // recargar=true -> al cambiar se redibuja el formulario entero del bloque
+    // (para mostrar/ocultar campos que dependen de esta opción, p.ej. el
+    // modo de imagen del encabezado cambia entre "tamaño del logo" y "alto").
+    return `<div class="bloque-campo">
+      <label>${escapeHTML(label)}</label>
+      <select data-campo="${campo}" ${recargar ? 'data-reload="1"' : ""}>
+        ${opciones.map(([v, l]) => `<option value="${escapeAttr(v)}" ${v === valor ? "selected" : ""}>${escapeHTML(l)}</option>`).join("")}
+      </select>
+    </div>`;
+  }
+
+  function campoNumero(label, campo, valor, min, max, sufijo) {
+    // Slider + número sincronizados, para que se pueda arrastrar rápido o
+    // teclear un valor exacto. Ambos comparten data-campo-num.
+    return `<div class="bloque-campo campo-numero">
+      <label>${escapeHTML(label)}</label>
+      <div class="numero-row">
+        <input type="range" class="numero-range" data-campo-num="${campo}" min="${min}" max="${max}" value="${valor}">
+        <input type="number" class="numero-input" data-campo-num="${campo}" min="${min}" max="${max}" value="${valor}">
+        <span class="numero-sufijo">${escapeHTML(sufijo || "px")}</span>
+      </div>
+    </div>`;
+  }
+
+  function campoFuente(label, campo, valor) {
+    return campoSelect(label, campo, valor, Object.entries(FUENTES).map(([v, def]) => [v, def.etiqueta]));
+  }
+
+  function campoAlineacion(label, campo, valor) {
+    return campoSelect(label, campo, valor, [["izquierda", "Izquierda"], ["centro", "Centro"], ["derecha", "Derecha"], ["justificado", "Justificado"]]);
+  }
+
+  function campoColor(label, campo, valor, porDefecto, permitirVacio) {
+    const hex = colorHex(valor, porDefecto);
+    const quitar = permitirVacio
+      ? `<button type="button" class="btn btn-ghost btn-mini btn-quitar-color" data-campo="${campo}">✕ Sin color</button>`
+      : "";
+    return `<div class="bloque-campo campo-color">
+      <label>${escapeHTML(label)}</label>
+      <div class="color-picker-row">
+        <input type="color" class="color-swatch" data-campo="${campo}" value="${escapeAttr(hex)}">
+        <input type="text" class="color-hex" data-campo-hex="${campo}" value="${escapeAttr(hex)}" placeholder="#0b6b3a" maxlength="7">
+        ${quitar}
+      </div>
+    </div>`;
+  }
+
+  // --- Barra de estilo de texto: agrupa fuente/tamaño/color/alineación/
+  // interlineado/espaciado en una sola fila compacta en vez de un campo por
+  // fila (que era una lista larguísima). Los steppers (–/+) y los botones de
+  // alineación reusan el mismo data-campo-num / data-campo que ya procesan
+  // los listeners de input y click — no hace falta wiring nuevo aparte de
+  // los propios botones de stepper/alineación.
+
+  function ctrlFuenteCompacta(campo, valor) {
+    return `<select class="mini-select" data-campo="${campo}" title="Tipo de letra">
+      ${Object.entries(FUENTES).map(([v, def]) => `<option value="${v}" ${v === valor ? "selected" : ""}>${escapeHTML(def.etiqueta)}</option>`).join("")}
+    </select>`;
+  }
+
+  function ctrlNumeroChico(campo, valor, min, max, step, etiqueta, conStepper) {
+    const stepperMenos = conStepper ? `<button type="button" class="btn-stepper" data-delta="-1">–</button>` : "";
+    const stepperMas = conStepper ? `<button type="button" class="btn-stepper" data-delta="1">+</button>` : "";
+    return `<span class="mini-campo-num" title="${escapeAttr(etiqueta)}">
+      <span class="mini-etiqueta">${escapeHTML(etiqueta)}</span>
+      ${stepperMenos}
+      <input type="number" class="mini-num-chico" data-campo-num="${campo}" min="${min}" max="${max}" step="${step}" value="${valor}">
+      ${stepperMas}
+    </span>`;
+  }
+
+  function ctrlColorCompacto(campo, valor, porDefecto, etiqueta) {
+    const hex = colorHex(valor, porDefecto);
+    return `<span class="mini-campo-num" title="${escapeAttr(etiqueta)}">
+      <span class="mini-etiqueta">${escapeHTML(etiqueta)}</span>
+      <input type="color" class="mini-color-swatch" data-campo="${campo}" value="${escapeAttr(hex)}">
+    </span>`;
+  }
+
+  function ctrlAlineacionCompacta(campo, valor) {
+    const opciones = [["izquierda", "⬅", "Izquierda"], ["centro", "↔", "Centro"], ["derecha", "➡", "Derecha"], ["justificado", "☰", "Justificar"]];
+    return `<span class="mini-align-grupo" title="Alineación">
+      ${opciones.map(([v, icono, tit]) => `<button type="button" class="btn-align ${v === (valor || "izquierda") ? "activo" : ""}" data-campo-valor="${campo}" data-valor="${v}" title="${tit}">${icono}</button>`).join("")}
+    </span>`;
+  }
+
+  // opciones: { alineacion, parrafos, padding, margen, tamanoDefecto, colorDefecto }
+  function barraEstiloTexto(b, opciones) {
+    opciones = opciones || {};
+    const partes = [
+      ctrlFuenteCompacta("fuente", b.fuente),
+      ctrlNumeroChico("tamanoFuente", numOr(b.tamanoFuente, opciones.tamanoDefecto || 15), opciones.tamanoMin || 10, opciones.tamanoMax || 60, 1, "Tamaño", true),
+      ctrlColorCompacto("colorTexto", b.colorTexto, opciones.colorDefecto || "#1a1a1a", "Color"),
+    ];
+    if (opciones.alineacion !== false) partes.push(ctrlAlineacionCompacta("alineacion", b.alineacion));
+    partes.push(ctrlNumeroChico("interlineado", numOr(b.interlineado, opciones.interlineadoDefecto || 1.4), 0.9, 3, 0.1, "Interlineado", true));
+    partes.push(ctrlNumeroChico("espaciadoLetras", numOr(b.espaciadoLetras, 0), -1, 6, 0.5, "Entre letras", true));
+    if (opciones.parrafos) partes.push(ctrlNumeroChico("espaciadoParrafos", numOr(b.espaciadoParrafos, 10), 0, 60, 1, "Entre párrafos", true));
+    let filas = `<div class="barra-estilo-texto">${partes.join("")}</div>`;
+    if (opciones.padding || opciones.margen) {
+      const partes2 = [];
+      if (opciones.padding) {
+        partes2.push(ctrlNumeroChico("paddingSup", numOr(b.paddingSup, opciones.paddingDefecto || 6), 0, 100, 1, "Espacio interno arriba", true));
+        partes2.push(ctrlNumeroChico("paddingInf", numOr(b.paddingInf, opciones.paddingDefecto || 6), 0, 100, 1, "Espacio interno abajo", true));
+      }
+      if (opciones.margen) {
+        partes2.push(ctrlNumeroChico("margenSup", numOr(b.margenSup, opciones.margenSupDefecto || 0), 0, 100, 1, "Margen arriba", true));
+        partes2.push(ctrlNumeroChico("margenInf", numOr(b.margenInf, opciones.margenInfDefecto || 0), 0, 100, 1, "Margen abajo", true));
+      }
+      filas += `<div class="barra-estilo-texto barra-espaciado">${partes2.join("")}</div>`;
+    }
+    return filas;
+  }
+
+  function barraFormatoHtml() {
+    return `<div class="formato-barra">
+      <button type="button" class="btn-formato" data-cmd="bold" title="Negrita"><b>N</b></button>
+      <button type="button" class="btn-formato" data-cmd="italic" title="Cursiva"><i>K</i></button>
+      <button type="button" class="btn-formato" data-cmd="insertUnorderedList" title="Lista">•</button>
+      <button type="button" class="btn-formato" data-cmd="link" title="Enlace">🔗</button>
+    </div>`;
+  }
+
+  function campoRico(label, campo, html) {
+    return `<div class="bloque-campo">
+      <label>${escapeHTML(label)}</label>
+      ${barraFormatoHtml()}
+      <div class="contenteditable-campo" contenteditable="true" data-campo-html="${campo}">${html || ""}</div>
+    </div>`;
+  }
+
+  function campoImagen(b) {
+    const thumb = b.imagenDataUrl
+      ? `<img class="imagen-picker-thumb" src="${b.imagenDataUrl}" alt="">`
+      : `<div class="imagen-picker-vacio">Sin imagen todavía</div>`;
+    return `<div class="bloque-campo imagen-picker">
+      ${thumb}
+      <button type="button" class="btn btn-ghost btn-mini btn-subir-imagen-bloque">📷 ${b.imagenDataUrl ? "Cambiar imagen" : "Subir imagen"}</button>
+      <input type="file" class="input-imagen-bloque" accept=".jpg,.jpeg,.png,.webp" hidden>
+    </div>`;
+  }
+
+  function formEncabezado(b) {
+    const controlImagen = b.imagenId
+      ? (b.modoImagen === "fondo"
+          ? campoNumero("Alto del encabezado", "altura", numOr(b.altura, 240), 120, 500)
+          : campoNumero("Tamaño del logo", "tamanoLogo", numOr(b.tamanoLogo, 56), 24, 200))
+      : `<p class="staff-hint">Sube una imagen para poder usarla como logo o como fondo a pantalla completa.</p>`;
+    return `${campoImagen(b)}
+      ${campoSelect("Uso de la imagen", "modoImagen", b.modoImagen || "logo", [["logo", "Logo encima del título"], ["fondo", "Fondo a pantalla completa (texto encima)"]], true)}
+      ${controlImagen}
+      ${campoColor("Color de fondo del encabezado", "color", b.color, "#0b6b3a")}
+      <div class="bloque-campo">
+        <label>Título</label>
+        <input type="text" data-campo="titulo" value="${escapeAttr(b.titulo || "")}" placeholder="Título del boletín">
+        <div class="barra-estilo-texto">
+          ${ctrlFuenteCompacta("fuente", b.fuente)}
+          ${ctrlNumeroChico("tamanoTitulo", numOr(b.tamanoTitulo, 26), 14, 60, 1, "Tamaño", true)}
+          ${ctrlColorCompacto("colorTitulo", b.colorTitulo, "#ffffff", "Color")}
+        </div>
+      </div>
+      <div class="bloque-campo">
+        <label>Subtítulo (opcional)</label>
+        <input type="text" data-campo="subtitulo" value="${escapeAttr(b.subtitulo || "")}" placeholder="Un mensaje breve debajo del título">
+        <div class="barra-estilo-texto">
+          ${ctrlFuenteCompacta("fuenteSubtitulo", b.fuenteSubtitulo)}
+          ${ctrlNumeroChico("tamanoSubtitulo", numOr(b.tamanoSubtitulo, 15), 10, 40, 1, "Tamaño", true)}
+          ${ctrlColorCompacto("colorSubtitulo", b.colorSubtitulo, "#ffffff", "Color")}
+        </div>
+      </div>`;
+  }
+
+  function formTitulo(b) {
+    return `${campoTexto("Texto del título de sección", "texto", b.texto, "Título de sección")}
+      ${barraEstiloTexto(b, { tamanoDefecto: 19, tamanoMin: 12, tamanoMax: 48, colorDefecto: "#1a1a1a", interlineadoDefecto: 1.3, margen: true, margenSupDefecto: 22, margenInfDefecto: 8 })}
+      ${campoColor("Color de fondo (opcional)", "fondo", b.fondo, "#ffffff", true)}`;
+  }
+
+  function formTexto(b) {
+    return `${campoRico("Texto", "html", b.html)}
+      ${barraEstiloTexto(b, { tamanoDefecto: 15, tamanoMin: 10, tamanoMax: 40, colorDefecto: "#1a1a1a", interlineadoDefecto: 1.6, parrafos: true, padding: true, paddingDefecto: 6 })}
+      ${campoColor("Color de fondo (opcional)", "fondo", b.fondo, "#ffffff", true)}`;
+  }
+
+  function formImagen(b) {
+    const controlAncho = b.anchoModo === "completa"
+      ? `<p class="staff-hint">La imagen ocupará todo el ancho del boletín.</p>`
+      : campoNumero("Ancho", "ancho", numOr(b.ancho, 380, TAMANOS_IMAGEN), 80, 600);
+    return `${campoImagen(b)}
+      ${campoSelect("Tamaño de la imagen", "anchoModo", b.anchoModo || "mediana", [["mediana", "Personalizado"], ["completa", "Ancho completo"]], true)}
+      ${controlAncho}
+      ${campoAlineacion("Alineación", "alineacion", b.alineacion)}
+      ${campoNumero("Redondeo de esquinas", "radio", numOr(b.radio, 8, { "": 0 }), 0, 40)}
+      ${campoTexto("Pie de foto (opcional)", "pie", b.pie, "")}
+      ${campoUrl("Enlace al hacer clic (opcional)", "enlace", b.enlace)}`;
+  }
+
+  function formBoton(b) {
+    return `${campoTexto("Texto del botón", "texto", b.texto, "Más información")}
+      ${barraEstiloTexto(b, { tamanoDefecto: 15, tamanoMin: 11, tamanoMax: 34, colorDefecto: "#ffffff", interlineadoDefecto: 1.2, alineacion: false })}
+      ${campoUrl("Dirección a la que lleva", "url", b.url)}
+      ${campoAlineacion("Posición del botón", "alineacion", b.alineacion)}
+      ${campoSelect("Tamaño del botón", "tamano", b.tamano || "mediano", [["pequeno", "Pequeño"], ["mediano", "Mediano"], ["grande", "Grande"]])}
+      ${campoNumero("Redondeo de esquinas", "radio", numOr(b.radio, 8, { "": 0 }), 0, 40)}
+      ${campoColor("Color de fondo", "color", b.color, "#0b6b3a")}`;
+  }
+
+  function formDivisor(b) {
+    return `<p class="staff-hint">Una línea para separar secciones.</p>
+      ${campoSelect("Estilo de línea", "estilo", b.estilo || "solid", [["solid", "Continua"], ["dashed", "Discontinua (guiones)"], ["dotted", "Punteada"], ["double", "Doble"]])}
+      ${campoNumero("Grosor", "grosor", numOr(b.grosor, 1), 1, 12)}
+      ${campoColor("Color de la línea", "color", b.color, "#dddddd")}`;
+  }
+
+  function formEspaciador(b) {
+    return `<p class="staff-hint">Espacio en blanco entre bloques.</p>
+      ${campoNumero("Alto del espacio", "altura", numOr(b.altura, 28, TAMANOS_ESPACIADOR), 4, 160)}`;
+  }
+
+  function formColumnas(b) {
+    return `${campoImagen(b)}
+      ${campoSelect("Lado de la imagen", "imagenLado", b.imagenLado, [["izquierda", "Izquierda"], ["derecha", "Derecha"]])}
+      ${campoNumero("Ancho de la imagen", "anchoImagen", numOr(b.anchoImagen, 200), 80, 400)}
+      ${campoTexto("Título de la columna (opcional)", "tituloColumna", b.tituloColumna, "")}
+      ${campoRico("Texto", "texto", b.texto)}
+      ${barraEstiloTexto(b, { tamanoDefecto: 14, tamanoMin: 10, tamanoMax: 34, colorDefecto: "#1a1a1a", interlineadoDefecto: 1.6, parrafos: true, padding: true, paddingDefecto: 14 })}
+      ${campoColor("Color de fondo (opcional)", "fondo", b.fondo, "#ffffff", true)}`;
+  }
+
+  function formAvanzado(b) {
+    return `<p class="staff-hint">Modo avanzado: escribe HTML directamente. Pensado para quien ya sabe HTML — no se revisa ni se limpia.</p>
+      <textarea data-campo="html" rows="8" class="textarea-avanzado" placeholder="&lt;p&gt;Tu HTML aquí...&lt;/p&gt;">${escapeHTML(b.html || "")}</textarea>`;
+  }
+
+  function formularioBloque(b) {
+    switch (b.tipo) {
+      case "encabezado": return formEncabezado(b);
+      case "titulo": return formTitulo(b);
+      case "texto": return formTexto(b);
+      case "imagen": return formImagen(b);
+      case "boton": return formBoton(b);
+      case "divisor": return formDivisor(b);
+      case "espaciador": return formEspaciador(b);
+      case "columnas": return formColumnas(b);
+      case "html_avanzado": return formAvanzado(b);
+      default: return "";
+    }
+  }
+
+  // ------------------------------- lista de bloques (edición) -------------------------------
+
+  function bloqueItemHtml(b, i) {
+    const def = DEFINICIONES[b.tipo];
+    return `<div class="bloque-item" draggable="true" data-id="${b.id}">
+      <div class="bloque-item-head">
+        <span class="bloque-handle" title="Arrastra para mover">⠿</span>
+        <span class="bloque-tipo-badge">${def.icono} ${escapeHTML(def.etiqueta)}</span>
+        <div class="bloque-item-acciones">
+          <button type="button" class="btn btn-ghost btn-mini btn-mover-arriba" data-id="${b.id}" title="Subir" ${i === 0 ? "disabled" : ""}>▲</button>
+          <button type="button" class="btn btn-ghost btn-mini btn-mover-abajo" data-id="${b.id}" title="Bajar" ${i === bloques.length - 1 ? "disabled" : ""}>▼</button>
+          <button type="button" class="btn btn-ghost btn-mini btn-eliminar-bloque" data-id="${b.id}" title="Eliminar">🗑</button>
+        </div>
+      </div>
+      <div class="bloque-item-body" data-id="${b.id}">${formularioBloque(b)}</div>
+    </div>`;
+  }
+
+  function render() {
+    renderLista();
+    renderPreview();
+  }
+
+  function renderLista() {
+    if (bloques.length === 0) {
+      elLista.innerHTML = `<p class="builder-vacio">Todavía no has añadido ningún bloque. Usa los botones de arriba para empezar, o elige una plantilla.</p>`;
+      return;
+    }
+    elLista.innerHTML = bloques.map((b, i) => bloqueItemHtml(b, i)).join("");
+  }
+
+  function renderPreview() {
+    elPreview.innerHTML = bloques.length === 0
+      ? `<p class="builder-vacio">La vista previa aparecerá aquí en cuanto añadas algún bloque.</p>`
+      : getHtml();
+  }
+
+  function actualizarBloqueBody(id) {
+    const b = bloques.find((x) => x.id === id);
+    const el = elLista.querySelector(`.bloque-item-body[data-id="${id}"]`);
+    if (el && b) el.innerHTML = formularioBloque(b);
+    renderPreview();
+  }
+
+  function moverBloque(id, delta) {
+    const i = bloques.findIndex((b) => b.id === id);
+    if (i === -1) return;
+    const j = i + delta;
+    if (j < 0 || j >= bloques.length) return;
+    const tmp = bloques[i];
+    bloques[i] = bloques[j];
+    bloques[j] = tmp;
+    render();
+  }
+
+  function moverBloqueJunto(idOrigen, idDestino, antes) {
+    const iOrigen = bloques.findIndex((b) => b.id === idOrigen);
+    if (iOrigen === -1) return;
+    const [item] = bloques.splice(iOrigen, 1);
+    let iDestino = bloques.findIndex((b) => b.id === idDestino);
+    if (iDestino === -1) iDestino = bloques.length;
+    bloques.splice(antes ? iDestino : iDestino + 1, 0, item);
+  }
+
+  function eliminarBloque(id) {
+    if (!confirm("¿Eliminar este bloque? Esta acción no se puede deshacer.")) return;
+    bloques = bloques.filter((b) => b.id !== id);
+    render();
+  }
+
+  function agregarBloque(tipo) {
+    const b = crearBloque(tipo);
+    if (!b) return;
+    bloques.push(b);
+    render();
+    const el = elLista.querySelector(".bloque-item:last-child");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function aplicarPlantilla(nombre) {
+    const fabrica = PLANTILLAS[nombre];
+    if (!fabrica) return;
+    if (bloques.length > 0 && !confirm("Esto reemplaza el contenido actual del boletín por la plantilla elegida. ¿Continuar?")) return;
+    bloques = fabrica();
+    render();
+  }
+
+  async function subirImagenParaBloque(id, file) {
+    const b = bloques.find((x) => x.id === id);
+    if (!b) return;
+    const formData = new FormData();
+    formData.append("file", file);
+    let res;
+    try {
+      res = await fetch(`${AUTH_API_BASE}/boletines/posts/${postId}/imagenes`, { method: "POST", body: formData });
+    } catch (e) {
+      alert("No se pudo subir la imagen (revisa tu conexión).");
+      return;
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.detail || "No se pudo subir la imagen.");
+      return;
+    }
+    const data = await res.json();
+    b.imagenId = data.id;
+    b.imagenDataUrl = await fileToDataURL(file);
+    actualizarBloqueBody(id);
+  }
+
+  function aplicarFormato(btn) {
+    const campo = btn.closest(".bloque-campo").querySelector("[data-campo-html]");
+    if (!campo) return;
+    campo.focus();
+    const cmd = btn.dataset.cmd;
+    if (cmd === "link") {
+      const url = prompt("¿A qué dirección debe llevar el enlace?", "https://");
+      if (!url) return;
+      document.execCommand("createLink", false, url);
+    } else {
+      document.execCommand(cmd);
+    }
+    campo.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  // ------------------------------- wiring -------------------------------
+
+  function wireToolbar() {
+    elToolbar.addEventListener("click", (e) => {
+      const btnTipo = e.target.closest("[data-tipo]");
+      if (btnTipo) { agregarBloque(btnTipo.dataset.tipo); return; }
+      const btnPlantilla = e.target.closest("[data-plantilla]");
+      if (btnPlantilla) { aplicarPlantilla(btnPlantilla.dataset.plantilla); return; }
+    });
+  }
+
+  function wireLista() {
+    elLista.addEventListener("mousedown", (e) => {
+      if (e.target.closest(".btn-formato")) { e.preventDefault(); return; }
+      const item = e.target.closest(".bloque-item");
+      if (!item) return;
+      const interactivo = e.target.closest("input, textarea, select, [contenteditable], button");
+      item.draggable = !interactivo;
+    });
+
+    elLista.addEventListener("click", (e) => {
+      const btnFormato = e.target.closest(".btn-formato");
+      if (btnFormato) { aplicarFormato(btnFormato); return; }
+      const btnSubir = e.target.closest(".btn-subir-imagen-bloque");
+      if (btnSubir) { btnSubir.closest(".bloque-campo").querySelector(".input-imagen-bloque").click(); return; }
+      const btnArriba = e.target.closest(".btn-mover-arriba");
+      if (btnArriba) { moverBloque(Number(btnArriba.dataset.id), -1); return; }
+      const btnAbajo = e.target.closest(".btn-mover-abajo");
+      if (btnAbajo) { moverBloque(Number(btnAbajo.dataset.id), 1); return; }
+      const btnEliminar = e.target.closest(".btn-eliminar-bloque");
+      if (btnEliminar) { eliminarBloque(Number(btnEliminar.dataset.id)); return; }
+      const btnQuitarColor = e.target.closest(".btn-quitar-color");
+      if (btnQuitarColor) {
+        const id = Number(btnQuitarColor.closest(".bloque-item-body").dataset.id);
+        const b = bloques.find((x) => x.id === id);
+        if (b) { b[btnQuitarColor.dataset.campo] = ""; actualizarBloqueBody(id); }
+        return;
+      }
+      const btnStepper = e.target.closest(".btn-stepper");
+      if (btnStepper) {
+        const input = btnStepper.closest(".mini-campo-num").querySelector("input[data-campo-num]");
+        if (input) {
+          const delta = Number(btnStepper.dataset.delta);
+          const min = input.min !== "" ? Number(input.min) : -Infinity;
+          const max = input.max !== "" ? Number(input.max) : Infinity;
+          const paso = input.step && input.step !== "any" ? Number(input.step) : 1;
+          const actual = input.value === "" ? 0 : Number(input.value);
+          let nuevo = Math.min(max, Math.max(min, actual + delta * paso));
+          nuevo = Math.round(nuevo * 100) / 100; // evita basura de coma flotante (0.1+0.2 etc.)
+          input.value = nuevo;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        return;
+      }
+      const btnAlign = e.target.closest(".btn-align");
+      if (btnAlign) {
+        const id = Number(btnAlign.closest(".bloque-item-body").dataset.id);
+        const b = bloques.find((x) => x.id === id);
+        if (b) {
+          const campo = btnAlign.dataset.campoValor;
+          b[campo] = btnAlign.dataset.valor;
+          btnAlign.parentElement.querySelectorAll(".btn-align").forEach((el) => el.classList.toggle("activo", el === btnAlign));
+          renderPreview();
+        }
+        return;
+      }
+    });
+
+    elLista.addEventListener("input", (e) => {
+      const campoHtml = e.target.closest("[data-campo-html]");
+      if (campoHtml) {
+        const id = Number(campoHtml.closest(".bloque-item-body").dataset.id);
+        const b = bloques.find((x) => x.id === id);
+        if (b) { b[campoHtml.dataset.campoHtml] = campoHtml.innerHTML; renderPreview(); }
+        return;
+      }
+      const swatch = e.target.closest(".color-swatch");
+      if (swatch) {
+        const id = Number(swatch.closest(".bloque-item-body").dataset.id);
+        const b = bloques.find((x) => x.id === id);
+        if (b) {
+          b[swatch.dataset.campo] = swatch.value;
+          const hexInput = swatch.parentElement.querySelector(".color-hex");
+          if (hexInput) hexInput.value = swatch.value;
+          renderPreview();
+        }
+        return;
+      }
+      const hexInput = e.target.closest(".color-hex");
+      if (hexInput) {
+        const val = hexInput.value.trim();
+        if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+          const id = Number(hexInput.closest(".bloque-item-body").dataset.id);
+          const b = bloques.find((x) => x.id === id);
+          if (b) {
+            b[hexInput.dataset.campoHex] = val;
+            const swatchPar = hexInput.parentElement.querySelector(".color-swatch");
+            if (swatchPar) swatchPar.value = val;
+            renderPreview();
+          }
+        }
+        return;
+      }
+      const campoNum = e.target.closest("[data-campo-num]");
+      if (campoNum) {
+        const id = Number(campoNum.closest(".bloque-item-body").dataset.id);
+        const b = bloques.find((x) => x.id === id);
+        if (b) {
+          const nombre = campoNum.dataset.campoNum;
+          // Campo vacío -> NaN, para que numOr caiga al valor por defecto en
+          // vez de tomarlo como 0 (Number("") es 0, no NaN). El 0 escrito a
+          // propósito sí se respeta (p.ej. radio 0 = esquinas rectas).
+          b[nombre] = campoNum.value === "" ? NaN : Number(campoNum.value);
+          // Sincroniza el gemelo (slider <-> número) del mismo campo, si lo hay.
+          const contenedorNum = campoNum.closest(".numero-row, .mini-campo-num");
+          if (contenedorNum) {
+            contenedorNum.querySelectorAll(`[data-campo-num="${nombre}"]`).forEach((el) => {
+              if (el !== campoNum) el.value = campoNum.value;
+            });
+          }
+          renderPreview();
+        }
+        return;
+      }
+      const campo = e.target.closest("[data-campo]");
+      if (campo) {
+        const id = Number(campo.closest(".bloque-item-body").dataset.id);
+        const b = bloques.find((x) => x.id === id);
+        if (b) {
+          b[campo.dataset.campo] = campo.value;
+          if (campo.dataset.reload) actualizarBloqueBody(id);
+          else renderPreview();
+        }
+      }
+    });
+
+    elLista.addEventListener("change", (e) => {
+      if (e.target.matches(".input-imagen-bloque")) {
+        const file = e.target.files[0];
+        if (file) {
+          const id = Number(e.target.closest(".bloque-item-body").dataset.id);
+          subirImagenParaBloque(id, file);
+        }
+        e.target.value = "";
+      }
+    });
+
+    elLista.addEventListener("dragstart", (e) => {
+      const item = e.target.closest(".bloque-item");
+      if (!item || item.draggable === false) return;
+      arrastrandoId = Number(item.dataset.id);
+      e.dataTransfer.effectAllowed = "move";
+      item.classList.add("arrastrando");
+    });
+
+    elLista.addEventListener("dragover", (e) => {
+      if (arrastrandoId == null) return;
+      e.preventDefault();
+      const item = e.target.closest(".bloque-item");
+      if (!item || Number(item.dataset.id) === arrastrandoId) return;
+      const rect = item.getBoundingClientRect();
+      const antes = e.clientY - rect.top < rect.height / 2;
+      elLista.querySelectorAll(".drop-antes,.drop-despues").forEach((el) => el.classList.remove("drop-antes", "drop-despues"));
+      item.classList.add(antes ? "drop-antes" : "drop-despues");
+    });
+
+    elLista.addEventListener("drop", (e) => {
+      if (arrastrandoId == null) return;
+      e.preventDefault();
+      const item = e.target.closest(".bloque-item");
+      if (item) {
+        const destinoId = Number(item.dataset.id);
+        const antes = item.classList.contains("drop-antes");
+        if (destinoId !== arrastrandoId) moverBloqueJunto(arrastrandoId, destinoId, antes);
+      }
+      arrastrandoId = null;
+      render();
+    });
+
+    elLista.addEventListener("dragend", () => {
+      arrastrandoId = null;
+      elLista.querySelectorAll(".drop-antes,.drop-despues,.arrastrando").forEach((el) => el.classList.remove("drop-antes", "drop-despues", "arrastrando"));
+    });
+  }
+
+  // ------------------------------- API pública -------------------------------
+
+  function init(root) {
+    elToolbar = root.querySelector(".builder-toolbar");
+    elLista = root.querySelector(".builder-lista");
+    elPreview = root.querySelector(".builder-preview-body");
+    wireToolbar();
+    wireLista();
+    render();
+  }
+
+  function setPostId(id) {
+    postId = id;
+  }
+
+  async function precargarImagenes() {
+    const conImagen = bloques.filter((b) => b.imagenId && !b.imagenDataUrl);
+    await Promise.all(conImagen.map(async (b) => {
+      try {
+        const res = await fetch(`${AUTH_API_BASE}/boletines/posts/${postId}/imagenes/${b.imagenId}`);
+        if (!res.ok) return;
+        const blob = await res.blob();
+        b.imagenDataUrl = await blobToDataURL(blob);
+      } catch (e) {
+        // se queda con el placeholder de "sin imagen", no rompe el builder
+      }
+    }));
+  }
+
+  async function cargarBloques(jsonStr) {
+    let datos = [];
+    try {
+      datos = jsonStr ? JSON.parse(jsonStr) : [];
+    } catch (e) {
+      datos = [];
+    }
+    bloques = Array.isArray(datos) ? datos : [];
+    contador = bloques.reduce((max, b) => Math.max(max, b.id || 0), 0) + 1;
+    render();
+    await precargarImagenes();
+    render();
+  }
+
+  function cargarComoAvanzado(html) {
+    bloques = [{ id: nuevoId(), tipo: "html_avanzado", html: html || "" }];
+    render();
+  }
+
+  function nuevoVacio() {
+    bloques = [];
+    render();
+  }
+
+  function tieneBloques() {
+    return bloques.length > 0;
+  }
+
+  function getBloquesJSON() {
+    return JSON.stringify(bloques.map(({ imagenDataUrl, ...resto }) => resto));
+  }
+
+  return { init, setPostId, cargarBloques, cargarComoAvanzado, nuevoVacio, tieneBloques, getBloquesJSON, getHtml };
+})();

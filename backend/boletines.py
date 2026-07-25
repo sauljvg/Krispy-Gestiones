@@ -13,6 +13,7 @@ from db import get_connection
 
 RESEND_API_URL = "https://api.resend.com/emails"
 PDF_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads", "boletines"))
+IMAGENES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads", "boletines_imagenes"))
 
 
 def ensure_boletin_tables():
@@ -34,7 +35,19 @@ def ensure_boletin_tables():
         conn.execute("ALTER TABLE boletin_posts ADD COLUMN pdf_ruta TEXT")
     if "pdf_nombre_original" not in cols_posts:
         conn.execute("ALTER TABLE boletin_posts ADD COLUMN pdf_nombre_original TEXT")
+    if "contenido_bloques" not in cols_posts:
+        conn.execute("ALTER TABLE boletin_posts ADD COLUMN contenido_bloques TEXT")
     os.makedirs(PDF_DIR, exist_ok=True)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS boletin_imagenes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            post_id INTEGER NOT NULL REFERENCES boletin_posts(id),
+            ruta TEXT NOT NULL,
+            nombre_original TEXT,
+            subido_en TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    os.makedirs(IMAGENES_DIR, exist_ok=True)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS boletin_contactos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,11 +103,11 @@ def get_post(post_id, solo_publicado=False):
     return post
 
 
-def create_post(titulo, resumen, contenido_html, autor):
+def create_post(titulo, resumen, contenido_html, autor, contenido_bloques=None):
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO boletin_posts (titulo, resumen, contenido_html, autor) VALUES (?, ?, ?, ?)",
-        (titulo, resumen, contenido_html, autor),
+        "INSERT INTO boletin_posts (titulo, resumen, contenido_html, autor, contenido_bloques) VALUES (?, ?, ?, ?, ?)",
+        (titulo, resumen, contenido_html, autor, contenido_bloques),
     )
     conn.commit()
     post_id = cur.lastrowid
@@ -102,11 +115,11 @@ def create_post(titulo, resumen, contenido_html, autor):
     return post_id
 
 
-def update_post(post_id, titulo, resumen, contenido_html):
+def update_post(post_id, titulo, resumen, contenido_html, contenido_bloques=None):
     conn = get_connection()
     conn.execute(
-        "UPDATE boletin_posts SET titulo = ?, resumen = ?, contenido_html = ? WHERE id = ?",
-        (titulo, resumen, contenido_html, post_id),
+        "UPDATE boletin_posts SET titulo = ?, resumen = ?, contenido_html = ?, contenido_bloques = ? WHERE id = ?",
+        (titulo, resumen, contenido_html, contenido_bloques, post_id),
     )
     conn.commit()
     conn.close()
@@ -131,8 +144,11 @@ def despublicar_post(post_id):
 
 def delete_post(post_id):
     _borrar_pdf_fisico(post_id)
+    for imagen in list_imagenes(post_id):
+        _borrar_imagen_fisica(imagen["ruta"])
     conn = get_connection()
     conn.execute("DELETE FROM boletin_envios WHERE post_id = ?", (post_id,))
+    conn.execute("DELETE FROM boletin_imagenes WHERE post_id = ?", (post_id,))
     conn.execute("DELETE FROM boletin_posts WHERE id = ?", (post_id,))
     conn.commit()
     conn.close()
@@ -171,6 +187,62 @@ def guardar_pdf(post_id, nombre_original, contenido):
         "UPDATE boletin_posts SET pdf_ruta = ?, pdf_nombre_original = ? WHERE id = ?",
         (ruta, nombre_original, post_id),
     )
+    conn.commit()
+    conn.close()
+
+
+def _borrar_imagen_fisica(ruta):
+    if ruta and os.path.exists(ruta):
+        os.remove(ruta)
+
+
+def guardar_imagen(post_id, nombre_original, extension, contenido):
+    """Guarda una imagen de un bloque del builder (foto, encabezado...). Un
+    boletín puede tener varias, a diferencia del único PDF adjunto, así que
+    cada una vive en su propia fila de boletin_imagenes en vez de una
+    columna del post."""
+    if not get_post(post_id):
+        raise ValueError("El boletín no existe")
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO boletin_imagenes (post_id, ruta, nombre_original) VALUES (?, ?, ?)",
+        (post_id, "", nombre_original),
+    )
+    imagen_id = cur.lastrowid
+    ruta = os.path.join(IMAGENES_DIR, f"{imagen_id}{extension}")
+    with open(ruta, "wb") as f:
+        f.write(contenido)
+    conn.execute("UPDATE boletin_imagenes SET ruta = ? WHERE id = ?", (ruta, imagen_id))
+    conn.commit()
+    conn.close()
+    return imagen_id
+
+
+def list_imagenes(post_id):
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM boletin_imagenes WHERE post_id = ? ORDER BY id", (post_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_imagen_info(post_id, imagen_id):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM boletin_imagenes WHERE id = ? AND post_id = ?", (imagen_id, post_id)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def borrar_imagen(post_id, imagen_id):
+    imagen = get_imagen_info(post_id, imagen_id)
+    if not imagen:
+        return
+    _borrar_imagen_fisica(imagen["ruta"])
+    conn = get_connection()
+    conn.execute("DELETE FROM boletin_imagenes WHERE id = ?", (imagen_id,))
     conn.commit()
     conn.close()
 

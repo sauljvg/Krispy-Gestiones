@@ -13,28 +13,54 @@
     }
   })();
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260725a">
+<link rel="stylesheet" href="css/styles.css?v=20260725f">
 <style>
-  .blog-wrap { max-width: 760px; margin: 0 auto; padding: 20px 16px 60px; }
+  .blog-layout {
+    max-width: 1400px; margin: 0 auto; padding: 24px 32px 60px;
+    display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 32px; align-items: start;
+  }
+  @media (max-width: 900px) {
+    .blog-layout { grid-template-columns: 1fr; padding: 16px 16px 40px; }
+    .blog-sidebar { position: static !important; order: -1; }
+  }
+  .blog-main { min-width: 0; }
+  .blog-lista-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
   .blog-lista-card {
     background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
-    padding: 18px; margin-bottom: 14px; cursor: pointer;
+    padding: 20px; cursor: pointer;
   }
   .blog-lista-card:hover { border-color: var(--acento); }
-  .blog-lista-card h2 { margin: 0 0 6px; font-size: 18px; }
-  .blog-lista-card p { margin: 0; color: var(--text-secondary); font-size: 14px; }
-  .blog-lista-card .fecha { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
-  .blog-post h1 { font-size: 24px; margin-bottom: 4px; }
-  .blog-post .fecha { color: var(--text-muted); font-size: 13px; margin-bottom: 20px; }
+  .blog-lista-card h2 { margin: 0 0 8px; font-size: 19px; }
+  .blog-lista-card p { margin: 0; color: var(--text-secondary); font-size: 14px; line-height: 1.5; }
+  .blog-lista-card .fecha { font-size: 12px; color: var(--text-muted); margin-top: 10px; }
+
+  .blog-post { max-width: 800px; }
+  .blog-post h1 { font-size: 30px; margin-bottom: 4px; line-height: 1.2; }
+  .blog-post .fecha { color: var(--text-muted); font-size: 13px; margin-bottom: 24px; }
   .blog-post .contenido { font-size: 16px; line-height: 1.6; }
+  .blog-post .contenido img { max-width: 100%; height: auto; }
   .blog-pdf-wrap { margin-top: 24px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   .blog-pdf-toolbar {
     display: flex; justify-content: space-between; align-items: center; padding: 10px 14px;
     background: var(--surface-1); font-size: 13px; border-bottom: 1px solid var(--border);
   }
   .blog-pdf-toolbar a { color: var(--acento); text-decoration: none; font-weight: 600; }
-  .blog-pdf-frame { width: 100%; height: 70vh; border: none; }
+  .blog-pdf-frame { width: 100%; height: 80vh; border: none; }
   .btn-volver-blog { margin-bottom: 16px; }
+
+  .blog-sidebar {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px; position: sticky; top: 20px; max-height: calc(100vh - 40px); overflow-y: auto;
+  }
+  .blog-sidebar-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .blog-sidebar-head h3 { margin: 0; font-size: 14px; }
+  .blog-sidebar-lista { display: flex; flex-direction: column; }
+  .blog-sidebar-item { padding: 10px 4px; border-bottom: 1px solid var(--gridline); cursor: pointer; }
+  .blog-sidebar-item:last-child { border-bottom: none; }
+  .blog-sidebar-item:hover .titulo { color: var(--acento); }
+  .blog-sidebar-item.activo .titulo { color: var(--acento); font-weight: 700; }
+  .blog-sidebar-item .titulo { font-size: 13px; color: var(--text-primary); line-height: 1.3; }
+  .blog-sidebar-item .fecha { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
 </style>
 </head>
 <body>
@@ -49,12 +75,21 @@
     </div>
   </header>
 
-  <div class="blog-wrap">
-    <div id="blog-lista"></div>
-    <div id="blog-post" hidden></div>
+  <div class="blog-layout">
+    <div class="blog-main">
+      <div id="blog-lista"></div>
+      <div id="blog-post" hidden></div>
+    </div>
+    <aside class="blog-sidebar">
+      <div class="blog-sidebar-head">
+        <h3>Otras entradas</h3>
+        <button id="btn-orden-sidebar" class="btn btn-ghost btn-mini" type="button">Más recientes</button>
+      </div>
+      <div class="blog-sidebar-lista" id="blog-sidebar-lista"></div>
+    </aside>
   </div>
 </div>
 <script src="js/theme.js?v=20260723f"></script>
-<script src="js/blog.js?v=20260723f"></script>
+<script src="js/blog.js?v=20260725b"></script>
 </body>
 </html>

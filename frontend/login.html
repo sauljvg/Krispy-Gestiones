@@ -13,7 +13,7 @@
     }
   })();
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260725a">
+<link rel="stylesheet" href="css/styles.css?v=20260725f">
 <style>
   .login-wrap {
     min-height: 100vh;
@@ -21,6 +21,12 @@
     align-items: center;
     justify-content: center;
     position: relative;
+    padding: 20px;
+    /* Fondo con un halo muy suave del color de marca detrás de la tarjeta,
+       para que la pantalla de acceso no sea un vacío liso. */
+    background:
+      radial-gradient(60% 45% at 50% 32%, color-mix(in srgb, var(--acento) 12%, transparent), transparent 70%),
+      var(--surface-page);
   }
   #btn-theme-toggle.login-theme-btn {
     position: absolute;
@@ -30,13 +36,22 @@
   .login-card {
     background: var(--surface-1);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 32px;
+    border-radius: 20px;
+    padding: 36px 32px;
     width: 100%;
-    max-width: 340px;
+    max-width: 360px;
+    box-shadow: 0 1px 2px rgba(17,17,17,0.04), 0 18px 50px color-mix(in srgb, var(--acento) 14%, rgba(17,17,17,0.10));
   }
-  .login-card h1 { margin: 0 0 4px; font-size: 20px; display: flex; align-items: center; gap: 10px; }
-  .login-card p { margin: 0 0 20px; color: var(--text-secondary); font-size: 13px; }
+  .login-brand-badge {
+    width: 60px; height: 60px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 30px; margin: 0 auto 16px;
+    background: color-mix(in srgb, var(--acento) 12%, var(--surface-1));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acento) 22%, transparent);
+  }
+  .login-card h1 { margin: 0 0 4px; font-size: 22px; text-align: center; font-family: var(--font-display); font-weight: 600; }
+  .login-card > form > p:first-of-type,
+  .login-card p.login-sub { margin: 0 0 22px; color: var(--text-secondary); font-size: 13px; text-align: center; }
   .login-field { margin-bottom: 14px; }
   .login-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
   .login-field input {
@@ -67,7 +82,8 @@
 <div class="login-wrap">
   <button id="btn-theme-toggle" class="btn btn-ghost login-theme-btn" aria-label="Cambiar tema" title="Cambiar entre claro y oscuro">🌙</button>
   <div class="login-card">
-    <h1><span>🍩</span> Krispy Gestiones</h1>
+    <div class="login-brand-badge">🍩</div>
+    <h1>Krispy Gestiones</h1>
 
     <form id="login-form-usuario">
       <p>Inicia sesión para continuar.</p>

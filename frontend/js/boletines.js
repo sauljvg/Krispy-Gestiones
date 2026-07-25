@@ -24,6 +24,7 @@ async function loadPosts() {
       <td>${(p.publicado_en || p.creado_en || "").slice(0, 10)}</td>
       <td class="acciones">
         <button class="btn btn-ghost btn-editar-post" data-id="${p.id}" type="button">Editar</button>
+        <button class="btn btn-ghost btn-copiar-enlace" data-id="${p.id}" type="button">🔗 Enlace</button>
       </td>
     </tr>`
     )
@@ -31,41 +32,74 @@ async function loadPosts() {
   tbody.querySelectorAll(".btn-editar-post").forEach((btn) => {
     btn.addEventListener("click", () => abrirEditor(Number(btn.dataset.id)));
   });
+  tbody.querySelectorAll(".btn-copiar-enlace").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const url = `${window.location.origin}/blog.html?post=${btn.dataset.id}`;
+      const textoOriginal = btn.textContent;
+      try {
+        await navigator.clipboard.writeText(url);
+        btn.textContent = "✓ Copiado";
+      } catch (e) {
+        prompt("Copia este enlace:", url);
+        return;
+      }
+      setTimeout(() => { btn.textContent = textoOriginal; }, 1500);
+    });
+  });
 }
 
-async function abrirEditor(postId) {
+async function nuevoPost() {
+  // Se crea un borrador vacío de inmediato (en vez de esperar al primer
+  // "Guardar") para que el builder ya tenga un post_id real y se puedan
+  // subir imágenes desde el primer momento. Si el usuario cierra sin tocar
+  // nada, queda un borrador suelto en la lista — se puede borrar como
+  // cualquier otro boletín, igual que un "Sin título" de Google Docs.
+  const res = await fetch(`${AUTH_API_BASE}/boletines/posts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ titulo: "Nuevo boletín", resumen: "", contenido_html: "<p></p>" }),
+  });
+  if (!res.ok) {
+    alert("No se pudo crear el boletín.");
+    return;
+  }
+  const data = await res.json();
+  await loadPosts();
+  await abrirEditor(data.id, true);
+}
+
+async function abrirEditor(postId, esNuevo = false) {
   currentPostId = postId;
   const editorCard = document.getElementById("editor-card");
   editorCard.hidden = false;
   document.getElementById("envio-resultado").textContent = "";
 
-  if (postId) {
-    const res = await fetch(`${AUTH_API_BASE}/boletines/posts/${postId}`);
-    const post = await res.json();
-    document.getElementById("editor-titulo-h2").textContent = "Editar boletín";
-    document.getElementById("post-titulo").value = post.titulo;
-    document.getElementById("post-resumen").value = post.resumen || "";
-    document.getElementById("post-contenido").value = post.contenido_html;
-    document.getElementById("btn-publicar-post").hidden = post.publicado;
-    document.getElementById("btn-despublicar-post").hidden = !post.publicado;
-    document.getElementById("btn-eliminar-post").hidden = false;
-    document.getElementById("envio-section").hidden = false;
-    document.getElementById("pdf-section").hidden = false;
-    document.getElementById("pdf-actual-txt").innerHTML = post.tiene_pdf
-      ? `📄 <a href="${AUTH_API_BASE}/boletines/posts/${postId}/pdf" target="_blank">Ver PDF actual</a>`
-      : "Este boletín no tiene PDF adjunto todavía.";
-    renderDestinatarios();
+  const res = await fetch(`${AUTH_API_BASE}/boletines/posts/${postId}`);
+  const post = await res.json();
+  document.getElementById("editor-titulo-h2").textContent = esNuevo ? "Nuevo boletín" : "Editar boletín";
+  document.getElementById("post-titulo").value = esNuevo ? "" : post.titulo;
+  document.getElementById("post-resumen").value = esNuevo ? "" : (post.resumen || "");
+  document.getElementById("btn-publicar-post").hidden = post.publicado;
+  document.getElementById("btn-despublicar-post").hidden = !post.publicado;
+  document.getElementById("btn-eliminar-post").hidden = false;
+  document.getElementById("envio-section").hidden = false;
+  document.getElementById("pdf-section").hidden = false;
+  document.getElementById("pdf-actual-txt").innerHTML = post.tiene_pdf
+    ? `📄 <a href="${AUTH_API_BASE}/boletines/posts/${postId}/pdf" target="_blank">Ver PDF actual</a>`
+    : "Este boletín no tiene PDF adjunto todavía.";
+  renderDestinatarios();
+
+  BoletinBuilder.setPostId(postId);
+  if (esNuevo) {
+    BoletinBuilder.nuevoVacio();
+  } else if (post.contenido_bloques) {
+    await BoletinBuilder.cargarBloques(post.contenido_bloques);
   } else {
-    document.getElementById("editor-titulo-h2").textContent = "Nuevo boletín";
-    document.getElementById("post-titulo").value = "";
-    document.getElementById("post-resumen").value = "";
-    document.getElementById("post-contenido").value = "";
-    document.getElementById("btn-publicar-post").hidden = true;
-    document.getElementById("btn-despublicar-post").hidden = true;
-    document.getElementById("btn-eliminar-post").hidden = true;
-    document.getElementById("envio-section").hidden = true;
-    document.getElementById("pdf-section").hidden = true;
+    // Boletín creado antes del builder visual: se abre como un único
+    // bloque "HTML avanzado" con su contenido intacto, para no perder nada.
+    BoletinBuilder.cargarComoAvanzado(post.contenido_html);
   }
+
   editorCard.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -77,27 +111,29 @@ function cerrarEditor() {
 async function guardarPost() {
   const titulo = document.getElementById("post-titulo").value.trim();
   const resumen = document.getElementById("post-resumen").value.trim();
-  const contenido_html = document.getElementById("post-contenido").value.trim();
-  if (!titulo || !contenido_html) {
-    alert("Título y contenido son obligatorios.");
+  if (!titulo) {
+    alert("El título es obligatorio.");
     return;
   }
-  const body = JSON.stringify({ titulo, resumen, contenido_html });
-  const headers = { "Content-Type": "application/json" };
-  let res;
-  if (currentPostId) {
-    res = await fetch(`${AUTH_API_BASE}/boletines/posts/${currentPostId}`, { method: "PUT", headers, body });
-  } else {
-    res = await fetch(`${AUTH_API_BASE}/boletines/posts`, { method: "POST", headers, body });
+  if (!BoletinBuilder.tieneBloques()) {
+    alert("Añade al menos un bloque de contenido.");
+    return;
   }
+  const body = JSON.stringify({
+    titulo,
+    resumen,
+    contenido_html: BoletinBuilder.getHtml(),
+    contenido_bloques: BoletinBuilder.getBloquesJSON(),
+  });
+  const headers = { "Content-Type": "application/json" };
+  const res = await fetch(`${AUTH_API_BASE}/boletines/posts/${currentPostId}`, { method: "PUT", headers, body });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     alert(err.detail || "No se pudo guardar el boletín.");
     return;
   }
-  const data = await res.json();
   await loadPosts();
-  await abrirEditor(currentPostId || data.id);
+  await abrirEditor(currentPostId);
 }
 
 async function publicarPost() {
@@ -244,11 +280,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     return;
   }
   wireUserBar(user);
+  BoletinBuilder.init(document.getElementById("builder-root"));
 
   await loadPosts();
   await loadContactos();
 
-  document.getElementById("btn-nuevo-post").addEventListener("click", () => abrirEditor(null));
+  document.getElementById("btn-nuevo-post").addEventListener("click", nuevoPost);
   document.getElementById("btn-cerrar-editor").addEventListener("click", cerrarEditor);
   document.getElementById("btn-guardar-post").addEventListener("click", guardarPost);
   document.getElementById("btn-publicar-post").addEventListener("click", publicarPost);
