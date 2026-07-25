@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 import auth as auth_module
 import backups as backups_module
 import scrape_jobs
-from auth_routes import COOKIE_NAME, require_resenas
+from auth_routes import COOKIE_NAME, require_admin, require_resenas
 from auth_routes import router as auth_router
 from boletines_routes import router as boletines_router
 from boletines_routes import router_publico as boletines_router_publico
@@ -107,9 +107,32 @@ def _start_db_backups():
     backups_module.start_scheduler()
 
 
+@app.on_event("shutdown")
+def _backup_on_shutdown():
+    # El backup periódico es cada 6h — si un redeploy de Autoscale llega
+    # antes de esa ventana (lo habitual: cada vez que se hace push/pull en
+    # Replit y se republica), storage_sync.restaurar_si_hace_falta() solo
+    # tiene esa copia vieja para restaurar y se pierde todo lo recibido
+    # desde entonces. Al hacer una copia también AQUÍ (justo cuando Autoscale
+    # manda la señal de apagado, antes de matar el contenedor), la próxima
+    # restauración parte de segundos antes en vez de hasta 6h antes.
+    try:
+        backups_module.hacer_backup()
+    except Exception as e:
+        print(f"[backup] Fallo al hacer backup de apagado: {e}", flush=True)
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/admin/backup-status")
+def backup_status(_admin: dict = Depends(require_admin)):
+    """Comprueba si Object Storage está realmente disponible en este
+    despliegue (bucket configurado en .replit) y cuándo se hizo el último
+    backup remoto — para verificarlo sin tener que mirar los logs."""
+    return storage_sync.estado()
 
 
 # Sirve el dashboard (HTML/CSS/JS) desde el mismo proceso y puerto que la API,

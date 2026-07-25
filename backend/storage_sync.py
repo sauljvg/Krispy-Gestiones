@@ -45,6 +45,32 @@ def _ultimo_backup_remoto(client):
     return sorted(nombres)[-1]
 
 
+def estado():
+    """Diagnóstico para comprobar desde fuera (sin depender de mirar los
+    logs del despliegue en Replit) si Object Storage está realmente
+    disponible y con backups recientes — pensado para verificar que el
+    bucket configurado en .replit funciona de verdad en producción, ya que
+    en local siempre falla (no existe el paquete 'replit')."""
+    resultado = {
+        "modulo_replit_disponible": False,
+        "bucket_alcanzable": False,
+        "num_backups_remotos": 0,
+        "ultimo_backup_remoto": None,
+        "db_local_bytes": os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0,
+        "error": None,
+    }
+    try:
+        client = _client()
+        resultado["modulo_replit_disponible"] = True
+        nombres = [o.name for o in client.list() if o.name.startswith(PREFIJO)]
+        resultado["bucket_alcanzable"] = True
+        resultado["num_backups_remotos"] = len(nombres)
+        resultado["ultimo_backup_remoto"] = sorted(nombres)[-1] if nombres else None
+    except Exception as e:
+        resultado["error"] = str(e)
+    return resultado
+
+
 def restaurar_si_hace_falta():
     """Si el archivo local no existe o pesa sospechosamente poco (indicio de
     que el contenedor se reinició y perdió el disco), trae la copia más
