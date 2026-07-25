@@ -35,4 +35,23 @@ The scraper runs locally (requires Chrome). To refresh data on Replit, run the s
 
 A nightly scheduler inside the app also triggers incremental updates at 02:00 via `POST /api/scrape` (update mode), but this only works if you have a working scraper environment.
 
+## Data persistence (Autoscale)
+
+`krispy_kreme.db` and the `uploads/`/`backups/` folders live on Autoscale's
+ephemeral disk, which is wiped on every redeploy. Two safety nets keep data
+across redeploys:
+
+- A backup runs every 6h and again right when the container gets the
+  shutdown signal (`backend/main.py`'s `shutdown` event), uploaded to
+  Replit Object Storage (`backend/storage_sync.py`).
+- On boot, if the local DB is missing or suspiciously small, the latest
+  backup is restored automatically before anything else runs.
+
+Check `GET /api/admin/backup-status` (admin session required) to confirm
+Object Storage is reachable and see the most recent remote backup.
+
+`DATA_DIR` (env var) lets all of this point at a real persistent volume
+instead — used when deploying to Fly.io, unset here so Replit keeps its
+current behavior.
+
 ## User preferences
