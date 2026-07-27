@@ -60,7 +60,7 @@ function campanaTestSelectHTML() {
       <label>Adjuntar enlace de un test (opcional)</label>
       <select id="campana-test">
         <option value="">— Sin enlace de test —</option>
-        ${campanaTestsAbiertos.map((t) => `<option value="${t.slug}">${escapeHTML(t.titulo)}</option>`).join("")}
+        ${campanaTestsAbiertos.map((t) => `<option value="${String(t.id).padStart(4, "0")}">${escapeHTML(t.titulo)}</option>`).join("")}
       </select>
     </div>`;
 }

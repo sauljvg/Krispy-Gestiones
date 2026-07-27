@@ -92,7 +92,11 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     } else {
       document.getElementById("test-tipo-informe").value = "";
     }
-    document.getElementById("test-enlace-publico").value = `${location.origin}/encuesta.html?slug=${currentTest.slug}`;
+    // Código corto y correlativo (el propio id, con 4 cifras) en vez del
+    // slug de texto — el backend acepta ambos, así que un enlace ya
+    // compartido con el slug largo sigue funcionando igual.
+    const codigoCorto = String(currentTest.id).padStart(4, "0");
+    document.getElementById("test-enlace-publico").value = `${location.origin}/encuesta.html?slug=${codigoCorto}`;
     document.getElementById("fondo-preview").hidden = !currentTest.tiene_fondo;
     if (currentTest.tiene_fondo) {
       document.getElementById("fondo-preview").src = `${AUTH_API_BASE}/encuestas/encuestas/${testId}/fondo?t=${Date.now()}`;

@@ -248,12 +248,23 @@ def get_encuesta(encuesta_id):
     return encuesta
 
 
-def get_encuesta_publica(slug):
+def _fila_por_slug_o_codigo(conn, identificador):
+    """El enlace público acepta tanto el slug de texto (enlaces ya
+    compartidos, siguen funcionando) como el código corto numérico — el id
+    de la propia encuesta, mostrado con 4 cifras (p.ej. "0008") — para que
+    el enlace sea corto y correlativo sin tener que añadir una columna
+    nueva ni mantener dos identificadores en sincronía."""
+    if identificador.isdigit():
+        return conn.execute("SELECT * FROM encuestas WHERE id = ?", (int(identificador),)).fetchone()
+    return conn.execute("SELECT * FROM encuestas WHERE slug = ?", (identificador,)).fetchone()
+
+
+def get_encuesta_publica(identificador):
     """Igual que get_encuesta pero solo si está abierta, y sin exponer
     tipo_informe_clave (detalle interno de administración, no le hace falta
     al candidato)."""
     conn = get_connection()
-    row = conn.execute("SELECT * FROM encuestas WHERE slug = ?", (slug,)).fetchone()
+    row = _fila_por_slug_o_codigo(conn, identificador)
     if not row or row["estado"] != "abierta":
         conn.close()
         return None
@@ -503,7 +514,7 @@ def _detectar_dispositivo(user_agent):
     return "Desconocido"
 
 
-def guardar_respuesta(slug, respuestas_por_pregunta, ip, user_agent):
+def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent):
     """respuestas_por_pregunta: {pregunta_id (str o int): valor}. Se guarda
     tal cual (por id) para la vista de administración, y además se arma un
     segundo dict keyed por ETIQUETA de pregunta — así, si la encuesta
@@ -511,7 +522,7 @@ def guardar_respuesta(slug, respuestas_por_pregunta, ip, user_agent):
     scoring_valores.calcular() (que reconoce las preguntas por el texto de
     su enunciado, igual que en el Excel de Forms)."""
     conn = get_connection()
-    row = conn.execute("SELECT * FROM encuestas WHERE slug = ?", (slug,)).fetchone()
+    row = _fila_por_slug_o_codigo(conn, identificador)
     if not row or row["estado"] != "abierta":
         conn.close()
         raise ValueError("Esta encuesta no está abierta actualmente")
