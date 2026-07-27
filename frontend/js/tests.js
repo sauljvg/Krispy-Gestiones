@@ -671,6 +671,12 @@ async function agregarPagina() {
 // (añadiendo "Z") para que el navegador la convierta a la hora local de
 // quien lo está viendo; si no, se ve la hora UTC tal cual y parece 1-2h
 // desfasada respecto a cuándo el candidato hizo el test en realidad.
+function formatearValorRespuesta(valor) {
+  if (Array.isArray(valor)) return valor.length ? valor.join(" → ") : "—";
+  if (valor === null || valor === undefined || valor === "") return "—";
+  return String(valor);
+}
+
 function formatearFechaHoraLocal(sqlUtc) {
   if (!sqlUtc) return "—";
   const fecha = new Date(sqlUtc.replace(" ", "T") + "Z");
@@ -705,6 +711,15 @@ async function verRespuestas() {
               return `<a href="/informes.html?${params.toString()}" target="_blank" class="btn btn-ghost btn-mini">Ver en Informes</a>`;
             })()
           : "";
+        const filasDatos = Object.entries(r.datos)
+          .map(
+            ([pregunta, valor]) => `
+              <tr>
+                <td class="respuesta-detalle-pregunta">${escapeHTML(pregunta)}</td>
+                <td class="respuesta-detalle-valor">${escapeHTML(formatearValorRespuesta(valor))}</td>
+              </tr>`
+          )
+          .join("");
         return `
       <tr>
         <td>${formatearFechaHoraLocal(r.creado_en)}</td>
@@ -712,7 +727,10 @@ async function verRespuestas() {
         <td>${escapeHTML(r.dispositivo || "—")}</td>
         <td>
           ${enlaceInforme}
-          <details><summary>Ver JSON</summary><pre style="white-space:pre-wrap;">${escapeHTML(JSON.stringify(r.datos, null, 2))}</pre></details>
+          <details>
+            <summary>Ver respuestas (${Object.keys(r.datos).length})</summary>
+            <table class="respuesta-detalle-tabla"><tbody>${filasDatos}</tbody></table>
+          </details>
         </td>
       </tr>`;
       })
