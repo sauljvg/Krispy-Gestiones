@@ -155,7 +155,14 @@ function modulosResumenHTML(u) {
   return escapeHTML(u.modulos.map(moduloLabel).join(", "));
 }
 
-function tiposInformeResumenHTML(tipos) {
+function tiposInformeResumenHTML(u) {
+  // Sin filas en tipos_informes normalmente significa "sin restricción, ve
+  // todos los tipos" — pero eso solo tiene sentido si el usuario tiene
+  // acceso al módulo Informes en primer lugar. Si no lo tiene, "Todos" es
+  // engañoso (parece que ve de todo cuando en realidad no entra a Informes).
+  const tieneInformes = u.rol === "admin" || (u.modulos || []).some((m) => m === "informes" || m === "saona_informes");
+  if (!tieneInformes) return `<span class="staff-hint">Ninguno</span>`;
+  const tipos = u.tipos_informes;
   if (!tipos || tipos.length === 0) return `<span class="staff-hint">Todos</span>`;
   const cache = TIPOS_INFORME_CACHE || [];
   const nombres = tipos.map((clave) => cache.find((t) => t.clave === clave)?.nombre || clave);
@@ -228,7 +235,7 @@ async function loadUsers(currentUserId) {
         </td>
         <td>
           <div class="checklist-wrap">
-            <span class="tipos-informe-resumen" data-id="${u.id}">${tiposInformeResumenHTML(u.tipos_informes)}</span>
+            <span class="tipos-informe-resumen" data-id="${u.id}">${tiposInformeResumenHTML(u)}</span>
             <button type="button" class="btn btn-ghost btn-editar-tipos-informe" data-id="${u.id}" style="font-size:11px; padding:3px 8px; margin-left:6px;">Editar</button>
             <div class="checklist-popover" id="tipos-informe-popover-${u.id}">
               <div class="checklist-popover-actions">
