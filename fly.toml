@@ -12,6 +12,10 @@ primary_region = 'iad'
   # backend/main.py escucha en esta variable de entorno (por defecto 8000
   # si no está puesta) - tiene que coincidir con internal_port de abajo.
   PORT = '8080'
+  # db.py lee esto para saber dónde vive krispy_kreme.db/uploads/backups —
+  # apunta al volumen montado más abajo, así los datos sobreviven a cada
+  # redeploy en vez de vivir en el disco efímero del contenedor.
+  DATA_DIR = '/data'
 
 [http_service]
   internal_port = 8080
@@ -20,6 +24,13 @@ primary_region = 'iad'
   auto_start_machines = true
   min_machines_running = 0
   processes = ['app']
+
+[mounts]
+  # El volumen en sí NO se crea con este archivo — hay que crearlo una vez
+  # con `fly volumes create krispy_data --region iad --size 1` antes del
+  # primer deploy que use este mounts (ver instrucciones).
+  source = 'krispy_data'
+  destination = '/data'
 
 [[vm]]
   memory = '1gb'
