@@ -22,6 +22,12 @@ PREFIJO = "backups/"
 # debajo de lo que pesa la base real con datos de producción. Se usa de
 # umbral para decidir si el archivo local "parece" recién reseteado.
 TAMANO_SOSPECHOSO_BYTES = 200_000
+# Con el backup cada 10 min (ver backups.py), sin rotación esto crecería sin
+# límite en Object Storage. Se conserva un historial de unas horas — no hace
+# falta más porque, a diferencia del disco local, este es solo el respaldo
+# "por si el disco viene vacío al arrancar", no un archivo histórico a largo
+# plazo.
+MAX_BACKUPS_REMOTOS = 30
 
 
 def _client():
@@ -37,9 +43,22 @@ def subir_backup(ruta_local, nombre_objeto):
     registra y sigue: es una capa extra, no debe tumbar el backup local que
     ya funciona sin ella."""
     try:
-        _client().upload_from_filename(PREFIJO + nombre_objeto, ruta_local)
+        client = _client()
+        client.upload_from_filename(PREFIJO + nombre_objeto, ruta_local)
     except Exception as e:
         print(f"[storage_sync] No se pudo subir el backup a Object Storage: {e}", flush=True)
+        return
+    try:
+        _rotar_backups_remotos(client)
+    except Exception as e:
+        print(f"[storage_sync] No se pudieron rotar los backups remotos antiguos: {e}", flush=True)
+
+
+def _rotar_backups_remotos(client):
+    nombres = sorted(o.name for o in client.list() if o.name.startswith(PREFIJO))
+    de_mas = len(nombres) - MAX_BACKUPS_REMOTOS
+    for nombre in nombres[: max(de_mas, 0)]:
+        client.delete(nombre)
 
 
 def _ultimo_backup_remoto(client):
