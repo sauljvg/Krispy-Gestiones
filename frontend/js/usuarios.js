@@ -1,6 +1,7 @@
 let ROLES_CACHE = [];
 let MODULOS_CACHE = [];
 let TIPOS_INFORME_CACHE = null; // null = todavía no se ha pedido (se carga la primera vez que hace falta)
+let CLIMA_CENTROS_CACHE = null; // idem, para el checklist de restricción por centro de Clima Laboral
 
 function escapeHTML(str) {
   const div = document.createElement("div");
@@ -40,6 +41,13 @@ async function loadTiposInformeSiHaceFalta() {
   const res = await fetch(`${AUTH_API_BASE}/informes/tipos`);
   TIPOS_INFORME_CACHE = res.ok ? await res.json() : [];
   return TIPOS_INFORME_CACHE;
+}
+
+async function loadClimaCentrosSiHaceFalta() {
+  if (CLIMA_CENTROS_CACHE !== null) return CLIMA_CENTROS_CACHE;
+  const res = await fetch(`${AUTH_API_BASE}/clima/centros-conocidos`);
+  CLIMA_CENTROS_CACHE = res.ok ? await res.json() : [];
+  return CLIMA_CENTROS_CACHE;
 }
 
 function moduloLabel(clave) {
@@ -174,8 +182,19 @@ function tiposInformeResumenHTML(u) {
   return escapeHTML(nombres.join(", "));
 }
 
+function climaCentrosResumenHTML(u) {
+  // Mismo razonamiento que tiposInformeResumenHTML: "Todos" solo tiene
+  // sentido si el usuario tiene acceso al módulo Clima Laboral.
+  const tieneClima = u.rol === "admin" || (u.modulos || []).some((m) => m === "clima" || m === "saona_clima");
+  if (!tieneClima) return `<span class="staff-hint">Ninguno</span>`;
+  const centros = u.clima_centros;
+  if (!centros || centros.length === 0) return `<span class="staff-hint">Todos</span>`;
+  return escapeHTML(centros.join(", "));
+}
+
 async function loadUsers(currentUserId) {
   await loadTiposInformeSiHaceFalta();
+  await loadClimaCentrosSiHaceFalta();
   const res = await fetch(`${AUTH_API_BASE}/auth/users`);
   const users = await res.json();
   const tbody = document.getElementById("users-list");
@@ -265,6 +284,32 @@ async function loadUsers(currentUserId) {
           </div>
         </td>
         <td>
+          <div class="checklist-wrap">
+            <span class="clima-centros-resumen" data-id="${u.id}">${climaCentrosResumenHTML(u)}</span>
+            <button type="button" class="btn btn-ghost btn-editar-clima-centros" data-id="${u.id}" style="font-size:11px; padding:3px 8px; margin-left:6px;">Editar</button>
+            <div class="checklist-popover" id="clima-centros-popover-${u.id}">
+              <div class="checklist-popover-actions">
+                <span style="font-size:11px; color:var(--text-secondary);">Clima Laboral</span>
+                <button type="button" class="btn-clima-centros-cerrar" data-id="${u.id}">Cerrar</button>
+              </div>
+              <div class="checklist-row" style="border-bottom:1px solid var(--border); padding-bottom:6px; margin-bottom:4px;">
+                <input type="checkbox" id="ecc-todos-${u.id}" class="ecc-todos" data-id="${u.id}" ${!u.clima_centros || u.clima_centros.length === 0 ? "checked" : ""}>
+                <label for="ecc-todos-${u.id}">Todos los centros</label>
+              </div>
+              ${(CLIMA_CENTROS_CACHE || []).map(
+                (c, i) => `
+                <div class="checklist-row">
+                  <input type="checkbox" id="ecc-${u.id}-${i}" class="ecc-centro" data-id="${u.id}" value="${escapeHTML(c)}"
+                    ${(u.clima_centros || []).includes(c) ? "checked" : ""}
+                    ${!u.clima_centros || u.clima_centros.length === 0 ? "disabled" : ""}>
+                  <label for="ecc-${u.id}-${i}">${escapeHTML(c)}</label>
+                </div>`
+              ).join("")}
+              <button type="button" class="btn btn-primary btn-guardar-clima-centros" data-id="${u.id}" style="width:100%; margin-top:8px; font-size:12px;">Guardar</button>
+            </div>
+          </div>
+        </td>
+        <td>
           <input type="text" class="pin-input" data-id="${u.id}" value="${u.pin || ""}" placeholder="sin PIN" maxlength="4" style="width:60px; text-align:center;">
         </td>
         <td>${fmtFecha(u.creado)}</td>
@@ -302,6 +347,8 @@ async function loadUsers(currentUserId) {
   wirePopoverClose(".btn-tiendas-cerrar", "tiendas-popover");
   wirePopoverToggle(".btn-editar-tipos-informe", "tipos-informe-popover");
   wirePopoverClose(".btn-tipos-informe-cerrar", "tipos-informe-popover");
+  wirePopoverToggle(".btn-editar-clima-centros", "clima-centros-popover");
+  wirePopoverClose(".btn-clima-centros-cerrar", "clima-centros-popover");
 
   tbody.querySelectorAll(".et-todas").forEach((cb) => {
     cb.addEventListener("change", () => {
@@ -316,6 +363,15 @@ async function loadUsers(currentUserId) {
     cb.addEventListener("change", () => {
       const id = cb.dataset.id;
       tbody.querySelectorAll(`.eti-tipo[data-id="${id}"]`).forEach((tCb) => {
+        tCb.disabled = cb.checked;
+        if (cb.checked) tCb.checked = false;
+      });
+    });
+  });
+  tbody.querySelectorAll(".ecc-todos").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const id = cb.dataset.id;
+      tbody.querySelectorAll(`.ecc-centro[data-id="${id}"]`).forEach((tCb) => {
         tCb.disabled = cb.checked;
         if (cb.checked) tCb.checked = false;
       });
@@ -373,6 +429,26 @@ async function loadUsers(currentUserId) {
       });
       if (!res.ok) {
         alert("No se pudieron guardar los informes.");
+        return;
+      }
+      loadUsers(currentUserId);
+    });
+  });
+
+  tbody.querySelectorAll(".btn-guardar-clima-centros").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      const todos = document.getElementById(`ecc-todos-${id}`).checked;
+      const centros = todos
+        ? []
+        : [...tbody.querySelectorAll(`.ecc-centro[data-id="${id}"]:checked`)].map((cb) => cb.value);
+      const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}/clima-centros`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ centros }),
+      });
+      if (!res.ok) {
+        alert("No se pudieron guardar los centros de Clima Laboral.");
         return;
       }
       loadUsers(currentUserId);

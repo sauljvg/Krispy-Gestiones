@@ -2,6 +2,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from pydantic import BaseModel
 
 import auth as auth_module
+import clima as clima_module
 import informes as informes_module
 from db import get_connection
 
@@ -16,6 +17,7 @@ def public_user(row: dict) -> dict:
         "tiendas": auth_module.get_tiendas_permitidas(row["id"]),
         "modulos": list(auth_module.MODULOS) if row["rol"] == "admin" else auth_module.get_modulos_permitidos(row["id"]),
         "tipos_informes": informes_module.get_tipos_permitidos(row["id"]),
+        "clima_centros": clima_module.get_centros_permitidos(row["id"]),
     }
 
 
@@ -129,6 +131,10 @@ class SetTiposInformesBody(BaseModel):
     tipos_informes: list[str] = []
 
 
+class SetClimaCentrosBody(BaseModel):
+    centros: list[str] = []
+
+
 @router.get("/roles")
 def list_roles(_admin: dict = Depends(require_admin)):
     return [{"value": k, "label": v} for k, v in auth_module.ROLES.items()]
@@ -150,6 +156,7 @@ def list_users(_admin: dict = Depends(require_admin)):
             "tiendas": auth_module.get_tiendas_permitidas(r["id"]),
             "modulos": list(auth_module.MODULOS) if r["rol"] == "admin" else auth_module.get_modulos_permitidos(r["id"]),
             "tipos_informes": informes_module.get_tipos_permitidos(r["id"]),
+            "clima_centros": clima_module.get_centros_permitidos(r["id"]),
         }
         for r in rows
     ]
@@ -209,6 +216,17 @@ def set_tipos_informes_route(user_id: int, body: SetTiposInformesBody, _admin: d
     if row is None:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     informes_module.set_tipos_permitidos(user_id, body.tipos_informes)
+    return {"ok": True}
+
+
+@router.patch("/users/{user_id}/clima-centros")
+def set_clima_centros_route(user_id: int, body: SetClimaCentrosBody, _admin: dict = Depends(require_admin)):
+    conn = get_connection()
+    row = conn.execute("SELECT id FROM usuarios WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    clima_module.set_centros_permitidos(user_id, body.centros)
     return {"ok": True}
 
 

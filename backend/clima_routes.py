@@ -35,14 +35,22 @@ def list_oleadas_route(empresa: str = "kk", _user: dict = Depends(require_clima)
     return clima_module.list_oleadas(empresa)
 
 
+@router.get("/centros-conocidos")
+def list_centros_conocidos_route(_user: dict = Depends(require_clima)):
+    """Para el checklist de restricción por centro en Usuarios (junto con
+    tipos-informe, ver informes_routes.py) — no depende de una oleada
+    concreta, así que no usa require_clima_oleada."""
+    return clima_module.list_centros_conocidos()
+
+
 @router.get("/{oleada_id}/centros")
-def list_centros_route(oleada_id: int, _user: dict = Depends(require_clima_oleada)):
-    return clima_module.list_centros(oleada_id)
+def list_centros_route(oleada_id: int, user: dict = Depends(require_clima_oleada)):
+    return clima_module.list_centros(oleada_id, clima_module.get_centros_permitidos(user["id"]))
 
 
 @router.get("/{oleada_id}/por-centro")
-def por_centro_route(oleada_id: int, _user: dict = Depends(require_clima_oleada)):
-    return clima_module.compute_por_centro(oleada_id)
+def por_centro_route(oleada_id: int, user: dict = Depends(require_clima_oleada)):
+    return clima_module.compute_por_centro(oleada_id, clima_module.get_centros_permitidos(user["id"]))
 
 
 @router.post("/importar")
@@ -64,18 +72,27 @@ async def importar_route(
     return {"ok": True, **resultado}
 
 
+def _validar_centro_permitido(centro, centros_permitidos):
+    if centro and centros_permitidos and centro not in centros_permitidos:
+        raise HTTPException(status_code=403, detail="No tienes acceso a este centro")
+
+
 @router.get("/{oleada_id}/reporte")
-def reporte_route(oleada_id: int, centro: str | None = None, _user: dict = Depends(require_clima_oleada)):
+def reporte_route(oleada_id: int, centro: str | None = None, user: dict = Depends(require_clima_oleada)):
+    centros_permitidos = clima_module.get_centros_permitidos(user["id"])
+    _validar_centro_permitido(centro, centros_permitidos)
     try:
-        return clima_module.compute_reporte(oleada_id, centro)
+        return clima_module.compute_reporte(oleada_id, centro, centros_permitidos)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.get("/{oleada_id}/reporte.pdf")
-def reporte_pdf_route(oleada_id: int, centro: str | None = None, _user: dict = Depends(require_clima_oleada)):
+def reporte_pdf_route(oleada_id: int, centro: str | None = None, user: dict = Depends(require_clima_oleada)):
+    centros_permitidos = clima_module.get_centros_permitidos(user["id"])
+    _validar_centro_permitido(centro, centros_permitidos)
     try:
-        reporte = clima_module.compute_reporte(oleada_id, centro)
+        reporte = clima_module.compute_reporte(oleada_id, centro, centros_permitidos)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     empresa = clima_module.get_oleada_empresa(oleada_id) or "kk"

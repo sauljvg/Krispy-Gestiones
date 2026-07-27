@@ -128,6 +128,42 @@ def ensure_clima_tables():
             ya_existian INTEGER NOT NULL DEFAULT 0
         )
     """)
+    # Restricción por centro para un usuario dentro del módulo Clima Laboral
+    # (p.ej. un gerente que solo debe ver el suyo) — tabla propia en vez de
+    # reutilizar usuario_tiendas de Reseñas porque los nombres no coinciden
+    # 1:1 (aquí ParqueSur se separa en "ParqueSur Fabrica"/"ParqueSur Tienda",
+    # y existe "Oficinas", que no es una tienda física). Mismo patrón que
+    # usuario_informe_tipos en informes.py: sin filas = sin restricción.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS usuario_clima_centros (
+            usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+            centro TEXT NOT NULL,
+            PRIMARY KEY (usuario_id, centro)
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def get_centros_permitidos(usuario_id):
+    """Centros de Clima Laboral a los que este usuario tiene acceso. Lista
+    vacía = sin restricción (ve todos), igual que get_tiendas_permitidas en
+    Reseñas y get_tipos_permitidos en Informes."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT centro FROM usuario_clima_centros WHERE usuario_id = ? ORDER BY centro", (usuario_id,)
+    ).fetchall()
+    conn.close()
+    return [r["centro"] for r in rows]
+
+
+def set_centros_permitidos(usuario_id, centros):
+    conn = get_connection()
+    conn.execute("DELETE FROM usuario_clima_centros WHERE usuario_id = ?", (usuario_id,))
+    for centro in centros:
+        conn.execute(
+            "INSERT OR IGNORE INTO usuario_clima_centros (usuario_id, centro) VALUES (?, ?)", (usuario_id, centro)
+        )
     conn.commit()
     conn.close()
 
@@ -395,20 +431,34 @@ def list_oleadas(empresa="kk"):
     return [dict(r) for r in rows]
 
 
-def list_centros(oleada_id):
+def list_centros_conocidos():
+    """Todos los centros que han aparecido alguna vez en cualquier oleada (de
+    cualquier empresa) — a diferencia de Informes, Clima no tiene un catálogo
+    fijo de tipos, así que el checklist de restricción por centro en Usuarios
+    se arma a partir de lo que ya se ha importado."""
+    conn = get_connection()
+    rows = conn.execute("SELECT DISTINCT centro FROM clima_respuestas ORDER BY centro").fetchall()
+    conn.close()
+    return [r["centro"] for r in rows]
+
+
+def list_centros(oleada_id, centros_permitidos=None):
     conn = get_connection()
     rows = conn.execute(
         "SELECT DISTINCT centro FROM clima_respuestas WHERE oleada_id = ? ORDER BY centro", (oleada_id,)
     ).fetchall()
     conn.close()
-    return [r["centro"] for r in rows]
+    centros = [r["centro"] for r in rows]
+    if centros_permitidos:
+        centros = [c for c in centros if c in centros_permitidos]
+    return centros
 
 
 def _es_oficinas(centro):
     return _normaliza_header(centro) == "oficinas"
 
 
-def _fetch_respuestas(conn, oleada_id, centro):
+def _fetch_respuestas(conn, oleada_id, centro, centros_permitidos=None):
     if centro:
         rows = conn.execute(
             "SELECT datos_json FROM clima_respuestas WHERE oleada_id = ? AND centro = ?", (oleada_id, centro)
@@ -417,12 +467,18 @@ def _fetch_respuestas(conn, oleada_id, centro):
     # Vista "todos los centros": Oficinas no es una tienda (no tiene cliente
     # ni ventas) y distorsionaría el engagement/participación agregados de
     # las tiendas — se excluye aquí, pero sigue siendo su propio centro
-    # seleccionable individualmente en el grid.
+    # seleccionable individualmente en el grid. centros_permitidos (gerente
+    # restringido a su/s centro/s, ver usuario_clima_centros) se aplica igual
+    # que la exclusión de Oficinas, para que el agregado de "todos los
+    # centros" de un gerente restringido solo cuente los suyos.
     rows = conn.execute("SELECT datos_json, centro FROM clima_respuestas WHERE oleada_id = ?", (oleada_id,)).fetchall()
-    return [json.loads(r["datos_json"]) for r in rows if not _es_oficinas(r["centro"])]
+    return [
+        json.loads(r["datos_json"]) for r in rows
+        if not _es_oficinas(r["centro"]) and (not centros_permitidos or r["centro"] in centros_permitidos)
+    ]
 
 
-def _empleados_total(conn, oleada_id, centro):
+def _empleados_total(conn, oleada_id, centro, centros_permitidos=None):
     if centro:
         row = conn.execute(
             "SELECT empleados FROM clima_plantilla WHERE oleada_id = ? AND centro = ?", (oleada_id, centro)
@@ -431,7 +487,10 @@ def _empleados_total(conn, oleada_id, centro):
     rows = conn.execute("SELECT centro, empleados FROM clima_plantilla WHERE oleada_id = ?", (oleada_id,)).fetchall()
     if not rows:
         return None
-    return sum(r["empleados"] for r in rows if not _es_oficinas(r["centro"]))
+    return sum(
+        r["empleados"] for r in rows
+        if not _es_oficinas(r["centro"]) and (not centros_permitidos or r["centro"] in centros_permitidos)
+    )
 
 
 def _tokenizar(texto):
@@ -452,16 +511,16 @@ def _respuesta_con_valor(texto):
     return limpio.lower() not in _RESPUESTAS_SIN_VALOR
 
 
-def compute_reporte(oleada_id, centro=None):
+def compute_reporte(oleada_id, centro=None, centros_permitidos=None):
     conn = get_connection()
-    filas = _fetch_respuestas(conn, oleada_id, centro)
+    filas = _fetch_respuestas(conn, oleada_id, centro, centros_permitidos)
     if not filas:
         conn.close()
         raise ValueError("No hay respuestas para este centro en esta oleada")
 
     roles = _column_roles(list(filas[0].keys()))
     n = len(filas)
-    empleados = _empleados_total(conn, oleada_id, centro)
+    empleados = _empleados_total(conn, oleada_id, centro, centros_permitidos)
     participacion = round(n / empleados * 100, 1) if empleados else None
 
     def stats_pregunta(header):
@@ -567,11 +626,11 @@ def compute_reporte(oleada_id, centro=None):
     }
 
 
-def compute_por_centro(oleada_id):
+def compute_por_centro(oleada_id, centros_permitidos=None):
     """Engagement y participación de CADA tienda por separado (Oficinas
     excluida, igual que en el agregado) — alimenta los dos gráficos de
     barras de la vista "todos los centros"."""
-    centros = [c for c in list_centros(oleada_id) if not _es_oficinas(c)]
+    centros = [c for c in list_centros(oleada_id, centros_permitidos) if not _es_oficinas(c)]
     resultado = []
     for centro in centros:
         try:
