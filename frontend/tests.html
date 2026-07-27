@@ -55,6 +55,12 @@
   .pregunta-row .etiqueta-txt { flex: 1; min-width: 200px; font-size: 14px; }
   .pregunta-row .obligatoria-txt { font-size: 11px; color: var(--text-muted); }
   .dashboard-badge { font-size: 11px; padding: 2px 6px; border-radius: 6px; background: color-mix(in srgb, var(--acento) 18%, transparent); color: var(--acento); white-space: nowrap; }
+  .pregunta-handle { cursor: grab; color: var(--text-muted); font-size: 15px; user-select: none; }
+  .pregunta-handle:active { cursor: grabbing; }
+  .pregunta-item.arrastrando { opacity: 0.4; }
+  .pregunta-item.drop-antes { box-shadow: inset 0 3px 0 var(--acento); }
+  .pregunta-item.drop-despues { box-shadow: inset 0 -3px 0 var(--acento); }
+  .preguntas-lista { min-height: 8px; }
 
   .nueva-pregunta-form { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); display: flex; flex-direction: column; gap: 8px; }
   .nueva-pregunta-form-fila { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
@@ -184,6 +190,6 @@
 <script src="js/theme.js?v=20260724a"></script>
 <script src="js/auth-common.js?v=20260724a"></script>
 <script src="js/topbar-menu.js?v=20260724a"></script>
-<script src="js/tests.js?v=20260724a"></script>
+<script src="js/tests.js?v=20260727a"></script>
 </body>
 </html>

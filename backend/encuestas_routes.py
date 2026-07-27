@@ -47,6 +47,11 @@ class RespuestaIn(BaseModel):
     respuestas: dict[str, str]
 
 
+class MoverPreguntaAPaginaIn(BaseModel):
+    pagina_destino_id: int
+    antes_de_pregunta_id: int | None = None
+
+
 # ------------------------------- Admin -------------------------------
 
 @router.get("/notificaciones")
@@ -215,6 +220,12 @@ def mover_pregunta_arriba_route(pregunta_id: int, _user: dict = Depends(require_
 @router.post("/preguntas/{pregunta_id}/mover-abajo")
 def mover_pregunta_abajo_route(pregunta_id: int, _user: dict = Depends(require_tests)):
     encuestas_module.mover_pregunta(pregunta_id, 1)
+    return {"ok": True}
+
+
+@router.post("/preguntas/{pregunta_id}/mover-a-pagina")
+def mover_pregunta_a_pagina_route(pregunta_id: int, body: MoverPreguntaAPaginaIn, _user: dict = Depends(require_tests)):
+    encuestas_module.mover_pregunta_a_pagina(pregunta_id, body.pagina_destino_id, body.antes_de_pregunta_id)
     return {"ok": True}
 
 

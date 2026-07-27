@@ -461,6 +461,37 @@ def mover_pregunta(pregunta_id, direccion):
     conn.close()
 
 
+def mover_pregunta_a_pagina(pregunta_id, pagina_destino_id, antes_de_pregunta_id=None):
+    """Mueve una pregunta a `pagina_destino_id` (puede ser la misma página en
+    la que ya está, para simplemente reordenarla) e inserta justo antes de
+    `antes_de_pregunta_id`, o al final si es None. Reconstruye el orden 1..N
+    de la página destino entera (y de la de origen, si es distinta) en vez de
+    solo desplazar huecos, para que quede siempre contiguo sin duplicados."""
+    conn = get_connection()
+    actual = conn.execute("SELECT * FROM encuesta_preguntas WHERE id = ?", (pregunta_id,)).fetchone()
+    if not actual:
+        conn.close()
+        return
+    pagina_origen_id = actual["pagina_id"]
+
+    destino_ids = [
+        r["id"] for r in conn.execute(
+            "SELECT id FROM encuesta_preguntas WHERE pagina_id = ? AND id != ? ORDER BY orden",
+            (pagina_destino_id, pregunta_id),
+        ).fetchall()
+    ]
+    indice = destino_ids.index(antes_de_pregunta_id) if antes_de_pregunta_id in destino_ids else len(destino_ids)
+    destino_ids.insert(indice, pregunta_id)
+
+    conn.execute("UPDATE encuesta_preguntas SET pagina_id = ? WHERE id = ?", (pagina_destino_id, pregunta_id))
+    for i, pid in enumerate(destino_ids, start=1):
+        conn.execute("UPDATE encuesta_preguntas SET orden = ? WHERE id = ?", (i, pid))
+    if pagina_origen_id != pagina_destino_id:
+        _renumerar_preguntas(conn, pagina_origen_id)
+    conn.commit()
+    conn.close()
+
+
 def _detectar_dispositivo(user_agent):
     ua = (user_agent or "").lower()
     if "ipad" in ua or "tablet" in ua:

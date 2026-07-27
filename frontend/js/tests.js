@@ -224,6 +224,7 @@ function mostrarDashboardPorDefecto(tipo) {
 }
 
 const editandoPreguntas = new Set();
+let arrastrandoPreguntaId = null;
 
 // Las preguntas de escala guardan la etiqueta completa "Categoria.Pregunta"
 // (KK) o "Preámbulo: [Pregunta]" (Saona) porque entrevistas.py necesita ese
@@ -406,8 +407,9 @@ function renderPaginas() {
           </div>`;
             }
             return `
-          <div class="pregunta-item" data-pregunta-id="${q.id}">
+          <div class="pregunta-item" draggable="true" data-pregunta-id="${q.id}">
             <div class="pregunta-row" data-pregunta-id="${q.id}">
+              <span class="pregunta-handle" title="Arrastra para mover (incluso a otra página)">⠿</span>
               <span class="tipo-badge">${TIPOS_PREGUNTA_LABELS[q.tipo] || q.tipo}</span>
               <span class="etiqueta-txt">${escapeHTML(etiquetaVisible(q))}</span>
               <span class="obligatoria-txt">${q.obligatoria ? "obligatoria" : "opcional"}</span>
@@ -580,6 +582,69 @@ function renderPaginas() {
       await abrirEditor(currentTestId, { scroll: false });
     })
   );
+
+  // Arrastrar preguntas (incluso entre páginas distintas): delegado en `wrap`
+  // en vez de en cada `.pregunta-item`, porque `wrap` es el único nodo que
+  // sobrevive entre llamadas a renderPaginas() (su innerHTML se reemplaza
+  // entero en cada render) — de lo contrario cada render añadiría un
+  // listener más y un solo drop dispararía varias peticiones.
+  if (!wrap.dataset.dragWired) {
+    wrap.dataset.dragWired = "1";
+    wrap.addEventListener("dragstart", (e) => {
+      const item = e.target.closest(".pregunta-item");
+      if (!item || item.classList.contains("pregunta-editando")) return;
+      arrastrandoPreguntaId = Number(item.dataset.preguntaId);
+      e.dataTransfer.effectAllowed = "move";
+      item.classList.add("arrastrando");
+    });
+    wrap.addEventListener("dragover", (e) => {
+      if (arrastrandoPreguntaId == null) return;
+      const lista = e.target.closest(".preguntas-lista");
+      if (!lista) return;
+      e.preventDefault();
+      wrap.querySelectorAll(".drop-antes,.drop-despues").forEach((el) => el.classList.remove("drop-antes", "drop-despues"));
+      const item = e.target.closest(".pregunta-item");
+      if (item && Number(item.dataset.preguntaId) !== arrastrandoPreguntaId) {
+        const rect = item.getBoundingClientRect();
+        const antes = e.clientY - rect.top < rect.height / 2;
+        item.classList.add(antes ? "drop-antes" : "drop-despues");
+      }
+    });
+    wrap.addEventListener("drop", async (e) => {
+      if (arrastrandoPreguntaId == null) return;
+      const lista = e.target.closest(".preguntas-lista");
+      if (!lista) return;
+      e.preventDefault();
+      const preguntaId = arrastrandoPreguntaId;
+      const paginaDestinoId = Number(lista.dataset.paginaId);
+      const item = e.target.closest(".pregunta-item");
+      let antesDeId = null;
+      if (item && Number(item.dataset.preguntaId) !== preguntaId) {
+        const rect = item.getBoundingClientRect();
+        const antes = e.clientY - rect.top < rect.height / 2;
+        if (antes) {
+          antesDeId = Number(item.dataset.preguntaId);
+        } else {
+          let sib = item.nextElementSibling;
+          while (sib && !sib.matches(".pregunta-item")) sib = sib.nextElementSibling;
+          antesDeId = sib ? Number(sib.dataset.preguntaId) : null;
+        }
+      }
+      arrastrandoPreguntaId = null;
+      await fetch(`${AUTH_API_BASE}/encuestas/preguntas/${preguntaId}/mover-a-pagina`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pagina_destino_id: paginaDestinoId, antes_de_pregunta_id: antesDeId }),
+      });
+      await abrirEditor(currentTestId, { scroll: false });
+    });
+    wrap.addEventListener("dragend", () => {
+      arrastrandoPreguntaId = null;
+      wrap.querySelectorAll(".drop-antes,.drop-despues,.arrastrando").forEach((el) =>
+        el.classList.remove("drop-antes", "drop-despues", "arrastrando")
+      );
+    });
+  }
 }
 
 async function agregarPagina() {
