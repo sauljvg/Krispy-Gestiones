@@ -70,13 +70,14 @@ CV_DIR = None  # no aplica aquí
 # Une cada centro de Clima Laboral con su tienda equivalente en el sistema de
 # Reseñas (Google), para poder mostrar la satisfacción real de cliente junto
 # al engagement. Oficinas no tiene tienda física de cara al público, así que
-# se queda fuera (None). ParqueSur Fábrica/Tienda comparten la misma ficha de
-# Google (una sola ubicación), así que ambas apuntan a "ParqueSur".
+# se queda fuera (None) — igual que ParqueSur Fábrica: aunque comparte la
+# misma ficha de Google que ParqueSur Tienda (una sola ubicación en Reseñas),
+# la fábrica no atiende clientes, así que no tiene sentido mostrarle una
+# satisfacción de cliente que en realidad es la de la tienda.
 _CENTRO_A_TIENDAS = {
     "caleido": ["Caleido"],
     "gran plaza 2": ["Gran Plaza 2"],
     "la gavia": ["La Gavia"],
-    "parquesur fabrica": ["ParqueSur"],
     "parquesur tienda": ["ParqueSur"],
     "princesa": ["Princesa"],
     "plenilunio": ["Plenilunio"],
