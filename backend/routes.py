@@ -355,27 +355,27 @@ def set_transactions(body: TransactionsIn):
 
 
 @router.post("/scrape")
-def start_scrape(tienda: str | None = None):
+def start_scrape(tienda: str | None = None, empresa: str = "kk"):
     """Lanza scraper_v2.py --update para `tienda` (nombre público o clave), o
-    para las 6 tiendas en cola si no se especifica. No bloquea: el progreso
-    se consulta en /scrape/status."""
+    para las tiendas de `empresa` en cola si no se especifica. No bloquea: el
+    progreso se consulta en /scrape/status."""
     if tienda:
         key = scrape_jobs.resolve_tienda_key(tienda)
         if key is None:
             raise HTTPException(404, f"Tienda desconocida: '{tienda}'")
         ok, error = scrape_jobs.start_update(tienda_key=key, all_keys=scrape_jobs.all_tienda_keys())
     else:
-        ok, error = scrape_jobs.start_update(all_keys=scrape_jobs.all_tienda_keys())
+        ok, error = scrape_jobs.start_update(all_keys=scrape_jobs.tienda_keys_de_empresa(empresa))
     if not ok:
         raise HTTPException(409, error)
     return {"ok": True}
 
 
 @router.get("/scrape/status")
-def scrape_status(tienda: str | None = None):
+def scrape_status(tienda: str | None = None, empresa: str = "kk"):
     """Estado de la actualización en curso (o de la última). Sin `tienda`
-    devuelve el estado de todas las tiendas."""
-    keys = [scrape_jobs.resolve_tienda_key(tienda)] if tienda else scrape_jobs.all_tienda_keys()
+    devuelve el estado de las tiendas de `empresa`."""
+    keys = [scrape_jobs.resolve_tienda_key(tienda)] if tienda else scrape_jobs.tienda_keys_de_empresa(empresa)
     if tienda and keys[0] is None:
         raise HTTPException(404, f"Tienda desconocida: '{tienda}'")
     return {"tiendas": {key: scrape_jobs.read_status(key) for key in keys}}

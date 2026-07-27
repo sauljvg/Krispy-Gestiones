@@ -32,6 +32,21 @@ def resolve_tienda_key(tienda):
 def all_tienda_keys():
     return list(STORES.keys())
 
+
+def tienda_keys_de_empresa(empresa):
+    """Claves de scraper ('parquesur', 'saona_madnum'...) de una marca — para
+    que el botón "Actualizar" sin tienda concreta en el dashboard de SAONA no
+    lance también las 6 tiendas de Krispy Kreme (y viceversa)."""
+    return [key for key, data in STORES.items() if data.get("empresa", "kk") == empresa]
+
+
+def tiendas_de_empresa(empresa):
+    """Nombres públicos de las tiendas de una marca ("kk" o "saona") — lo usa
+    el middleware de main.py para que el dashboard de Reseñas de una marca no
+    pueda ver reseñas de la otra (misma tabla `reviews`, sin columna propia
+    de empresa: la separación vive aquí, en el registro de tiendas)."""
+    return [data["nombre"] for data in STORES.values() if data.get("empresa", "kk") == empresa]
+
 _lock = threading.Lock()
 _running = {}  # tienda_key -> Popen
 

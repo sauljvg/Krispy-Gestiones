@@ -8,10 +8,15 @@ function escapeHTML(str) {
   return div.innerHTML;
 }
 
-// Mismas 6 tiendas del selector de Reseñas — ParqueSur es una sola ficha de
-// Google (fábrica y tienda comparten la misma reseña pública), así que no
-// hay forma de separarlas a nivel de datos.
-const TIENDAS_DISPONIBLES = ["Caleido", "Gran Plaza 2", "La Gavia", "ParqueSur", "Plenilunio", "Princesa"];
+// Mismas tiendas del selector de Reseñas (KK + SAONA) — ParqueSur es una
+// sola ficha de Google (fábrica y tienda comparten la misma reseña pública),
+// así que no hay forma de separarlas a nivel de datos. La restricción por
+// tienda no distingue empresa: a un usuario con módulo saona_resenas se le
+// puede limitar a "Saona Madnum" igual que a uno de Reseñas KK a "Caleido".
+const TIENDAS_DISPONIBLES = [
+  "Caleido", "Gran Plaza 2", "La Gavia", "ParqueSur", "Plenilunio", "Princesa",
+  "Saona Madnum", "Saona Salamanca",
+];
 
 function fmtFecha(iso) {
   if (!iso) return "";

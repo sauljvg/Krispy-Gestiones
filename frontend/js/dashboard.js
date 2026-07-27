@@ -1,5 +1,16 @@
+// Igual que entrevistas.js: una sola constante leída de la URL una vez, que
+// se propaga a cada llamada a la API — así el backend (ver require_resenas y
+// el middleware de main.py) sabe si debe aplicar el módulo/las tiendas de
+// Krispy Kreme o las de SAONA, sin tocar cada endpoint uno a uno.
+const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" ? "saona" : "kk";
+
+function conEmpresaURL(url) {
+  const separador = url.includes("?") ? "&" : "?";
+  return `${url}${separador}empresa=${EMPRESA}`;
+}
+
 async function fetchJSON(url) {
-  const res = await fetch(url);
+  const res = await fetch(conEmpresaURL(url));
   if (!res.ok) throw new Error(`Error ${res.status} al llamar ${url}`);
   return res.json();
 }
@@ -82,7 +93,7 @@ async function loadStoreRanking() {
 
 async function saveTransacciones(tienda, transacciones) {
   const mes = currentTransactionsMonth();
-  await fetch(`${API_BASE}/transactions`, {
+  await fetch(conEmpresaURL(`${API_BASE}/transactions`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tienda, mes, transacciones }),
@@ -94,7 +105,7 @@ async function uploadTransaccionesFile(file) {
   const mes = currentTransactionsMonth();
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch(`${API_BASE}/transactions/upload?mes=${encodeURIComponent(mes)}`, { method: "POST", body: formData });
+  const res = await fetch(conEmpresaURL(`${API_BASE}/transactions/upload?mes=${encodeURIComponent(mes)}`), { method: "POST", body: formData });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     alert(`No se pudo procesar el Excel: ${body.detail || res.statusText}`);
@@ -109,7 +120,7 @@ async function uploadTakeoutZip(file) {
   try {
     const formData = new FormData();
     formData.append("file", file);
-    const res = await fetch(`${API_BASE}/import/takeout`, { method: "POST", body: formData });
+    const res = await fetch(conEmpresaURL(`${API_BASE}/import/takeout`), { method: "POST", body: formData });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       alert(`No se pudo importar el Takeout: ${body.detail || res.statusText}`);
@@ -394,7 +405,7 @@ async function refreshAll() {
 
 function exportExcel() {
   const params = currentQueryParams();
-  window.open(`${API_BASE}/reviews/export/xlsx?${params.toString()}`, "_blank");
+  window.open(conEmpresaURL(`${API_BASE}/reviews/export/xlsx?${params.toString()}`), "_blank");
 }
 
 function goToLatest() {
@@ -409,7 +420,7 @@ let scrapePollTimer = null;
 
 async function startScrapeUpdate() {
   const tienda = state.tienda;
-  const url = tienda ? `${API_BASE}/scrape?tienda=${encodeURIComponent(tienda)}` : `${API_BASE}/scrape`;
+  const url = conEmpresaURL(tienda ? `${API_BASE}/scrape?tienda=${encodeURIComponent(tienda)}` : `${API_BASE}/scrape`);
   const res = await fetch(url, { method: "POST" });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -512,10 +523,26 @@ function clearFilters() {
   return refreshAll();
 }
 
+function aplicarBrandingEmpresa() {
+  if (EMPRESA !== "saona") return;
+  document.title = "Saona Track";
+  const icon = document.getElementById("brand-icon");
+  if (icon) icon.textContent = "🌿";
+  const favicon = document.querySelector('link[rel="icon"]');
+  if (favicon) favicon.href = "assets/favicon-saona.png";
+  const title = document.getElementById("brand-title");
+  if (title) title.textContent = "Saona Track";
+  const rankingTitle = document.getElementById("staff-ranking-title");
+  if (rankingTitle) rankingTitle.textContent = "Ranking de Saona Team";
+  document.documentElement.dataset.empresa = "saona";
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
+  aplicarBrandingEmpresa();
   const user = await checkAuth();
   if (!user) return; // checkAuth ya redirigió a /login.html
-  if (!(user.modulos || []).includes("resenas")) {
+  const moduloRequerido = EMPRESA === "saona" ? "saona_resenas" : "resenas";
+  if (!(user.modulos || []).includes(moduloRequerido)) {
     window.location.href = "/";
     return;
   }

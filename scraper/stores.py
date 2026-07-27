@@ -1,7 +1,11 @@
 """Registro de tiendas a scrapear.
 
 Añadir una tienda nueva es solo añadir una entrada aquí, con la clave que se
-pasará como argumento al scraper (`python scraper_v2.py <clave>`).
+pasará como argumento al scraper (`python scraper_v2.py <clave>`). "empresa"
+("kk" o "saona") es lo que usa el backend (ver backend/scrape_jobs.py
+tiendas_de_empresa()) para separar el dashboard de Reseñas de cada marca —
+las tiendas sin "empresa" explícito se tratan como "kk", así las 6 tiendas
+originales no necesitaron migración al añadir SAONA.
 """
 
 STORES = {
@@ -42,6 +46,22 @@ STORES = {
     "plenilunio": {
         "nombre": "Plenilunio",
         "url": "https://maps.app.goo.gl/FBMzHzNo3BK3B8M99",
+    },
+    "saona_madnum": {
+        "nombre": "Saona Madnum",
+        "empresa": "saona",
+        "url": (
+            "https://www.google.com/maps/place/Saona+Madnum/@40.3973965,-3.6836681,17z/"
+            "data=!4m8!3m7!1s0xd4227f45a67de45:0x9c2efeae1c44eb30!8m2!3d40.3973965!4d-3.6810932!9m1!1b1!16s%2Fg%2F11xcv33kz4"
+        ),
+    },
+    "saona_salamanca": {
+        "nombre": "Saona Salamanca",
+        "empresa": "saona",
+        "url": (
+            "https://www.google.com/maps/place/Saona+Salamanca/@40.965008,-5.6684526,17z/"
+            "data=!4m8!3m7!1s0xd3f27032b1a4f2b:0x652398cd173785f!8m2!3d40.965008!4d-5.6658777!9m1!1b1!16s%2Fg%2F11lm_6lr7h"
+        ),
     },
 }
 

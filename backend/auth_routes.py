@@ -32,8 +32,9 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
-def require_resenas(user: dict = Depends(get_current_user)) -> dict:
-    if not auth_module.tiene_modulo(user, "resenas"):
+def require_resenas(empresa: str = "kk", user: dict = Depends(get_current_user)) -> dict:
+    modulo = "saona_resenas" if empresa == "saona" else "resenas"
+    if not auth_module.tiene_modulo(user, modulo):
         raise HTTPException(status_code=403, detail="No tienes acceso a Reseñas")
     return user
 

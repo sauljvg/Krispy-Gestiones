@@ -60,13 +60,27 @@ async def restringir_tiendas_por_usuario(request, call_next):
     """Resuelve, una vez por petición, a qué tiendas tiene acceso el usuario
     de la sesión (si la hay) y lo deja en un contextvar — así build_filters()
     y las funciones de analytics.py pueden aplicar la restricción sin que
-    cada endpoint de Reseñas tenga que pedirla explícitamente."""
+    cada endpoint de Reseñas tenga que pedirla explícitamente.
+
+    La tabla `reviews` no distingue empresa (KK/SAONA) por columna propia —
+    la separación vive en el registro de tiendas (ver scrape_jobs.tiendas_de_
+    empresa()). Por eso aquí, además de la restricción propia del usuario, se
+    intersecta SIEMPRE con las tiendas de la empresa pedida (?empresa=, ver
+    dashboard.js EMPRESA): sin esto, un usuario sin restricción de tienda
+    ("ve todas") vería mezcladas las reseñas de las dos marcas."""
+    empresa = request.query_params.get("empresa") or "kk"
+    if empresa not in ("kk", "saona"):
+        empresa = "kk"
+    tiendas_empresa = scrape_jobs.tiendas_de_empresa(empresa)
+
     token = request.cookies.get(COOKIE_NAME)
-    tiendas = []
+    tiendas_usuario = []
     if token:
         user = auth_module.get_user_by_token(token)
         if user:
-            tiendas = auth_module.get_tiendas_permitidas(user["id"])
+            tiendas_usuario = auth_module.get_tiendas_permitidas(user["id"])
+    tiendas = [t for t in tiendas_usuario if t in tiendas_empresa] if tiendas_usuario else tiendas_empresa
+
     reset_token = tiendas_permitidas_actual.set(tiendas)
     try:
         return await call_next(request)
