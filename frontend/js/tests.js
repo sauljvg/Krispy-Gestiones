@@ -599,8 +599,14 @@ function renderPaginas() {
     });
     wrap.addEventListener("dragover", (e) => {
       if (arrastrandoPreguntaId == null) return;
-      const lista = e.target.closest(".preguntas-lista");
-      if (!lista) return;
+      // Se usa `.pagina-card` (toda la tarjeta) en vez de `.preguntas-lista`
+      // como zona de soltado: si solo la lista contara, arrastrar la ÚLTIMA
+      // pregunta de una página hacia la siguiente sacaba el cursor de esa
+      // lista (pasando por el formulario de "Añadir pregunta" o el hueco
+      // entre tarjetas) antes de entrar en la lista destino, y el navegador
+      // cancelaba el drop por completo.
+      const card = e.target.closest(".pagina-card");
+      if (!card) return;
       e.preventDefault();
       wrap.querySelectorAll(".drop-antes,.drop-despues").forEach((el) => el.classList.remove("drop-antes", "drop-despues"));
       const item = e.target.closest(".pregunta-item");
@@ -612,11 +618,11 @@ function renderPaginas() {
     });
     wrap.addEventListener("drop", async (e) => {
       if (arrastrandoPreguntaId == null) return;
-      const lista = e.target.closest(".preguntas-lista");
-      if (!lista) return;
+      const card = e.target.closest(".pagina-card");
+      if (!card) return;
       e.preventDefault();
       const preguntaId = arrastrandoPreguntaId;
-      const paginaDestinoId = Number(lista.dataset.paginaId);
+      const paginaDestinoId = Number(card.dataset.paginaId);
       const item = e.target.closest(".pregunta-item");
       let antesDeId = null;
       if (item && Number(item.dataset.preguntaId) !== preguntaId) {
