@@ -440,7 +440,7 @@ function renderPaginas() {
         <div class="nueva-pregunta-form-fila">
           <label class="chk"><input type="checkbox" class="nueva-pregunta-obligatoria" data-pagina-id="${p.id}" checked> Obligatoria</label>
           <label class="chk"><input type="checkbox" class="nueva-pregunta-dashboard" data-pagina-id="${p.id}"> Mostrar en el dashboard de resultados</label>
-          <button type="button" class="btn btn-ghost btn-agregar-pregunta" data-pagina-id="${p.id}">＋ Añadir pregunta</button>
+          <button type="button" class="btn btn-primary btn-agregar-pregunta" data-pagina-id="${p.id}">＋ Añadir pregunta</button>
         </div>
       </div>
     </div>`
