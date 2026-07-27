@@ -1,5 +1,7 @@
+import datetime
 import mimetypes
 import os
+import sqlite3
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -21,12 +23,14 @@ mimetypes.add_type("font/ttf", ".ttf")
 mimetypes.add_type("font/woff", ".woff")
 mimetypes.add_type("font/woff2", ".woff2")
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 import auth as auth_module
 import backups as backups_module
+import db as db_module
 import scrape_jobs
 from auth_routes import COOKIE_NAME, require_admin, require_resenas
 from auth_routes import router as auth_router
@@ -133,6 +137,54 @@ def backup_status(_admin: dict = Depends(require_admin)):
     despliegue (bucket configurado en .replit) y cuándo se hizo el último
     backup remoto — para verificarlo sin tener que mirar los logs."""
     return storage_sync.estado()
+
+
+@app.get("/api/admin/backup/descargar")
+def descargar_backup(_admin: dict = Depends(require_admin)):
+    """Descarga manual de la base de datos completa (Test, Informes,
+    Boletines, Reclutamiento...) en un solo archivo — red de seguridad extra
+    antes de un pull/publish arriesgado: si algo se pierde al republicar, se
+    puede restaurar este mismo archivo desde /api/admin/backup/restaurar. No
+    incluye los archivos subidos (PDFs, imágenes, CVs), solo las tablas."""
+    if not os.path.exists(db_module.DB_PATH):
+        raise HTTPException(status_code=404, detail="No hay base de datos que descargar")
+    marca = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    return FileResponse(
+        db_module.DB_PATH, media_type="application/octet-stream",
+        filename=f"krispy_kreme_{marca}.db",
+    )
+
+
+@app.post("/api/admin/backup/restaurar")
+async def restaurar_backup(file: UploadFile = File(...), _admin: dict = Depends(require_admin)):
+    """Restaura la base de datos completa desde un archivo descargado antes
+    con /api/admin/backup/descargar. Sobreescribe TODO lo que haya ahora
+    mismo — se valida que al menos abra como SQLite antes de reemplazar, así
+    subir un archivo equivocado no deja la app con la base de datos rota."""
+    contenido = await file.read()
+    tmp_path = db_module.DB_PATH + ".subida_tmp"
+    with open(tmp_path, "wb") as f:
+        f.write(contenido)
+    conn = None
+    valido = False
+    try:
+        conn = sqlite3.connect(tmp_path)
+        conn.execute("SELECT name FROM sqlite_master LIMIT 1")
+        valido = True
+    except Exception:
+        pass
+    finally:
+        # Cerrar SIEMPRE antes de tocar el archivo de nuevo — en Windows una
+        # conexión sqlite3 que falló al validar sigue reteniendo el archivo
+        # bloqueado, y borrarlo fallaría con un error sin relación (WinError
+        # 32) en vez del 400 que se quiere devolver aquí abajo.
+        if conn is not None:
+            conn.close()
+    if not valido:
+        os.remove(tmp_path)
+        raise HTTPException(status_code=400, detail="El archivo no es una base de datos SQLite válida")
+    os.replace(tmp_path, db_module.DB_PATH)
+    return {"ok": True}
 
 
 # Sirve el dashboard (HTML/CSS/JS) desde el mismo proceso y puerto que la API,

@@ -65,6 +65,25 @@
     </div>
 
     <section class="chart-card">
+      <h2>Copia de seguridad de datos</h2>
+      <p class="staff-hint">
+        Descarga toda la base de datos (Test, Informes, Boletines, Reclutamiento, Entrevistas, Clima...) en un solo
+        archivo — útil como red de seguridad extra antes de hacer un pull/publicar arriesgado en el despliegue. Si algo
+        se pierde al republicar, puedes restaurar este mismo archivo aquí. No incluye archivos subidos (PDFs,
+        imágenes, CVs).
+      </p>
+      <div class="editor-actions" style="margin-top:10px;">
+        <a href="#" id="btn-descargar-backup" class="btn btn-primary" download>⬇ Descargar copia de seguridad</a>
+        <label class="btn btn-ghost btn-upload">
+          ⬆ Restaurar desde copia
+          <input type="file" id="input-restaurar-backup" accept=".db" hidden>
+        </label>
+      </div>
+      <p class="config-error" id="backup-error" hidden></p>
+      <p class="config-ok" id="backup-ok" hidden></p>
+    </section>
+
+    <section class="chart-card">
       <h2>Crear usuario</h2>
       <form id="new-user-form" class="config-form">
         <div class="config-field">
@@ -135,6 +154,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260723g"></script>
-<script src="js/usuarios.js?v=20260723g"></script>
+<script src="js/usuarios.js?v=20260725a"></script>
 </body>
 </html>

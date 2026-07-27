@@ -432,6 +432,40 @@ async function loadUsers(currentUserId) {
   });
 }
 
+function wireBackup() {
+  const errorEl = document.getElementById("backup-error");
+  const okEl = document.getElementById("backup-ok");
+
+  document.getElementById("btn-descargar-backup").href = `${AUTH_API_BASE}/admin/backup/descargar`;
+
+  const input = document.getElementById("input-restaurar-backup");
+  input.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    errorEl.hidden = true;
+    okEl.hidden = true;
+    if (!confirm(
+      "Esto SOBREESCRIBE toda la base de datos actual (Test, Informes, Boletines, Reclutamiento, etc.) con el " +
+      "contenido de este archivo. Todo lo que se haya recibido después de esta copia se perderá. ¿Continuar?"
+    )) {
+      e.target.value = "";
+      return;
+    }
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${AUTH_API_BASE}/admin/backup/restaurar`, { method: "POST", body: formData });
+    e.target.value = "";
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      errorEl.textContent = err.detail || "No se pudo restaurar la copia.";
+      errorEl.hidden = false;
+      return;
+    }
+    okEl.textContent = "Base de datos restaurada. Recarga la página para ver los datos actualizados.";
+    okEl.hidden = false;
+  });
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   const user = await checkAuth("/usuarios.html");
   if (!user) return;
@@ -440,6 +474,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     return;
   }
   wireUserBar(user);
+  wireBackup();
 
   await loadRoles();
   await loadModulos();
