@@ -204,6 +204,25 @@ def username_disponible(username: str) -> bool:
     return get_user_by_username(username) is None
 
 
+def _backup_inmediato():
+    """Fuerza una copia de seguridad justo después de guardar un PIN, en vez
+    de esperar al ciclo periódico (cada 10 min, ver backups.py). Un PIN es
+    justo el tipo de dato que se escribe una vez y no vuelve a tocarse — si
+    Autoscale reinicia el contenedor (lo que pasa en cada redeploy) antes de
+    que le toque turno al backup periódico, ese PIN recién creado se pierde
+    y el usuario vuelve a aparecer "sin PIN" después de publicar. Import
+    perezoso (no a nivel de módulo) para evitar un ciclo de imports con
+    backups.py; nunca lanza excepción, igual que el resto de la capa de
+    backups: si falla, el PIN ya se guardó igualmente, esto es solo una red
+    de seguridad extra."""
+    try:
+        import backups as backups_module
+
+        backups_module.hacer_backup()
+    except Exception as e:
+        print(f"[auth] No se pudo forzar backup tras guardar PIN: {e}", flush=True)
+
+
 def reset_pin(user_id: int):
     """Borra el PIN — el usuario vuelve a ver la pantalla de "todavía no
     tienes un PIN" la próxima vez que entre, y puede crear uno nuevo."""
@@ -211,6 +230,7 @@ def reset_pin(user_id: int):
     conn.execute("UPDATE usuarios SET pin = NULL WHERE id = ?", (user_id,))
     conn.commit()
     conn.close()
+    _backup_inmediato()
 
 
 def set_pin_si_no_tiene(username: str, pin: str) -> bool:
@@ -228,6 +248,7 @@ def set_pin_si_no_tiene(username: str, pin: str) -> bool:
     conn.execute("UPDATE usuarios SET pin = ? WHERE id = ?", (pin, row["id"]))
     conn.commit()
     conn.close()
+    _backup_inmediato()
     return True
 
 
@@ -236,6 +257,7 @@ def admin_set_pin(user_id: int, pin: str):
     conn.execute("UPDATE usuarios SET pin = ? WHERE id = ?", (pin, user_id))
     conn.commit()
     conn.close()
+    _backup_inmediato()
 
 
 def authenticate_pin(username: str, pin: str):
