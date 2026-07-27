@@ -3,6 +3,73 @@ const API_BASE = `${window.location.origin}/api/public/boletines`;
 let todosPosts = [];
 let ordenDescendente = true; // true = más recientes primero
 let postIdActual = null; // null = viendo la lista
+let indiceObserver = null;
+let revealObserver = null;
+
+function quitarIndiceCapitulos() {
+  if (indiceObserver) { indiceObserver.disconnect(); indiceObserver = null; }
+  const existente = document.getElementById("blog-indice-capitulos");
+  if (existente) existente.remove();
+}
+
+// Construye el índice flotante a partir de los divisores de departamento
+// ("capitulo" en boletin-builder.js), que llegan en el HTML como
+// <div id="cap-N" data-capitulo-titulo="MARKETING">. Con 0 o 1 no compensa
+// mostrar el índice.
+function montarIndiceCapitulos(postEl) {
+  quitarIndiceCapitulos();
+  const capitulos = [...postEl.querySelectorAll(".contenido [data-capitulo-titulo]")];
+  if (capitulos.length < 2) return;
+
+  const nav = document.createElement("div");
+  nav.id = "blog-indice-capitulos";
+  nav.className = "blog-indice-capitulos";
+  nav.innerHTML = `
+    <div class="blog-indice-panel">
+      ${capitulos.map((el) => `<a href="#${el.id}" data-ir="${el.id}">${escapeHTML(el.dataset.capituloTitulo)}</a>`).join("")}
+    </div>
+    <button type="button" class="blog-indice-toggle" title="Ir a una sección" aria-label="Ir a una sección">☰</button>
+  `;
+  document.body.appendChild(nav);
+
+  nav.querySelector(".blog-indice-toggle").addEventListener("click", () => nav.classList.toggle("abierto"));
+  nav.querySelectorAll("[data-ir]").forEach((a) => {
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      const destino = document.getElementById(a.dataset.ir);
+      if (destino) destino.scrollIntoView({ behavior: "smooth", block: "start" });
+      nav.classList.remove("abierto");
+    });
+  });
+
+  indiceObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      nav.querySelectorAll("[data-ir]").forEach((a) => a.classList.toggle("activo", a.dataset.ir === entry.target.id));
+    });
+  }, { rootMargin: "-35% 0px -55% 0px" });
+  capitulos.forEach((el) => indiceObserver.observe(el));
+}
+
+// Cada bloque del boletín entra con un fade/slide al llegar a la vista —
+// solo en esta página; el HTML que se manda por email no ejecuta JS/CSS de
+// ningún cliente de correo, así que ahí siempre se ve todo directamente.
+function activarAnimacionesScroll(postEl) {
+  if (revealObserver) { revealObserver.disconnect(); revealObserver = null; }
+  const contenedor = postEl.querySelector(".contenido > div");
+  if (!contenedor) return;
+  const hijos = [...contenedor.children];
+  if (hijos.length === 0) return;
+  hijos.forEach((el) => el.classList.add("blog-reveal"));
+  revealObserver = new IntersectionObserver((entries, obs) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add("blog-reveal-visible");
+      obs.unobserve(entry.target);
+    });
+  }, { threshold: 0.12 });
+  hijos.forEach((el) => revealObserver.observe(el));
+}
 
 function escapeHTML(str) {
   const div = document.createElement("div");
@@ -48,6 +115,7 @@ function renderSidebar() {
 
 function mostrarLista() {
   postIdActual = null;
+  quitarIndiceCapitulos();
   document.getElementById("blog-post").hidden = true;
   const listaEl = document.getElementById("blog-lista");
   listaEl.hidden = false;
@@ -110,6 +178,8 @@ async function mostrarPost(id) {
   `;
   postEl.querySelector(".btn-volver-blog").addEventListener("click", mostrarLista);
   renderSidebar();
+  montarIndiceCapitulos(postEl);
+  activarAnimacionesScroll(postEl);
   history.pushState({}, "", `/blog.html?post=${id}`);
 }
 

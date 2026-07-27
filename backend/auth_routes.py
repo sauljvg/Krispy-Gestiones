@@ -34,6 +34,16 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
+@router.get("/usuarios-en-linea")
+def usuarios_en_linea_route(user: dict = Depends(get_current_user)):
+    # A propósito atado al username literal (no a rol admin): es un vistazo
+    # personal de Saúl, no una función general del portal para cualquier
+    # administrador.
+    if user["username"] != "saul":
+        raise HTTPException(status_code=403, detail="No disponible")
+    return {"usuarios": auth_module.get_usuarios_en_linea(excluir_usuario_id=user["id"])}
+
+
 def require_resenas(empresa: str = "kk", user: dict = Depends(get_current_user)) -> dict:
     modulo = "saona_resenas" if empresa == "saona" else "resenas"
     if not auth_module.tiene_modulo(user, modulo):

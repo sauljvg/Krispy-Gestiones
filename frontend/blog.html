@@ -13,7 +13,7 @@
     }
   })();
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260725f">
+<link rel="stylesheet" href="css/styles.css?v=20260727a">
 <style>
   .blog-layout {
     max-width: 1400px; margin: 0 auto; padding: 24px 32px 60px;
@@ -71,6 +71,41 @@
   .blog-sidebar-item.activo .titulo { color: var(--acento); font-weight: 700; }
   .blog-sidebar-item .titulo { font-size: 13px; color: var(--text-primary); line-height: 1.3; }
   .blog-sidebar-item .fecha { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+
+  /* Índice flotante de departamentos/secciones (generado en blog.js a partir
+     de los bloques "capitulo" del boletín) — solo aparece cuando el post
+     tiene 2 o más. Botón redondo fijo + panel desplegable con la lista. */
+  .blog-indice-capitulos { position: fixed; right: 20px; bottom: 20px; z-index: 40; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+  .blog-indice-toggle {
+    width: 48px; height: 48px; border-radius: 50%; border: 1px solid var(--border);
+    background: var(--acento); color: #fff; font-size: 20px; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+  }
+  .blog-indice-panel {
+    display: none; flex-direction: column; min-width: 220px; max-width: 280px;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.2); overflow: hidden;
+  }
+  .blog-indice-capitulos.abierto .blog-indice-panel { display: flex; }
+  .blog-indice-panel a {
+    padding: 10px 14px; font-size: 13px; font-weight: 600; color: var(--text-secondary);
+    text-decoration: none; border-bottom: 1px solid var(--gridline);
+  }
+  .blog-indice-panel a:last-child { border-bottom: none; }
+  .blog-indice-panel a:hover { background: var(--surface-page); color: var(--text-primary); }
+  .blog-indice-panel a.activo { color: var(--acento); }
+  @media (max-width: 900px) {
+    .blog-indice-capitulos { right: 14px; bottom: 14px; }
+  }
+
+  /* Animación de aparición al hacer scroll para cada bloque del boletín —
+     solo en esta vista web (el email nunca ejecuta este CSS/JS, así que
+     siempre se ve completo ahí, sin depender de esto). */
+  .blog-reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.5s ease, transform 0.5s ease; }
+  .blog-reveal-visible { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .blog-reveal { opacity: 1; transform: none; transition: none; }
+  }
 </style>
 </head>
 <body>
@@ -100,6 +135,6 @@
   </div>
 </div>
 <script src="js/theme.js?v=20260723f"></script>
-<script src="js/blog.js?v=20260725c"></script>
+<script src="js/blog.js?v=20260727a"></script>
 </body>
 </html>

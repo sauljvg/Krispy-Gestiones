@@ -229,6 +229,22 @@ h3 {
   font-size: 11px; font-weight: 700; text-align: center;
 }
 
+/* Indicador de "quién está en línea" (solo visible para el usuario admin
+   "saul", ver topbar-menu.js) — mismo patrón visual que .notif-badge. */
+.en-linea-badge-wrap { position: relative; }
+.en-linea-badge-btn { position: relative; font-size: 14px; padding: 8px 12px; line-height: 1; display: flex; align-items: center; gap: 4px; }
+.en-linea-badge-count { font-size: 12px; font-weight: 700; color: var(--text-secondary); }
+.en-linea-panel {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 100;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px; width: 220px; max-height: 260px; overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+}
+.en-linea-panel[hidden] { display: none; }
+.en-linea-titulo { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.en-linea-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.en-linea-lista li { font-size: 13px; color: var(--text-primary); padding: 4px 8px; }
+
 /* Popover de checklist genérico (elegir tiendas, columnas, etc.) — mismo
    patrón visual en toda la web para no reinventar la interacción cada vez. */
 .checklist-wrap { position: relative; display: inline-block; }

@@ -86,6 +86,82 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 });
 
+// Indicador de "quién está en línea ahora mismo" — solo se activa para el
+// usuario "saul" (el backend devuelve 403 para cualquier otro, así que aquí
+// simplemente se deja de consultar si el primer intento falla, sin
+// comprobar el usuario aparte). Se actualiza cada 20s mientras la pestaña
+// esté abierta para que se sienta "en vivo".
+document.addEventListener("DOMContentLoaded", async () => {
+  const wrap = document.querySelector(".hamburger-wrap");
+  if (!wrap) return;
+
+  const escapeHTML = (str) => {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  };
+
+  async function fetchEnLinea() {
+    try {
+      const res = await fetch(`${window.location.origin}/api/auth/usuarios-en-linea`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  const primero = await fetchEnLinea();
+  if (!primero) return; // no es "saul", o falló la petición — no se vuelve a intentar
+
+  const badgeWrap = document.createElement("div");
+  badgeWrap.className = "en-linea-badge-wrap";
+  badgeWrap.hidden = true;
+  badgeWrap.innerHTML = `
+    <button type="button" id="btn-en-linea" class="btn btn-ghost en-linea-badge-btn" aria-label="Usuarios en línea ahora" aria-haspopup="true" aria-expanded="false">
+      🟢<span class="en-linea-badge-count"></span>
+    </button>
+    <div id="en-linea-panel" class="en-linea-panel" hidden>
+      <p class="en-linea-titulo">En línea ahora</p>
+      <ul class="en-linea-lista"></ul>
+    </div>`;
+  wrap.parentElement.insertBefore(badgeWrap, wrap);
+
+  const btnEnLinea = badgeWrap.querySelector("#btn-en-linea");
+  const panelEnLinea = badgeWrap.querySelector("#en-linea-panel");
+  const countEnLinea = badgeWrap.querySelector(".en-linea-badge-count");
+  const listaEnLinea = badgeWrap.querySelector(".en-linea-lista");
+
+  btnEnLinea.addEventListener("click", (e) => {
+    e.stopPropagation();
+    panelEnLinea.hidden = !panelEnLinea.hidden;
+    btnEnLinea.setAttribute("aria-expanded", String(!panelEnLinea.hidden));
+  });
+  panelEnLinea.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", () => {
+    if (!panelEnLinea.hidden) {
+      panelEnLinea.hidden = true;
+      btnEnLinea.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  function renderEnLinea(data) {
+    const usuarios = (data && data.usuarios) || [];
+    badgeWrap.hidden = usuarios.length === 0;
+    if (usuarios.length === 0) return;
+    countEnLinea.textContent = usuarios.length;
+    listaEnLinea.innerHTML = usuarios
+      .map((u) => `<li>🟢 ${escapeHTML(u.nombre)}</li>`)
+      .join("");
+  }
+
+  renderEnLinea(primero);
+  setInterval(async () => {
+    const data = await fetchEnLinea();
+    if (data) renderEnLinea(data);
+  }, 20000);
+});
+
 // Botones ⓘ genéricos (.info-tip-wrap): en desktop ya se ven con :hover, pero
 // el móvil no dispara hover de forma fiable con un tap — esto añade el toggle
 // por clic/tap en cualquier página que use el patrón, sin tener que cablear

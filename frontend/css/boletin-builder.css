@@ -222,6 +222,9 @@
 .btn-align.activo { background: var(--acento); color: #fff; border-color: var(--acento); }
 .btn-align:hover:not(.activo) { border-color: var(--acento); }
 
+.galeria-slot { border: 1px dashed var(--border); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.galeria-slot .imagen-picker { margin: 0; }
+
 .imagen-picker { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .imagen-picker-thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
 .imagen-picker-vacio {

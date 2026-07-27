@@ -61,12 +61,15 @@ const BoletinBuilder = (function () {
   const DEFINICIONES = {
     encabezado: { etiqueta: "Encabezado", icono: "🏷️" },
     titulo: { etiqueta: "Título de sección", icono: "🔠" },
+    callout: { etiqueta: "Aviso destacado", icono: "📣" },
     texto: { etiqueta: "Texto", icono: "📝" },
     imagen: { etiqueta: "Imagen", icono: "🖼️" },
+    galeria: { etiqueta: "Galería de fotos", icono: "🖼️🖼️" },
     boton: { etiqueta: "Botón", icono: "🔘" },
     divisor: { etiqueta: "Divisor", icono: "➖" },
     espaciador: { etiqueta: "Espacio", icono: "↕️" },
     columnas: { etiqueta: "Dos columnas", icono: "▥" },
+    capitulo: { etiqueta: "Divisor de departamento", icono: "🏢" },
     html_avanzado: { etiqueta: "HTML avanzado", icono: "💻" },
   };
 
@@ -160,6 +163,17 @@ const BoletinBuilder = (function () {
         return { id: nuevoId(), tipo, texto: "Título de sección", fuente: "brandon", alineacion: "izquierda",
                  colorTexto: "#1a1a1a", tamanoFuente: 19, fondo: "", interlineado: 1.3, espaciadoLetras: 0,
                  margenSup: 22, margenInf: 8 };
+      case "callout":
+        // Crema de glaseado (no rosa genérico) para que combine con la
+        // identidad Krispy Kreme del resto de la plantilla.
+        return { id: nuevoId(), tipo, texto: "Recuerda compartir este boletín con todo tu equipo", fuente: "brandon",
+                 colorTexto: "#1a1a1a", tamanoFuente: 16, interlineado: 1.4, espaciadoLetras: 0.5,
+                 paddingSup: 18, paddingInf: 18, radio: 0, fondo: "#fdeecb" };
+      case "capitulo":
+        return { id: nuevoId(), tipo, texto: "MARKETING", fuente: "gelica", alineacion: "izquierda",
+                 colorTexto: "#ffffff", tamanoFuente: 22, interlineado: 1.2, espaciadoLetras: 1,
+                 paddingSup: 16, paddingInf: 16, fondo: "#0b6b3a",
+                 email: "", emailFuente: "brandon", emailColorTexto: "#ffffff", emailTamanoFuente: 12 };
       case "texto":
         return { id: nuevoId(), tipo, html: "<p>Escribe aquí el contenido...</p>", fuente: "brandon", alineacion: "izquierda",
                  fondo: "", colorTexto: "#1a1a1a", tamanoFuente: 15, interlineado: 1.6, espaciadoLetras: 0,
@@ -167,6 +181,13 @@ const BoletinBuilder = (function () {
       case "imagen":
         return { id: nuevoId(), tipo, imagenId: null, imagenDataUrl: null, anchoModo: "mediana", ancho: 380,
                  alineacion: "centro", radio: 8, pie: "", enlace: "", fondo: "" };
+      case "galeria":
+        return { id: nuevoId(), tipo,
+                 imagenId1: null, imagenDataUrl1: null, pie1: "",
+                 imagenId2: null, imagenDataUrl2: null, pie2: "",
+                 imagenId3: null, imagenDataUrl3: null, pie3: "",
+                 imagenId4: null, imagenDataUrl4: null, pie4: "",
+                 espacio: 8, radio: 8, fondo: "", colorPie: "#666666", tamanoPie: 11 };
       case "boton":
         return { id: nuevoId(), tipo, texto: "Más información", url: "", color: "#0b6b3a", fuente: "brandon",
                  colorTexto: "#ffffff", tamanoFuente: 15, interlineado: 1.2, espaciadoLetras: 0,
@@ -176,8 +197,12 @@ const BoletinBuilder = (function () {
       case "espaciador":
         return { id: nuevoId(), tipo, altura: 28, fondo: "" };
       case "columnas":
-        return { id: nuevoId(), tipo, imagenId: null, imagenDataUrl: null, imagenLado: "izquierda", tituloColumna: "",
-                 anchoImagen: 200, texto: "<p>Escribe aquí...</p>", fuente: "brandon", alineacion: "izquierda", fondo: "",
+        return { id: nuevoId(), tipo, tipoColumnas: "imagen_texto",
+                 imagenId: null, imagenDataUrl: null, imagenLado: "izquierda",
+                 imagenId2: null, imagenDataUrl2: null,
+                 tituloColumna: "", anchoImagen: 200,
+                 texto: "<p>Escribe aquí...</p>", texto2: "<p>Escribe aquí...</p>",
+                 fuente: "brandon", alineacion: "izquierda", fondo: "",
                  colorTexto: "#1a1a1a", tamanoFuente: 14, interlineado: 1.6, espaciadoLetras: 0, espaciadoParrafos: 10,
                  paddingSup: 14, paddingInf: 14 };
       case "html_avanzado":
@@ -185,6 +210,12 @@ const BoletinBuilder = (function () {
       default:
         return null;
     }
+  }
+
+  // Todos los divisores de departamento en el mismo verde de marca — el
+  // usuario prefirió esto a la paleta rotativa por color.
+  function capituloDepartamento(texto) {
+    return { ...crearBloque("capitulo"), texto, fondo: "#0b6b3a" };
   }
 
   const PLANTILLAS = {
@@ -197,6 +228,21 @@ const BoletinBuilder = (function () {
       { ...crearBloque("encabezado"), titulo: "Aviso importante" },
       crearBloque("imagen"),
       crearBloque("texto"),
+    ],
+    // Estructura tipo "El Coronel" (KFC/Sway): encabezado + identificación del
+    // boletín, aviso de "compártelo con tu equipo", y un capítulo por
+    // departamento — cada uno con un bloque de texto vacío listo para
+    // rellenar. El usuario puede borrar los departamentos que no necesite.
+    boletin_departamentos: () => [
+      { ...crearBloque("encabezado"), titulo: "EL BOLETÍN", color: "#006838",
+        subtitulo: "Boletín número 1 · " + new Date().toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" }) },
+      { ...crearBloque("callout"), texto: "RECUERDA COMPARTIR ESTE BOLETÍN CON TODO TU EQUIPO" },
+      capituloDepartamento("MARKETING"), crearBloque("texto"),
+      capituloDepartamento("COMPRAS (SUPPLY CHAIN)"), crearBloque("texto"),
+      capituloDepartamento("CALIDAD"), crearBloque("texto"),
+      capituloDepartamento("FORMACIÓN"), crearBloque("texto"),
+      capituloDepartamento("OPERACIONES"), crearBloque("texto"),
+      capituloDepartamento("PEOPLE & CULTURE (RRHH)"), crearBloque("texto"),
     ],
   };
 
@@ -250,6 +296,71 @@ const BoletinBuilder = (function () {
     const conFondo = b.fondo && /^#[0-9a-fA-F]{6}$/.test(b.fondo);
     const fondoCss = conFondo ? `background:${b.fondo};` : "";
     return `<div style="margin:${mSup}px 0 ${mInf}px;padding:0 20px;${fondoCss}"><h2 style="margin:0;padding:${conFondo ? "10px 0" : "0"};font-family:${fuente};font-size:${tam}px;font-weight:700;color:${colorTexto};text-align:${align};line-height:${interlineado};letter-spacing:${espLetras}px;">${escapeHTML(b.texto || "")}</h2></div>`;
+  }
+
+  function htmlCallout(b) {
+    if (!b.texto || !b.texto.trim()) return "";
+    const fuente = fuentePila(b.fuente, "brandon");
+    const colorTexto = colorHex(b.colorTexto, "#1a1a1a");
+    const tam = numOr(b.tamanoFuente, 16);
+    const interlineado = numOr(b.interlineado, 1.4);
+    const espLetras = numOr(b.espaciadoLetras, 0.5);
+    const pSup = numOr(b.paddingSup, 18);
+    const pInf = numOr(b.paddingInf, 18);
+    const radio = numOr(b.radio, 0, { "": 0 });
+    const fondo = colorHex(b.fondo, "#ffd9e6");
+    // Mayúsculas vía CSS (no se muta el texto guardado) para que se lea como
+    // un aviso destacado, igual que en la referencia de "El Coronel".
+    const texto = escapeHTML(b.texto).replace(/\n/g, "<br>");
+    return `<div style="background:${fondo};padding:${pSup}px 24px ${pInf}px;text-align:center;border-radius:${radio}px;"><p style="margin:0;font-family:${fuente};font-size:${tam}px;font-weight:700;color:${colorTexto};line-height:${interlineado};letter-spacing:${espLetras}px;text-transform:uppercase;">${texto}</p></div>`;
+  }
+
+  // El id/atributo estable aquí es lo que engancha con blog.js: cada
+  // capítulo se convierte en un ancla navegable del índice flotante, y en un
+  // punto de anclaje para el scroll suave. b.id ya es único dentro de un
+  // mismo boletín (contador incremental por post), así que sirve tal cual.
+  function htmlCapitulo(b) {
+    if (!b.texto || !b.texto.trim()) return "";
+    const fuente = fuentePila(b.fuente, "gelica");
+    const colorTexto = colorHex(b.colorTexto, "#ffffff");
+    const tam = numOr(b.tamanoFuente, 22);
+    const interlineado = numOr(b.interlineado, 1.2);
+    const espLetras = numOr(b.espaciadoLetras, 1);
+    const align = ALINEACIONES[b.alineacion] || "left";
+    const pSup = numOr(b.paddingSup, 16);
+    const pInf = numOr(b.paddingInf, 16);
+    const fondo = colorHex(b.fondo, "#0b6b3a");
+    // El email va como <a> inline justo después del <h2> (también puesto en
+    // inline) para que quede en la misma línea que el título — nada de
+    // flexbox/grid, que los clientes de correo no soportan de forma fiable;
+    // el flujo de texto normal ya los sienta juntos y envuelve solo si hace
+    // falta en pantallas pequeñas.
+    const email = (b.email || "").trim();
+    const emailHtml = email
+      ? (() => {
+          const fuenteEmail = fuentePila(b.emailFuente, "brandon");
+          const colorEmail = colorHex(b.emailColorTexto, "#ffffff");
+          const tamEmail = numOr(b.emailTamanoFuente, 12);
+          return ` <a href="mailto:${escapeAttr(email)}" style="margin-left:10px;font-family:${fuenteEmail};font-size:${tamEmail}px;font-weight:400;color:${colorEmail};text-decoration:underline;text-transform:none;">${escapeHTML(email)}</a>`;
+        })()
+      : "";
+    return `<div id="cap-${b.id}" data-capitulo-titulo="${escapeAttr(b.texto)}" style="background:${fondo};padding:${pSup}px 24px ${pInf}px;text-align:${align};"><h2 style="display:inline;margin:0;font-family:${fuente};font-size:${tam}px;font-weight:700;color:${colorTexto};letter-spacing:${espLetras}px;line-height:${interlineado};text-transform:uppercase;">${escapeHTML(b.texto)}</h2>${emailHtml}</div>`;
+  }
+
+  function htmlGaleria(b) {
+    const slots = [1, 2, 3, 4].map((n) => ({ url: b["imagenDataUrl" + n], pie: b["pie" + n] })).filter((s) => s.url);
+    if (slots.length === 0) return "";
+    const radio = numOr(b.radio, 8, { "": 0 });
+    const espacio = numOr(b.espacio, 8);
+    const colorPie = colorHex(b.colorPie, "#666666");
+    const tamanoPie = numOr(b.tamanoPie, 11);
+    const fondo = b.fondo && /^#[0-9a-fA-F]{6}$/.test(b.fondo) ? `background:${b.fondo};` : "";
+    const anchoCelda = Math.floor(100 / slots.length);
+    const celdas = slots.map((s) => `<td style="width:${anchoCelda}%;padding:0 ${espacio / 2}px;vertical-align:top;">
+        <img src="${s.url}" alt="${escapeAttr(s.pie || "")}" style="max-width:100%;width:100%;border-radius:${radio}px;display:block;">
+        ${s.pie ? `<div style="font-size:${tamanoPie}px;color:${colorPie};margin-top:4px;text-align:center;font-family:Arial,Helvetica,sans-serif;">${escapeHTML(s.pie)}</div>` : ""}
+      </td>`).join("");
+    return `<div style="padding:12px 20px;${fondo}"><table role="presentation" width="100%" style="border-collapse:collapse;"><tr>${celdas}</tr></table></div>`;
   }
 
   function htmlTexto(b) {
@@ -324,7 +435,15 @@ const BoletinBuilder = (function () {
   }
 
   function htmlColumnas(b) {
-    const limpio = aplicarEspaciadoParrafos(sanitizarHTML(b.texto || ""), numOr(b.espaciadoParrafos, 10));
+    const tipoColumnas = b.tipoColumnas || "imagen_texto";
+    const fondo = b.fondo && /^#[0-9a-fA-F]{6}$/.test(b.fondo) ? ` background:${b.fondo};` : "";
+
+    if (tipoColumnas === "imagen_imagen") {
+      const anchoImg = numOr(b.anchoImagen, 200);
+      const celdaImg = (url) => `<td style="width:50%;padding:14px 10px;vertical-align:top;text-align:center;">${url ? `<img src="${url}" style="max-width:${anchoImg}px;width:100%;border-radius:8px;display:inline-block;">` : ""}</td>`;
+      return `<table role="presentation" width="100%" style="border-collapse:collapse;${fondo}"><tr>${celdaImg(b.imagenDataUrl)}${celdaImg(b.imagenDataUrl2)}</tr></table>`;
+    }
+
     const fuente = fuentePila(b.fuente, "brandon");
     const align = ALINEACIONES[b.alineacion] || "left";
     const colorTexto = colorHex(b.colorTexto, "#1a1a1a");
@@ -333,8 +452,18 @@ const BoletinBuilder = (function () {
     const espLetras = numOr(b.espaciadoLetras, 0);
     const pSup = numOr(b.paddingSup, 14);
     const pInf = numOr(b.paddingInf, 14);
+    const espParrafos = numOr(b.espaciadoParrafos, 10);
+
+    if (tipoColumnas === "texto_texto") {
+      const limpio1 = aplicarEspaciadoParrafos(sanitizarHTML(b.texto || ""), espParrafos);
+      const limpio2 = aplicarEspaciadoParrafos(sanitizarHTML(b.texto2 || ""), espParrafos);
+      const estiloTd = `width:50%;padding:${pSup}px 10px ${pInf}px;vertical-align:top;font-family:${fuente};font-size:${tam}px;line-height:${interlineado};letter-spacing:${espLetras}px;color:${colorTexto};text-align:${align};`;
+      return `<table role="presentation" width="100%" style="border-collapse:collapse;${fondo}"><tr><td style="${estiloTd}">${limpio1}</td><td style="${estiloTd}">${limpio2}</td></tr></table>`;
+    }
+
+    // imagen_texto (comportamiento original)
+    const limpio = aplicarEspaciadoParrafos(sanitizarHTML(b.texto || ""), espParrafos);
     const anchoImg = numOr(b.anchoImagen, 200);
-    const fondo = b.fondo && /^#[0-9a-fA-F]{6}$/.test(b.fondo) ? ` background:${b.fondo};` : "";
     const colImg = `<td style="width:${anchoImg}px;padding:14px 10px;vertical-align:top;">${b.imagenDataUrl ? `<img src="${b.imagenDataUrl}" style="max-width:100%;border-radius:8px;display:block;">` : ""}</td>`;
     const colTxt = `<td style="padding:${pSup}px 10px ${pInf}px;vertical-align:top;font-family:${fuente};font-size:${tam}px;line-height:${interlineado};letter-spacing:${espLetras}px;color:${colorTexto};text-align:${align};">${b.tituloColumna ? `<b style="display:block;margin-bottom:6px;">${escapeHTML(b.tituloColumna)}</b>` : ""}${limpio}</td>`;
     const celdas = b.imagenLado === "derecha" ? colTxt + colImg : colImg + colTxt;
@@ -349,12 +478,15 @@ const BoletinBuilder = (function () {
     switch (b.tipo) {
       case "encabezado": return htmlEncabezado(b);
       case "titulo": return htmlTitulo(b);
+      case "callout": return htmlCallout(b);
       case "texto": return htmlTexto(b);
       case "imagen": return htmlImagen(b);
+      case "galeria": return htmlGaleria(b);
       case "boton": return htmlBoton(b);
       case "divisor": return htmlDivisor(b);
       case "espaciador": return htmlEspaciador(b);
       case "columnas": return htmlColumnas(b);
+      case "capitulo": return htmlCapitulo(b);
       case "html_avanzado": return htmlAvanzado(b);
       default: return "";
     }
@@ -371,6 +503,13 @@ const BoletinBuilder = (function () {
     return `<div class="bloque-campo">
       <label>${escapeHTML(label)}</label>
       <input type="text" data-campo="${campo}" value="${escapeAttr(valor || "")}" placeholder="${escapeAttr(placeholder || "")}">
+    </div>`;
+  }
+
+  function campoTextoLargo(label, campo, valor, placeholder) {
+    return `<div class="bloque-campo">
+      <label>${escapeHTML(label)}</label>
+      <textarea data-campo="${campo}" rows="3" placeholder="${escapeAttr(placeholder || "")}">${escapeHTML(valor || "")}</textarea>
     </div>`;
   }
 
@@ -524,6 +663,24 @@ const BoletinBuilder = (function () {
     </div>`;
   }
 
+  // Igual que campoImagen pero apuntando a un par de campos con nombre propio
+  // (imagenId1/imagenDataUrl1, imagenId2/...) para poder tener varias fotos
+  // independientes en un mismo bloque (galería). Los data-campo-imagen-*
+  // los lee el listener genérico de subida en wireLista().
+  function campoImagenGaleria(b, n) {
+    const campoId = "imagenId" + n;
+    const campoDataUrl = "imagenDataUrl" + n;
+    const val = b[campoDataUrl];
+    const thumb = val
+      ? `<img class="imagen-picker-thumb" src="${val}" alt="">`
+      : `<div class="imagen-picker-vacio">Foto ${n}</div>`;
+    return `<div class="bloque-campo imagen-picker" data-campo-imagen-id="${campoId}" data-campo-imagen-dataurl="${campoDataUrl}">
+      ${thumb}
+      <button type="button" class="btn btn-ghost btn-mini btn-subir-imagen-bloque">📷 ${val ? "Cambiar" : "Subir"}</button>
+      <input type="file" class="input-imagen-bloque" accept=".jpg,.jpeg,.png,.webp" hidden>
+    </div>`;
+  }
+
   function formEncabezado(b) {
     const controlImagen = b.imagenId
       ? (b.modoImagen === "fondo"
@@ -557,6 +714,50 @@ const BoletinBuilder = (function () {
   function formTitulo(b) {
     return `${campoTexto("Texto del título de sección", "texto", b.texto, "Título de sección")}
       ${barraEstiloTexto(b, { tamanoDefecto: 19, tamanoMin: 12, tamanoMax: 48, colorDefecto: "#1a1a1a", interlineadoDefecto: 1.3, margen: true, margenSupDefecto: 22, margenInfDefecto: 8 })}
+      ${campoColor("Color de fondo (opcional)", "fondo", b.fondo, "#ffffff", true)}`;
+  }
+
+  function formCallout(b) {
+    return `<p class="staff-hint">Una caja resaltada para avisos importantes (se muestra en mayúsculas).</p>
+      ${campoTextoLargo("Texto del aviso", "texto", b.texto, "Recuerda compartir este boletín con todo tu equipo")}
+      ${barraEstiloTexto(b, { tamanoDefecto: 16, tamanoMin: 11, tamanoMax: 40, colorDefecto: "#1a1a1a", interlineadoDefecto: 1.4, alineacion: false, padding: true, paddingDefecto: 18 })}
+      ${campoColor("Color de fondo", "fondo", b.fondo, "#ffd9e6")}
+      ${campoNumero("Redondeo de esquinas", "radio", numOr(b.radio, 0, { "": 0 }), 0, 40)}`;
+  }
+
+  function formCapitulo(b) {
+    return `<p class="staff-hint">Divisor ancho para arrancar una sección/departamento (MARKETING, COMPRAS...).</p>
+      ${campoTexto("Nombre del departamento/sección", "texto", b.texto, "MARKETING")}
+      ${barraEstiloTexto(b, { tamanoDefecto: 22, tamanoMin: 14, tamanoMax: 48, colorDefecto: "#ffffff", interlineadoDefecto: 1.2, padding: true, paddingDefecto: 16 })}
+      <div class="bloque-campo">
+        <label>Email del responsable (opcional, aparece junto al título)</label>
+        <input type="text" data-campo="email" value="${escapeAttr(b.email || "")}" placeholder="nombre@krispykreme.es">
+        <div class="barra-estilo-texto">
+          ${ctrlFuenteCompacta("emailFuente", b.emailFuente)}
+          ${ctrlNumeroChico("emailTamanoFuente", numOr(b.emailTamanoFuente, 12), 8, 30, 1, "Tamaño", true)}
+          ${ctrlColorCompacto("emailColorTexto", b.emailColorTexto, "#ffffff", "Color")}
+        </div>
+      </div>
+      ${campoColor("Color de fondo", "fondo", b.fondo, "#0b6b3a")}`;
+  }
+
+  function formGaleria(b) {
+    const slots = [1, 2, 3, 4].map((n) => `
+      <div class="galeria-slot">
+        ${campoImagenGaleria(b, n)}
+        ${campoTexto("Pie de foto " + n + " (opcional)", "pie" + n, b["pie" + n], "")}
+      </div>`).join("");
+    return `<p class="staff-hint">Sube entre 2 y 4 fotos — se acomodan automáticamente en fila. Deja vacíos los huecos que no uses.</p>
+      ${slots}
+      ${campoNumero("Espacio entre fotos", "espacio", numOr(b.espacio, 8), 0, 40)}
+      ${campoNumero("Redondeo de esquinas", "radio", numOr(b.radio, 8, { "": 0 }), 0, 40)}
+      <div class="bloque-campo">
+        <label>Pies de foto</label>
+        <div class="barra-estilo-texto">
+          ${ctrlNumeroChico("tamanoPie", numOr(b.tamanoPie, 11), 8, 24, 1, "Tamaño", true)}
+          ${ctrlColorCompacto("colorPie", b.colorPie, "#666666", "Color")}
+        </div>
+      </div>
       ${campoColor("Color de fondo (opcional)", "fondo", b.fondo, "#ffffff", true)}`;
   }
 
@@ -606,12 +807,33 @@ const BoletinBuilder = (function () {
   }
 
   function formColumnas(b) {
-    return `${campoImagen(b)}
-      ${campoSelect("Lado de la imagen", "imagenLado", b.imagenLado, [["izquierda", "Izquierda"], ["derecha", "Derecha"]])}
-      ${campoNumero("Ancho de la imagen", "anchoImagen", numOr(b.anchoImagen, 200), 80, 400)}
-      ${campoTexto("Título de la columna (opcional)", "tituloColumna", b.tituloColumna, "")}
-      ${campoRico("Texto", "texto", b.texto)}
-      ${barraEstiloTexto(b, { tamanoDefecto: 14, tamanoMin: 10, tamanoMax: 34, colorDefecto: "#1a1a1a", interlineadoDefecto: 1.6, parrafos: true, padding: true, paddingDefecto: 14 })}
+    const tipoColumnas = b.tipoColumnas || "imagen_texto";
+    const selectorTipo = campoSelect("Tipo de columnas", "tipoColumnas", tipoColumnas, [
+      ["imagen_texto", "Imagen y texto"],
+      ["imagen_imagen", "Imagen e imagen"],
+      ["texto_texto", "Texto y texto"],
+    ], true);
+
+    let contenido;
+    if (tipoColumnas === "imagen_imagen") {
+      contenido = `
+        <div class="bloque-campo"><label>Imagen izquierda</label>${campoImagen(b)}</div>
+        <div class="bloque-campo"><label>Imagen derecha</label>${campoImagenGaleria(b, 2)}</div>
+        ${campoNumero("Ancho de cada imagen", "anchoImagen", numOr(b.anchoImagen, 200), 80, 400)}`;
+    } else if (tipoColumnas === "texto_texto") {
+      contenido = `
+        ${campoRico("Texto columna izquierda", "texto", b.texto)}
+        ${campoRico("Texto columna derecha", "texto2", b.texto2)}
+        ${barraEstiloTexto(b, { tamanoDefecto: 14, tamanoMin: 10, tamanoMax: 34, colorDefecto: "#1a1a1a", interlineadoDefecto: 1.6, parrafos: true, padding: true, paddingDefecto: 14 })}`;
+    } else {
+      contenido = `${campoImagen(b)}
+        ${campoSelect("Lado de la imagen", "imagenLado", b.imagenLado, [["izquierda", "Izquierda"], ["derecha", "Derecha"]])}
+        ${campoNumero("Ancho de la imagen", "anchoImagen", numOr(b.anchoImagen, 200), 80, 400)}
+        ${campoTexto("Título de la columna (opcional)", "tituloColumna", b.tituloColumna, "")}
+        ${campoRico("Texto", "texto", b.texto)}
+        ${barraEstiloTexto(b, { tamanoDefecto: 14, tamanoMin: 10, tamanoMax: 34, colorDefecto: "#1a1a1a", interlineadoDefecto: 1.6, parrafos: true, padding: true, paddingDefecto: 14 })}`;
+    }
+    return `${selectorTipo}${contenido}
       ${campoColor("Color de fondo (opcional)", "fondo", b.fondo, "#ffffff", true)}`;
   }
 
@@ -624,12 +846,15 @@ const BoletinBuilder = (function () {
     switch (b.tipo) {
       case "encabezado": return formEncabezado(b);
       case "titulo": return formTitulo(b);
+      case "callout": return formCallout(b);
       case "texto": return formTexto(b);
       case "imagen": return formImagen(b);
+      case "galeria": return formGaleria(b);
       case "boton": return formBoton(b);
       case "divisor": return formDivisor(b);
       case "espaciador": return formEspaciador(b);
       case "columnas": return formColumnas(b);
+      case "capitulo": return formCapitulo(b);
       case "html_avanzado": return formAvanzado(b);
       default: return "";
     }
@@ -722,7 +947,13 @@ const BoletinBuilder = (function () {
     render();
   }
 
-  async function subirImagenParaBloque(id, file) {
+  // campoImagenId/campoImagenDataUrl dejan elegir a qué par de propiedades
+  // del bloque se escribe el resultado — por defecto imagenId/imagenDataUrl
+  // (encabezado, imagen, columnas), pero la galería tiene 4 pares propios
+  // (imagenId1/imagenDataUrl1...) para poder llevar varias fotos a la vez.
+  async function subirImagenParaBloque(id, file, campoImagenId, campoImagenDataUrl) {
+    campoImagenId = campoImagenId || "imagenId";
+    campoImagenDataUrl = campoImagenDataUrl || "imagenDataUrl";
     const b = bloques.find((x) => x.id === id);
     if (!b) return;
     const formData = new FormData();
@@ -740,8 +971,8 @@ const BoletinBuilder = (function () {
       return;
     }
     const data = await res.json();
-    b.imagenId = data.id;
-    b.imagenDataUrl = await fileToDataURL(file);
+    b[campoImagenId] = data.id;
+    b[campoImagenDataUrl] = await fileToDataURL(file);
     actualizarBloqueBody(id);
   }
 
@@ -901,7 +1132,10 @@ const BoletinBuilder = (function () {
         const file = e.target.files[0];
         if (file) {
           const id = Number(e.target.closest(".bloque-item-body").dataset.id);
-          subirImagenParaBloque(id, file);
+          const picker = e.target.closest(".imagen-picker");
+          const campoImagenId = picker && picker.dataset.campoImagenId;
+          const campoImagenDataUrl = picker && picker.dataset.campoImagenDataurl;
+          subirImagenParaBloque(id, file, campoImagenId, campoImagenDataUrl);
         }
         e.target.value = "";
       }
@@ -960,18 +1194,33 @@ const BoletinBuilder = (function () {
     postId = id;
   }
 
+  // Qué pares (idCampo, dataUrlCampo) de imagen tiene cada tipo de bloque —
+  // la galería tiene 4 fotos independientes, el resto solo 1.
+  const CAMPOS_IMAGEN_POR_TIPO = {
+    encabezado: [["imagenId", "imagenDataUrl"]],
+    imagen: [["imagenId", "imagenDataUrl"]],
+    columnas: [["imagenId", "imagenDataUrl"], ["imagenId2", "imagenDataUrl2"]],
+    galeria: [["imagenId1", "imagenDataUrl1"], ["imagenId2", "imagenDataUrl2"], ["imagenId3", "imagenDataUrl3"], ["imagenId4", "imagenDataUrl4"]],
+  };
+
   async function precargarImagenes() {
-    const conImagen = bloques.filter((b) => b.imagenId && !b.imagenDataUrl);
-    await Promise.all(conImagen.map(async (b) => {
-      try {
-        const res = await fetch(`${AUTH_API_BASE}/boletines/posts/${postId}/imagenes/${b.imagenId}`);
-        if (!res.ok) return;
-        const blob = await res.blob();
-        b.imagenDataUrl = await blobToDataURL(blob);
-      } catch (e) {
-        // se queda con el placeholder de "sin imagen", no rompe el builder
-      }
-    }));
+    const tareas = [];
+    bloques.forEach((b) => {
+      (CAMPOS_IMAGEN_POR_TIPO[b.tipo] || []).forEach(([campoId, campoDataUrl]) => {
+        if (!b[campoId] || b[campoDataUrl]) return;
+        tareas.push((async () => {
+          try {
+            const res = await fetch(`${AUTH_API_BASE}/boletines/posts/${postId}/imagenes/${b[campoId]}`);
+            if (!res.ok) return;
+            const blob = await res.blob();
+            b[campoDataUrl] = await blobToDataURL(blob);
+          } catch (e) {
+            // se queda con el placeholder de "sin imagen", no rompe el builder
+          }
+        })());
+      });
+    });
+    await Promise.all(tareas);
   }
 
   async function cargarBloques(jsonStr) {
@@ -1002,8 +1251,16 @@ const BoletinBuilder = (function () {
     return bloques.length > 0;
   }
 
+  // Se quita cualquier campo "imagenDataUrl*" (incluye los imagenDataUrl1..4
+  // de la galería) antes de guardar — es solo un caché en memoria de la
+  // imagen ya subida (identificada por imagenId), guardarlo también como
+  // base64 en la fila de bloques infla el JSON sin necesidad.
   function getBloquesJSON() {
-    return JSON.stringify(bloques.map(({ imagenDataUrl, ...resto }) => resto));
+    return JSON.stringify(bloques.map((b) => {
+      const limpio = {};
+      Object.keys(b).forEach((k) => { if (!/^imagenDataUrl/.test(k)) limpio[k] = b[k]; });
+      return limpio;
+    }));
   }
 
   return { init, setPostId, cargarBloques, cargarComoAvanzado, nuevoVacio, tieneBloques, getBloquesJSON, getHtml };

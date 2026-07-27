@@ -1,5 +1,7 @@
+import os
 import re
 import secrets
+import sqlite3
 
 from db import get_connection
 
@@ -90,6 +92,13 @@ def ensure_auth_tables():
             creado TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # Para el indicador de "quién está en línea" (get_user_by_token la va
+    # actualizando en cada request autenticado) — sin esto, una sesión de
+    # hace días se seguiría contando como "en línea" para siempre.
+    try:
+        conn.execute("ALTER TABLE sesiones ADD COLUMN ultima_actividad TEXT")
+    except sqlite3.OperationalError:
+        pass  # La columna ya existía
     # Sin filas = sin restricción (ve todas las tiendas en Reseñas). Con
     # filas = solo ve esas tiendas concretas — así "seleccionar todos" es
     # simplemente no guardar ninguna fila, y no hay que mantener una lista
@@ -294,8 +303,69 @@ def get_user_by_token(token: str):
         JOIN usuarios ON usuarios.id = sesiones.usuario_id
         WHERE sesiones.token = ?
     """, (token,)).fetchone()
+    if row:
+        # Se marca aquí (no en un endpoint aparte) porque este es el único
+        # punto por el que pasa CUALQUIER request autenticado — así "en
+        # línea" refleja actividad real navegando la app, no solo tener
+        # sesión abierta desde hace días.
+        conn.execute("UPDATE sesiones SET ultima_actividad = datetime('now') WHERE token = ?", (token,))
+        conn.commit()
     conn.close()
     return dict(row) if row else None
 
 
+# Ventana de "en línea": una sesión sin actividad en más de esto ya no cuenta,
+# aunque el usuario nunca haya cerrado sesión explícitamente.
+EN_LINEA_MINUTOS = 3
+
+
+def get_usuarios_en_linea(excluir_usuario_id=None):
+    """Usuarios con actividad reciente (ver EN_LINEA_MINUTOS), para el
+    indicador del topbar — pensado solo para el usuario admin principal, no
+    es una lista de presencia de uso general."""
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT usuarios.id, usuarios.nombre, usuarios.rol, MAX(sesiones.ultima_actividad) AS ultima_actividad
+        FROM sesiones
+        JOIN usuarios ON usuarios.id = sesiones.usuario_id
+        WHERE sesiones.ultima_actividad >= datetime('now', ?)
+        GROUP BY usuarios.id
+        ORDER BY ultima_actividad DESC
+    """, (f"-{EN_LINEA_MINUTOS} minutes",)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows if r["id"] != excluir_usuario_id]
+
+
+def sembrar_admin_inicial():
+    """Crea un único admin de arranque cuando la tabla usuarios está
+    completamente vacía (despliegue nuevo en Railway/Fly.io/etc. sin datos
+    previos) — sin esto, un despliegue desde git nunca tiene ningún usuario
+    con el que entrar, porque la base de datos real vive fuera de git a
+    propósito (ver .gitignore) y nunca viaja con el código.
+
+    Se activa solo con la variable de entorno ADMIN_PIN puesta a mano en el
+    panel de la plataforma de turno (nunca en el código/git) — sin ella no
+    hace nada, para no crear un admin con PIN adivinable en ningún entorno.
+    Es un mecanismo de un solo uso: en cuanto exista al menos un usuario ya
+    no vuelve a ejecutarse, así que no pisa nada en despliegues ya poblados
+    (Replit) ni si luego restauras una copia de seguridad real."""
+    admin_pin = os.environ.get("ADMIN_PIN")
+    if not admin_pin or not pin_valido(admin_pin):
+        return
+    conn = get_connection()
+    total = conn.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0]
+    if total > 0:
+        conn.close()
+        return
+    username = os.environ.get("ADMIN_USERNAME", "saul")
+    conn.execute(
+        "INSERT INTO usuarios (username, nombre, rol, pin) VALUES (?, ?, 'admin', ?)",
+        (username, "Saul", admin_pin),
+    )
+    conn.commit()
+    conn.close()
+    print(f"[auth] Base de datos vacía: creado admin de arranque '{username}' desde ADMIN_PIN.", flush=True)
+
+
 ensure_auth_tables()
+sembrar_admin_inicial()
