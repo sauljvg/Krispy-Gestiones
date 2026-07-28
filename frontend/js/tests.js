@@ -718,9 +718,25 @@ async function verEmbudo() {
     wrap.hidden = true;
     return;
   }
-  const datos = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/embudo`).then((r) => r.json());
   const resumen = document.getElementById("embudo-resumen");
   const barras = document.getElementById("embudo-barras");
+  let res;
+  try {
+    res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/embudo`);
+  } catch (e) {
+    resumen.textContent = `No se pudo conectar con el servidor: ${e.message}`;
+    barras.innerHTML = "";
+    wrap.hidden = false;
+    return;
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    resumen.textContent = `No se pudieron cargar las estadísticas (error ${res.status}): ${body.detail || "sin detalle"}`;
+    barras.innerHTML = "";
+    wrap.hidden = false;
+    return;
+  }
+  const datos = await res.json();
   if (datos.aperturas === 0) {
     resumen.textContent = "Todavía nadie ha abierto el enlace de este test.";
     barras.innerHTML = "";
