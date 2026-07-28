@@ -84,6 +84,23 @@
     </section>
 
     <section class="chart-card">
+      <h2>Retención de datos de Reclutamiento</h2>
+      <p class="staff-hint">
+        Candidatos marcados como "Descartado" que llevan sin actividad más del plazo que elijas abajo. Revisa la lista
+        antes de borrar — la ficha, sus notas y los archivos subidos se eliminan de forma permanente, no se puede
+        deshacer.
+      </p>
+      <div class="editor-actions" style="margin-top:10px; align-items:center;">
+        <label for="retencion-meses" class="staff-hint" style="margin:0;">Descartados hace más de</label>
+        <input type="number" id="retencion-meses" value="12" min="1" style="width:70px;"> meses
+        <button id="btn-ver-retencion" class="btn btn-ghost" type="button">Ver lista</button>
+        <button id="btn-purgar-retencion" class="btn btn-primary" type="button" hidden>🗑 Borrar estos candidatos</button>
+      </div>
+      <div id="retencion-resultado" class="staff-hint" style="margin-top:8px;"></div>
+      <ul id="retencion-lista" style="margin-top:6px; font-size:13px;"></ul>
+    </section>
+
+    <section class="chart-card">
       <h2>Crear usuario</h2>
       <form id="new-user-form" class="config-form">
         <div class="config-field">
@@ -154,6 +171,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/usuarios.js?v=20260727b"></script>
+<script src="js/usuarios.js?v=20260728a"></script>
 </body>
 </html>

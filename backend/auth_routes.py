@@ -85,15 +85,24 @@ def set_pin_route(body: SetPinBody):
 
 @router.post("/login-pin")
 def login_pin_route(body: LoginPinBody, response: Response):
+    restante = auth_module.login_bloqueado_minutos(body.username)
+    if restante is not None:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Demasiados intentos fallidos. Prueba de nuevo en {restante} minuto{'s' if restante != 1 else ''}.",
+        )
     user = auth_module.authenticate_pin(body.username.strip(), body.pin)
     if user is None:
+        auth_module.registrar_intento_fallido(body.username)
         raise HTTPException(status_code=401, detail="Usuario o PIN incorrectos")
+    auth_module.limpiar_intentos_login(body.username)
     token = auth_module.create_session(user["id"])
     response.set_cookie(
         COOKIE_NAME,
         token,
         httponly=True,
         samesite="lax",
+        secure=True,
         max_age=60 * 60 * 24 * 30,
     )
     return {"ok": True, "user": public_user(user)}

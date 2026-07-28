@@ -111,6 +111,18 @@ def ensure_auth_tables():
         )
     """)
 
+    # Cuenta intentos fallidos de login por usuario para poder bloquear
+    # temporalmente tras varios seguidos — el PIN es de solo 4 dígitos
+    # (10.000 combinaciones), así que sin este freno alguien podría probarlas
+    # todas en minutos con un script.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS login_intentos (
+            username TEXT PRIMARY KEY,
+            intentos INTEGER NOT NULL DEFAULT 0,
+            bloqueado_hasta TEXT
+        )
+    """)
+
     # Migración: la tabla original tenía password_hash (con o sin el CHECK
     # de rol viejo). El login pasó a ser por PIN visible para el admin (no
     # tiene sentido guardarlo hasheado), así que se recrea sin password_hash
@@ -276,6 +288,61 @@ def authenticate_pin(username: str, pin: str):
     if not secrets.compare_digest(user["pin"], pin):
         return None
     return user
+
+
+# El PIN es de solo 4 dígitos (10.000 combinaciones) — sin límite de
+# intentos, un script podría probarlas todas en minutos. Bloqueo por
+# username (no por IP, que aquí no se conoce a nivel de este módulo) tras
+# varios fallos seguidos.
+MAX_INTENTOS_LOGIN = 5
+BLOQUEO_MINUTOS = 10
+
+
+def _clave_intentos(username: str) -> str:
+    """login_intentos no usa COLLATE NOCASE en la columna (INSERT ... ON
+    CONFLICT necesita que la clave sea idéntica letra a letra para
+    detectarlo), así que se normaliza aquí en vez de depender de eso."""
+    return (username or "").strip().lower()
+
+
+def login_bloqueado_minutos(username: str) -> int | None:
+    """Minutos que faltan para poder reintentar, o None si no está
+    bloqueado ahora mismo."""
+    conn = get_connection()
+    row = conn.execute("""
+        SELECT CAST((julianday(bloqueado_hasta) - julianday('now')) * 1440 AS INTEGER) AS restante
+        FROM login_intentos WHERE username = ? AND bloqueado_hasta IS NOT NULL
+    """, (_clave_intentos(username),)).fetchone()
+    conn.close()
+    if row and row["restante"] is not None and row["restante"] > 0:
+        return row["restante"]
+    return None
+
+
+def registrar_intento_fallido(username: str):
+    clave = _clave_intentos(username)
+    conn = get_connection()
+    row = conn.execute("SELECT intentos FROM login_intentos WHERE username = ?", (clave,)).fetchone()
+    intentos = (row["intentos"] if row else 0) + 1
+    bloqueado_hasta = None
+    if intentos >= MAX_INTENTOS_LOGIN:
+        bloqueado_hasta = conn.execute(
+            "SELECT datetime('now', ?)", (f"+{BLOQUEO_MINUTOS} minutes",)
+        ).fetchone()[0]
+        intentos = 0  # se reinicia el contador al entrar en el bloqueo
+    conn.execute("""
+        INSERT INTO login_intentos (username, intentos, bloqueado_hasta) VALUES (?, ?, ?)
+        ON CONFLICT(username) DO UPDATE SET intentos = excluded.intentos, bloqueado_hasta = excluded.bloqueado_hasta
+    """, (clave, intentos, bloqueado_hasta))
+    conn.commit()
+    conn.close()
+
+
+def limpiar_intentos_login(username: str):
+    conn = get_connection()
+    conn.execute("DELETE FROM login_intentos WHERE username = ?", (_clave_intentos(username),))
+    conn.commit()
+    conn.close()
 
 
 def create_session(usuario_id: int) -> str:

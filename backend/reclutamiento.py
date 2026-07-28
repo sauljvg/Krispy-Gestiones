@@ -595,6 +595,33 @@ def usuario_tiene_acceso_candidato(usuario_id, candidato_id):
     return row is not None
 
 
+def candidatos_descartados_antiguos(meses: int):
+    """Candidatos en estado 'descartado' que llevan más de `meses` sin
+    actividad (actualizado_en) — la lista de lo que se borraría, para poder
+    revisarla antes de purgar de verdad. No incluye estados activos
+    (pendiente/entrevistado/contratado) a propósito: la retención solo tiene
+    sentido para candidaturas ya cerradas y descartadas."""
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT id, nombre_completo, telefono, email, actualizado_en
+        FROM candidatos
+        WHERE estado = 'descartado' AND actualizado_en < datetime('now', ?)
+        ORDER BY actualizado_en
+    """, (f"-{meses} months",)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def purgar_descartados(meses: int) -> int:
+    """Borra de verdad (ficha + archivos) los candidatos devueltos por
+    candidatos_descartados_antiguos — se llama a mano desde Ajustes tras
+    revisar la lista, nunca sola en el arranque."""
+    candidatos = candidatos_descartados_antiguos(meses)
+    for c in candidatos:
+        eliminar_candidato(c["id"])
+    return len(candidatos)
+
+
 def eliminar_candidato(candidato_id):
     candidato = get_candidato(candidato_id)
     if candidato is None:

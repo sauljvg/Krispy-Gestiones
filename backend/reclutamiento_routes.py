@@ -139,6 +139,17 @@ def list_candidatos_route(
     return reclutamiento_module.list_candidatos(empresa=empresa, estado=estado, q=q, vacante_id=vacante_id, sin_vacante=sin_vacante)
 
 
+@router.get("/candidatos/descartados-antiguos")
+def descartados_antiguos_route(meses: int = 12, _user: dict = Depends(require_informes)):
+    return reclutamiento_module.candidatos_descartados_antiguos(meses)
+
+
+@router.post("/candidatos/purgar-descartados")
+def purgar_descartados_route(meses: int = 12, user: dict = Depends(require_informes)):
+    borrados = reclutamiento_module.purgar_descartados(meses)
+    return {"ok": True, "borrados": borrados}
+
+
 @router.post("/candidatos/revincular-tests")
 def revincular_candidatos_route(user: dict = Depends(require_informes)):
     enlazados = reclutamiento_module.revincular_candidatos_existentes()

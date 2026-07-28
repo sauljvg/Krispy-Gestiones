@@ -268,6 +268,10 @@ function renderPagina(index) {
       </div>
     </div>
     <div class="encuesta-progreso-barra"><div class="encuesta-progreso-fill" style="width:${((posActual + 1) / totalPaginas) * 100}%"></div></div>
+    <p class="encuesta-privacidad-nota">
+      Tus datos se usan solo para este proceso de selección/evaluación de Krispy Kreme España y SAONA.
+      Más información en nuestra <a href="/privacidad.html" target="_blank" rel="noopener">política de privacidad</a>.
+    </p>
   `;
 
   card.querySelectorAll("input[type='text'], input[type='email'], input[type='number'], input[type='date'], textarea").forEach((el) => {

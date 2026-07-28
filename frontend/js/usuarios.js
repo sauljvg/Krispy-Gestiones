@@ -554,6 +554,46 @@ function wireBackup() {
   });
 }
 
+function wireRetencion() {
+  const mesesInput = document.getElementById("retencion-meses");
+  const resultadoEl = document.getElementById("retencion-resultado");
+  const listaEl = document.getElementById("retencion-lista");
+  const btnVer = document.getElementById("btn-ver-retencion");
+  const btnPurgar = document.getElementById("btn-purgar-retencion");
+  let ultimaLista = [];
+
+  btnVer.addEventListener("click", async () => {
+    const meses = Number(mesesInput.value) || 12;
+    const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/descartados-antiguos?meses=${meses}`);
+    ultimaLista = res.ok ? await res.json() : [];
+    if (ultimaLista.length === 0) {
+      resultadoEl.textContent = "No hay ningún candidato descartado que lleve tanto tiempo sin actividad.";
+      listaEl.innerHTML = "";
+      btnPurgar.hidden = true;
+      return;
+    }
+    resultadoEl.textContent = `${ultimaLista.length} candidato${ultimaLista.length === 1 ? "" : "s"} se borrarían:`;
+    listaEl.innerHTML = ultimaLista.map((c) =>
+      `<li>${escapeHTML(c.nombre_completo || "(sin nombre)")} — descartado el ${escapeHTML((c.actualizado_en || "").slice(0, 10))}</li>`
+    ).join("");
+    btnPurgar.hidden = false;
+  });
+
+  btnPurgar.addEventListener("click", async () => {
+    const meses = Number(mesesInput.value) || 12;
+    if (!confirm(`Esto borra PERMANENTEMENTE ${ultimaLista.length} ficha(s) de candidato, sus notas y archivos subidos. No se puede deshacer. ¿Continuar?`)) return;
+    const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/purgar-descartados?meses=${meses}`, { method: "POST" });
+    if (!res.ok) {
+      alert("No se pudo completar el borrado.");
+      return;
+    }
+    const data = await res.json();
+    resultadoEl.textContent = `${data.borrados} candidato(s) borrados.`;
+    listaEl.innerHTML = "";
+    btnPurgar.hidden = true;
+  });
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   const user = await checkAuth("/usuarios.html");
   if (!user) return;
@@ -563,6 +603,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   wireUserBar(user);
   wireBackup();
+  wireRetencion();
 
   await loadRoles();
   await loadModulos();
