@@ -1,6 +1,9 @@
 let currentPostId = null;
 let contactosActuales = [];
 
+// Icono SVG en vez de 🔗 — se ve igual de nítido en cualquier sistema.
+const ICONO_ENLACE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
+
 function escapeHTML(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";
@@ -24,7 +27,7 @@ async function loadPosts() {
       <td>${(p.publicado_en || p.creado_en || "").slice(0, 10)}</td>
       <td class="acciones">
         <button class="btn btn-ghost btn-editar-post" data-id="${p.id}" type="button">Editar</button>
-        <button class="btn btn-ghost btn-copiar-enlace" data-id="${p.id}" type="button">🔗 Enlace</button>
+        <button class="btn btn-ghost btn-copiar-enlace" data-id="${p.id}" type="button">${ICONO_ENLACE} Enlace</button>
       </td>
     </tr>`
     )

@@ -8,6 +8,9 @@ let chartEvolucionTotal = null;
 let chartEvolucionMinMax = null;
 let MARCA_COLOR = "#006838";
 
+// Icono SVG en vez de 🔗 — se ve igual de nítido en cualquier sistema.
+const ICONO_ENLACE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
+
 // Un color por cuatrimestre (no por bloque) — valores por defecto, se
 // sobreescriben con los tokens de marca (KK o Saona) en cargarTokensDiseno().
 let COLORES_PERIODO = ["#38761d", "#c00000", "#1155cc", "#bf9000", "#6a3d9a", "#e08214"];
@@ -312,7 +315,7 @@ function renderAuditoriaG(items, auditoriaF) {
           <option value="">¿Es la misma persona que...?</option>
           ${opcionesF}
         </select>
-        <button type="button" class="btn-registrar-salida btn-vincular" data-idx="${i}">🔗 Vincular</button>
+        <button type="button" class="btn-registrar-salida btn-vincular" data-idx="${i}">${ICONO_ENLACE} Vincular</button>
         <button type="button" class="btn-registrar-salida btn-registrar-nueva" data-idx="${i}">＋ Registrar como salida</button>
         <button type="button" class="btn-registrar-salida btn-ghost btn-eliminar-respuesta" data-idx="${i}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg> Eliminar</button>
       </span>

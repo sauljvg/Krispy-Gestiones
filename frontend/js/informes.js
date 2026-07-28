@@ -9,6 +9,10 @@ let lastData = null;
 
 const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" ? "saona" : "kk";
 
+// Iconos SVG en vez de ▲▼ — se ven igual de nítidos en cualquier sistema.
+const ICONO_FLECHA_ARRIBA = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
+const ICONO_FLECHA_ABAJO = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>`;
+
 function aplicarBrandingEmpresa() {
   if (EMPRESA !== "saona") return;
   document.title = document.title.replace("Krispy Gestiones", "SAONA Gestiones");
@@ -85,8 +89,8 @@ function renderColumnasPanel() {
     .map(
       (c, i) => `
       <div class="columna-check-row">
-        <button type="button" class="btn-col-mover" data-col="${escapeHTML(c)}" data-delta="-1" title="Subir" ${i === 0 ? "disabled" : ""}>▲</button>
-        <button type="button" class="btn-col-mover" data-col="${escapeHTML(c)}" data-delta="1" title="Bajar" ${i === colOrder.length - 1 ? "disabled" : ""}>▼</button>
+        <button type="button" class="btn-col-mover" data-col="${escapeHTML(c)}" data-delta="-1" title="Subir" ${i === 0 ? "disabled" : ""}>${ICONO_FLECHA_ARRIBA}</button>
+        <button type="button" class="btn-col-mover" data-col="${escapeHTML(c)}" data-delta="1" title="Bajar" ${i === colOrder.length - 1 ? "disabled" : ""}>${ICONO_FLECHA_ABAJO}</button>
         <input type="checkbox" id="colchk-${i}" data-col="${escapeHTML(c)}" ${hiddenCols.has(c) ? "" : "checked"}>
         <label for="colchk-${i}">${escapeHTML(c)}</label>
       </div>`

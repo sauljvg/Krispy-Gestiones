@@ -1,6 +1,13 @@
 let currentTestId = null;
 let currentTest = null;
 
+// Iconos SVG en vez de emoji (⠿ ✎ ↑ ↓) — algunos sistemas los renderizan
+// como cuadros sin forma; el SVG con currentColor se ve igual en todos.
+const ICONO_FLECHA_ARRIBA = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
+const ICONO_FLECHA_ABAJO = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>`;
+const ICONO_LAPIZ = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
+const ICONO_ARRASTRAR = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>`;
+
 function escapeHTML(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";
@@ -383,8 +390,8 @@ function renderPaginas() {
       <div class="pagina-head">
         <textarea class="pagina-instrucciones" data-pagina-id="${p.id}" placeholder="Instrucciones de esta página (opcional)">${escapeHTML(p.instrucciones || "")}</textarea>
         <div class="pagina-acciones">
-          <button type="button" class="btn-mini btn-pagina-subir" data-pagina-id="${p.id}" ${pi === 0 ? "disabled" : ""}>↑</button>
-          <button type="button" class="btn-mini btn-pagina-bajar" data-pagina-id="${p.id}" ${pi === currentTest.paginas.length - 1 ? "disabled" : ""}>↓</button>
+          <button type="button" class="btn-mini btn-pagina-subir" data-pagina-id="${p.id}" ${pi === 0 ? "disabled" : ""}>${ICONO_FLECHA_ARRIBA}</button>
+          <button type="button" class="btn-mini btn-pagina-bajar" data-pagina-id="${p.id}" ${pi === currentTest.paginas.length - 1 ? "disabled" : ""}>${ICONO_FLECHA_ABAJO}</button>
           <button type="button" class="btn-mini btn-pagina-borrar" data-pagina-id="${p.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
         </div>
       </div>
@@ -413,15 +420,15 @@ function renderPaginas() {
             return `
           <div class="pregunta-item" draggable="true" data-pregunta-id="${q.id}">
             <div class="pregunta-row" data-pregunta-id="${q.id}">
-              <span class="pregunta-handle" title="Arrastra para mover (incluso a otra página)">⠿</span>
+              <span class="pregunta-handle" title="Arrastra para mover (incluso a otra página)">${ICONO_ARRASTRAR}</span>
               <span class="tipo-badge">${TIPOS_PREGUNTA_LABELS[q.tipo] || q.tipo}</span>
               <span class="etiqueta-txt">${escapeHTML(etiquetaVisible(q))}</span>
               <span class="obligatoria-txt">${q.obligatoria ? "obligatoria" : "opcional"}</span>
               ${q.mostrar_dashboard ? `<span class="dashboard-badge" title="Esta respuesta aparece en el dashboard de resultados">📊 dashboard</span>` : ""}
               <span class="pregunta-acciones">
-                <button type="button" class="btn-mini btn-pregunta-editar" data-pregunta-id="${q.id}">✎</button>
-                <button type="button" class="btn-mini btn-pregunta-subir" data-pregunta-id="${q.id}" ${qi === 0 ? "disabled" : ""}>↑</button>
-                <button type="button" class="btn-mini btn-pregunta-bajar" data-pregunta-id="${q.id}" ${qi === p.preguntas.length - 1 ? "disabled" : ""}>↓</button>
+                <button type="button" class="btn-mini btn-pregunta-editar" data-pregunta-id="${q.id}">${ICONO_LAPIZ}</button>
+                <button type="button" class="btn-mini btn-pregunta-subir" data-pregunta-id="${q.id}" ${qi === 0 ? "disabled" : ""}>${ICONO_FLECHA_ARRIBA}</button>
+                <button type="button" class="btn-mini btn-pregunta-bajar" data-pregunta-id="${q.id}" ${qi === p.preguntas.length - 1 ? "disabled" : ""}>${ICONO_FLECHA_ABAJO}</button>
                 <button type="button" class="btn-mini btn-pregunta-borrar" data-pregunta-id="${q.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
               </span>
             </div>

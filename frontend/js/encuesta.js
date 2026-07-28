@@ -4,6 +4,10 @@ let encuesta = null;
 let paginaActual = 0;
 const respuestas = {}; // pregunta_id -> valor
 
+// Iconos SVG en vez de ↑ ↓ — se ven igual de nítidos en cualquier sistema.
+const ICONO_FLECHA_ARRIBA = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
+const ICONO_FLECHA_ABAJO = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>`;
+
 // Ramificación: una página con condicion_pregunta_id solo se muestra si la
 // respuesta guardada para esa pregunta (de una página anterior) está dentro
 // de condicion_valores — igual que las secciones condicionales de Forms.
@@ -120,8 +124,8 @@ function renderListaPrioridadHTML(q) {
       <span class="prioridad-num">${i + 1}</span>
       <span class="prioridad-texto">${escapeHTML(texto)}</span>
       <span class="prioridad-flechas">
-        <button type="button" class="btn-prioridad-subir" data-idx="${i}" ${i === 0 ? "disabled" : ""} aria-label="Subir prioridad">↑</button>
-        <button type="button" class="btn-prioridad-bajar" data-idx="${i}" ${i === orden.length - 1 ? "disabled" : ""} aria-label="Bajar prioridad">↓</button>
+        <button type="button" class="btn-prioridad-subir" data-idx="${i}" ${i === 0 ? "disabled" : ""} aria-label="Subir prioridad">${ICONO_FLECHA_ARRIBA}</button>
+        <button type="button" class="btn-prioridad-bajar" data-idx="${i}" ${i === orden.length - 1 ? "disabled" : ""} aria-label="Bajar prioridad">${ICONO_FLECHA_ABAJO}</button>
       </span>
     </li>`
     )

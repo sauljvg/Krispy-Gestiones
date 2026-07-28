@@ -553,11 +553,19 @@ def scrape_all_reviews():
         time.sleep(4)
         dismiss_cookie_consent(driver)
 
+        # El total ("X opiniones") vive en el resumen de calificación, que es
+        # más fiable justo después de cargar la página (antes de entrar a la
+        # pestaña Opiniones) — una vez dentro de esa pestaña, ese resumen a
+        # veces ya no está en el DOM. Se intenta aquí primero y, si falla, se
+        # reintenta después de abrir el panel por si acaso.
+        total_hint = get_total_reviews_hint(driver)
+
         print("Abriendo la pestaña de Opiniones...")
         if not ensure_reviews_panel_loaded(driver):
             print("Aviso: no se confirmó la carga completa del panel de reseñas, se continúa igualmente.", flush=True)
 
-        total_hint = get_total_reviews_hint(driver)
+        if not total_hint:
+            total_hint = get_total_reviews_hint(driver)
         if total_hint:
             print(f"Google Maps anuncia ~{total_hint} opiniones en total", flush=True)
             save_total_google(STORE_NAME, total_hint)

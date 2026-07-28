@@ -13,6 +13,13 @@ const BoletinBuilder = (function () {
   // 4 claves fijas — se traducen al vuelo para no romper contenido antiguo.
   const PRESETS_ANTIGUOS = { verde: "#0b6b3a", naranja: "#e07b00", azul: "#2454a6", gris: "#5a5a5a" };
   const ALINEACIONES = { izquierda: "left", centro: "center", derecha: "right", justificado: "justify" };
+
+  // Iconos SVG en vez de ⠿ ▲ ▼ 🔗 — se ven igual de nítidos en cualquier
+  // sistema, a diferencia de esos glifos que algunas fuentes no traen.
+  const ICONO_FLECHA_ARRIBA = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
+  const ICONO_FLECHA_ABAJO = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>`;
+  const ICONO_ARRASTRAR = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>`;
+  const ICONO_ENLACE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
   // Las 3 primeras son las fuentes de marca ya cargadas en styles.css
   // (@font-face con archivos propios); Fraunces viene de Google Fonts. Se
   // listan con su pila de resguardo por si el cliente de correo no las carga.
@@ -640,7 +647,7 @@ const BoletinBuilder = (function () {
       <button type="button" class="btn-formato" data-cmd="bold" title="Negrita"><b>N</b></button>
       <button type="button" class="btn-formato" data-cmd="italic" title="Cursiva"><i>K</i></button>
       <button type="button" class="btn-formato" data-cmd="insertUnorderedList" title="Lista">•</button>
-      <button type="button" class="btn-formato" data-cmd="link" title="Enlace">🔗</button>
+      <button type="button" class="btn-formato" data-cmd="link" title="Enlace">${ICONO_ENLACE}</button>
     </div>`;
   }
 
@@ -866,11 +873,11 @@ const BoletinBuilder = (function () {
     const def = DEFINICIONES[b.tipo];
     return `<div class="bloque-item" draggable="true" data-id="${b.id}">
       <div class="bloque-item-head">
-        <span class="bloque-handle" title="Arrastra para mover">⠿</span>
+        <span class="bloque-handle" title="Arrastra para mover">${ICONO_ARRASTRAR}</span>
         <span class="bloque-tipo-badge">${def.icono} ${escapeHTML(def.etiqueta)}</span>
         <div class="bloque-item-acciones">
-          <button type="button" class="btn btn-ghost btn-mini btn-mover-arriba" data-id="${b.id}" title="Subir" ${i === 0 ? "disabled" : ""}>▲</button>
-          <button type="button" class="btn btn-ghost btn-mini btn-mover-abajo" data-id="${b.id}" title="Bajar" ${i === bloques.length - 1 ? "disabled" : ""}>▼</button>
+          <button type="button" class="btn btn-ghost btn-mini btn-mover-arriba" data-id="${b.id}" title="Subir" ${i === 0 ? "disabled" : ""}>${ICONO_FLECHA_ARRIBA}</button>
+          <button type="button" class="btn btn-ghost btn-mini btn-mover-abajo" data-id="${b.id}" title="Bajar" ${i === bloques.length - 1 ? "disabled" : ""}>${ICONO_FLECHA_ABAJO}</button>
           <button type="button" class="btn btn-ghost btn-mini btn-eliminar-bloque" data-id="${b.id}" title="Eliminar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
         </div>
       </div>
