@@ -13,7 +13,7 @@
     }
   })();
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260727a">
+<link rel="stylesheet" href="css/styles.css?v=20260728a">
 <style>
   .tests-wrap { max-width: 1000px; margin: 0 auto; padding: 0 0 60px; }
   .tests-toolbar { display: flex; justify-content: space-between; align-items: center; margin: 16px 0; }
@@ -22,6 +22,12 @@
   .badge { padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
   .badge-cerrada { background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-secondary); }
   .badge-abierta { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
+
+  .embudo-fila { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; }
+  .embudo-etiqueta { width: 80px; flex: none; color: var(--text-secondary); }
+  .embudo-barra-fondo { flex: 1; height: 16px; border-radius: 8px; background: var(--surface-page); overflow: hidden; }
+  .embudo-barra-relleno { height: 100%; background: var(--acento); border-radius: 8px; }
+  .embudo-valor { width: 90px; flex: none; text-align: right; color: var(--text-secondary); }
 
   .editor-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-top: 20px; }
   .editor-field { margin-bottom: 12px; }
@@ -176,12 +182,19 @@
         <button id="btn-publicar-test" class="btn btn-ghost" type="button" hidden>Publicar (abrir)</button>
         <button id="btn-despublicar-test" class="btn btn-ghost" type="button" hidden>Despublicar (cerrar)</button>
         <button id="btn-ver-respuestas" class="btn btn-ghost" type="button" hidden>Ver respuestas</button>
+        <button id="btn-ver-embudo" class="btn btn-ghost" type="button" hidden>Ver estadísticas de abandono</button>
         <button id="btn-eliminar-test" class="btn btn-ghost" type="button" hidden>Eliminar</button>
         <button id="btn-cerrar-editor" class="btn btn-ghost" type="button">Cerrar</button>
       </div>
 
       <div id="paginas-wrap"></div>
       <button id="btn-nueva-pagina" class="btn btn-ghost" type="button" hidden>＋ Añadir página</button>
+
+      <div id="embudo-wrap" hidden>
+        <h3 style="font-size:15px; margin-top:24px;">Estadísticas de abandono</h3>
+        <p id="embudo-resumen" class="staff-hint"></p>
+        <div id="embudo-barras"></div>
+      </div>
 
       <div id="respuestas-wrap" hidden>
         <h3 style="font-size:15px; margin-top:24px;">Respuestas recibidas</h3>
@@ -196,6 +209,6 @@
 <script src="js/theme.js?v=20260724a"></script>
 <script src="js/auth-common.js?v=20260724a"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/tests.js?v=20260727h"></script>
+<script src="js/tests.js?v=20260728a"></script>
 </body>
 </html>

@@ -702,6 +702,16 @@ h3 {
   border-radius: 999px;
   font-weight: 600;
 }
+.en-vivo-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  margin-left: 6px;
+  background: color-mix(in srgb, var(--status-good) 16%, transparent);
+  color: var(--status-good);
+  white-space: nowrap;
+}
 .badge-positivo { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
 .badge-neutral  { background: color-mix(in srgb, var(--status-warning) 22%, transparent); color: #9a6b00; }
 .badge-negativo { background: color-mix(in srgb, var(--status-critical) 16%, transparent); color: var(--status-critical); }

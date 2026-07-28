@@ -45,6 +45,12 @@ class PreguntaIn(BaseModel):
 
 class RespuestaIn(BaseModel):
     respuestas: dict[str, str]
+    token: str | None = None
+
+
+class SesionIn(BaseModel):
+    token: str
+    pagina: int = 1
 
 
 class MoverPreguntaAPaginaIn(BaseModel):
@@ -76,6 +82,21 @@ def tipos_informe_disponibles_route(_user: dict = Depends(require_tests)):
 @router.get("/encuestas")
 def list_encuestas_route(_user: dict = Depends(require_tests)):
     return encuestas_module.list_encuestas()
+
+
+@router.get("/encuestas/en-vivo")
+def en_vivo_route(_user: dict = Depends(require_tests)):
+    """Cuántas personas están respondiendo cada test AHORA MISMO (heartbeat
+    de los últimos 2 min, sin haber terminado) — un solo viaje para toda la
+    lista en vez de una petición por test."""
+    return encuestas_module.contar_en_vivo_por_encuesta()
+
+
+@router.get("/encuestas/{encuesta_id}/embudo")
+def embudo_route(encuesta_id: int, _user: dict = Depends(require_tests)):
+    if not encuestas_module.get_encuesta(encuesta_id):
+        raise HTTPException(status_code=404, detail="Encuesta no encontrada")
+    return encuestas_module.get_embudo(encuesta_id)
 
 
 @router.get("/encuestas/{encuesta_id}")
@@ -271,6 +292,15 @@ def enviar_respuesta_route(slug: str, body: RespuestaIn, request: Request):
     ip = _ip_cliente(request)
     user_agent = request.headers.get("user-agent", "")
     try:
-        return encuestas_module.guardar_respuesta(slug, body.respuestas, ip, user_agent)
+        return encuestas_module.guardar_respuesta(slug, body.respuestas, ip, user_agent, token=body.token)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router_publico.post("/{slug}/sesion")
+def registrar_sesion_route(slug: str, body: SesionIn):
+    """Late para trackear aperturas/abandono: encuesta.js llama esto al
+    cargar y cada vez que cambia de página (más un heartbeat cada 20s en la
+    misma página) — nunca bloquea ni rompe el formulario si falla."""
+    encuestas_module.registrar_sesion(slug, body.token, body.pagina)
+    return {"ok": True}

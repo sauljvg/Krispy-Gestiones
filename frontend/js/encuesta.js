@@ -4,6 +4,29 @@ let encuesta = null;
 let paginaActual = 0;
 const respuestas = {}; // pregunta_id -> valor
 
+// Token propio de esta apertura del enlace — deja rastro de quién abrió el
+// test y hasta dónde llegó aunque nunca lo termine (ver encuesta_sesiones en
+// el backend), para poder medir abandono en tests largos. No es información
+// personal, solo un identificador aleatorio de esta visita.
+const SESION_TOKEN = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+let ultimaPaginaReportada = 1;
+
+function reportarSesion(pagina) {
+  ultimaPaginaReportada = pagina;
+  fetch(`${API_BASE}/${encuesta.slug}/sesion`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: SESION_TOKEN, pagina }),
+  }).catch(() => {});
+}
+
+// Heartbeat: si alguien se queda un buen rato en la MISMA página (un bloque
+// largo de Likert, por ejemplo), sin esto dejaría de contar como "en vivo"
+// pasados los 2 min aunque siga ahí respondiendo.
+setInterval(() => {
+  if (encuesta) reportarSesion(ultimaPaginaReportada);
+}, 20000);
+
 // Iconos SVG en vez de ↑ ↓ — se ven igual de nítidos en cualquier sistema.
 const ICONO_FLECHA_ARRIBA = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
 const ICONO_FLECHA_ABAJO = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>`;
@@ -211,6 +234,7 @@ function renderPagina(index) {
   const visibles = indicesVisibles();
   const posActual = visibles.indexOf(index);
   const totalPaginas = visibles.length;
+  reportarSesion(posActual + 1);
   let bloquesHtml = "";
   let i = 0;
   while (i < pagina.preguntas.length) {
@@ -321,7 +345,7 @@ async function enviarRespuestas() {
   const res = await fetch(`${API_BASE}/${encuesta.slug}/enviar`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ respuestas: respuestasPlano }),
+    body: JSON.stringify({ respuestas: respuestasPlano, token: SESION_TOKEN }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

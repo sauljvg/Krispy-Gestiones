@@ -137,9 +137,101 @@ def ensure_encuestas_tables():
             visto_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # Cada apertura del enlace público genera un token propio (encuesta.js lo
+    # crea al cargar y lo reenvía en cada cambio de página) — a diferencia de
+    # encuesta_respuestas (que solo existe si se llegó a ENVIAR el test), esto
+    # deja rastro de quien abrió el enlace y en qué página se quedó, aunque
+    # nunca termine. pagina_maxima es la más lejos que llegó (no se pisa hacia
+    # atrás si vuelve con "Atrás"), y sirve para el embudo de abandono.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS encuesta_sesiones (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            encuesta_id INTEGER NOT NULL REFERENCES encuestas(id),
+            token TEXT NOT NULL UNIQUE,
+            pagina_maxima INTEGER NOT NULL DEFAULT 1,
+            completado INTEGER NOT NULL DEFAULT 0,
+            iniciado_en TEXT NOT NULL DEFAULT (datetime('now')),
+            ultima_actividad TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
     conn.commit()
     conn.close()
     os.makedirs(FONDOS_DIR, exist_ok=True)
+
+
+# Igual que EN_LINEA_MINUTOS en auth.py (usuarios internos) — aquí es cuánto
+# tiempo sin heartbeat hace que alguien deje de contar como "en vivo" en el
+# test. Encuesta.js manda un heartbeat cada 20s mientras la pestaña sigue
+# abierta, así que 2 min da margen de sobra sin dejar sesiones "fantasma"
+# marcadas como activas mucho rato tras cerrar la pestaña sin querer.
+EN_VIVO_MINUTOS = 2
+
+
+def registrar_sesion(identificador, token, pagina):
+    conn = get_connection()
+    row = _fila_por_slug_o_codigo(conn, identificador)
+    if not row:
+        conn.close()
+        return
+    conn.execute("""
+        INSERT INTO encuesta_sesiones (encuesta_id, token, pagina_maxima)
+        VALUES (?, ?, ?)
+        ON CONFLICT(token) DO UPDATE SET
+            pagina_maxima = MAX(pagina_maxima, excluded.pagina_maxima),
+            ultima_actividad = datetime('now')
+    """, (row["id"], token, pagina))
+    conn.commit()
+    conn.close()
+
+
+def marcar_sesion_completada(token):
+    if not token:
+        return
+    conn = get_connection()
+    conn.execute(
+        "UPDATE encuesta_sesiones SET completado = 1, ultima_actividad = datetime('now') WHERE token = ?", (token,)
+    )
+    conn.commit()
+    conn.close()
+
+
+def contar_en_vivo_por_encuesta():
+    """Cuántas sesiones activas (heartbeat reciente, sin completar) hay AHORA
+    MISMO por encuesta — alimenta el indicador junto a cada test en la lista."""
+    conn = get_connection()
+    rows = conn.execute(f"""
+        SELECT encuesta_id, COUNT(*) AS n FROM encuesta_sesiones
+        WHERE completado = 0 AND ultima_actividad >= datetime('now', '-{EN_VIVO_MINUTOS} minutes')
+        GROUP BY encuesta_id
+    """).fetchall()
+    conn.close()
+    return {r["encuesta_id"]: r["n"] for r in rows}
+
+
+def get_embudo(encuesta_id):
+    """Aperturas vs completados y, página a página, cuántas sesiones
+    llegaron al menos hasta ahí — para ver dónde se cae la gente en un test
+    largo, no solo cuántos lo acaban."""
+    conn = get_connection()
+    total_paginas = conn.execute(
+        "SELECT COUNT(*) FROM encuesta_paginas WHERE encuesta_id = ?", (encuesta_id,)
+    ).fetchone()[0]
+    aperturas = conn.execute(
+        "SELECT COUNT(*) FROM encuesta_sesiones WHERE encuesta_id = ?", (encuesta_id,)
+    ).fetchone()[0]
+    completados = conn.execute(
+        "SELECT COUNT(*) FROM encuesta_sesiones WHERE encuesta_id = ? AND completado = 1", (encuesta_id,)
+    ).fetchone()[0]
+    por_pagina = []
+    if aperturas:
+        for pagina in range(1, total_paginas + 1):
+            n = conn.execute(
+                "SELECT COUNT(*) FROM encuesta_sesiones WHERE encuesta_id = ? AND pagina_maxima >= ?",
+                (encuesta_id, pagina),
+            ).fetchone()[0]
+            por_pagina.append({"pagina": pagina, "llegaron": n})
+    conn.close()
+    return {"aperturas": aperturas, "completados": completados, "total_paginas": total_paginas, "por_pagina": por_pagina}
 
 
 def get_notificaciones_tests(usuario_id):
@@ -514,7 +606,7 @@ def _detectar_dispositivo(user_agent):
     return "Desconocido"
 
 
-def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent):
+def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, token=None):
     """respuestas_por_pregunta: {pregunta_id (str o int): valor}. Se guarda
     tal cual (por id) para la vista de administración, y además se arma un
     segundo dict keyed por ETIQUETA de pregunta — así, si la encuesta
@@ -602,6 +694,7 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent):
             row["tipo_entrevista_empresa"], fila_por_etiqueta, origen=f"Test web: {row['titulo']}"
         )
 
+    marcar_sesion_completada(token)
     return {"ok": True}
 
 

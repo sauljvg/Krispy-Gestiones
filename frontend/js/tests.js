@@ -61,7 +61,10 @@ async function loadTests() {
       (t) => `
     <tr>
       <td>${escapeHTML(t.titulo)}</td>
-      <td><span class="badge ${t.estado === "abierta" ? "badge-abierta" : "badge-cerrada"}">${t.estado === "abierta" ? "Abierta" : "Cerrada"}</span></td>
+      <td>
+        <span class="badge ${t.estado === "abierta" ? "badge-abierta" : "badge-cerrada"}">${t.estado === "abierta" ? "Abierta" : "Cerrada"}</span>
+        <span class="en-vivo-badge" data-id="${t.id}" hidden>🟢 <span class="en-vivo-n"></span> en vivo</span>
+      </td>
       <td>${enlaceRespuestasTest(t)}</td>
       <td><button class="btn btn-ghost btn-editar-test" data-id="${t.id}" type="button">Editar</button></td>
     </tr>`
@@ -70,7 +73,22 @@ async function loadTests() {
   tbody.querySelectorAll(".btn-editar-test").forEach((btn) => {
     btn.addEventListener("click", () => abrirEditor(Number(btn.dataset.id)));
   });
+  actualizarEnVivo();
 }
+
+// Cuántas personas están respondiendo cada test AHORA MISMO — se refresca
+// solo (sin recargar la lista entera, que cortaría una edición en curso).
+async function actualizarEnVivo() {
+  const conteo = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/en-vivo`).then((r) => (r.ok ? r.json() : {}));
+  document.querySelectorAll(".en-vivo-badge").forEach((badge) => {
+    const n = conteo[badge.dataset.id] || 0;
+    badge.hidden = n === 0;
+    badge.querySelector(".en-vivo-n").textContent = n;
+  });
+}
+setInterval(() => {
+  if (document.getElementById("tests-tbody")) actualizarEnVivo();
+}, 20000);
 
 // scroll=false se usa para refrescos "en el sitio" tras guardar algo dentro
 // de un test que ya está abierto (guardar campos, mover/borrar una página o
@@ -111,6 +129,7 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("btn-publicar-test").hidden = currentTest.estado === "abierta";
     document.getElementById("btn-despublicar-test").hidden = currentTest.estado !== "abierta";
     document.getElementById("btn-ver-respuestas").hidden = false;
+    document.getElementById("btn-ver-embudo").hidden = false;
     document.getElementById("btn-eliminar-test").hidden = false;
     document.getElementById("btn-nueva-pagina").hidden = false;
     renderPaginas();
@@ -126,6 +145,7 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("btn-publicar-test").hidden = true;
     document.getElementById("btn-despublicar-test").hidden = true;
     document.getElementById("btn-ver-respuestas").hidden = true;
+    document.getElementById("btn-ver-embudo").hidden = true;
     document.getElementById("btn-eliminar-test").hidden = true;
     document.getElementById("btn-nueva-pagina").hidden = true;
     document.getElementById("paginas-wrap").innerHTML = "";
@@ -691,6 +711,42 @@ function formatearFechaHoraLocal(sqlUtc) {
   return fecha.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+async function verEmbudo() {
+  const wrap = document.getElementById("embudo-wrap");
+  const visible = !wrap.hidden;
+  if (visible) {
+    wrap.hidden = true;
+    return;
+  }
+  const datos = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/embudo`).then((r) => r.json());
+  const resumen = document.getElementById("embudo-resumen");
+  const barras = document.getElementById("embudo-barras");
+  if (datos.aperturas === 0) {
+    resumen.textContent = "Todavía nadie ha abierto el enlace de este test.";
+    barras.innerHTML = "";
+  } else {
+    const pct = Math.round((datos.completados / datos.aperturas) * 100);
+    const abandonaron = datos.aperturas - datos.completados;
+    const personas = datos.aperturas === 1 ? "1 persona abrió" : `${datos.aperturas} personas abrieron`;
+    const completaron = datos.completados === 1 ? "1 lo completó" : `${datos.completados} lo completaron`;
+    const abandonaronTxt = abandonaron === 1 ? "1 lo abandonó" : `${abandonaron} lo abandonaron`;
+    resumen.textContent = `${personas} el enlace · ${completaron} (${pct}%) · ${abandonaronTxt} sin terminar.`;
+    barras.innerHTML = datos.por_pagina
+      .map((p) => {
+        const pctPagina = Math.round((p.llegaron / datos.aperturas) * 100);
+        return `
+        <div class="embudo-fila">
+          <span class="embudo-etiqueta">Página ${p.pagina}</span>
+          <div class="embudo-barra-fondo"><div class="embudo-barra-relleno" style="width:${pctPagina}%"></div></div>
+          <span class="embudo-valor">${p.llegaron} (${pctPagina}%)</span>
+        </div>`;
+      })
+      .join("");
+  }
+  wrap.hidden = false;
+  wrap.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 async function verRespuestas() {
   const wrap = document.getElementById("respuestas-wrap");
   const visible = !wrap.hidden;
@@ -781,6 +837,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btn-eliminar-test").addEventListener("click", eliminarTest);
   document.getElementById("btn-nueva-pagina").addEventListener("click", agregarPagina);
   document.getElementById("btn-ver-respuestas").addEventListener("click", verRespuestas);
+  document.getElementById("btn-ver-embudo").addEventListener("click", verEmbudo);
   document.getElementById("input-fondo-upload").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
