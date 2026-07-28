@@ -40,6 +40,11 @@ def hacer_backup():
     if not os.path.exists(DB_PATH):
         return
     os.makedirs(BACKUP_DIR, exist_ok=True)
+    # Podar ANTES de escribir la copia nueva (deja hueco): en un volumen casi
+    # lleno, escribir puede fallar pero borrar no necesita espacio libre — así
+    # este ciclo nunca vuelve a dejar el disco sin margen entre una corrida y
+    # la siguiente.
+    storage_sync.podar_backups_locales(dejar=BACKUPS_A_CONSERVAR - 1)
     marca = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     nombre = f"krispy_kreme_{marca}.db"
     destino = os.path.join(BACKUP_DIR, nombre)

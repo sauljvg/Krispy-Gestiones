@@ -13,6 +13,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 # "base de datos real". Ver storage_sync.py para el porqué completo.
 import storage_sync
 
+# Podar ANTES de restaurar: si el volumen está lleno del todo, incluso
+# restaurar_si_hace_falta() (que escribe en disco) fallaría — borrar es lo
+# único que no necesita espacio libre. Ver storage_sync.podar_backups_locales.
+storage_sync.podar_backups_locales()
 storage_sync.restaurar_si_hace_falta()
 
 # En Windows, mimetypes no siempre trae registrados los tipos de fuentes
