@@ -23,14 +23,15 @@ mimetypes.add_type("font/ttf", ".ttf")
 mimetypes.add_type("font/woff", ".woff")
 mimetypes.add_type("font/woff2", ".woff2")
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 import auth as auth_module
 import backups as backups_module
 import db as db_module
+import encuestas as encuestas_module
 import scrape_jobs
 from auth_routes import COOKIE_NAME, require_admin, require_resenas
 from auth_routes import router as auth_router
@@ -201,12 +202,50 @@ async def restaurar_backup(file: UploadFile = File(...), _admin: dict = Depends(
     return {"ok": True}
 
 
+FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
+
+
+@app.get("/encuesta.html")
+def encuesta_html_route(request: Request, slug: str | None = None):
+    """encuesta.html es un archivo estático fijo — el favicon/og:image que
+    distingue SAONA de Krispy Kreme hoy se decide en JS (encuesta.js), así
+    que un crawler que NO ejecuta JS (WhatsApp, Facebook, etc. generando la
+    vista previa de un enlace compartido) siempre ve el favicon de KK sin
+    importar el test. Esta ruta intercepta la petición antes del StaticFiles
+    de abajo y, si el slug corresponde a un test SAONA, sirve el HTML con el
+    favicon y unas meta og: ya correctas — así la vista previa del enlace
+    compartido también acierta, no solo lo que ve quien abre el enlace en el
+    navegador."""
+    import html as html_module
+
+    ruta = os.path.join(FRONTEND_DIR, "encuesta.html")
+    with open(ruta, encoding="utf-8") as f:
+        contenido = f.read()
+    if not slug:
+        return HTMLResponse(contenido)
+    encuesta = encuestas_module.get_encuesta_publica(slug)
+    if not encuesta:
+        return HTMLResponse(contenido)
+    es_saona = "saona" in encuesta["titulo"].lower()
+    favicon = "assets/favicon-saona.png" if es_saona else "assets/favicon-kk.png"
+    titulo_seguro = html_module.escape(encuesta["titulo"])
+    base_url = str(request.base_url).rstrip("/")
+    contenido = contenido.replace(
+        '<link rel="icon" type="image/png" href="assets/favicon-kk.png">',
+        f'<link rel="icon" type="image/png" href="{favicon}">\n'
+        f'<meta property="og:title" content="{titulo_seguro}">\n'
+        f'<meta property="og:type" content="website">\n'
+        f'<meta property="og:image" content="{base_url}/{favicon}">',
+    )
+    contenido = contenido.replace("<title>Test</title>", f"<title>{titulo_seguro}</title>")
+    return HTMLResponse(contenido)
+
+
 # Sirve el dashboard (HTML/CSS/JS) desde el mismo proceso y puerto que la API,
 # para que un único comando de arranque baste tanto en local como en un
 # despliegue (Replit, etc.) — antes hacían falta dos servidores (API +
 # estático) en dos puertos distintos. Va DESPUÉS de include_router para que
 # las rutas /api/* tengan prioridad sobre el catch-all de archivos estáticos.
-FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
 
 

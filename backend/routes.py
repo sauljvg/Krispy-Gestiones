@@ -355,15 +355,19 @@ def set_transactions(body: TransactionsIn):
 
 
 @router.post("/scrape")
-def start_scrape(tienda: str | None = None, empresa: str = "kk"):
+def start_scrape(tienda: str | None = None, empresa: str = "kk", completo: bool = False):
     """Lanza scraper_v2.py --update para `tienda` (nombre público o clave), o
     para las tiendas de `empresa` en cola si no se especifica. No bloquea: el
-    progreso se consulta en /scrape/status."""
+    progreso se consulta en /scrape/status. `completo=true` hace un escaneo
+    completo del histórico en vez del incremental — requiere `tienda` (no
+    tiene sentido en cola para varias tiendas, tarda mucho más)."""
+    if completo and not tienda:
+        raise HTTPException(400, "El escaneo completo requiere elegir una tienda concreta.")
     if tienda:
         key = scrape_jobs.resolve_tienda_key(tienda)
         if key is None:
             raise HTTPException(404, f"Tienda desconocida: '{tienda}'")
-        ok, error = scrape_jobs.start_update(tienda_key=key, all_keys=scrape_jobs.all_tienda_keys())
+        ok, error = scrape_jobs.start_update(tienda_key=key, all_keys=scrape_jobs.all_tienda_keys(), completo=completo)
     else:
         ok, error = scrape_jobs.start_update(all_keys=scrape_jobs.tienda_keys_de_empresa(empresa))
     if not ok:

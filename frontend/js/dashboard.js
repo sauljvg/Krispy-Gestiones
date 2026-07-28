@@ -430,6 +430,23 @@ async function startScrapeUpdate() {
   pollScrapeStatus(tienda);
 }
 
+async function startScrapeCompleto() {
+  const tienda = state.tienda;
+  if (!tienda) {
+    alert("Elige primero una tienda concreta arriba — el escaneo completo no es para todas a la vez, tarda demasiado.");
+    return;
+  }
+  if (!confirm(`Esto va a recorrer TODO el histórico de reseñas de ${tienda}, no solo lo nuevo. Puede tardar 20-40 minutos con Chrome abierto. ¿Continuar?`)) return;
+  const url = conEmpresaURL(`${API_BASE}/scrape?tienda=${encodeURIComponent(tienda)}&completo=true`);
+  const res = await fetch(url, { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    alert(`No se pudo iniciar el escaneo completo: ${body.detail || res.statusText}`);
+    return;
+  }
+  pollScrapeStatus(tienda);
+}
+
 function renderScrapeTooltip(e) {
   const tooltipEl = document.getElementById("scrape-info-tooltip");
   if (!e) {
@@ -559,6 +576,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (horarioVisible) loadHorario().catch((err) => console.error("Fallo cargando horario:", err));
   });
   document.getElementById("btn-refresh").addEventListener("click", startScrapeUpdate);
+  document.getElementById("btn-scan-completo").addEventListener("click", startScrapeCompleto);
   document.getElementById("btn-export-csv").addEventListener("click", exportExcel);
   document.getElementById("input-transactions-month").value = new Date().toISOString().slice(0, 7);
   document.getElementById("input-transactions-month").addEventListener("change", () => {

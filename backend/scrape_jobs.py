@@ -74,7 +74,7 @@ def is_running(tienda_key):
     return proc is not None and proc.poll() is None
 
 
-def _run_one(tienda_key):
+def _run_one(tienda_key, completo=False):
     status_file = _status_path(tienda_key)
     try:
         with open(status_file, "w", encoding="utf-8") as f:
@@ -82,10 +82,13 @@ def _run_one(tienda_key):
     except OSError:
         pass
 
+    args = [sys.executable, "-u", SCRAPER_SCRIPT, tienda_key]
+    if not completo:
+        args.append("--update")
     env = {**os.environ, "KT_STATUS_FILE": status_file}
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-u", SCRAPER_SCRIPT, tienda_key, "--update"],
+            args,
             cwd=SCRAPER_DIR,
             env=env,
         )
@@ -113,15 +116,18 @@ def _run_queue(tienda_keys):
         _run_one(tienda_key)
 
 
-def start_update(tienda_key=None, all_keys=None):
+def start_update(tienda_key=None, all_keys=None, completo=False):
     """Lanza la actualización de una tienda, o de todas en cola si
-    `tienda_key` es None. Devuelve (ok, mensaje_error)."""
+    `tienda_key` es None. `completo=True` hace un escaneo completo (sin
+    --update): recorre todo el histórico en vez de parar al pisar territorio
+    ya conocido — solo tiene sentido para una tienda concreta (tarda mucho
+    más), por eso se ignora si no hay `tienda_key`. Devuelve (ok, mensaje_error)."""
     all_keys = list(all_keys or [])
     with _lock:
         if tienda_key:
             if is_running(tienda_key):
                 return False, "Ya hay una actualización en curso para esta tienda."
-            threading.Thread(target=_run_one, args=(tienda_key,), daemon=True).start()
+            threading.Thread(target=_run_one, args=(tienda_key, completo), daemon=True).start()
             return True, None
 
         if any(is_running(k) for k in all_keys):
