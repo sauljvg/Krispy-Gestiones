@@ -459,6 +459,14 @@ def _es_oficinas(centro):
     return _normaliza_header(centro) == "oficinas"
 
 
+def _es_fabrica(centro):
+    """Detecta cualquier centro cuyo nombre contenga "fábrica" (ParqueSur
+    Fábrica hoy, y las que se vayan añadiendo) — por nombre y no por una
+    lista fija, para que una fábrica nueva aparezca sola en su gráfico sin
+    tener que tocar código cada vez."""
+    return "fabrica" in _normaliza_header(centro)
+
+
 def _fetch_respuestas(conn, oleada_id, centro, centros_permitidos=None):
     if centro:
         rows = conn.execute(
@@ -629,21 +637,26 @@ def compute_reporte(oleada_id, centro=None, centros_permitidos=None):
 
 def compute_por_centro(oleada_id, centros_permitidos=None):
     """Engagement y participación de CADA tienda por separado (Oficinas
-    excluida, igual que en el agregado) — alimenta los dos gráficos de
-    barras de la vista "todos los centros"."""
+    excluida, igual que en el agregado) — alimenta los gráficos de barras de
+    la vista "todos los centros". Separado en tiendas/fábricas porque son
+    realidades distintas (una fábrica no tiene el mismo perfil de plantilla
+    ni de participación que una tienda) y mezclarlas en el mismo gráfico de
+    barras no deja comparar bien ni unas ni otras."""
     centros = [c for c in list_centros(oleada_id, centros_permitidos) if not _es_oficinas(c)]
-    resultado = []
+    tiendas = []
+    fabricas = []
     for centro in centros:
         try:
             reporte = compute_reporte(oleada_id, centro)
         except ValueError:
             continue
-        resultado.append({
+        item = {
             "centro": centro,
             "engagement": reporte["engagement_presente"],
             "participacion": reporte["participacion"],
-        })
-    return resultado
+        }
+        (fabricas if _es_fabrica(centro) else tiendas).append(item)
+    return {"tiendas": tiendas, "fabricas": fabricas}
 
 
 def _tiendas_para_centro(centro, empresa="kk"):

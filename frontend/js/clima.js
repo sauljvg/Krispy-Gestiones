@@ -221,6 +221,9 @@ function renderChart(canvasId, existingChart, items) {
 
 let chartCentrosEngagement = null;
 let chartCentrosParticipacion = null;
+let chartFabricasEngagement = null;
+let chartFabricasParticipacion = null;
+let hayFabricas = false;
 let datosPorCentroCache = { oleada: null, datos: null };
 
 function mostrarGraficosCentroPreferido() {
@@ -264,10 +267,9 @@ async function actualizarGraficosPorCentro(centro) {
 
   if (datosPorCentroCache.oleada !== currentOleada) {
     const res = await fetch(`${AUTH_API_BASE}/clima/${currentOleada}/por-centro`);
-    datosPorCentroCache = { oleada: currentOleada, datos: res.ok ? await res.json() : [] };
+    datosPorCentroCache = { oleada: currentOleada, datos: res.ok ? await res.json() : { tiendas: [], fabricas: [] } };
   }
-  const datos = datosPorCentroCache.datos;
-  const labels = datos.map((d) => d.centro);
+  const { tiendas, fabricas } = datosPorCentroCache.datos;
   const verde = getComputedStyle(document.documentElement).getPropertyValue("--kk-verde").trim() || "#006838";
   // Participación usa el segundo color de marca de cada empresa: rojo
   // corporativo de Krispy Kreme (tomado del logo de La Voz), o el navy de
@@ -278,11 +280,24 @@ async function actualizarGraficosPorCentro(centro) {
     : "#CE102A";
 
   chartCentrosEngagement = renderChartSimple(
-    "chart-centros-engagement", chartCentrosEngagement, labels, datos.map((d) => d.engagement ?? 0), verde
+    "chart-centros-engagement", chartCentrosEngagement, tiendas.map((d) => d.centro), tiendas.map((d) => d.engagement ?? 0), verde
   );
   chartCentrosParticipacion = renderChartSimple(
-    "chart-centros-participacion", chartCentrosParticipacion, labels, datos.map((d) => d.participacion ?? 0), colorParticipacion
+    "chart-centros-participacion", chartCentrosParticipacion, tiendas.map((d) => d.centro), tiendas.map((d) => d.participacion ?? 0), colorParticipacion
   );
+
+  // Fila de fábricas: aparte de las tiendas (ver compute_por_centro en el
+  // backend) y solo visible si hay al menos una — así una empresa sin
+  // fábricas (Saona, hoy) no ve una fila de gráficos vacía.
+  hayFabricas = fabricas.length > 0;
+  if (hayFabricas) {
+    chartFabricasEngagement = renderChartSimple(
+      "chart-fabricas-engagement", chartFabricasEngagement, fabricas.map((d) => d.centro), fabricas.map((d) => d.engagement ?? 0), verde
+    );
+    chartFabricasParticipacion = renderChartSimple(
+      "chart-fabricas-participacion", chartFabricasParticipacion, fabricas.map((d) => d.centro), fabricas.map((d) => d.participacion ?? 0), colorParticipacion
+    );
+  }
 
   aplicarPreferenciaGraficosCentro();
 }
@@ -291,6 +306,7 @@ function aplicarPreferenciaGraficosCentro() {
   const mostrar = mostrarGraficosCentroPreferido();
   const palabra = EMPRESA === "saona" ? "restaurante" : "tienda";
   document.getElementById("centros-charts-row").hidden = !mostrar;
+  document.getElementById("fabricas-charts-row").hidden = !mostrar || !hayFabricas;
   document.getElementById("btn-toggle-centros-charts").textContent = mostrar
     ? `📊 Ocultar gráficos por ${palabra}`
     : `📊 Mostrar gráficos por ${palabra}`;
