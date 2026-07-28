@@ -25,7 +25,13 @@ BACKUP_DIR = os.path.join(DATA_DIR, "backups")
 # Bajar el intervalo a minutos es la mitigación real para este hosting: en el
 # peor caso solo se pierde lo que entró en esta ventana, no hasta 6h.
 BACKUP_INTERVAL_MINUTES = 10
-BACKUPS_A_CONSERVAR = 30  # ~5 horas de historial local a razón de una copia cada 10 min
+# 30 copias (~5h de historial) llenó un volumen de 500 MB en Railway con una
+# base de ~15 MB (30 x 15 MB = 450 MB solo en backups locales, antes de
+# contar uploads). En un host con volumen persistente de verdad (a diferencia
+# de Replit Autoscale, que es por lo que este número era tan alto) no hace
+# falta tanta redundancia local — 1h de historial (6 copias) ya cubre el caso
+# real (crash o mal despliegue) sin arriesgarse a llenar el disco.
+BACKUPS_A_CONSERVAR = 6
 
 _scheduler_started = False
 
