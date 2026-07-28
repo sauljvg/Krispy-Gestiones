@@ -546,6 +546,17 @@ function renderForm() {
     <div id="extraccion-aviso-wrap"></div>
     <div id="revision-multiple-wrap"></div>`;
 
+  const resultadoTestHTML = esEdicion && candidatoEditando.informe_tipo_clave
+    ? (() => {
+        const params = new URLSearchParams({
+          tipo: candidatoEditando.informe_tipo_clave,
+          hoja: candidatoEditando.informe_hoja || "",
+          empresa: candidatoEditando.informe_empresa || "kk",
+        });
+        return `<p class="staff-hint"><a href="/informes.html?${params.toString()}" target="_blank" rel="noopener">📊 Ver resultado del test</a></p>`;
+      })()
+    : "";
+
   const archivosHTML = esEdicion && candidatoEditando.archivos.length
     ? `<div class="archivos-lista">${candidatoEditando.archivos.map((a) =>
         `<a href="${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}/archivos/${a.id}" target="_blank" rel="noopener">📄 ${escapeHTML(a.nombre_original)}</a>`
@@ -561,6 +572,7 @@ function renderForm() {
   wrap.innerHTML = `
     <div class="candidato-form">
       <h3>${esEdicion ? "Editar candidato" : "Nuevo candidato"}</h3>
+      ${resultadoTestHTML}
       ${subirCvHTML}
       <div id="single-candidato-wrap">
         <div class="form-grid">

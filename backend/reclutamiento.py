@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 from db import DATA_DIR, get_connection
 
@@ -259,6 +260,21 @@ def get_candidato(candidato_id):
         "SELECT id, nombre_original, subido_en FROM candidato_archivos WHERE candidato_id = ? ORDER BY subido_en DESC",
         (candidato_id,),
     ).fetchall()
+    # Si esta ficha está enlazada a una respuesta de Informes (por "compartir"
+    # o por el match automático de guardar_respuesta), se expone también el
+    # tipo/hoja para que el frontend pueda armar el enlace directo al
+    # resultado — sin esto, respuesta_id es solo un número sin ningún sitio
+    # al que llevar al usuario.
+    if candidato.get("respuesta_id"):
+        info = conn.execute("""
+            SELECT t.clave AS tipo_clave, t.empresa, r.hoja
+            FROM informe_respuestas r JOIN informe_tipos t ON t.id = r.tipo_id
+            WHERE r.id = ?
+        """, (candidato["respuesta_id"],)).fetchone()
+        if info:
+            candidato["informe_tipo_clave"] = info["tipo_clave"]
+            candidato["informe_hoja"] = info["hoja"]
+            candidato["informe_empresa"] = info["empresa"]
     conn.close()
     candidato["archivos"] = [dict(a) for a in archivos]
     return candidato
@@ -269,6 +285,45 @@ def get_candidato_por_respuesta(respuesta_id):
     row = conn.execute("SELECT id FROM candidatos WHERE respuesta_id = ?", (respuesta_id,)).fetchone()
     conn.close()
     return row["id"] if row else None
+
+
+def _normalizar_telefono(telefono):
+    return re.sub(r"\D", "", telefono or "")
+
+
+def buscar_candidato_sin_respuesta_por_contacto(telefono, email):
+    """Busca en Reclutamiento un candidato YA EXISTENTE (creado a mano, por CV
+    o por una vacante) que coincida por teléfono o correo con quien acaba de
+    responder un test — y que todavía no tenga ningún test enlazado. Así, si
+    Bianca Burbano ya está en la base de candidatos y ahora rellena el test,
+    se enlaza a su misma ficha en vez de quedar suelto hasta que alguien lo
+    comparta a mano desde Informes. No toca candidatos que ya tengan un
+    respuesta_id (para no perder un enlace anterior)."""
+    tel_norm = _normalizar_telefono(telefono)
+    email_norm = (email or "").strip().lower()
+    if not tel_norm and not email_norm:
+        return None
+    conn = get_connection()
+    candidatos = conn.execute(
+        "SELECT id, telefono, email FROM candidatos WHERE respuesta_id IS NULL"
+    ).fetchall()
+    conn.close()
+    for c in candidatos:
+        if tel_norm and _normalizar_telefono(c["telefono"]) == tel_norm:
+            return c["id"]
+        if email_norm and (c["email"] or "").strip().lower() == email_norm:
+            return c["id"]
+    return None
+
+
+def enlazar_respuesta_a_candidato(candidato_id, respuesta_id):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE candidatos SET respuesta_id = ?, actualizado_en = datetime('now') WHERE id = ?",
+        (respuesta_id, candidato_id),
+    )
+    conn.commit()
+    conn.close()
 
 
 def list_candidatos(empresa=None, estado=None, q=None, vacante_id=None, sin_vacante=False):

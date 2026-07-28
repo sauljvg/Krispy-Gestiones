@@ -665,6 +665,18 @@ def _candidato_id_para_respuesta(respuesta_id, compartido_por):
 
     datos = json.loads(respuesta["datos_json"])
     campos, extra = reclutamiento_module.mapear_datos_a_candidato(datos)
+
+    # Si esta persona ya está en Reclutamiento (creada a mano, por CV, o por
+    # una vacante) pero todavía sin ningún test enlazado, se conecta ahí en
+    # vez de crear una ficha duplicada — mismo criterio que el match
+    # automático al recibir la respuesta (ver encuestas.guardar_respuesta).
+    candidato_existente = reclutamiento_module.buscar_candidato_sin_respuesta_por_contacto(
+        campos.get("telefono"), campos.get("email")
+    )
+    if candidato_existente:
+        reclutamiento_module.enlazar_respuesta_a_candidato(candidato_existente, respuesta_id)
+        return candidato_existente
+
     campos["extra_fields"] = extra
     candidato_id = reclutamiento_module.crear_candidato(
         campos, empresa=empresa, origen="informe", respuesta_id=respuesta_id, creado_por=compartido_por

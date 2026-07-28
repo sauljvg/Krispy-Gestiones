@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 import entrevistas as entrevistas_module
 import informes as informes_module
+import reclutamiento as reclutamiento_module
 from db import DATA_DIR, get_connection
 
 FONDOS_DIR = os.path.join(DATA_DIR, "uploads", "encuestas_fondos")
@@ -689,6 +690,17 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
             )
             conn2.commit()
             conn2.close()
+            # Si quien acaba de responder ya está en la base de Reclutamiento
+            # (creado a mano, por CV, o desde una vacante) pero todavía sin
+            # test enlazado, se conecta automáticamente con esta respuesta en
+            # vez de quedar como una ficha aparte hasta que alguien la
+            # comparta a mano — así el resultado aparece directo en su ficha.
+            campos_contacto, _ = reclutamiento_module.mapear_datos_a_candidato(fila_por_etiqueta)
+            candidato_id = reclutamiento_module.buscar_candidato_sin_respuesta_por_contacto(
+                campos_contacto.get("telefono"), campos_contacto.get("email")
+            )
+            if candidato_id:
+                reclutamiento_module.enlazar_respuesta_a_candidato(candidato_id, enlace["respuesta_id"])
     if row["tipo_entrevista_empresa"]:
         entrevistas_module.ingest_fila_directa(
             row["tipo_entrevista_empresa"], fila_por_etiqueta, origen=f"Test web: {row['titulo']}"
