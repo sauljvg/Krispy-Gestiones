@@ -115,6 +115,21 @@ def ensure_reclutamiento_tables():
             subido_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # Compartir un candidato directo desde Reclutamiento (sin pasar por un
+    # test de Informes) — paralela a informe_compartidos, que exige un
+    # respuesta_id y por eso no sirve para candidatos que llegaron por CV o
+    # alta manual. Las dos se fusionan al leer "Compartidos" (ver
+    # informes.get_compartidos_con/por) para que el gerente las vea juntas.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS candidato_compartidos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            candidato_id INTEGER NOT NULL REFERENCES candidatos(id) ON DELETE CASCADE,
+            usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+            compartido_por TEXT,
+            compartido_en TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(candidato_id, usuario_id)
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -322,6 +337,110 @@ def actualizar_candidato(candidato_id, campos: dict):
     conn.execute(f"UPDATE candidatos SET {', '.join(sets)} WHERE id = ?", params)
     conn.commit()
     conn.close()
+
+
+def actualizar_estado_multiple(candidato_ids: list[int], estado: str):
+    if not candidato_ids:
+        return
+    conn = get_connection()
+    placeholders = ", ".join("?" for _ in candidato_ids)
+    conn.execute(
+        f"UPDATE candidatos SET estado = ?, actualizado_en = datetime('now') WHERE id IN ({placeholders})",
+        [estado, *candidato_ids],
+    )
+    conn.commit()
+    conn.close()
+
+
+def contar_por_estado(empresa=None, q=None, vacante_id=None, sin_vacante=False):
+    """Conteo de candidatos por estado con los mismos filtros que
+    list_candidatos (menos el propio estado) — alimenta los números de cada
+    pestaña en la vista de Reclutamiento."""
+    conn = get_connection()
+    clauses = []
+    params = []
+    if empresa:
+        clauses.append("empresa = ?")
+        params.append(empresa)
+    if vacante_id is not None:
+        clauses.append("vacante_id = ?")
+        params.append(vacante_id)
+    elif sin_vacante:
+        clauses.append("vacante_id IS NULL")
+    if q:
+        clauses.append("(nombre_completo LIKE ? OR telefono LIKE ? OR email LIKE ? OR puesto_solicitado LIKE ?)")
+        like = f"%{q}%"
+        params.extend([like, like, like, like])
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = conn.execute(f"SELECT estado, COUNT(*) AS n FROM candidatos {where} GROUP BY estado", params).fetchall()
+    conn.close()
+    conteo = {e: 0 for e in ESTADOS}
+    for r in rows:
+        conteo[r["estado"]] = r["n"]
+    return conteo
+
+
+def compartir_candidatos_directo(candidato_ids: list[int], usuario_id: int, compartido_por: str):
+    conn = get_connection()
+    for candidato_id in candidato_ids:
+        conn.execute(
+            """
+            INSERT INTO candidato_compartidos (candidato_id, usuario_id, compartido_por)
+            VALUES (?, ?, ?)
+            ON CONFLICT(candidato_id, usuario_id)
+            DO UPDATE SET compartido_por = excluded.compartido_por, compartido_en = datetime('now')
+            """,
+            (candidato_id, usuario_id, compartido_por),
+        )
+    conn.commit()
+    conn.close()
+
+
+def dejar_de_compartir_candidato(candidato_id: int, usuario_id: int):
+    conn = get_connection()
+    conn.execute(
+        "DELETE FROM candidato_compartidos WHERE candidato_id = ? AND usuario_id = ?", (candidato_id, usuario_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_candidatos_compartidos_directo_con(usuario_id, empresa=None):
+    conn = get_connection()
+    clauses = ["cc.usuario_id = ?"]
+    params = [usuario_id]
+    if empresa:
+        clauses.append("c.empresa = ?")
+        params.append(empresa)
+    rows = conn.execute(f"""
+        SELECT cc.id AS compartido_id, cc.compartido_en, cc.compartido_por, c.*
+        FROM candidato_compartidos cc
+        JOIN candidatos c ON c.id = cc.candidato_id
+        WHERE {' AND '.join(clauses)}
+        ORDER BY cc.compartido_en DESC
+    """, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_candidatos_compartidos_directo_por(username, empresa=None):
+    conn = get_connection()
+    clauses = ["cc.compartido_por = ?"]
+    params = [username]
+    if empresa:
+        clauses.append("c.empresa = ?")
+        params.append(empresa)
+    rows = conn.execute(f"""
+        SELECT cc.id AS compartido_id, cc.compartido_en, cc.compartido_por,
+               u.nombre AS destinatario_nombre, u.username AS destinatario_username, c.*
+        FROM candidato_compartidos cc
+        JOIN candidatos c ON c.id = cc.candidato_id
+        JOIN usuarios u ON u.id = cc.usuario_id
+        WHERE {' AND '.join(clauses)}
+        ORDER BY cc.compartido_en DESC
+    """, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def eliminar_candidato(candidato_id):

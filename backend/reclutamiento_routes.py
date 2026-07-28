@@ -44,6 +44,16 @@ class CandidatoIn(BaseModel):
     extra_fields: dict[str, str] = {}
 
 
+class EstadoMultipleIn(BaseModel):
+    candidato_ids: list[int]
+    estado: str
+
+
+class CompartirCandidatosIn(BaseModel):
+    candidato_ids: list[int]
+    usuario_id: int
+
+
 class CandidatoUpdateIn(BaseModel):
     vacante_id: int | None = None
     nombre_completo: str | None = None
@@ -112,6 +122,37 @@ def list_candidatos_route(
     _user: dict = Depends(require_informes),
 ):
     return reclutamiento_module.list_candidatos(empresa=empresa, estado=estado, q=q, vacante_id=vacante_id, sin_vacante=sin_vacante)
+
+
+@router.get("/candidatos/conteo-por-estado")
+def conteo_por_estado_route(
+    empresa: str | None = None,
+    q: str | None = None,
+    vacante_id: int | None = None,
+    sin_vacante: bool = False,
+    _user: dict = Depends(require_informes),
+):
+    return reclutamiento_module.contar_por_estado(empresa=empresa, q=q, vacante_id=vacante_id, sin_vacante=sin_vacante)
+
+
+@router.put("/candidatos/estado-multiple")
+def actualizar_estado_multiple_route(body: EstadoMultipleIn, _user: dict = Depends(require_informes)):
+    if body.estado not in reclutamiento_module.ESTADOS:
+        raise HTTPException(status_code=400, detail=f"Estado inválido: {body.estado}")
+    reclutamiento_module.actualizar_estado_multiple(body.candidato_ids, body.estado)
+    return {"ok": True}
+
+
+@router.post("/candidatos/compartir")
+def compartir_candidatos_route(body: CompartirCandidatosIn, user: dict = Depends(require_informes)):
+    reclutamiento_module.compartir_candidatos_directo(body.candidato_ids, body.usuario_id, user["username"])
+    return {"ok": True}
+
+
+@router.delete("/candidatos/{candidato_id}/compartir/{usuario_id}")
+def dejar_de_compartir_candidato_route(candidato_id: int, usuario_id: int, _user: dict = Depends(require_informes)):
+    reclutamiento_module.dejar_de_compartir_candidato(candidato_id, usuario_id)
+    return {"ok": True}
 
 
 @router.get("/candidatos/{candidato_id}")

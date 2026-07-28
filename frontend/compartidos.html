@@ -50,6 +50,33 @@
   .badge-contratado { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
   .badge-descartado { background: color-mix(in srgb, var(--status-critical) 16%, transparent); color: var(--status-critical); }
 
+  .candidatos-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .candidatos-tab {
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary);
+    border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .candidatos-tab:hover { border-color: var(--border-strong); }
+  .candidatos-tab.activa { background: var(--acento); border-color: var(--acento); color: #fff; }
+  .candidatos-tab-count {
+    background: color-mix(in srgb, currentColor 18%, transparent); border-radius: 999px;
+    padding: 1px 7px; font-size: 11px;
+  }
+  .candidatos-seleccion-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none;
+    align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal-overlay.visible { display: flex; }
+  .modal-box {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 24px; width: 100%; max-width: 360px;
+  }
+  .modal-box h3 { margin: 0 0 14px; font-size: 16px; }
+  .modal-box select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); margin-bottom: 14px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
   .reclu-candidatos-wrap { margin-bottom: 30px; }
   .candidatos-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
   .candidatos-toolbar input, .candidatos-toolbar select {
@@ -155,22 +182,27 @@
       <div id="vacante-form-wrap"></div>
 
       <h2 class="reclu-seccion">Base de candidatos</h2>
+      <div id="candidatos-tabs" class="candidatos-tabs"></div>
       <div class="candidatos-toolbar">
         <input type="text" id="candidatos-buscar" placeholder="Buscar por nombre, teléfono, email o puesto...">
-        <select id="candidatos-filtro-estado">
-          <option value="">Todos los estados</option>
-          <option value="pendiente">Pendiente</option>
-          <option value="entrevistado">Entrevistado</option>
-          <option value="contratado">Contratado</option>
-          <option value="descartado">Descartado</option>
-        </select>
         <select id="candidatos-filtro-vacante">
           <option value="">Todos los candidatos</option>
           <option value="sin_vacante">Sin vacante asignada</option>
         </select>
         <button id="btn-modo-seleccion" class="btn btn-ghost" type="button">☑ Selección múltiple</button>
-        <button id="btn-whatsapp-seleccionados" class="btn btn-ghost" type="button" hidden>💬 Mensaje por WhatsApp</button>
         <button id="btn-nuevo-candidato" class="btn btn-primary" type="button">＋ Nuevo candidato</button>
+      </div>
+      <div id="candidatos-seleccion-bar" class="candidatos-seleccion-bar" hidden>
+        <span id="candidatos-seleccion-contador" class="staff-hint"></span>
+        <select id="candidatos-estado-masivo">
+          <option value="">Cambiar estado a...</option>
+          <option value="pendiente">Pendiente</option>
+          <option value="entrevistado">Entrevistado</option>
+          <option value="contratado">Contratado</option>
+          <option value="descartado">Descartado</option>
+        </select>
+        <button id="btn-compartir-seleccionados" class="btn btn-ghost" type="button">Compartir con...</button>
+        <button id="btn-whatsapp-seleccionados" class="btn btn-ghost" type="button" hidden>💬 Mensaje por WhatsApp</button>
       </div>
       <div id="candidatos-grid" class="candidatos-grid"></div>
       <div id="form-wrap"></div>
@@ -179,9 +211,21 @@
     <div id="compartidos-list"></div>
   </div>
 </div>
+
+<div class="modal-overlay" id="compartir-candidatos-modal">
+  <div class="modal-box">
+    <h3>Compartir con...</h3>
+    <select id="compartir-candidatos-usuario-select"></select>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="btn-compartir-candidatos-cancelar">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btn-compartir-candidatos-confirmar">Compartir</button>
+    </div>
+  </div>
+</div>
+
 <script src="js/theme.js?v=20260724a"></script>
 <script src="js/auth-common.js?v=20260724a"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/compartidos.js?v=20260727a"></script>
+<script src="js/compartidos.js?v=20260728a"></script>
 </body>
 </html>

@@ -212,10 +212,11 @@ function candidatoCardHTML(item) {
   const notasHTML = candId
     ? `<div class="candidato-notas"><textarea class="candidato-notas-input" data-candidato-id="${candId}" placeholder="Notas sobre este candidato...">${escapeHTML(item.notas || "")}</textarea></div>`
     : "";
+  const metaTxt = item.hoja ? `${item.tipo_nombre} · hoja "${item.hoja}"` : item.tipo_nombre;
   return `
     <div class="candidato-card">
       <h3>${escapeHTML(nombreCandidato(item.datos))} ${estadoHTML}</h3>
-      <p class="candidato-meta">${escapeHTML(item.tipo_nombre)} · hoja "${escapeHTML(item.hoja)}"</p>
+      <p class="candidato-meta">${escapeHTML(metaTxt)}</p>
       <div class="candidato-datos">
         ${entries.map(([k, v]) => `<div><div class="campo-nombre">${escapeHTML(k)}</div><div>${escapeHTML(v)}</div></div>`).join("")}
       </div>
@@ -825,6 +826,8 @@ async function agregarArchivoAlCandidato() {
 let modoSeleccionCandidatos = false;
 let candidatosSeleccionadosIds = new Set();
 let ultimosCandidatosCargados = [];
+let candidatosFiltroEstado = "";
+let usuariosParaCompartirCandidatos = [];
 
 function candidatoMiniCardHTML(c) {
   const linea2 = [c.telefono, c.email].filter(Boolean).join(" · ");
@@ -842,10 +845,20 @@ function candidatoMiniCardHTML(c) {
 }
 
 function actualizarBotonWhatsappSeleccionados() {
-  const btn = document.getElementById("btn-whatsapp-seleccionados");
+  const barra = document.getElementById("candidatos-seleccion-bar");
+  const btnWhatsapp = document.getElementById("btn-whatsapp-seleccionados");
+  const btnCompartir = document.getElementById("btn-compartir-seleccionados");
+  const estadoMasivo = document.getElementById("candidatos-estado-masivo");
+  const contador = document.getElementById("candidatos-seleccion-contador");
   const n = candidatosSeleccionadosIds.size;
-  btn.hidden = !modoSeleccionCandidatos || n === 0;
-  btn.textContent = `💬 Mensaje por WhatsApp (${n})`;
+  barra.hidden = !modoSeleccionCandidatos;
+  if (!modoSeleccionCandidatos) return;
+  contador.textContent = `${n} candidato${n === 1 ? "" : "s"} seleccionado${n === 1 ? "" : "s"}`;
+  const sinSeleccion = n === 0;
+  btnWhatsapp.hidden = sinSeleccion;
+  btnWhatsapp.textContent = `💬 Mensaje por WhatsApp (${n})`;
+  btnCompartir.disabled = sinSeleccion;
+  estadoMasivo.disabled = sinSeleccion;
 }
 
 function toggleModoSeleccion() {
@@ -854,6 +867,73 @@ function toggleModoSeleccion() {
   document.getElementById("btn-modo-seleccion").textContent = modoSeleccionCandidatos ? "✕ Cancelar selección" : "☑ Selección múltiple";
   actualizarBotonWhatsappSeleccionados();
   renderCandidatosGrid();
+}
+
+async function cambiarEstadoSeleccionados(estado) {
+  if (!estado || candidatosSeleccionadosIds.size === 0) return;
+  const ids = [...candidatosSeleccionadosIds];
+  await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/estado-multiple`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ candidato_ids: ids, estado }),
+  });
+  document.getElementById("candidatos-estado-masivo").value = "";
+  toggleModoSeleccion();
+  await loadCandidatos();
+}
+
+async function abrirModalCompartirCandidatos() {
+  if (candidatosSeleccionadosIds.size === 0) return;
+  if (usuariosParaCompartirCandidatos.length === 0) {
+    usuariosParaCompartirCandidatos = await fetch(`${AUTH_API_BASE}/informes/usuarios-para-compartir`).then((r) => r.json());
+  }
+  const select = document.getElementById("compartir-candidatos-usuario-select");
+  select.innerHTML = usuariosParaCompartirCandidatos
+    .map((u) => `<option value="${u.id}">${escapeHTML(u.nombre)} (${escapeHTML(u.username)} · ${escapeHTML(u.rol)})</option>`)
+    .join("");
+  document.getElementById("compartir-candidatos-modal").classList.add("visible");
+}
+
+function cerrarModalCompartirCandidatos() {
+  document.getElementById("compartir-candidatos-modal").classList.remove("visible");
+}
+
+async function confirmarCompartirCandidatos() {
+  const usuarioId = Number(document.getElementById("compartir-candidatos-usuario-select").value);
+  const ids = [...candidatosSeleccionadosIds];
+  if (!usuarioId || ids.length === 0) return;
+  await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/compartir`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ candidato_ids: ids, usuario_id: usuarioId }),
+  });
+  cerrarModalCompartirCandidatos();
+  toggleModoSeleccion();
+}
+
+async function renderCandidatosTabs() {
+  const q = document.getElementById("candidatos-buscar").value.trim();
+  const vacanteFiltro = document.getElementById("candidatos-filtro-vacante").value;
+  const params = new URLSearchParams({ empresa: EMPRESA });
+  if (q) params.set("q", q);
+  if (vacanteFiltro === "sin_vacante") params.set("sin_vacante", "true");
+  else if (vacanteFiltro) params.set("vacante_id", vacanteFiltro);
+  const conteo = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/conteo-por-estado?${params}`).then((r) => (r.ok ? r.json() : {}));
+  const total = Object.values(conteo).reduce((a, b) => a + b, 0);
+  const tabs = document.getElementById("candidatos-tabs");
+  const pestañas = [{ valor: "", etiqueta: "Todos", n: total }, ...ESTADOS.map((e) => ({ valor: e, etiqueta: ESTADO_LABELS[e], n: conteo[e] || 0 }))];
+  tabs.innerHTML = pestañas
+    .map((p) => `
+      <button type="button" class="candidatos-tab ${p.valor === candidatosFiltroEstado ? "activa" : ""}" data-estado="${p.valor}">
+        ${escapeHTML(p.etiqueta)} <span class="candidatos-tab-count">${p.n}</span>
+      </button>`)
+    .join("");
+  tabs.querySelectorAll(".candidatos-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      candidatosFiltroEstado = btn.dataset.estado;
+      loadCandidatos();
+    });
+  });
 }
 
 function renderCandidatosGrid() {
@@ -878,15 +958,15 @@ function renderCandidatosGrid() {
 
 async function loadCandidatos() {
   const q = document.getElementById("candidatos-buscar").value.trim();
-  const estado = document.getElementById("candidatos-filtro-estado").value;
   const vacanteFiltro = document.getElementById("candidatos-filtro-vacante").value;
   const params = new URLSearchParams({ empresa: EMPRESA });
   if (q) params.set("q", q);
-  if (estado) params.set("estado", estado);
+  if (candidatosFiltroEstado) params.set("estado", candidatosFiltroEstado);
   if (vacanteFiltro === "sin_vacante") params.set("sin_vacante", "true");
   else if (vacanteFiltro) params.set("vacante_id", vacanteFiltro);
   ultimosCandidatosCargados = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos?${params}`).then((r) => (r.ok ? r.json() : []));
   renderCandidatosGrid();
+  renderCandidatosTabs();
 }
 
 function abrirCampanaWhatsappSeleccionados() {
@@ -918,8 +998,11 @@ async function initBaseCandidatos(user) {
   document.getElementById("btn-nueva-vacante").addEventListener("click", abrirNuevaVacante);
   document.getElementById("btn-modo-seleccion").addEventListener("click", toggleModoSeleccion);
   document.getElementById("btn-whatsapp-seleccionados").addEventListener("click", abrirCampanaWhatsappSeleccionados);
+  document.getElementById("btn-compartir-seleccionados").addEventListener("click", abrirModalCompartirCandidatos);
+  document.getElementById("btn-compartir-candidatos-cancelar").addEventListener("click", cerrarModalCompartirCandidatos);
+  document.getElementById("btn-compartir-candidatos-confirmar").addEventListener("click", confirmarCompartirCandidatos);
+  document.getElementById("candidatos-estado-masivo").addEventListener("change", (e) => cambiarEstadoSeleccionados(e.target.value));
   document.getElementById("vacantes-filtro-estado").addEventListener("change", refreshVacantes);
-  document.getElementById("candidatos-filtro-estado").addEventListener("change", loadCandidatos);
   document.getElementById("candidatos-filtro-vacante").addEventListener("change", () => {
     renderVacantesGrid();
     loadCandidatos();

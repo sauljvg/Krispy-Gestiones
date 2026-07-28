@@ -737,6 +737,44 @@ def set_tipos_permitidos(usuario_id: int, tipos: list[str]):
     conn.close()
 
 
+def _candidato_directo_como_item(row, incluir_destinatario=False):
+    """Adapta una fila de candidato_compartidos (sin respuesta de Informes
+    detrás) a la misma forma que devuelve get_compartidos_con/por, para que
+    la pantalla de "Compartidos" pueda pintar ambos orígenes con el mismo
+    candidatoCardHTML sin ramificar el frontend. `datos` se sintetiza a
+    partir de los campos del candidato en vez de venir de un Excel."""
+    datos = {}
+    if row["nombre_completo"]:
+        datos["Nombre"] = row["nombre_completo"]
+    if row["telefono"]:
+        datos["Teléfono"] = row["telefono"]
+    if row["email"]:
+        datos["Email"] = row["email"]
+    if row["puesto_solicitado"]:
+        datos["Puesto solicitado"] = row["puesto_solicitado"]
+    item = {
+        "compartido_id": f"candidato-{row['compartido_id']}",
+        "compartido_en": row["compartido_en"],
+        "compartido_por": row["compartido_por"],
+        "respuesta_id": None,
+        "datos": datos,
+        "hoja": None,
+        "tiene_cv": False,
+        "cv_nombre": None,
+        "tipo_nombre": "Candidato (Reclutamiento)",
+        "tipo_clave": None,
+        "candidato_id": row["id"],
+        "estado": row["estado"],
+        "notas": row["notas"],
+        "telefono": row["telefono"],
+        "puesto_solicitado": row["puesto_solicitado"],
+    }
+    if incluir_destinatario:
+        item["destinatario_nombre"] = row["destinatario_nombre"]
+        item["destinatario_username"] = row["destinatario_username"]
+    return item
+
+
 def get_compartidos_con(usuario_id, empresa=None):
     conn = get_connection()
     clauses = ["c.usuario_id = ?"]
@@ -777,6 +815,9 @@ def get_compartidos_con(usuario_id, empresa=None):
             "telefono": row["candidato_telefono"],
             "puesto_solicitado": row["candidato_puesto"],
         })
+    directos = reclutamiento_module.get_candidatos_compartidos_directo_con(usuario_id, empresa=empresa)
+    resultado += [_candidato_directo_como_item(r) for r in directos]
+    resultado.sort(key=lambda it: it["compartido_en"], reverse=True)
     return resultado
 
 
@@ -826,6 +867,9 @@ def get_compartidos_por(username, empresa=None):
             "telefono": row["candidato_telefono"],
             "puesto_solicitado": row["candidato_puesto"],
         })
+    directos = reclutamiento_module.get_candidatos_compartidos_directo_por(username, empresa=empresa)
+    resultado += [_candidato_directo_como_item(r, incluir_destinatario=True) for r in directos]
+    resultado.sort(key=lambda it: it["compartido_en"], reverse=True)
     return resultado
 
 
