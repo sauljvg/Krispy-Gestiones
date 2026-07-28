@@ -157,6 +157,12 @@ function estadoBadgeHTML(estado) {
   return `<span class="badge-estado badge-${e}">${escapeHTML(ESTADO_LABELS[e] || e)}</span>`;
 }
 
+function resultadoBadgeHTML(resultado) {
+  if (!resultado) return "";
+  const clase = resultado.includes("No apto") ? "badge-resultado-malo" : "badge-resultado-bueno";
+  return `<span class="badge-resultado ${clase}">${escapeHTML(resultado)}</span>`;
+}
+
 function estadoSelectHTML(candidatoId, estado) {
   const opciones = ESTADOS.map((e) => `<option value="${e}" ${e === (estado || "pendiente") ? "selected" : ""}>${ESTADO_LABELS[e]}</option>`).join("");
   return `<select class="candidato-estado-select" data-candidato-id="${candidatoId}">${opciones}</select>`;
@@ -218,7 +224,7 @@ function candidatoCardHTML(item) {
   const metaTxt = item.hoja ? `${item.tipo_nombre} · hoja "${item.hoja}"` : item.tipo_nombre;
   return `
     <div class="candidato-card">
-      <h3>${escapeHTML(nombreCandidato(item.datos))} ${estadoHTML}</h3>
+      <h3>${escapeHTML(nombreCandidato(item.datos))} ${estadoHTML} ${resultadoBadgeHTML(item.test_resultado)}</h3>
       <p class="candidato-meta">${escapeHTML(metaTxt)}</p>
       <div class="candidato-datos">
         ${entries.map(([k, v]) => `<div><div class="campo-nombre">${escapeHTML(k)}</div><div>${escapeHTML(v)}</div></div>`).join("")}
@@ -559,7 +565,7 @@ function renderForm() {
           hoja: candidatoEditando.informe_hoja || "",
           empresa: candidatoEditando.informe_empresa || "kk",
         });
-        return `<p class="staff-hint"><a href="/informes.html?${params.toString()}" target="_blank" rel="noopener">📊 Ver resultado del test</a></p>`;
+        return `<p class="staff-hint"><a href="/informes.html?${params.toString()}" target="_blank" rel="noopener">📊 Ver resultado del test</a> ${resultadoBadgeHTML(candidatoEditando.test_resultado)}</p>`;
       })()
     : "";
 
@@ -855,7 +861,7 @@ function candidatoMiniCardHTML(c) {
   const checkbox = modoSeleccionCandidatos ? `<input type="checkbox" ${seleccionada ? "checked" : ""} style="margin-right:4px;">` : "";
   return `
     <div class="candidato-mini-card ${seleccionada ? "seleccionada" : ""}" data-candidato-id="${c.id}">
-      <h4>${checkbox}${escapeHTML(c.nombre_completo || "(sin nombre)")} ${estadoBadgeHTML(c.estado)}</h4>
+      <h4>${checkbox}${escapeHTML(c.nombre_completo || "(sin nombre)")} ${estadoBadgeHTML(c.estado)} ${resultadoBadgeHTML(c.test_resultado)}</h4>
       <p>${escapeHTML(c.puesto_solicitado || "")}</p>
       <p>${escapeHTML(linea2)}</p>
       <p style="color:var(--text-muted);">${escapeHTML(vacanteTxt)}</p>
@@ -1003,6 +1009,27 @@ function abrirNuevoCandidato() {
   renderForm();
 }
 
+async function revincularTests() {
+  const btn = document.getElementById("btn-revincular-tests");
+  btn.disabled = true;
+  btn.textContent = "Buscando...";
+  try {
+    const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/revincular-tests`, { method: "POST" });
+    if (!res.ok) {
+      alert("No se pudo completar la búsqueda (error " + res.status + ").");
+      return;
+    }
+    const data = await res.json();
+    alert(data.enlazados === 0
+      ? "No se encontró ninguna coincidencia nueva."
+      : `Se enlazaron ${data.enlazados} candidato${data.enlazados === 1 ? "" : "s"} con su test ya respondido.`);
+    loadCandidatos();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "🔗 Buscar tests ya respondidos";
+  }
+}
+
 async function initBaseCandidatos(user) {
   const modulos = user.modulos || [];
   const tieneAcceso = modulos.includes("informes") || modulos.includes("saona_informes");
@@ -1013,6 +1040,7 @@ async function initBaseCandidatos(user) {
   }
   wrap.hidden = false;
   document.getElementById("btn-nuevo-candidato").addEventListener("click", abrirNuevoCandidato);
+  document.getElementById("btn-revincular-tests").addEventListener("click", revincularTests);
   document.getElementById("btn-nueva-vacante").addEventListener("click", abrirNuevaVacante);
   document.getElementById("btn-modo-seleccion").addEventListener("click", toggleModoSeleccion);
   document.getElementById("btn-whatsapp-seleccionados").addEventListener("click", abrirCampanaWhatsappSeleccionados);

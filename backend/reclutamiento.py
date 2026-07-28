@@ -267,7 +267,7 @@ def get_candidato(candidato_id):
     # al que llevar al usuario.
     if candidato.get("respuesta_id"):
         info = conn.execute("""
-            SELECT t.clave AS tipo_clave, t.empresa, r.hoja
+            SELECT t.clave AS tipo_clave, t.empresa, r.hoja, json_extract(r.datos_json, '$.RESULTADO') AS test_resultado
             FROM informe_respuestas r JOIN informe_tipos t ON t.id = r.tipo_id
             WHERE r.id = ?
         """, (candidato["respuesta_id"],)).fetchone()
@@ -275,6 +275,7 @@ def get_candidato(candidato_id):
             candidato["informe_tipo_clave"] = info["tipo_clave"]
             candidato["informe_hoja"] = info["hoja"]
             candidato["informe_empresa"] = info["empresa"]
+            candidato["test_resultado"] = info["test_resultado"]
     conn.close()
     candidato["archivos"] = [dict(a) for a in archivos]
     return candidato
@@ -291,6 +292,16 @@ def _normalizar_telefono(telefono):
     return re.sub(r"\D", "", telefono or "")
 
 
+def _ultimos_9_digitos(telefono):
+    """Compara solo los últimos 9 dígitos (formato de móvil español) en vez
+    del número normalizado completo — si un lado guarda el prefijo de país
+    (+34, 0034...) y el otro no, con una igualdad exacta nunca habrían
+    coincidido aunque sea la misma persona. Devuelve None si hay menos de 9
+    dígitos, para no cruzar por accidente dos números incompletos."""
+    digitos = _normalizar_telefono(telefono)
+    return digitos[-9:] if len(digitos) >= 9 else None
+
+
 def buscar_candidato_sin_respuesta_por_contacto(telefono, email):
     """Busca en Reclutamiento un candidato YA EXISTENTE (creado a mano, por CV
     o por una vacante) que coincida por teléfono o correo con quien acaba de
@@ -299,7 +310,7 @@ def buscar_candidato_sin_respuesta_por_contacto(telefono, email):
     se enlaza a su misma ficha en vez de quedar suelto hasta que alguien lo
     comparta a mano desde Informes. No toca candidatos que ya tengan un
     respuesta_id (para no perder un enlace anterior)."""
-    tel_norm = _normalizar_telefono(telefono)
+    tel_norm = _ultimos_9_digitos(telefono)
     email_norm = (email or "").strip().lower()
     if not tel_norm and not email_norm:
         return None
@@ -309,10 +320,39 @@ def buscar_candidato_sin_respuesta_por_contacto(telefono, email):
     ).fetchall()
     conn.close()
     for c in candidatos:
-        if tel_norm and _normalizar_telefono(c["telefono"]) == tel_norm:
+        if tel_norm and _ultimos_9_digitos(c["telefono"]) == tel_norm:
             return c["id"]
         if email_norm and (c["email"] or "").strip().lower() == email_norm:
             return c["id"]
+    return None
+
+
+def buscar_respuesta_huerfana_por_contacto(telefono, email):
+    """Simétrico al anterior: cuando el candidato se da de alta en
+    Reclutamiento DESPUÉS de que la persona ya hubiera respondido el test
+    (p.ej. una importación de candidatos de una vacante), busca entre las
+    respuestas de test que todavía no están enlazadas a ningún candidato una
+    que coincida por teléfono o correo. Sin esto, el enlace automático solo
+    funcionaba en un sentido (respuesta nueva -> candidato existente) y una
+    importación posterior se quedaba huérfana para siempre."""
+    tel_norm = _ultimos_9_digitos(telefono)
+    email_norm = (email or "").strip().lower()
+    if not tel_norm and not email_norm:
+        return None
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT r.id, r.datos_json FROM informe_respuestas r
+        LEFT JOIN candidatos c ON c.respuesta_id = r.id
+        WHERE c.id IS NULL
+    """).fetchall()
+    conn.close()
+    for r in rows:
+        datos = json.loads(r["datos_json"])
+        campos, _ = mapear_datos_a_candidato(datos)
+        if tel_norm and _ultimos_9_digitos(campos.get("telefono")) == tel_norm:
+            return r["id"]
+        if email_norm and (campos.get("email") or "").strip().lower() == email_norm:
+            return r["id"]
     return None
 
 
@@ -331,30 +371,44 @@ def list_candidatos(empresa=None, estado=None, q=None, vacante_id=None, sin_vaca
     clauses = []
     params = []
     if empresa:
-        clauses.append("empresa = ?")
+        clauses.append("c.empresa = ?")
         params.append(empresa)
     if estado:
-        clauses.append("estado = ?")
+        clauses.append("c.estado = ?")
         params.append(estado)
     if vacante_id is not None:
-        clauses.append("vacante_id = ?")
+        clauses.append("c.vacante_id = ?")
         params.append(vacante_id)
     elif sin_vacante:
-        clauses.append("vacante_id IS NULL")
+        clauses.append("c.vacante_id IS NULL")
     if q:
-        clauses.append("(nombre_completo LIKE ? OR telefono LIKE ? OR email LIKE ? OR puesto_solicitado LIKE ?)")
+        clauses.append("(c.nombre_completo LIKE ? OR c.telefono LIKE ? OR c.email LIKE ? OR c.puesto_solicitado LIKE ?)")
         like = f"%{q}%"
         params.extend([like, like, like, like])
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    rows = conn.execute(
-        f"SELECT * FROM candidatos {where} ORDER BY actualizado_en DESC", params
-    ).fetchall()
+    # test_resultado viene de la respuesta de Valores y Competencias enlazada
+    # (si la hay) — así el listado puede mostrar el mismo check de apto/no
+    # apto que ya se ve en Informes, sin que el frontend tenga que pedirlo
+    # aparte candidato a candidato.
+    rows = conn.execute(f"""
+        SELECT c.*, json_extract(r.datos_json, '$.RESULTADO') AS test_resultado
+        FROM candidatos c
+        LEFT JOIN informe_respuestas r ON r.id = c.respuesta_id
+        {where}
+        ORDER BY c.actualizado_en DESC
+    """, params).fetchall()
     conn.close()
     return [_row_to_dict(r) for r in rows]
 
 
 def crear_candidato(campos: dict, empresa="kk", origen="manual", respuesta_id=None, creado_por=None, vacante_id=None):
     extra_fields = campos.pop("extra_fields", {}) or {}
+    # Si no viene ya con una respuesta enlazada (alta manual, CV o
+    # importación de una vacante), se comprueba si esta persona ya había
+    # respondido un test antes de tener ficha en Reclutamiento — ver
+    # buscar_respuesta_huerfana_por_contacto.
+    if respuesta_id is None:
+        respuesta_id = buscar_respuesta_huerfana_por_contacto(campos.get("telefono"), campos.get("email"))
     valores = {c: campos.get(c) for c in CAMPOS if c in campos}
     conn = get_connection()
     columnas = ["empresa", "origen", "respuesta_id", "creado_por", "extra_fields", "vacante_id"] + list(valores.keys())
@@ -367,6 +421,27 @@ def crear_candidato(campos: dict, empresa="kk", origen="manual", respuesta_id=No
     conn.commit()
     conn.close()
     return candidato_id
+
+
+def revincular_candidatos_existentes():
+    """Re-escanea TODOS los candidatos sin test enlazado en busca de una
+    respuesta huérfana que coincida — para poner al día de golpe a quienes
+    ya estaban en Reclutamiento antes de que este enlace bidireccional
+    existiera (p.ej. una vacante importada antes de este cambio). Se llama a
+    mano desde un botón, no en cada arranque, porque recorre todas las
+    respuestas de test sin enlazar y puede ser una operación algo pesada."""
+    conn = get_connection()
+    candidatos = conn.execute(
+        "SELECT id, telefono, email FROM candidatos WHERE respuesta_id IS NULL"
+    ).fetchall()
+    conn.close()
+    enlazados = 0
+    for c in candidatos:
+        respuesta_id = buscar_respuesta_huerfana_por_contacto(c["telefono"], c["email"])
+        if respuesta_id:
+            enlazar_respuesta_a_candidato(c["id"], respuesta_id)
+            enlazados += 1
+    return enlazados
 
 
 def actualizar_candidato(candidato_id, campos: dict):
@@ -468,9 +543,11 @@ def get_candidatos_compartidos_directo_con(usuario_id, empresa=None):
         clauses.append("c.empresa = ?")
         params.append(empresa)
     rows = conn.execute(f"""
-        SELECT cc.id AS compartido_id, cc.compartido_en, cc.compartido_por, c.*
+        SELECT cc.id AS compartido_id, cc.compartido_en, cc.compartido_por, c.*,
+               json_extract(r.datos_json, '$.RESULTADO') AS test_resultado
         FROM candidato_compartidos cc
         JOIN candidatos c ON c.id = cc.candidato_id
+        LEFT JOIN informe_respuestas r ON r.id = c.respuesta_id
         WHERE {' AND '.join(clauses)}
         ORDER BY cc.compartido_en DESC
     """, params).fetchall()
@@ -487,10 +564,12 @@ def get_candidatos_compartidos_directo_por(username, empresa=None):
         params.append(empresa)
     rows = conn.execute(f"""
         SELECT cc.id AS compartido_id, cc.compartido_en, cc.compartido_por,
-               u.nombre AS destinatario_nombre, u.username AS destinatario_username, c.*
+               u.nombre AS destinatario_nombre, u.username AS destinatario_username, c.*,
+               json_extract(r.datos_json, '$.RESULTADO') AS test_resultado
         FROM candidato_compartidos cc
         JOIN candidatos c ON c.id = cc.candidato_id
         JOIN usuarios u ON u.id = cc.usuario_id
+        LEFT JOIN informe_respuestas r ON r.id = c.respuesta_id
         WHERE {' AND '.join(clauses)}
         ORDER BY cc.compartido_en DESC
     """, params).fetchall()

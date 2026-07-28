@@ -768,7 +768,7 @@ def _candidato_directo_como_item(row, incluir_destinatario=False):
         "compartido_id": f"candidato-{row['compartido_id']}",
         "compartido_en": row["compartido_en"],
         "compartido_por": row["compartido_por"],
-        "respuesta_id": None,
+        "respuesta_id": row["respuesta_id"],
         "datos": datos,
         "hoja": None,
         "tiene_cv": False,
@@ -780,6 +780,7 @@ def _candidato_directo_como_item(row, incluir_destinatario=False):
         "notas": row["notas"],
         "telefono": row["telefono"],
         "puesto_solicitado": row["puesto_solicitado"],
+        "test_resultado": row["test_resultado"],
     }
     if incluir_destinatario:
         item["destinatario_nombre"] = row["destinatario_nombre"]
@@ -810,12 +811,13 @@ def get_compartidos_con(usuario_id, empresa=None):
     conn.close()
     resultado = []
     for row in rows:
+        datos = json.loads(row["datos_json"])
         resultado.append({
             "compartido_id": row["compartido_id"],
             "compartido_en": row["compartido_en"],
             "compartido_por": row["compartido_por"],
             "respuesta_id": row["respuesta_id"],
-            "datos": json.loads(row["datos_json"]),
+            "datos": datos,
             "hoja": row["hoja"],
             "tiene_cv": row["cv_ruta"] is not None,
             "cv_nombre": row["cv_nombre_original"],
@@ -826,6 +828,7 @@ def get_compartidos_con(usuario_id, empresa=None):
             "notas": row["candidato_notas"],
             "telefono": row["candidato_telefono"],
             "puesto_solicitado": row["candidato_puesto"],
+            "test_resultado": datos.get("RESULTADO"),
         })
     directos = reclutamiento_module.get_candidatos_compartidos_directo_con(usuario_id, empresa=empresa)
     resultado += [_candidato_directo_como_item(r) for r in directos]
@@ -861,13 +864,14 @@ def get_compartidos_por(username, empresa=None):
     conn.close()
     resultado = []
     for row in rows:
+        datos = json.loads(row["datos_json"])
         resultado.append({
             "compartido_id": row["compartido_id"],
             "compartido_en": row["compartido_en"],
             "destinatario_nombre": row["destinatario_nombre"],
             "destinatario_username": row["destinatario_username"],
             "respuesta_id": row["respuesta_id"],
-            "datos": json.loads(row["datos_json"]),
+            "datos": datos,
             "hoja": row["hoja"],
             "tiene_cv": row["cv_ruta"] is not None,
             "cv_nombre": row["cv_nombre_original"],
@@ -878,6 +882,7 @@ def get_compartidos_por(username, empresa=None):
             "notas": row["candidato_notas"],
             "telefono": row["candidato_telefono"],
             "puesto_solicitado": row["candidato_puesto"],
+            "test_resultado": datos.get("RESULTADO"),
         })
     directos = reclutamiento_module.get_candidatos_compartidos_directo_por(username, empresa=empresa)
     resultado += [_candidato_directo_como_item(r, incluir_destinatario=True) for r in directos]

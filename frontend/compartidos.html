@@ -50,6 +50,10 @@
   .badge-contratado { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
   .badge-descartado { background: color-mix(in srgb, var(--status-critical) 16%, transparent); color: var(--status-critical); }
 
+  .badge-resultado { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .badge-resultado-bueno { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
+  .badge-resultado-malo { background: color-mix(in srgb, var(--status-critical) 16%, transparent); color: var(--status-critical); }
+
   .candidatos-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
   .candidatos-tab {
     border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary);
@@ -190,6 +194,7 @@
           <option value="sin_vacante">Sin vacante asignada</option>
         </select>
         <button id="btn-modo-seleccion" class="btn btn-ghost" type="button">☑ Selección múltiple</button>
+        <button id="btn-revincular-tests" class="btn btn-ghost" type="button" title="Busca de nuevo entre las respuestas de test ya enviadas por si alguna coincide con un candidato que no tenía enlace">🔗 Buscar tests ya respondidos</button>
         <button id="btn-nuevo-candidato" class="btn btn-primary" type="button">＋ Nuevo candidato</button>
       </div>
       <div id="candidatos-seleccion-bar" class="candidatos-seleccion-bar" hidden>
@@ -226,6 +231,6 @@
 <script src="js/theme.js?v=20260724a"></script>
 <script src="js/auth-common.js?v=20260724a"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/compartidos.js?v=20260728c"></script>
+<script src="js/compartidos.js?v=20260728d"></script>
 </body>
 </html>

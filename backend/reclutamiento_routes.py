@@ -139,6 +139,12 @@ def list_candidatos_route(
     return reclutamiento_module.list_candidatos(empresa=empresa, estado=estado, q=q, vacante_id=vacante_id, sin_vacante=sin_vacante)
 
 
+@router.post("/candidatos/revincular-tests")
+def revincular_candidatos_route(user: dict = Depends(require_informes)):
+    enlazados = reclutamiento_module.revincular_candidatos_existentes()
+    return {"ok": True, "enlazados": enlazados}
+
+
 @router.get("/candidatos/conteo-por-estado")
 def conteo_por_estado_route(
     empresa: str | None = None,
