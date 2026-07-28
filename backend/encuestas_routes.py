@@ -154,6 +154,12 @@ def list_respuestas_route(encuesta_id: int, _user: dict = Depends(require_tests)
     return encuestas_module.list_respuestas(encuesta_id)
 
 
+@router.delete("/encuestas/respuestas/{respuesta_id}")
+def borrar_respuesta_route(respuesta_id: int, _user: dict = Depends(require_tests)):
+    encuestas_module.borrar_respuesta(respuesta_id)
+    return {"ok": True}
+
+
 @router.post("/encuestas/{encuesta_id}/paginas")
 def add_pagina_route(encuesta_id: int, body: PaginaIn, _user: dict = Depends(require_tests)):
     if not encuestas_module.get_encuesta(encuesta_id):

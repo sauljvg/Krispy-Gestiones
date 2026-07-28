@@ -732,15 +732,26 @@ async function verRespuestas() {
             <table class="respuesta-detalle-tabla"><tbody>${filasDatos}</tbody></table>
           </details>
         </td>
+        <td><button type="button" class="btn-mini btn-respuesta-borrar" data-respuesta-id="${r.id}">🗑</button></td>
       </tr>`;
       })
       .join("");
+    tbody.querySelectorAll(".btn-respuesta-borrar").forEach((btn) => {
+      btn.addEventListener("click", () => borrarRespuesta(btn.dataset.respuestaId));
+    });
   }
   wrap.hidden = false;
   // Este panel se pinta DESPUÉS de todas las páginas/preguntas del test, así
   // que en un test largo (20+ páginas) se abre muy por debajo del viewport
   // sin que se note — parecía que el botón no hacía nada.
   wrap.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function borrarRespuesta(respuestaId) {
+  if (!confirm("¿Eliminar esta respuesta? No se puede deshacer.")) return;
+  await fetch(`${AUTH_API_BASE}/encuestas/encuestas/respuestas/${respuestaId}`, { method: "DELETE" });
+  document.getElementById("respuestas-wrap").hidden = true;
+  await verRespuestas();
 }
 
 document.addEventListener("DOMContentLoaded", async () => {

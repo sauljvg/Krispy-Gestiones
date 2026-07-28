@@ -622,4 +622,11 @@ def list_respuestas(encuesta_id):
     return resultado
 
 
+def borrar_respuesta(respuesta_id):
+    conn = get_connection()
+    conn.execute("DELETE FROM encuesta_respuestas WHERE id = ?", (respuesta_id,))
+    conn.commit()
+    conn.close()
+
+
 ensure_encuestas_tables()
