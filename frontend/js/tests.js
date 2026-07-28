@@ -278,7 +278,7 @@ function opcionesEditorHTML(tipo, opciones) {
           (op, i) => `
         <div class="opcion-editor-row">
           <input type="text" class="opcion-editor-input" value="${escapeHTML(op)}" placeholder="Opción ${i + 1}">
-          <button type="button" class="btn-mini btn-opcion-quitar" title="Quitar esta opción">🗑</button>
+          <button type="button" class="btn-mini btn-opcion-quitar" title="Quitar esta opción"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
         </div>`
         )
         .join("")}
@@ -300,7 +300,7 @@ function bindOpcionesEditor(root) {
     btnAgregar?.addEventListener("click", () => {
       const row = document.createElement("div");
       row.className = "opcion-editor-row";
-      row.innerHTML = `<input type="text" class="opcion-editor-input" placeholder="Nueva opción"><button type="button" class="btn-mini btn-opcion-quitar" title="Quitar esta opción">🗑</button>`;
+      row.innerHTML = `<input type="text" class="opcion-editor-input" placeholder="Nueva opción"><button type="button" class="btn-mini btn-opcion-quitar" title="Quitar esta opción"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>`;
       filas.appendChild(row);
       row.querySelector(".btn-opcion-quitar").addEventListener("click", () => {
         if (filas.children.length <= 2) return;
@@ -385,7 +385,7 @@ function renderPaginas() {
         <div class="pagina-acciones">
           <button type="button" class="btn-mini btn-pagina-subir" data-pagina-id="${p.id}" ${pi === 0 ? "disabled" : ""}>↑</button>
           <button type="button" class="btn-mini btn-pagina-bajar" data-pagina-id="${p.id}" ${pi === currentTest.paginas.length - 1 ? "disabled" : ""}>↓</button>
-          <button type="button" class="btn-mini btn-pagina-borrar" data-pagina-id="${p.id}">🗑</button>
+          <button type="button" class="btn-mini btn-pagina-borrar" data-pagina-id="${p.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
         </div>
       </div>
       ${condicionEditorHTML(p, pi)}
@@ -422,7 +422,7 @@ function renderPaginas() {
                 <button type="button" class="btn-mini btn-pregunta-editar" data-pregunta-id="${q.id}">✎</button>
                 <button type="button" class="btn-mini btn-pregunta-subir" data-pregunta-id="${q.id}" ${qi === 0 ? "disabled" : ""}>↑</button>
                 <button type="button" class="btn-mini btn-pregunta-bajar" data-pregunta-id="${q.id}" ${qi === p.preguntas.length - 1 ? "disabled" : ""}>↓</button>
-                <button type="button" class="btn-mini btn-pregunta-borrar" data-pregunta-id="${q.id}">🗑</button>
+                <button type="button" class="btn-mini btn-pregunta-borrar" data-pregunta-id="${q.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
               </span>
             </div>
           </div>`;
@@ -732,7 +732,7 @@ async function verRespuestas() {
             <table class="respuesta-detalle-tabla"><tbody>${filasDatos}</tbody></table>
           </details>
         </td>
-        <td><button type="button" class="btn-mini btn-respuesta-borrar" data-respuesta-id="${r.id}">🗑</button></td>
+        <td><button type="button" class="btn-mini btn-respuesta-borrar" data-respuesta-id="${r.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button></td>
       </tr>`;
       })
       .join("");

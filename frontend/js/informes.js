@@ -203,7 +203,7 @@ function renderHojasPanel() {
         <div style="display:flex; align-items:center; gap:8px; width:100%;">
           <input type="checkbox" id="hojachk-${escapeHTML(h.hoja)}" data-hoja="${escapeHTML(h.hoja)}" ${h.oculta ? "" : "checked"}>
           <label for="hojachk-${escapeHTML(h.hoja)}" style="flex:1;">${escapeHTML(h.hoja)} (${h.total})</label>
-          <button type="button" class="btn-eliminar-hoja" data-hoja="${escapeHTML(h.hoja)}" title="Eliminar esta hoja (no es un dato real)" style="background:none; border:none; color:var(--status-critical); cursor:pointer; font-size:13px;">🗑</button>
+          <button type="button" class="btn-eliminar-hoja" data-hoja="${escapeHTML(h.hoja)}" title="Eliminar esta hoja (no es un dato real)" style="background:none; border:none; color:var(--status-critical); cursor:pointer; display:inline-flex;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
         </div>
         <label style="font-size:11px; color:var(--text-secondary); display:flex; align-items:center; gap:5px; padding-left:22px;">
           <input type="radio" name="hoja-principal" data-hoja="${escapeHTML(h.hoja)}" ${h.principal ? "checked" : ""}>
