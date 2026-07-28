@@ -99,6 +99,21 @@ def embudo_route(encuesta_id: int, _user: dict = Depends(require_tests)):
     return encuestas_module.get_embudo(encuesta_id)
 
 
+@router.get("/encuestas/{encuesta_id}/en-vivo-detalle")
+def en_vivo_detalle_route(encuesta_id: int, _user: dict = Depends(require_tests)):
+    if not encuestas_module.get_encuesta(encuesta_id):
+        raise HTTPException(status_code=404, detail="Encuesta no encontrada")
+    return encuestas_module.get_en_vivo_detalle(encuesta_id)
+
+
+@router.delete("/encuestas/{encuesta_id}/sesiones")
+def borrar_sesiones_route(encuesta_id: int, _user: dict = Depends(require_tests)):
+    if not encuestas_module.get_encuesta(encuesta_id):
+        raise HTTPException(status_code=404, detail="Encuesta no encontrada")
+    encuestas_module.borrar_sesiones(encuesta_id)
+    return {"ok": True}
+
+
 @router.get("/encuestas/{encuesta_id}")
 def get_encuesta_route(encuesta_id: int, _user: dict = Depends(require_tests)):
     encuesta = encuestas_module.get_encuesta(encuesta_id)

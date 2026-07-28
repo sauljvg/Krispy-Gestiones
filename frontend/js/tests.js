@@ -711,15 +711,40 @@ function formatearFechaHoraLocal(sqlUtc) {
   return fecha.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-async function verEmbudo() {
+async function actualizarEnVivoDetalle() {
+  const enVivoP = document.getElementById("embudo-en-vivo");
+  if (!currentTestId) return;
+  const sesiones = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/en-vivo-detalle`)
+    .then((r) => (r.ok ? r.json() : []))
+    .catch(() => []);
+  if (sesiones.length === 0) {
+    enVivoP.textContent = "Nadie está respondiendo este test ahora mismo.";
+    return;
+  }
+  const paginas = sesiones.map((s) => `página ${s.pagina}`).join(", ");
+  enVivoP.textContent = `🟢 ${sesiones.length} en vivo ahora mismo, en: ${paginas}.`;
+}
+
+async function reiniciarEmbudo() {
+  if (!confirm("Esto borra todas las aperturas y abandonos registrados de este test (por ejemplo, pruebas que hayas hecho tú mismo). No afecta a las respuestas ya enviadas. ¿Continuar?")) return;
+  const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/sesiones`, { method: "DELETE" });
+  if (!res.ok) {
+    alert("No se pudo reiniciar (error " + res.status + ").");
+    return;
+  }
+  await verEmbudo({ forzarRecarga: true });
+}
+
+async function verEmbudo({ forzarRecarga = false } = {}) {
   const wrap = document.getElementById("embudo-wrap");
   const visible = !wrap.hidden;
-  if (visible) {
+  if (visible && !forzarRecarga) {
     wrap.hidden = true;
     return;
   }
   const resumen = document.getElementById("embudo-resumen");
   const barras = document.getElementById("embudo-barras");
+  actualizarEnVivoDetalle();
   let res;
   try {
     res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/embudo`);
@@ -853,7 +878,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btn-eliminar-test").addEventListener("click", eliminarTest);
   document.getElementById("btn-nueva-pagina").addEventListener("click", agregarPagina);
   document.getElementById("btn-ver-respuestas").addEventListener("click", verRespuestas);
-  document.getElementById("btn-ver-embudo").addEventListener("click", verEmbudo);
+  document.getElementById("btn-ver-embudo").addEventListener("click", () => verEmbudo());
+  document.getElementById("btn-reiniciar-embudo").addEventListener("click", reiniciarEmbudo);
   document.getElementById("input-fondo-upload").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;

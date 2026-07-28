@@ -4,12 +4,27 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+import auth as auth_module
 import cv_extraction
 import reclutamiento as reclutamiento_module
 from auth_routes import get_current_user
 from informes_routes import require_informes
 
 router = APIRouter()
+
+
+def require_acceso_candidato(candidato_id: int, user: dict = Depends(get_current_user)) -> dict:
+    """A diferencia de require_informes (para la sección propia de
+    Reclutamiento), esto también deja pasar a quien no tiene el módulo
+    Informes pero SÍ recibió justo este candidato compartido — mismo
+    espíritu que /informes/compartidos (get_current_user a secas) para que
+    un gerente o area manager pueda abrir la ficha completa que le
+    compartieron, no solo la tarjeta resumen."""
+    if auth_module.tiene_modulo(user, "informes") or auth_module.tiene_modulo(user, "saona_informes"):
+        return user
+    if reclutamiento_module.usuario_tiene_acceso_candidato(user["id"], candidato_id):
+        return user
+    raise HTTPException(status_code=403, detail="No tienes acceso a este candidato")
 
 
 class VacanteIn(BaseModel):
@@ -156,7 +171,7 @@ def dejar_de_compartir_candidato_route(candidato_id: int, usuario_id: int, _user
 
 
 @router.get("/candidatos/{candidato_id}")
-def get_candidato_route(candidato_id: int, _user: dict = Depends(require_informes)):
+def get_candidato_route(candidato_id: int, _user: dict = Depends(require_acceso_candidato)):
     candidato = reclutamiento_module.get_candidato(candidato_id)
     if candidato is None:
         raise HTTPException(status_code=404, detail="Candidato no encontrado")
@@ -173,7 +188,7 @@ def crear_candidato_route(body: CandidatoIn, user: dict = Depends(require_inform
 
 
 @router.put("/candidatos/{candidato_id}")
-def actualizar_candidato_route(candidato_id: int, body: CandidatoUpdateIn, _user: dict = Depends(require_informes)):
+def actualizar_candidato_route(candidato_id: int, body: CandidatoUpdateIn, _user: dict = Depends(require_acceso_candidato)):
     if reclutamiento_module.get_candidato(candidato_id) is None:
         raise HTTPException(status_code=404, detail="Candidato no encontrado")
     if body.estado is not None and body.estado not in reclutamiento_module.ESTADOS:
@@ -218,19 +233,10 @@ async def agregar_archivo_route(candidato_id: int, file: UploadFile = File(...),
 
 
 @router.get("/candidatos/{candidato_id}/archivos/{archivo_id}")
-def descargar_archivo_route(candidato_id: int, archivo_id: int, user: dict = Depends(get_current_user)):
-    import auth as auth_module
-    import informes as informes_module
-
+def descargar_archivo_route(candidato_id: int, archivo_id: int, _user: dict = Depends(require_acceso_candidato)):
     candidato = reclutamiento_module.get_candidato(candidato_id)
     if candidato is None or archivo_id not in {a["id"] for a in candidato["archivos"]}:
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
-
-    tiene_acceso = auth_module.tiene_modulo(user, "informes") or auth_module.tiene_modulo(user, "saona_informes")
-    if not tiene_acceso and candidato.get("respuesta_id"):
-        tiene_acceso = informes_module.usuario_tiene_acceso_respuesta(user["id"], candidato["respuesta_id"])
-    if not tiene_acceso:
-        raise HTTPException(status_code=403, detail="No tienes acceso a este archivo")
 
     archivo = reclutamiento_module.get_archivo(archivo_id)
     if archivo is None:

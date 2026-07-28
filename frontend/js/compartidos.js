@@ -212,6 +212,9 @@ function candidatoCardHTML(item) {
   const notasHTML = candId
     ? `<div class="candidato-notas"><textarea class="candidato-notas-input" data-candidato-id="${candId}" placeholder="Notas sobre este candidato...">${escapeHTML(item.notas || "")}</textarea></div>`
     : "";
+  const fichaBtn = candId
+    ? `<button type="button" class="btn btn-ghost candidato-abrir-ficha" data-candidato-id="${candId}">📋 Ver ficha completa</button>`
+    : "";
   const metaTxt = item.hoja ? `${item.tipo_nombre} · hoja "${item.hoja}"` : item.tipo_nombre;
   return `
     <div class="candidato-card">
@@ -220,7 +223,7 @@ function candidatoCardHTML(item) {
       <div class="candidato-datos">
         ${entries.map(([k, v]) => `<div><div class="campo-nombre">${escapeHTML(k)}</div><div>${escapeHTML(v)}</div></div>`).join("")}
       </div>
-      <div class="candidato-acciones">${cvBtn}${whatsappBtn}</div>
+      <div class="candidato-acciones">${fichaBtn}${cvBtn}${whatsappBtn}</div>
       ${notasHTML}
     </div>`;
 }
@@ -256,6 +259,9 @@ function wireCompartidosInteractivos(wrap) {
   });
   wrap.querySelectorAll(".candidato-notas-input").forEach((el) => {
     el.addEventListener("blur", () => actualizarCandidatoInline(el.dataset.candidatoId, { notas: el.value }));
+  });
+  wrap.querySelectorAll(".candidato-abrir-ficha").forEach((el) => {
+    el.addEventListener("click", () => abrirEdicionCandidato(el.dataset.candidatoId));
   });
 }
 

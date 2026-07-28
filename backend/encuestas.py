@@ -209,6 +209,31 @@ def contar_en_vivo_por_encuesta():
     return {r["encuesta_id"]: r["n"] for r in rows}
 
 
+def get_en_vivo_detalle(encuesta_id):
+    """Detalle de cada sesión activa de UN test concreto (en qué página va
+    cada una) — para el desplegable "quién está en vivo" del editor, a
+    diferencia de contar_en_vivo_por_encuesta que solo da el total por test."""
+    conn = get_connection()
+    rows = conn.execute(f"""
+        SELECT pagina_maxima, iniciado_en, ultima_actividad FROM encuesta_sesiones
+        WHERE encuesta_id = ? AND completado = 0
+              AND ultima_actividad >= datetime('now', '-{EN_VIVO_MINUTOS} minutes')
+        ORDER BY ultima_actividad DESC
+    """, (encuesta_id,)).fetchall()
+    conn.close()
+    return [{"pagina": r["pagina_maxima"], "iniciado_en": r["iniciado_en"], "ultima_actividad": r["ultima_actividad"]} for r in rows]
+
+
+def borrar_sesiones(encuesta_id):
+    """Vacía el rastro de aperturas/abandono de un test (deja el embudo a
+    cero) — para descartar pruebas propias del staff antes de que el test
+    salga de verdad, sin tener que tocar la base de datos a mano."""
+    conn = get_connection()
+    conn.execute("DELETE FROM encuesta_sesiones WHERE encuesta_id = ?", (encuesta_id,))
+    conn.commit()
+    conn.close()
+
+
 def get_embudo(encuesta_id):
     """Aperturas vs completados y, página a página, cuántas sesiones
     llegaron al menos hasta ahí — para ver dónde se cae la gente en un test

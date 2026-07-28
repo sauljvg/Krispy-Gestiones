@@ -498,6 +498,24 @@ def get_candidatos_compartidos_directo_por(username, empresa=None):
     return [dict(r) for r in rows]
 
 
+def usuario_tiene_acceso_candidato(usuario_id, candidato_id):
+    """Puerta para quien NO tiene el módulo Informes/Reclutamiento completo
+    (gerentes, area managers) pero sí recibió este candidato en concreto —
+    por el nuevo "compartir directo" (candidato_compartidos) o por el camino
+    de siempre desde Informes (informe_compartidos, que también guarda
+    candidato_id desde que existe el enlace automático con el test)."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT 1 FROM candidato_compartidos WHERE candidato_id = ? AND usuario_id = ?", (candidato_id, usuario_id)
+    ).fetchone()
+    if row is None:
+        row = conn.execute(
+            "SELECT 1 FROM informe_compartidos WHERE candidato_id = ? AND usuario_id = ?", (candidato_id, usuario_id)
+        ).fetchone()
+    conn.close()
+    return row is not None
+
+
 def eliminar_candidato(candidato_id):
     candidato = get_candidato(candidato_id)
     if candidato is None:
