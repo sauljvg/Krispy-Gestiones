@@ -577,24 +577,20 @@ def compute_reporte(oleada_id, centro=None, centros_permitidos=None):
     else:
         engagement_score = None
 
-    # Comparación lexicográfica categoría a categoría: en el momento en que
-    # dos preguntas empatan en una categoría, les queda exactamente el mismo
-    # "resto" por repartir entre las categorías siguientes (los porcentajes
-    # siempre suman 100%), así que seguir comparando la siguiente categoría
-    # de la lista sigue siendo una comparación válida sobre ese resto — sin
-    # necesidad de sumar top2box/bottom2box ni de un criterio de repuesto
-    # cuando no hay desacuerdo. Fortalezas recorre la escala de mejor a peor
-    # (más "Totalmente de acuerdo" gana, empates se resuelven por "De
-    # acuerdo", luego por menos "Neutral", etc.); oportunidades recorre la
-    # misma escala al revés, de peor a mejor.
+    # Mismo criterio que se muestra en pantalla: fortalezas = mayor top2box
+    # (Totalmente de acuerdo + De acuerdo), oportunidades = mayor bottom2box
+    # (En desacuerdo + Totalmente en desacuerdo). Neutral no cuenta para
+    # ninguna de las dos listas. Empates en top2box/bottom2box se resuelven
+    # por "Totalmente de acuerdo"/"Totalmente en desacuerdo" respectivamente,
+    # la casilla más extrema de cada lado.
     fortalezas = sorted(
         todas_preguntas_top2box,
-        key=lambda i: tuple(i["porcentajes"][cat] for cat in LIKERT_ORDEN),
+        key=lambda i: (i["top2box"], i["porcentajes"]["Totalmente de acuerdo"]),
         reverse=True,
     )[:2]
     oportunidades = sorted(
         todas_preguntas_top2box,
-        key=lambda i: tuple(i["porcentajes"][cat] for cat in reversed(LIKERT_ORDEN)),
+        key=lambda i: (i["bottom2box"], i["porcentajes"]["Totalmente en desacuerdo"]),
         reverse=True,
     )[:2]
 
