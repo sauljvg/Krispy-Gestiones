@@ -174,6 +174,23 @@ def _union_headers(filas):
     return resultado
 
 
+def _mejor_columna_nombre(headers, metadata_cols):
+    """La columna que _column_roles asigna a "nombre" es la PRIMERA que
+    contenga esa palabra — en los Excel reales de Krispy Kreme eso suele ser
+    una columna "Nombre" corta que llega vacía o con basura (un 1, resto de
+    una celda de Forms), mientras que el nombre real y completo está en
+    "Nombre y Apellido", una columna aparte que por eso mismo se clasificaba
+    como comentario abierto en vez de como metadata. Para el cruce con
+    Salidas Totales hace falta el nombre completo de verdad, así que aquí se
+    prioriza cualquier encabezado que combine "nombre" y "apellido" antes de
+    caer al comportamiento genérico de _column_roles."""
+    for h in headers:
+        norm = _normaliza_header(h)
+        if "nombre" in norm and "apellido" in norm:
+            return h
+    return metadata_cols.get("nombre")
+
+
 def _column_roles(headers, filas=None):
     """Dos formatos reconocidos para las preguntas de escala, además de
     preguntas sueltas sin bloque:
@@ -870,7 +887,7 @@ def compute_evolucion(oleada_id, centro=None):
     _todas_las_filas = [datos for _id, datos in filas_con_id]
     roles = _column_roles(_union_headers(_todas_las_filas), _todas_las_filas)
     centro_col = roles["centro_col"]
-    nombre_col = roles["metadata"].get("nombre")
+    nombre_col = _mejor_columna_nombre(_union_headers(_todas_las_filas), roles["metadata"])
     fecha_col = roles["metadata"].get("hora_inicio")
 
     salidas_por_id = {s["id"]: s for s in salidas}

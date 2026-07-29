@@ -512,7 +512,7 @@ function renderListaComentarios(container, textos) {
     container.innerHTML = `<p class="staff-hint">(sin comentarios)</p>`;
     return;
   }
-  container.innerHTML = `<ul>${textos.map((t) => `<li>${escapeHTML(t)}</li>`).join("")}</ul>`;
+  container.innerHTML = `<ol>${textos.map((t) => `<li>${escapeHTML(t)}</li>`).join("")}</ol>`;
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
