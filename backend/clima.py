@@ -593,11 +593,15 @@ def compute_reporte(oleada_id, centro=None, centros_permitidos=None):
     else:
         engagement_score = None
 
-    # Mismo criterio que se muestra en pantalla: fortalezas = mayor top2box
-    # (Totalmente de acuerdo + De acuerdo); oportunidades = mayor
-    # "oportunidad" (las dos categorías que más pesen entre Neutral/En
-    # desacuerdo/Totalmente en desacuerdo — ver stats_pregunta). Empates se
-    # resuelven por la casilla más extrema de cada lado.
+    # Fortalezas: mayor top2box, empate por "Totalmente de acuerdo".
+    #
+    # Oportunidades: una pregunta con desacuerdo real y extremo (aunque sea
+    # poco) siempre gana a una que no tiene nada de "Totalmente en
+    # desacuerdo" — aunque esta última tenga un % de oportunidad más alto
+    # gracias al respaldo de Neutral. Por eso el criterio de orden va
+    # primero por "tiene algo de Totalmente en desacuerdo" (0 o 1) y solo
+    # entre las que empatan ahí se desempata por el % de oportunidad ya
+    # calculado.
     fortalezas = sorted(
         todas_preguntas_top2box,
         key=lambda i: (i["top2box"], i["porcentajes"]["Totalmente de acuerdo"]),
@@ -605,7 +609,10 @@ def compute_reporte(oleada_id, centro=None, centros_permitidos=None):
     )[:2]
     oportunidades = sorted(
         todas_preguntas_top2box,
-        key=lambda i: (i["oportunidad"], i["porcentajes"]["Totalmente en desacuerdo"]),
+        key=lambda i: (
+            1 if i["porcentajes"]["Totalmente en desacuerdo"] > 0 else 0,
+            i["oportunidad"],
+        ),
         reverse=True,
     )[:2]
 
