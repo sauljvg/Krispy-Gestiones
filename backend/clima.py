@@ -545,17 +545,13 @@ def compute_reporte(oleada_id, centro=None, centros_permitidos=None):
         else:
             porcentajes = {cat: round(conteo[cat] / respondidas * 100, 1) for cat in LIKERT_ORDEN}
         top2box = round(porcentajes["Totalmente de acuerdo"] + porcentajes["De acuerdo"], 1)
-        # "Oportunidad" no es una pareja fija de categorías: es la suma de
-        # las DOS que más pesen entre Neutral / En desacuerdo / Totalmente en
-        # desacuerdo (la tercera, la que menos pese de esas tres, queda
-        # fuera). Con "Totalmente en desacuerdo" en 0%, por ejemplo, las dos
-        # que cuentan pueden perfectamente ser Neutral + En desacuerdo — no
-        # siempre son las mismas dos categorías.
-        negativas = sorted(
-            (porcentajes[c] for c in ("Neutral", "En desacuerdo", "Totalmente en desacuerdo")),
-            reverse=True,
-        )
-        oportunidad = round(negativas[0] + negativas[1], 1)
+        # "Oportunidad" = todo lo que no sea acuerdo pleno: Neutral + En
+        # desacuerdo + Totalmente en desacuerdo, las tres juntas (equivale a
+        # 100 - top2box). Elegir solo "las dos que más pesen" de esas tres se
+        # probó y se descartó: con las tres categorías presentes a la vez
+        # (no solo dos) terminaba saltándose el desacuerdo real cuando
+        # Neutral pesaba más, lo cual no tiene sentido de negocio.
+        oportunidad = round(100 - top2box, 1)
         return porcentajes, top2box, oportunidad
 
     primera_categoria = roles["categorias_orden"][0] if roles["categorias_orden"] else None
