@@ -545,8 +545,18 @@ def compute_reporte(oleada_id, centro=None, centros_permitidos=None):
         else:
             porcentajes = {cat: round(conteo[cat] / respondidas * 100, 1) for cat in LIKERT_ORDEN}
         top2box = round(porcentajes["Totalmente de acuerdo"] + porcentajes["De acuerdo"], 1)
-        bottom2box = round(porcentajes["En desacuerdo"] + porcentajes["Totalmente en desacuerdo"], 1)
-        return porcentajes, top2box, bottom2box
+        # "Oportunidad" no es una pareja fija de categorías: es la suma de
+        # las DOS que más pesen entre Neutral / En desacuerdo / Totalmente en
+        # desacuerdo (la tercera, la que menos pese de esas tres, queda
+        # fuera). Con "Totalmente en desacuerdo" en 0%, por ejemplo, las dos
+        # que cuentan pueden perfectamente ser Neutral + En desacuerdo — no
+        # siempre son las mismas dos categorías.
+        negativas = sorted(
+            (porcentajes[c] for c in ("Neutral", "En desacuerdo", "Totalmente en desacuerdo")),
+            reverse=True,
+        )
+        oportunidad = round(negativas[0] + negativas[1], 1)
+        return porcentajes, top2box, oportunidad
 
     primera_categoria = roles["categorias_orden"][0] if roles["categorias_orden"] else None
 
@@ -555,13 +565,13 @@ def compute_reporte(oleada_id, centro=None, centros_permitidos=None):
     todas_preguntas_top2box = []
 
     for header, categoria, pregunta in roles["likert"]:
-        porcentajes, top2box, bottom2box = stats_pregunta(header)
+        porcentajes, top2box, oportunidad = stats_pregunta(header)
         item = {
             "pregunta": pregunta,
             "categoria": categoria,
             "porcentajes": porcentajes,
             "top2box": top2box,
-            "bottom2box": bottom2box,
+            "oportunidad": oportunidad,
         }
         if categoria == primera_categoria:
             resultados_engagement.append(item)
@@ -578,11 +588,10 @@ def compute_reporte(oleada_id, centro=None, centros_permitidos=None):
         engagement_score = None
 
     # Mismo criterio que se muestra en pantalla: fortalezas = mayor top2box
-    # (Totalmente de acuerdo + De acuerdo), oportunidades = mayor bottom2box
-    # (En desacuerdo + Totalmente en desacuerdo). Neutral no cuenta para
-    # ninguna de las dos listas. Empates en top2box/bottom2box se resuelven
-    # por "Totalmente de acuerdo"/"Totalmente en desacuerdo" respectivamente,
-    # la casilla más extrema de cada lado.
+    # (Totalmente de acuerdo + De acuerdo); oportunidades = mayor
+    # "oportunidad" (las dos categorías que más pesen entre Neutral/En
+    # desacuerdo/Totalmente en desacuerdo — ver stats_pregunta). Empates se
+    # resuelven por la casilla más extrema de cada lado.
     fortalezas = sorted(
         todas_preguntas_top2box,
         key=lambda i: (i["top2box"], i["porcentajes"]["Totalmente de acuerdo"]),
@@ -590,7 +599,7 @@ def compute_reporte(oleada_id, centro=None, centros_permitidos=None):
     )[:2]
     oportunidades = sorted(
         todas_preguntas_top2box,
-        key=lambda i: (i["bottom2box"], i["porcentajes"]["Totalmente en desacuerdo"]),
+        key=lambda i: (i["oportunidad"], i["porcentajes"]["Totalmente en desacuerdo"]),
         reverse=True,
     )[:2]
 

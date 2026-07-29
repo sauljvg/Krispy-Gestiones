@@ -314,13 +314,10 @@ CHIP_PAD_V = 9
 
 
 def _texto_oportunidad(i):
-    """Los neutrales cuentan como oportunidad, no solo el desacuerdo real:
-    "De acuerdo" (sin llegar a "Totalmente"), Neutral, En desacuerdo y
-    Totalmente en desacuerdo son todos, en distinto grado, gente que no dio
-    el máximo compromiso — el % que se muestra es todo eso junto
-    (equivalente a 100% − % de "Totalmente de acuerdo")."""
-    pct = round(100 - i["porcentajes"]["Totalmente de acuerdo"], 1)
-    return f'{i["pregunta"]} — {pct}% no muestra acuerdo total'
+    """i["oportunidad"] ya viene calculado desde clima.py: la suma de las
+    dos categorías que más pesen entre Neutral/En desacuerdo/Totalmente en
+    desacuerdo (no una pareja fija de etiquetas — ver stats_pregunta)."""
+    return f'{i["pregunta"]} — {i["oportunidad"]}% no muestra acuerdo total'
 
 
 def _altura_texto_chip(texto, estilo):

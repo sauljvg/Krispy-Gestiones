@@ -94,14 +94,13 @@ function escapeHTML(str) {
   return div.innerHTML;
 }
 
-// Solo las dos casillas negativas (En desacuerdo + Totalmente en desacuerdo)
-// cuentan como oportunidad — Neutral no es una postura negativa, así que no
-// debe sumarse aquí. bottom2box ya viene calculado así desde el backend
-// (ver clima.py); antes esta función usaba 100 - top2box, que de paso metía
-// a Neutral en la cuenta e inflaba el porcentaje mostrado por encima de lo
-// que de verdad ordena fortalezas/oportunidades en el backend.
+// o.oportunidad ya viene calculado desde el backend: la suma de las DOS
+// categorías que más pesen entre Neutral/En desacuerdo/Totalmente en
+// desacuerdo (no es una pareja fija de etiquetas — ver stats_pregunta en
+// clima.py). Es el mismo valor que usa el backend para ordenar
+// fortalezas/oportunidades, así que el número mostrado y el orden coinciden.
 function textoOportunidad(o) {
-  const pct = o.bottom2box;
+  const pct = o.oportunidad;
   return `${pct}% no muestra acuerdo total`;
 }
 
