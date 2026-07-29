@@ -9,6 +9,22 @@ from db import get_connection
 
 LIKERT_ORDEN = ["Totalmente de acuerdo", "De acuerdo", "Neutral", "En desacuerdo", "Totalmente en desacuerdo"]
 
+# Orden de prioridad para elegir la pareja de fortaleza/oportunidad de cada
+# pregunta: se toman las dos primeras categorías de la lista que tengan
+# respuestas (>0%) — Neutral es el respaldo de las dos, solo entra si la
+# categoría "fuerte" que le toca (De acuerdo, o En desacuerdo/Totalmente en
+# desacuerdo) no tiene ninguna respuesta. Así una categoría extrema con pocas
+# respuestas (p. ej. "Totalmente en desacuerdo" al 3%) nunca queda tapada por
+# un Neutral más grande que en realidad no es ni de acuerdo ni en desacuerdo.
+ORDEN_POSITIVO = ["Totalmente de acuerdo", "De acuerdo", "Neutral"]
+ORDEN_NEGATIVO = ["Totalmente en desacuerdo", "En desacuerdo", "Neutral"]
+
+
+def _par_dominante(porcentajes, orden):
+    presentes = [cat for cat in orden if porcentajes[cat] > 0]
+    elegidas = presentes[:2]
+    return round(sum(porcentajes[cat] for cat in elegidas), 1)
+
 # Algunos formularios (Saona, Google Forms) usan "Ni de acuerdo ni en
 # desacuerdo" en vez de "Neutral" para el mismo nivel intermedio — sin este
 # alias esas respuestas no encajaban en ningún cubo de LIKERT_ORDEN y se
@@ -544,14 +560,8 @@ def compute_reporte(oleada_id, centro=None, centros_permitidos=None):
             porcentajes = {cat: 0.0 for cat in LIKERT_ORDEN}
         else:
             porcentajes = {cat: round(conteo[cat] / respondidas * 100, 1) for cat in LIKERT_ORDEN}
-        top2box = round(porcentajes["Totalmente de acuerdo"] + porcentajes["De acuerdo"], 1)
-        # "Oportunidad" = todo lo que no sea acuerdo pleno: Neutral + En
-        # desacuerdo + Totalmente en desacuerdo, las tres juntas (equivale a
-        # 100 - top2box). Elegir solo "las dos que más pesen" de esas tres se
-        # probó y se descartó: con las tres categorías presentes a la vez
-        # (no solo dos) terminaba saltándose el desacuerdo real cuando
-        # Neutral pesaba más, lo cual no tiene sentido de negocio.
-        oportunidad = round(100 - top2box, 1)
+        top2box = _par_dominante(porcentajes, ORDEN_POSITIVO)
+        oportunidad = _par_dominante(porcentajes, ORDEN_NEGATIVO)
         return porcentajes, top2box, oportunidad
 
     primera_categoria = roles["categorias_orden"][0] if roles["categorias_orden"] else None
