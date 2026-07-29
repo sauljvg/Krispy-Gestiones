@@ -94,13 +94,14 @@ function escapeHTML(str) {
   return div.innerHTML;
 }
 
-// Ni "Totalmente de acuerdo" ni "De acuerdo" cuentan como oportunidad — solo
-// Neutral, En desacuerdo y Totalmente en desacuerdo, es decir 100% menos el
-// top2box (las dos casillas de acuerdo). Antes se restaba solo "Totalmente
-// de acuerdo", así que "De acuerdo" (claramente positivo) se sumaba también
-// como si fuera parte del problema, inflando el porcentaje mostrado.
+// Solo las dos casillas negativas (En desacuerdo + Totalmente en desacuerdo)
+// cuentan como oportunidad — Neutral no es una postura negativa, así que no
+// debe sumarse aquí. bottom2box ya viene calculado así desde el backend
+// (ver clima.py); antes esta función usaba 100 - top2box, que de paso metía
+// a Neutral en la cuenta e inflaba el porcentaje mostrado por encima de lo
+// que de verdad ordena fortalezas/oportunidades en el backend.
 function textoOportunidad(o) {
-  const pct = Math.round((100 - o.top2box) * 10) / 10;
+  const pct = o.bottom2box;
   return `${pct}% no muestra acuerdo total`;
 }
 
