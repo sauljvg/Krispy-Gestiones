@@ -94,13 +94,13 @@ function escapeHTML(str) {
   return div.innerHTML;
 }
 
-// Los neutrales cuentan como oportunidad, no solo el desacuerdo real: "De
-// acuerdo" (sin llegar a "Totalmente"), Neutral, En desacuerdo y Totalmente
-// en desacuerdo son todos, en distinto grado, gente que no dio el máximo
-// compromiso — así que el % que se muestra es todo eso junto (equivalente a
-// 100% − % de "Totalmente de acuerdo"), nunca solo el desacuerdo puro.
+// Ni "Totalmente de acuerdo" ni "De acuerdo" cuentan como oportunidad — solo
+// Neutral, En desacuerdo y Totalmente en desacuerdo, es decir 100% menos el
+// top2box (las dos casillas de acuerdo). Antes se restaba solo "Totalmente
+// de acuerdo", así que "De acuerdo" (claramente positivo) se sumaba también
+// como si fuera parte del problema, inflando el porcentaje mostrado.
 function textoOportunidad(o) {
-  const pct = Math.round((100 - o.porcentajes["Totalmente de acuerdo"]) * 10) / 10;
+  const pct = Math.round((100 - o.top2box) * 10) / 10;
   return `${pct}% no muestra acuerdo total`;
 }
 
