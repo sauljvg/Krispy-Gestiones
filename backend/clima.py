@@ -595,13 +595,18 @@ def compute_reporte(oleada_id, centro=None, centros_permitidos=None):
 
     # Fortalezas: mayor top2box, empate por "Totalmente de acuerdo".
     #
-    # Oportunidades: una pregunta con desacuerdo real y extremo (aunque sea
-    # poco) siempre gana a una que no tiene nada de "Totalmente en
-    # desacuerdo" — aunque esta última tenga un % de oportunidad más alto
-    # gracias al respaldo de Neutral. Por eso el criterio de orden va
-    # primero por "tiene algo de Totalmente en desacuerdo" (0 o 1) y solo
-    # entre las que empatan ahí se desempata por el % de oportunidad ya
-    # calculado.
+    # Oportunidades: para elegir cuáles entran al Plan de Acción se usa SOLO
+    # el desacuerdo genuino (En desacuerdo + Totalmente en desacuerdo, sin
+    # Neutral) — Neutral nunca debe poder hacer ganar a una pregunta en el
+    # ranking, aunque sí se siga usando (vía i["oportunidad"]) para el %
+    # que se muestra en el chip cuando falte una de las dos categorías
+    # reales (ver stats_pregunta/_par_dominante). Sin esto, una pregunta con
+    # 3% de desacuerdo real y 29% de Neutral "de relleno" podía ganarle a
+    # otra con 29% de desacuerdo 100% real, solo por tener un % combinado
+    # más alto en pantalla.
+    def _desacuerdo_real(i):
+        return round(i["porcentajes"]["En desacuerdo"] + i["porcentajes"]["Totalmente en desacuerdo"], 1)
+
     fortalezas = sorted(
         todas_preguntas_top2box,
         key=lambda i: (i["top2box"], i["porcentajes"]["Totalmente de acuerdo"]),
@@ -609,10 +614,12 @@ def compute_reporte(oleada_id, centro=None, centros_permitidos=None):
     )[:2]
     oportunidades = sorted(
         todas_preguntas_top2box,
-        key=lambda i: (
-            1 if i["porcentajes"]["Totalmente en desacuerdo"] > 0 else 0,
-            i["oportunidad"],
-        ),
+        # Empate en desacuerdo real (p. ej. 12.5% en desacuerdo moderado vs
+        # 12.5% totalmente en desacuerdo extremo): gana la que tenga más
+        # "Totalmente en desacuerdo" — sin este desempate, dos preguntas con
+        # el mismo total podían resolverse por el orden en que salían en el
+        # Excel en vez de por gravedad real.
+        key=lambda i: (_desacuerdo_real(i), i["porcentajes"]["Totalmente en desacuerdo"], i["oportunidad"]),
         reverse=True,
     )[:2]
 
