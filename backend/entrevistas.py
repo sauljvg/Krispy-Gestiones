@@ -40,13 +40,14 @@ _CENTRO_ALIASES = {
 
 # Todas las tiendas/centros conocidos de Krispy Kreme — para poder registrar
 # una salida manual incluso en un centro que todavía no tiene ninguna
-# respuesta de Entrevista de Salida. "ParqueSur - Leganés" (con sufijo) y no
-# solo "ParqueSur" a propósito: así es como aparece de verdad en el Excel de
-# Entrevista de Salida (campo de texto libre) — si no coincidiera letra por
-# letra, una salida registrada aquí como "ParqueSur" contaría como un centro
-# distinto al que ya usan las respuestas reales.
+# respuesta de Entrevista de Salida. Los nombres tienen que coincidir letra
+# por letra con el campo de texto libre "Centro de Trabajo" del Excel de
+# Entrevista de Salida — si no, una salida registrada aquí contaría como un
+# centro distinto al que ya usan las respuestas reales. "ParqueSur - Leganés"
+# ya no se usa: se dividió en "ParqueSur Fabrica" y "ParqueSur Tienda".
 CENTROS_CONOCIDOS_KK = [
-    "Caleido", "Gran Plaza 2", "La Gavia", "Oficina Central", "ParqueSur - Leganés", "Plenilunio", "Princesa",
+    "Caleido", "Gran Plaza 2", "La Gavia", "Oficina Central", "ParqueSur Fabrica", "ParqueSur Tienda", "Plenilunio",
+    "Princesa",
 ]
 
 
@@ -350,7 +351,97 @@ def _sede_keywords_desde_centro(centro):
     return [t for t in tokens if len(t) >= 4 and t not in ignorar]
 
 
+# Puesto manda sobre la compañía: si el puesto es de producción/limpieza/
+# decoración es Fábrica sin importar qué ponga la columna "Compañía" (hay
+# una sola fábrica hoy, así que no hace falta más detalle) — así lo confirmó
+# el usuario tras revisar los puestos reales de la hoja "Salidas Totales".
+_PUESTOS_FABRICA = ("produccion", "limpieza", "decoracion")
+# "Dependiente"/"Vendedor" (son lo mismo) y "Retail" (Jefe/a de Turno -
+# Retail) son puestos de tienda — cuál tienda depende de la compañía.
+_PUESTOS_TIENDA = ("dependiente", "vendedor", "retail")
+
+
+def _centro_desde_compania_puesto(compania, puesto):
+    """Traduce una fila de la hoja "Salidas Totales" en formato plano (con
+    columnas Compañía + Puesto de trabajo, en vez del formato antiguo
+    agrupado por secciones) a un centro conocido.
+    - Puesto de producción/limpieza/decoración -> ParqueSur Fábrica, sin
+      importar la compañía (hay una sola fábrica).
+    - Puesto de tienda (dependiente/vendedor/retail) -> la tienda que
+      indique la compañía ("T-MDxx COD-Nombre"), o ParqueSur Tienda por
+      defecto si la compañía es la razón social genérica sin código.
+    - Cualquier otro puesto bajo la razón social genérica (roles de
+      oficina/corporativos, ej. "Programador", "Director Operaciones") ->
+      Oficina Central.
+    - Cualquier otro puesto bajo un código de tienda/fábrica concreto ->
+      sin determinar (None), para no adivinar mal un caso no visto."""
+    norm_puesto = _normaliza_header(puesto or "")
+    norm_compania = _normaliza_header(compania or "")
+    if any(k in norm_puesto for k in _PUESTOS_FABRICA):
+        return "ParqueSur Fabrica"
+    if any(k in norm_puesto for k in _PUESTOS_TIENDA):
+        # "Glaseados Originales S.L." es la razón social genérica, sin
+        # código de tienda concreto — para puestos de tienda bajo esa razón
+        # social se asume ParqueSur Tienda por defecto (confirmado por el
+        # usuario), a diferencia de "T-MDxx COD-Nombre" que sí trae la
+        # tienda explícita.
+        if "glaseados originales" in norm_compania or not compania:
+            return "ParqueSur Tienda"
+        nombre = compania.strip().rsplit("-", 1)[-1].strip()
+        if not nombre:
+            return "ParqueSur Tienda"
+        if "parquesur" in _normaliza_header(nombre) or "parque sur" in _normaliza_header(nombre):
+            return "ParqueSur Tienda"
+        return nombre
+    if "glaseados originales" in norm_compania:
+        return "Oficina Central"
+    return None
+
+
+def _es_formato_plano_salidas(header):
+    # "compa" y no "compania" a propósito: _normaliza_header no quita la ñ
+    # (solo vocales acentuadas), así que "Compañía" normaliza a "compañía",
+    # no a "compania" — "compa" es un prefijo seguro en cualquiera de las
+    # dos formas.
+    norm = [_normaliza_header(str(h)) for h in header if h]
+    tiene = lambda palabra: any(palabra in h for h in norm)
+    return tiene("nombre") and tiene("compa") and tiene("puesto") and tiene("fecha")
+
+
+def _parse_salidas_totales_plano(ws):
+    rows_iter = ws.iter_rows(values_only=True)
+    try:
+        header = list(next(rows_iter))
+    except StopIteration:
+        return []
+    norm_header = [_normaliza_header(str(h)) if h else "" for h in header]
+    idx_nombre = next(i for i, h in enumerate(norm_header) if "nombre" in h)
+    idx_fecha = next(i for i, h in enumerate(norm_header) if "fecha" in h)
+    idx_compania = next(i for i, h in enumerate(norm_header) if "compa" in h)
+    idx_puesto = next(i for i, h in enumerate(norm_header) if "puesto" in h)
+
+    salidas = []
+    for row in rows_iter:
+        if row is None or all(c in (None, "") for c in row):
+            continue
+        nombre = row[idx_nombre] if idx_nombre < len(row) else None
+        fecha_baja = row[idx_fecha] if idx_fecha < len(row) else None
+        compania = row[idx_compania] if idx_compania < len(row) else None
+        puesto = row[idx_puesto] if idx_puesto < len(row) else None
+        if not nombre or not hasattr(fecha_baja, "isoformat"):
+            continue
+        centro = _centro_desde_compania_puesto(compania, puesto)
+        if not centro:
+            continue
+        salidas.append({"centro": centro, "nombre": str(nombre).strip(), "fecha_baja": fecha_baja.isoformat()})
+    return salidas
+
+
 def _parse_salidas_totales(ws, centros_conocidos):
+    primera_fila = next(ws.iter_rows(values_only=True), None)
+    if primera_fila and _es_formato_plano_salidas(primera_fila):
+        return _parse_salidas_totales_plano(ws)
+
     sede_keywords = {c: _sede_keywords_desde_centro(c) for c in centros_conocidos}
 
     def _detectar_centro_en_fila(row):
@@ -434,6 +525,9 @@ def ensure_entrevistas_tables():
             ya_existian INTEGER NOT NULL DEFAULT 0
         )
     """)
+    cols_importaciones = {row[1] for row in conn.execute("PRAGMA table_info(entrevistas_importaciones)")}
+    if "actualizadas" not in cols_importaciones:
+        conn.execute("ALTER TABLE entrevistas_importaciones ADD COLUMN actualizadas INTEGER NOT NULL DEFAULT 0")
     # Solo centro/nombre/fecha de baja — lo mínimo que hace falta para
     # calcular cobertura y cruzar con las respuestas. Nada de DNI, email
     # personal ni demás datos sensibles de la hoja "Salidas Totales".
@@ -521,6 +615,14 @@ def _hash_fila(fila):
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+def _clave_identidad(fila, nombre_col, hora_col):
+    nombre = fila.get(nombre_col)
+    hora = fila.get(hora_col)
+    if not nombre or not hora:
+        return None
+    return (_normaliza_header(str(nombre)).strip(), str(hora).strip())
+
+
 def _read_sheet_rows(ws):
     rows_iter = ws.iter_rows(values_only=True)
     try:
@@ -592,8 +694,26 @@ def import_excel(file_bytes, archivo_nombre, subido_por, nueva_oleada=False, emp
 
     roles = _column_roles(_union_headers(filas), filas)
     centro_col = roles["centro_col"]
+    nombre_col = _mejor_columna_nombre(_union_headers(filas), roles["metadata"])
+    hora_col = roles["metadata"].get("hora_inicio")
+
+    # La identidad de una respuesta es la persona + el momento exacto en que
+    # la envió (nombre + hora de inicio), NO la fila completa. Si el Excel de
+    # origen se corrige después (p. ej. al dividir "ParqueSur - Leganés" en
+    # Fábrica/Tienda, cambiando la columna de centro de gente que ya había
+    # respondido), una reimportación debe ACTUALIZAR esa respuesta con el
+    # dato corregido, no duplicarla — antes, como el hash se calculaba sobre
+    # la fila entera, cualquier corrección hacía que la fila pareciera
+    # "nueva" y se insertaba una segunda copia de la misma persona.
+    existentes_por_identidad = {}
+    if nombre_col and hora_col:
+        for id_existente, datos_existentes in _fetch_respuestas(conn, oleada_id, None):
+            clave = _clave_identidad(datos_existentes, nombre_col, hora_col)
+            if clave:
+                existentes_por_identidad[clave] = id_existente
 
     nuevas = 0
+    actualizadas = 0
     ya_existian = 0
     centros_vistos = set()
     for fila in filas:
@@ -603,18 +723,33 @@ def import_excel(file_bytes, archivo_nombre, subido_por, nueva_oleada=False, emp
         if centro:
             centros_vistos.add(centro)
         fila_hash = _hash_fila(fila)
+        datos_json = json.dumps(fila, ensure_ascii=False, default=str)
+
+        clave = _clave_identidad(fila, nombre_col, hora_col) if nombre_col and hora_col else None
+        if clave and clave in existentes_por_identidad:
+            id_existente = existentes_por_identidad[clave]
+            conn.execute(
+                "UPDATE entrevistas_respuestas SET centro = ?, fila_hash = ?, datos_json = ? WHERE id = ?",
+                (centro, fila_hash, datos_json, id_existente),
+            )
+            actualizadas += 1
+            continue
+
+        # Sin nombre+hora que identifiquen la fila (formulario sin esas
+        # columnas), cae al criterio anterior: hash exacto de toda la fila.
         existe = conn.execute(
             "SELECT id FROM entrevistas_respuestas WHERE oleada_id = ? AND fila_hash = ?", (oleada_id, fila_hash)
         ).fetchone()
         if existe:
             ya_existian += 1
             continue
-        datos_json = json.dumps(fila, ensure_ascii=False, default=str)
-        conn.execute(
+        cur_fila = conn.execute(
             "INSERT INTO entrevistas_respuestas (oleada_id, centro, fila_hash, datos_json) VALUES (?, ?, ?, ?)",
             (oleada_id, centro, fila_hash, datos_json),
         )
         nuevas += 1
+        if clave:
+            existentes_por_identidad[clave] = cur_fila.lastrowid
 
     # "Salidas Totales" (si viene en el mismo Excel) es una foto completa de
     # las bajas reales — se reemplaza entera en cada importación, no se
@@ -631,13 +766,13 @@ def import_excel(file_bytes, archivo_nombre, subido_por, nueva_oleada=False, emp
         salidas_nuevas = len(salidas)
 
     conn.execute(
-        "UPDATE entrevistas_importaciones SET nuevas = ?, ya_existian = ? WHERE id = ?",
-        (nuevas, ya_existian, importacion_id),
+        "UPDATE entrevistas_importaciones SET nuevas = ?, ya_existian = ?, actualizadas = ? WHERE id = ?",
+        (nuevas, ya_existian, actualizadas, importacion_id),
     )
     conn.commit()
     conn.close()
     return {
-        "oleada_id": oleada_id, "nuevas": nuevas, "ya_existian": ya_existian,
+        "oleada_id": oleada_id, "nuevas": nuevas, "ya_existian": ya_existian, "actualizadas": actualizadas,
         "total_en_excel": len(filas), "salidas_totales": salidas_nuevas,
     }
 

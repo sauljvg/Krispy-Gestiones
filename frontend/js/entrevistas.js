@@ -557,7 +557,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
     const result = await res.json();
-    alert(`Importación completa: ${result.nuevas} respuestas nuevas, ${result.ya_existian} ya existían (de ${result.total_en_excel} filas).`);
+    alert(`Importación completa: ${result.nuevas} respuestas nuevas, ${result.actualizadas} actualizadas, ${result.ya_existian} ya existían (de ${result.total_en_excel} filas).`);
     await loadOleadas();
   });
 
