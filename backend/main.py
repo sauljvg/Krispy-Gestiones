@@ -6,18 +6,12 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-# Tiene que ejecutarse ANTES de cualquier import que toque db.py (auth,
-# encuestas, informes...): ese módulo crea krispy_kreme.db vacío en cuanto
-# se importa si el archivo no existe, y si eso pasara primero ya no
-# tendríamos forma de distinguir "disco recién reseteado por Autoscale" de
-# "base de datos real". Ver storage_sync.py para el porqué completo.
 import storage_sync
 
-# Podar ANTES de restaurar: si el volumen está lleno del todo, incluso
-# restaurar_si_hace_falta() (que escribe en disco) fallaría — borrar es lo
-# único que no necesita espacio libre. Ver storage_sync.podar_backups_locales.
+# Podar antes de que arranque el resto de la app: si el volumen está lleno
+# del todo, borrar es lo único que no necesita espacio libre. Ver
+# storage_sync.podar_backups_locales.
 storage_sync.podar_backups_locales()
-storage_sync.restaurar_si_hace_falta()
 
 # En Windows, mimetypes no siempre trae registrados los tipos de fuentes
 # (depende del registro del sistema) — sin esto, StaticFiles las sirve como
@@ -132,13 +126,9 @@ def _start_db_backups():
 
 @app.on_event("shutdown")
 def _backup_on_shutdown():
-    # El backup periódico es cada 6h — si un redeploy de Autoscale llega
-    # antes de esa ventana (lo habitual: cada vez que se hace push/pull en
-    # Replit y se republica), storage_sync.restaurar_si_hace_falta() solo
-    # tiene esa copia vieja para restaurar y se pierde todo lo recibido
-    # desde entonces. Al hacer una copia también AQUÍ (justo cuando Autoscale
-    # manda la señal de apagado, antes de matar el contenedor), la próxima
-    # restauración parte de segundos antes en vez de hasta 6h antes.
+    # Copia extra justo al apagarse (redeploy, reinicio...) para que la
+    # próxima arrancada tenga una copia de segundos antes en vez de hasta
+    # BACKUP_INTERVAL_MINUTES antes.
     try:
         backups_module.hacer_backup()
     except Exception as e:
@@ -148,14 +138,6 @@ def _backup_on_shutdown():
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
-
-
-@app.get("/api/admin/backup-status")
-def backup_status(_admin: dict = Depends(require_admin)):
-    """Comprueba si Object Storage está realmente disponible en este
-    despliegue (bucket configurado en .replit) y cuándo se hizo el último
-    backup remoto — para verificarlo sin tener que mirar los logs."""
-    return storage_sync.estado()
 
 
 @app.get("/api/admin/backup/descargar")
