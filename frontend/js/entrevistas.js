@@ -118,15 +118,35 @@ async function loadCentros() {
   await loadReporte(null);
 }
 
+// Chart.js pinta cada elemento del array como una línea aparte — partiendo
+// el texto en varias líneas cortas (en vez de rotar la etiqueta en diagonal,
+// que la cortaba y era ilegible) se puede leer completa sin girar la cabeza.
+function wrapLabel(texto, maxLen = 18) {
+  const palabras = (texto || "").split(/\s+/);
+  const lineas = [];
+  let actual = "";
+  for (const palabra of palabras) {
+    const candidata = actual ? `${actual} ${palabra}` : palabra;
+    if (candidata.length > maxLen && actual) {
+      lineas.push(actual);
+      actual = palabra;
+    } else {
+      actual = candidata;
+    }
+  }
+  if (actual) lineas.push(actual);
+  return lineas;
+}
+
 function renderChartBloque(canvasId, existingChart, items) {
   const ctx = document.getElementById(canvasId);
   if (existingChart) existingChart.destroy();
-  ctx.parentElement.style.height = "320px";
+  ctx.parentElement.style.height = "380px";
   const colorTexto = colorTextoActual();
   return new Chart(ctx, {
     type: "bar",
     data: {
-      labels: items.map((i) => i.pregunta),
+      labels: items.map((i) => wrapLabel(i.pregunta)),
       datasets: [{ data: items.map((i) => i.promedio), backgroundColor: MARCA_COLOR, borderRadius: 4 }],
     },
     options: {
@@ -134,7 +154,7 @@ function renderChartBloque(canvasId, existingChart, items) {
       maintainAspectRatio: false,
       scales: {
         y: { min: 0, max: 5, ticks: { color: colorTexto }, grid: { color: "rgba(128,128,128,0.2)" } },
-        x: { ticks: { color: colorTexto, autoSkip: false, maxRotation: 60, minRotation: 30 }, grid: { display: false } },
+        x: { ticks: { color: colorTexto, autoSkip: false, maxRotation: 0, minRotation: 0 }, grid: { display: false } },
       },
       plugins: {
         legend: { display: false },
@@ -290,6 +310,31 @@ function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquet
   lista.innerHTML = items.map((it) => `<li><span>${escapeHTML(formatoItem(it))}</span></li>`).join("");
 }
 
+// Nunca se envía nada desde el servidor: el botón arma un enlace mailto:
+// con todos los correos en copia oculta (bcc) y abre el cliente de correo
+// del propio usuario, que es quien de verdad manda el email desde su
+// cuenta — así no depende de tener el dominio verificado en Resend.
+function wireRecordatorio(auditoriaF) {
+  const btn = document.getElementById("btn-enviar-recordatorio");
+  const hint = document.getElementById("recordatorio-hint");
+  const conEmail = auditoriaF.filter((a) => a.email);
+  const sinEmail = auditoriaF.length - conEmail.length;
+  btn.disabled = conEmail.length === 0;
+  hint.hidden = auditoriaF.length === 0;
+  hint.textContent =
+    conEmail.length === 0
+      ? "Ninguna de estas salidas tiene email guardado (la hoja Salidas Totales no traía columna de correo)."
+      : `${conEmail.length} con email · ${sinEmail} sin email (no se les puede incluir).`;
+  btn.onclick = () => {
+    const destinatarios = conEmail.map((a) => a.email).join(",");
+    const asunto = encodeURIComponent("Recordatorio: Entrevista de Salida pendiente");
+    const cuerpo = encodeURIComponent(
+      "Hola,\n\nVemos que aún no has completado el formulario de Entrevista de Salida. Te agradeceríamos que lo respondieras cuando puedas.\n\nGracias."
+    );
+    window.location.href = `mailto:?bcc=${encodeURIComponent(destinatarios)}&subject=${asunto}&body=${cuerpo}`;
+  };
+}
+
 // La auditoría G (respuestas que no cruzaron con ninguna salida) necesita
 // algo más que la F: cuando la misma persona real aparece en las dos listas
 // con el nombre escrito distinto (el caso real: "FLORES, LENIN MICHAEL" en
@@ -425,6 +470,7 @@ async function loadEvolucion(centro) {
       data.auditoria_f, (a) => `${a.nombre} — ${a.centro || ""} (baja: ${(a.fecha_baja || "").slice(0, 10)})`,
       "salidas sin ninguna respuesta detectada"
     );
+    wireRecordatorio(data.auditoria_f);
     renderAuditoriaG(data.auditoria_g, data.auditoria_f);
   } else {
     coberturaWrap.hidden = true;

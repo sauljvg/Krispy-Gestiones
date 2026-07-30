@@ -200,6 +200,25 @@ async function enviarBoletin() {
   resultadoEl.textContent = texto;
 }
 
+// Alternativa a "Enviar a seleccionados" (que pasa por Resend, y necesita
+// el dominio verificado) — arma un mailto: con los mismos seleccionados en
+// bcc y abre el cliente de correo del propio usuario, que envía desde su
+// cuenta real. No pasa por el servidor ni deja constancia en boletin_envios.
+function generarMailtoBoletin() {
+  const ids = Array.from(document.querySelectorAll(".chk-destinatario:checked")).map((chk) => Number(chk.value));
+  if (ids.length === 0) {
+    alert("Selecciona al menos un destinatario.");
+    return;
+  }
+  const emails = contactosActuales.filter((c) => ids.includes(c.id)).map((c) => c.email);
+  const titulo = document.getElementById("post-titulo").value.trim() || "Boletín";
+  const resumen = document.getElementById("post-resumen").value.trim();
+  const url = `${window.location.origin}/blog.html?post=${currentPostId}`;
+  const asunto = encodeURIComponent(titulo);
+  const cuerpo = encodeURIComponent(`${resumen ? resumen + "\n\n" : ""}Léelo aquí: ${url}`);
+  window.location.href = `mailto:?bcc=${encodeURIComponent(emails.join(","))}&subject=${asunto}&body=${cuerpo}`;
+}
+
 async function loadContactos() {
   const res = await fetch(`${AUTH_API_BASE}/boletines/contactos`);
   contactosActuales = await res.json();
@@ -308,6 +327,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     e.target.value = "";
   });
   document.getElementById("btn-enviar").addEventListener("click", enviarBoletin);
+  document.getElementById("btn-generar-mailto").addEventListener("click", generarMailtoBoletin);
   document.getElementById("btn-seleccionar-todos").addEventListener("click", () => {
     document.querySelectorAll(".chk-destinatario").forEach((chk) => (chk.checked = true));
   });

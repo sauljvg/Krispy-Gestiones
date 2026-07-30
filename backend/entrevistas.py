@@ -224,6 +224,15 @@ def _column_roles(headers, filas=None):
             # Columna de fila autogenerada por Forms — no es ni metadata útil
             # ni comentario, se ignora del todo.
             continue
+        if re.fullmatch(r"columna\d*", norm):
+            # "Columna1", "Columna2"... es el nombre que pone Excel solo
+            # cuando la celda de encabezado viene vacía — la pregunta real
+            # perdió su texto al exportar. Aunque tenga datos de verdad
+            # debajo, se ignora del todo (no entra en ningún bloque ni en
+            # comentarios) hasta que se sepa qué pregunta era de verdad;
+            # contarla con un rótulo sin sentido inflaría/desinflaría medias
+            # de forma engañosa.
+            continue
         matched_meta = False
         for hint, campo in METADATA_HINTS.items():
             if hint in norm and campo not in metadata_cols:
@@ -446,6 +455,7 @@ def _parse_salidas_totales_plano(ws):
     idx_fecha = next(i for i, h in enumerate(norm_header) if "fecha" in h)
     idx_compania = next(i for i, h in enumerate(norm_header) if "compa" in h)
     idx_puesto = next(i for i, h in enumerate(norm_header) if "puesto" in h)
+    idx_email = next((i for i, h in enumerate(norm_header) if "correo" in h or "email" in h), None)
 
     salidas = []
     for row in rows_iter:
@@ -455,6 +465,7 @@ def _parse_salidas_totales_plano(ws):
         fecha_baja = row[idx_fecha] if idx_fecha < len(row) else None
         compania = row[idx_compania] if idx_compania < len(row) else None
         puesto = row[idx_puesto] if idx_puesto < len(row) else None
+        email = row[idx_email] if idx_email is not None and idx_email < len(row) else None
         if not nombre or not hasattr(fecha_baja, "isoformat"):
             continue
         centro = _centro_desde_compania_puesto(compania, puesto)
@@ -463,6 +474,7 @@ def _parse_salidas_totales_plano(ws):
         salidas.append({
             "centro": centro, "nombre": str(nombre).strip(), "fecha_baja": fecha_baja.isoformat(),
             "puesto": _puesto_canonico(puesto),
+            "email": str(email).strip() if email else None,
         })
     return salidas
 
@@ -520,7 +532,7 @@ def _parse_salidas_totales(ws, centros_conocidos):
             if nombre and hasattr(fecha_baja, "isoformat"):
                 salidas.append({
                     "centro": centro_actual, "nombre": str(nombre).strip(), "fecha_baja": fecha_baja.isoformat(),
-                    "puesto": None,
+                    "puesto": None, "email": None,
                 })
 
     return salidas
@@ -561,10 +573,13 @@ def ensure_entrevistas_tables():
     cols_importaciones = {row[1] for row in conn.execute("PRAGMA table_info(entrevistas_importaciones)")}
     if "actualizadas" not in cols_importaciones:
         conn.execute("ALTER TABLE entrevistas_importaciones ADD COLUMN actualizadas INTEGER NOT NULL DEFAULT 0")
-    # centro/nombre/fecha de baja/puesto — lo mínimo que hace falta para
-    # calcular cobertura, cruzar con las respuestas y el resumen por puesto
-    # de trabajo. Nada de DNI, email personal ni demás datos sensibles de la
-    # hoja "Salidas Totales".
+    # centro/nombre/fecha de baja/puesto/email — lo que hace falta para
+    # calcular cobertura, cruzar con las respuestas, el resumen por puesto
+    # de trabajo y poder mandar un recordatorio manual (botón "Enviar
+    # Recordatorio", genera un mailto:, nunca se envía nada desde el
+    # servidor). Nada de DNI ni otros datos sensibles de la hoja "Salidas
+    # Totales" — el email se guarda porque hace falta para el recordatorio,
+    # pero no se muestra en ninguna lista de nombres.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS entrevistas_salidas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -577,6 +592,8 @@ def ensure_entrevistas_tables():
     cols_salidas = {row[1] for row in conn.execute("PRAGMA table_info(entrevistas_salidas)")}
     if "puesto" not in cols_salidas:
         conn.execute("ALTER TABLE entrevistas_salidas ADD COLUMN puesto TEXT")
+    if "email" not in cols_salidas:
+        conn.execute("ALTER TABLE entrevistas_salidas ADD COLUMN email TEXT")
     # Override manual de un cruce respuesta<->salida — para cuando la misma
     # persona aparece en las dos auditorías (p.ej. "FLORES, LENIN MICHAEL" en
     # Salidas Totales vs "Lenin flores alvarado" en su propia respuesta) pero
@@ -797,8 +814,8 @@ def import_excel(file_bytes, archivo_nombre, subido_por, nueva_oleada=False, emp
         conn.execute("DELETE FROM entrevistas_salidas WHERE oleada_id = ?", (oleada_id,))
         for s in salidas:
             conn.execute(
-                "INSERT INTO entrevistas_salidas (oleada_id, centro, nombre, fecha_baja, puesto) VALUES (?, ?, ?, ?, ?)",
-                (oleada_id, s["centro"], s["nombre"], s["fecha_baja"], s.get("puesto")),
+                "INSERT INTO entrevistas_salidas (oleada_id, centro, nombre, fecha_baja, puesto, email) VALUES (?, ?, ?, ?, ?, ?)",
+                (oleada_id, s["centro"], s["nombre"], s["fecha_baja"], s.get("puesto"), s.get("email")),
             )
         salidas_nuevas = len(salidas)
 
@@ -1014,12 +1031,12 @@ def compute_reporte(oleada_id, centro=None):
 def _fetch_salidas(conn, oleada_id, centro):
     if centro:
         rows = conn.execute(
-            "SELECT id, centro, nombre, fecha_baja, puesto FROM entrevistas_salidas WHERE oleada_id = ? AND centro = ?",
+            "SELECT id, centro, nombre, fecha_baja, puesto, email FROM entrevistas_salidas WHERE oleada_id = ? AND centro = ?",
             (oleada_id, centro),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id, centro, nombre, fecha_baja, puesto FROM entrevistas_salidas WHERE oleada_id = ?", (oleada_id,)
+            "SELECT id, centro, nombre, fecha_baja, puesto, email FROM entrevistas_salidas WHERE oleada_id = ?", (oleada_id,)
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -1143,7 +1160,7 @@ def compute_evolucion(oleada_id, centro=None):
         enriquecidas.append({"fila": fila, "cuatrimestre": cuat, "matched": matched})
 
     auditoria_f = [
-        {"salida_id": s["id"], "nombre": s["nombre"], "fecha_baja": s["fecha_baja"], "centro": s["centro"]}
+        {"salida_id": s["id"], "nombre": s["nombre"], "fecha_baja": s["fecha_baja"], "centro": s["centro"], "email": s["email"]}
         for s in salidas
         if s["id"] not in usadas_ids
     ]
