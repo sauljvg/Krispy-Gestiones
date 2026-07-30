@@ -46,6 +46,13 @@
   .motivos-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 20px; }
   .motivos-card h2 { margin: 0 0 12px; font-size: 17px; }
 
+  .puestos-tipo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 700px) { .puestos-tipo-grid { grid-template-columns: 1fr; } }
+  .puestos-tipo-col { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .puestos-tipo-col summary { cursor: pointer; font-size: 14px; font-weight: 600; }
+  .puestos-tipo-col ul { margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: var(--text-secondary); }
+  .puestos-tipo-col li { padding: 3px 0; }
+
   .comentarios-lista { margin-bottom: 24px; }
   .comentarios-lista ol { margin: 0; padding-left: 24px; max-height: 340px; overflow-y: auto; }
   .comentarios-lista li { font-size: 15px; margin-bottom: 10px; color: var(--text-primary); line-height: 1.45; }
@@ -195,6 +202,11 @@
         <div class="chart-wrap"><canvas id="chart-motivos"></canvas></div>
       </div>
 
+      <div id="puestos-card" class="motivos-card" hidden>
+        <h2>Puestos de trabajo (salidas totales)</h2>
+        <div class="puestos-tipo-grid" id="puestos-tipo-grid"></div>
+      </div>
+
       <h2 style="font-size:17px;">Comentarios abiertos</h2>
       <div id="comentarios-wrap"></div>
     </div>
@@ -203,6 +215,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/entrevistas.js?v=20260729a"></script>
+<script src="js/entrevistas.js?v=20260729d"></script>
 </body>
 </html>

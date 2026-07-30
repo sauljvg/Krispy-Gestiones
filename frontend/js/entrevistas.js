@@ -444,7 +444,38 @@ async function loadReporte(centro) {
   document.getElementById("reporte-wrap").hidden = false;
   document.getElementById("btn-exportar-pdf").hidden = false;
 
-  document.getElementById("entrevistas-header-stats").innerHTML = `<span>N = <b>${data.n}</b></span>`;
+  const statsHtml = [`<span>N = <b>${data.n}</b></span>`];
+  if (data.tiene_salidas_totales) {
+    statsHtml.push(`<span>Total = <b>${data.total_salidas}</b></span>`);
+    statsHtml.push(`<span>Participación = <b>${data.participacion !== null ? data.participacion + "%" : "—"}</b></span>`);
+  }
+  document.getElementById("entrevistas-header-stats").innerHTML = statsHtml.join("");
+
+  const puestosCard = document.getElementById("puestos-card");
+  if (data.tiene_salidas_totales && data.salidas_por_tipo && data.puestos_por_tipo) {
+    puestosCard.hidden = false;
+    const t = data.salidas_por_tipo;
+    const columnas = [
+      { clave: "fabrica", titulo: "Fábrica" },
+      { clave: "tienda", titulo: "Tienda" },
+      { clave: "oficina", titulo: "Oficina" },
+    ];
+    document.getElementById("puestos-tipo-grid").innerHTML = columnas
+      .map(({ clave, titulo }) => {
+        const puestos = data.puestos_por_tipo[clave] || [];
+        const items = puestos.length
+          ? puestos.map((p) => `<li>${escapeHTML(p.puesto)} — <b>${p.cantidad}</b></li>`).join("")
+          : `<li class="staff-hint">(sin datos de puesto)</li>`;
+        return `
+        <details class="puestos-tipo-col">
+          <summary>${titulo} (${t[clave]})</summary>
+          <ul>${items}</ul>
+        </details>`;
+      })
+      .join("");
+  } else {
+    puestosCard.hidden = true;
+  }
 
   const satisfaccionBox = document.getElementById("satisfaccion-box");
   satisfaccionBox.style.background = MARCA_COLOR;
@@ -497,8 +528,10 @@ async function loadReporte(centro) {
   comentariosWrap.innerHTML = headers
     .map(
       (h, i) => `
-      <h3 style="font-size:15px;">${escapeHTML(h)}</h3>
-      <div class="comentarios-lista" id="lista-${i}"></div>
+      <details class="auditoria-details">
+        <summary style="font-size:15px; font-weight:600;">${escapeHTML(h)} (${data.abiertas[h].length})</summary>
+        <div class="comentarios-lista" id="lista-${i}"></div>
+      </details>
     `
     )
     .join("");

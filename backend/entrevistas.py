@@ -360,6 +360,33 @@ _PUESTOS_FABRICA = ("produccion", "limpieza", "decoracion")
 # Retail) son puestos de tienda — cuál tienda depende de la compañía.
 _PUESTOS_TIENDA = ("dependiente", "vendedor", "retail")
 
+_HORAS_SUFIJO_RE = re.compile(r"\s*\d+\s*h\s*$", re.IGNORECASE)
+
+
+def _puesto_canonico(puesto):
+    """Unifica variantes del mismo puesto: quita el sufijo de horas del
+    contrato ("Dependiente/a 20h" y "Dependiente/a 40h" son el mismo puesto,
+    solo cambia la jornada) y renombra "Dependiente/a"/"Dependiente" a
+    "Vendedor/a" (mismo rol, nombre más claro), tal como pidió el usuario."""
+    if not puesto:
+        return None
+    texto = _HORAS_SUFIJO_RE.sub("", str(puesto).strip()).strip()
+    texto = re.sub(r"\s+", " ", texto).replace("–", "-")
+    if _normaliza_header(texto).startswith("dependiente"):
+        return "Vendedor/a"
+    return texto or None
+
+
+def _tipo_centro(centro):
+    """Clasifica un centro conocido en tienda/oficina/fábrica, para el
+    resumen "Tienda X · Oficina Y · Fábrica Z"."""
+    norm = _normaliza_header(centro or "")
+    if "fabrica" in norm:
+        return "fabrica"
+    if "oficina" in norm:
+        return "oficina"
+    return "tienda"
+
 
 def _centro_desde_compania_puesto(compania, puesto):
     """Traduce una fila de la hoja "Salidas Totales" en formato plano (con
@@ -433,7 +460,10 @@ def _parse_salidas_totales_plano(ws):
         centro = _centro_desde_compania_puesto(compania, puesto)
         if not centro:
             continue
-        salidas.append({"centro": centro, "nombre": str(nombre).strip(), "fecha_baja": fecha_baja.isoformat()})
+        salidas.append({
+            "centro": centro, "nombre": str(nombre).strip(), "fecha_baja": fecha_baja.isoformat(),
+            "puesto": _puesto_canonico(puesto),
+        })
     return salidas
 
 
@@ -488,7 +518,10 @@ def _parse_salidas_totales(ws, centros_conocidos):
             nombre = row[col_map["nombre"]]
             fecha_baja = row[col_map["fecha"]]
             if nombre and hasattr(fecha_baja, "isoformat"):
-                salidas.append({"centro": centro_actual, "nombre": str(nombre).strip(), "fecha_baja": fecha_baja.isoformat()})
+                salidas.append({
+                    "centro": centro_actual, "nombre": str(nombre).strip(), "fecha_baja": fecha_baja.isoformat(),
+                    "puesto": None,
+                })
 
     return salidas
 
@@ -528,9 +561,10 @@ def ensure_entrevistas_tables():
     cols_importaciones = {row[1] for row in conn.execute("PRAGMA table_info(entrevistas_importaciones)")}
     if "actualizadas" not in cols_importaciones:
         conn.execute("ALTER TABLE entrevistas_importaciones ADD COLUMN actualizadas INTEGER NOT NULL DEFAULT 0")
-    # Solo centro/nombre/fecha de baja — lo mínimo que hace falta para
-    # calcular cobertura y cruzar con las respuestas. Nada de DNI, email
-    # personal ni demás datos sensibles de la hoja "Salidas Totales".
+    # centro/nombre/fecha de baja/puesto — lo mínimo que hace falta para
+    # calcular cobertura, cruzar con las respuestas y el resumen por puesto
+    # de trabajo. Nada de DNI, email personal ni demás datos sensibles de la
+    # hoja "Salidas Totales".
     conn.execute("""
         CREATE TABLE IF NOT EXISTS entrevistas_salidas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -540,6 +574,9 @@ def ensure_entrevistas_tables():
             fecha_baja TEXT NOT NULL
         )
     """)
+    cols_salidas = {row[1] for row in conn.execute("PRAGMA table_info(entrevistas_salidas)")}
+    if "puesto" not in cols_salidas:
+        conn.execute("ALTER TABLE entrevistas_salidas ADD COLUMN puesto TEXT")
     # Override manual de un cruce respuesta<->salida — para cuando la misma
     # persona aparece en las dos auditorías (p.ej. "FLORES, LENIN MICHAEL" en
     # Salidas Totales vs "Lenin flores alvarado" en su propia respuesta) pero
@@ -760,8 +797,8 @@ def import_excel(file_bytes, archivo_nombre, subido_por, nueva_oleada=False, emp
         conn.execute("DELETE FROM entrevistas_salidas WHERE oleada_id = ?", (oleada_id,))
         for s in salidas:
             conn.execute(
-                "INSERT INTO entrevistas_salidas (oleada_id, centro, nombre, fecha_baja) VALUES (?, ?, ?, ?)",
-                (oleada_id, s["centro"], s["nombre"], s["fecha_baja"]),
+                "INSERT INTO entrevistas_salidas (oleada_id, centro, nombre, fecha_baja, puesto) VALUES (?, ?, ?, ?, ?)",
+                (oleada_id, s["centro"], s["nombre"], s["fecha_baja"], s.get("puesto")),
             )
         salidas_nuevas = len(salidas)
 
@@ -915,6 +952,14 @@ def compute_reporte(oleada_id, centro=None):
 
     abiertas = {}
     for header in roles["abiertas"]:
+        # "Puesto de trabajo Tienda/Oficina/Fábrica/..." son preguntas
+        # condicionales del propio test (solo se le muestra al respondiente
+        # la que corresponde a su centro) — no son un comentario libre, y
+        # esa info ya se resume en la sección "Puestos de trabajo" (aunque
+        # viene de una fuente distinta, Salidas Totales). Se excluyen de
+        # Comentarios abiertos para no duplicar/fragmentar la vista.
+        if _normaliza_header(header).startswith("puesto de trabajo"):
+            continue
         textos = [str(fila[header]).strip() for fila in filas if fila.get(header)]
         textos = [t for t in textos if _respuesta_con_valor(t)]
         # Preguntas que se eliminaron del formulario antes de que nadie llegara
@@ -923,10 +968,42 @@ def compute_reporte(oleada_id, centro=None):
         if textos:
             abiertas[header] = textos
 
+    # N (quién respondió) vs Total (quién debía responder, según Salidas
+    # Totales) son números distintos — antes solo se mostraba N y se leía
+    # como si fuera el total. tiene_salidas_totales indica si hay datos de
+    # Salidas Totales para poder calcular Total/Participación (si nunca se
+    # subió esa hoja, se queda en None en vez de mostrar un 0 engañoso).
+    conn2 = get_connection()
+    salidas = _fetch_salidas(conn2, oleada_id, centro)
+    conn2.close()
+    total_salidas = len(salidas)
+    tiene_salidas_totales = total_salidas > 0
+    participacion = round(n / total_salidas * 100, 1) if total_salidas else None
+
+    salidas_por_tipo = {"tienda": 0, "oficina": 0, "fabrica": 0}
+    puestos_map = {"tienda": {}, "oficina": {}, "fabrica": {}}
+    for s in salidas:
+        tipo = _tipo_centro(s["centro"])
+        salidas_por_tipo[tipo] += 1
+        if s["puesto"]:
+            puestos_map[tipo][s["puesto"]] = puestos_map[tipo].get(s["puesto"], 0) + 1
+    puestos_por_tipo = {
+        tipo: sorted(
+            [{"puesto": p, "cantidad": c} for p, c in mapa.items()],
+            key=lambda x: -x["cantidad"],
+        )
+        for tipo, mapa in puestos_map.items()
+    }
+
     return {
         "oleada_id": oleada_id,
         "centro": centro,
         "n": n,
+        "total_salidas": total_salidas if tiene_salidas_totales else None,
+        "tiene_salidas_totales": tiene_salidas_totales,
+        "participacion": participacion,
+        "salidas_por_tipo": salidas_por_tipo if tiene_salidas_totales else None,
+        "puestos_por_tipo": puestos_por_tipo,
         "satisfaccion_general": satisfaccion_general,
         "bloques": bloques,
         "motivos": motivos,
@@ -937,12 +1014,12 @@ def compute_reporte(oleada_id, centro=None):
 def _fetch_salidas(conn, oleada_id, centro):
     if centro:
         rows = conn.execute(
-            "SELECT id, centro, nombre, fecha_baja FROM entrevistas_salidas WHERE oleada_id = ? AND centro = ?",
+            "SELECT id, centro, nombre, fecha_baja, puesto FROM entrevistas_salidas WHERE oleada_id = ? AND centro = ?",
             (oleada_id, centro),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id, centro, nombre, fecha_baja FROM entrevistas_salidas WHERE oleada_id = ?", (oleada_id,)
+            "SELECT id, centro, nombre, fecha_baja, puesto FROM entrevistas_salidas WHERE oleada_id = ?", (oleada_id,)
         ).fetchall()
     return [dict(r) for r in rows]
 
