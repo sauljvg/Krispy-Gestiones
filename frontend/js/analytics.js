@@ -83,51 +83,60 @@ function renderTimelineChart(timeline, porTienda) {
   });
 }
 
-function renderDistributionChart(distribucion) {
+// `porTienda` (solo llega en la vista "Todas", ver loadStats) dibuja barras
+// APILADAS, una serie de color por tienda, en vez de una única barra
+// agregada — mismo patrón que el timeline.
+function renderDistributionChart(distribucion, porTienda) {
   const ctx = document.getElementById("chart-distribution");
-  const orderedStars = [5, 4, 3, 2, 1];
-  const byStars = Object.fromEntries(distribucion.map((d) => [d.estrellas, d.cantidad]));
-  const counts = orderedStars.map((s) => byStars[s] || 0);
-
   if (distributionChart) distributionChart.destroy();
+  const orderedStars = [5, 4, 3, 2, 1];
+  const labels = orderedStars.map((s) => `${s} ★`);
+
+  const apilado = porTienda && porTienda.series.length > 0;
+  const datasets = apilado
+    ? porTienda.series.map((s, i) => ({
+        label: s.tienda,
+        data: s.datos,
+        backgroundColor: PALETA_EVOLUCION[i % PALETA_EVOLUCION.length],
+      }))
+    : (() => {
+        const byStars = Object.fromEntries(distribucion.map((d) => [d.estrellas, d.cantidad]));
+        return [{
+          label: "Reseñas",
+          data: orderedStars.map((s) => byStars[s] || 0),
+          backgroundColor: cssVar("--acento"),
+          borderRadius: 4,
+          maxBarThickness: 46,
+        }];
+      })();
+
   distributionChart = new Chart(ctx, {
     type: "bar",
-    data: {
-      labels: orderedStars.map((s) => `${s} ★`),
-      datasets: [{
-        label: "Reseñas",
-        data: counts,
-        backgroundColor: cssVar("--acento"),
-        borderRadius: 4,
-        maxBarThickness: 46,
-      }],
-    },
+    data: { labels, datasets },
     options: {
       responsive: true,
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: apilado, position: "bottom", labels: { usePointStyle: true, pointStyle: "circle", color: cssVar("--text-muted") } },
+      },
       scales: {
-        x: { grid: { display: false }, ticks: { color: cssVar("--text-muted") } },
-        y: { beginAtZero: true, grid: { color: cssVar("--gridline") }, ticks: { color: cssVar("--text-muted") } },
+        x: { stacked: apilado, grid: { display: false }, ticks: { color: cssVar("--text-muted") } },
+        y: { stacked: apilado, beginAtZero: true, grid: { color: cssVar("--gridline") }, ticks: { color: cssVar("--text-muted") } },
       },
     },
   });
 }
 
-function renderHoraChart(porHora) {
+function renderHoraChart(porHora, seriesPorTienda) {
   const ctx = document.getElementById("chart-hora");
   if (horaChart) horaChart.destroy();
+  const apilado = seriesPorTienda && seriesPorTienda.length > 0;
+  const datasets = apilado
+    ? seriesPorTienda.map((s, i) => ({ label: s.tienda, data: s.datos, backgroundColor: PALETA_EVOLUCION[i % PALETA_EVOLUCION.length] }))
+    : [{ label: "Reseñas", data: porHora.map((h) => h.cantidad), backgroundColor: cssVar("--acento"), borderRadius: 4, maxBarThickness: 22 }];
+
   horaChart = new Chart(ctx, {
     type: "bar",
-    data: {
-      labels: porHora.map((h) => `${h.hora}h`),
-      datasets: [{
-        label: "Reseñas",
-        data: porHora.map((h) => h.cantidad),
-        backgroundColor: cssVar("--acento"),
-        borderRadius: 4,
-        maxBarThickness: 22,
-      }],
-    },
+    data: { labels: porHora.map((h) => `${h.hora}h`), datasets },
     options: {
       responsive: true,
       onClick: (evt, elements) => {
@@ -137,30 +146,28 @@ function renderHoraChart(porHora) {
       onHover: (evt, elements) => {
         evt.native.target.style.cursor = elements.length ? "pointer" : "default";
       },
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: apilado, position: "bottom", labels: { usePointStyle: true, pointStyle: "circle", color: cssVar("--text-muted") } },
+      },
       scales: {
-        x: { grid: { display: false }, ticks: { color: cssVar("--text-muted") } },
-        y: { beginAtZero: true, grid: { color: cssVar("--gridline") }, ticks: { color: cssVar("--text-muted"), precision: 0 } },
+        x: { stacked: apilado, grid: { display: false }, ticks: { color: cssVar("--text-muted") } },
+        y: { stacked: apilado, beginAtZero: true, grid: { color: cssVar("--gridline") }, ticks: { color: cssVar("--text-muted"), precision: 0 } },
       },
     },
   });
 }
 
-function renderDiaSemanaChart(porDia) {
+function renderDiaSemanaChart(porDia, seriesPorTienda) {
   const ctx = document.getElementById("chart-dia-semana");
   if (diaSemanaChart) diaSemanaChart.destroy();
+  const apilado = seriesPorTienda && seriesPorTienda.length > 0;
+  const datasets = apilado
+    ? seriesPorTienda.map((s, i) => ({ label: s.tienda, data: s.datos, backgroundColor: PALETA_EVOLUCION[i % PALETA_EVOLUCION.length] }))
+    : [{ label: "Reseñas", data: porDia.map((d) => d.cantidad), backgroundColor: cssVar("--acento"), borderRadius: 4, maxBarThickness: 46 }];
+
   diaSemanaChart = new Chart(ctx, {
     type: "bar",
-    data: {
-      labels: porDia.map((d) => d.dia),
-      datasets: [{
-        label: "Reseñas",
-        data: porDia.map((d) => d.cantidad),
-        backgroundColor: cssVar("--acento"),
-        borderRadius: 4,
-        maxBarThickness: 46,
-      }],
-    },
+    data: { labels: porDia.map((d) => d.dia), datasets },
     options: {
       responsive: true,
       onClick: (evt, elements) => {
@@ -170,10 +177,12 @@ function renderDiaSemanaChart(porDia) {
       onHover: (evt, elements) => {
         evt.native.target.style.cursor = elements.length ? "pointer" : "default";
       },
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: apilado, position: "bottom", labels: { usePointStyle: true, pointStyle: "circle", color: cssVar("--text-muted") } },
+      },
       scales: {
-        x: { grid: { display: false }, ticks: { color: cssVar("--text-muted") } },
-        y: { beginAtZero: true, grid: { color: cssVar("--gridline") }, ticks: { color: cssVar("--text-muted"), precision: 0 } },
+        x: { stacked: apilado, grid: { display: false }, ticks: { color: cssVar("--text-muted") } },
+        y: { stacked: apilado, beginAtZero: true, grid: { color: cssVar("--gridline") }, ticks: { color: cssVar("--text-muted"), precision: 0 } },
       },
     },
   });

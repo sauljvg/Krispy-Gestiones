@@ -149,7 +149,7 @@ async function loadStats() {
   document.getElementById("stat-promedio").textContent = `${stats.promedio_estrellas} ★`;
   document.getElementById("stat-positivas").textContent = `${stats.porcentaje_positivas}%`;
   document.getElementById("stat-recientes").textContent = stats.resenas_recientes.toLocaleString("es-ES");
-  renderDistributionChart(stats.distribucion_estrellas);
+  renderDistributionChart(stats.distribucion_estrellas, stats.distribucion_por_tienda);
 
   const checkEl = document.getElementById("stat-total-check");
   if (stats.completo) {
@@ -229,8 +229,8 @@ async function loadHorario() {
   if (!horarioVisible) return;
   const params = currentQueryParams();
   const data = await fetchJSON(`${API_BASE}/timeline-horas?${params.toString()}`);
-  renderHoraChart(data.por_hora);
-  renderDiaSemanaChart(data.por_dia_semana);
+  renderHoraChart(data.por_hora, data.por_tienda?.por_hora);
+  renderDiaSemanaChart(data.por_dia_semana, data.por_tienda?.por_dia_semana);
   const hintEl = document.getElementById("horario-hint");
   hintEl.hidden = false;
   hintEl.textContent = data.con_hora_exacta > 0

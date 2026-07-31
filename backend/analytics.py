@@ -93,6 +93,34 @@ def get_stats(where="", params=None):
     }
 
 
+def get_distribucion_por_tienda(where="", params=None):
+    """Distribución de estrellas (5★..1★) desglosada por tienda — para
+    dibujar "Distribución de estrellas" como barras apiladas en la vista
+    "Todas" en vez de un único agregado."""
+    sql_where, sql_params = _combine_where("tienda IS NOT NULL", where, params)
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(f"""
+        SELECT tienda, calificacion_num AS estrellas, COUNT(*) AS cantidad
+        FROM reviews {sql_where}
+        GROUP BY tienda, estrellas
+    """, sql_params)
+    filas = dict_rows(cur)
+    conn.close()
+
+    por_tienda = {}
+    for f in filas:
+        por_tienda.setdefault(f["tienda"], {})[f["estrellas"]] = f["cantidad"]
+
+    orden_estrellas = [5, 4, 3, 2, 1]
+    series = [
+        {"tienda": tienda, "datos": [conteos.get(e, 0) for e in orden_estrellas]}
+        for tienda, conteos in por_tienda.items()
+    ]
+    series.sort(key=lambda s: -sum(s["datos"]))
+    return {"estrellas": orden_estrellas, "series": series}
+
+
 def get_timeline(where="", params=None):
     sql_where, sql_params = _combine_where("fecha_datetime IS NOT NULL", where, params)
     conn = get_connection()
@@ -393,6 +421,49 @@ def get_hourly_distribution(where, params):
         "por_dia_semana": por_dia_semana,
         "con_hora_exacta": con_hora_exacta,
     }
+
+
+def get_hourly_distribution_por_tienda(where, params):
+    """Como get_hourly_distribution pero una serie por tienda en vez de un
+    único agregado — para dibujar "Horario de reseñas" (por hora y por día
+    de la semana) como barras apiladas en la vista "Todas"."""
+    conn = get_connection()
+    clause = where + (" AND" if where else " WHERE") + " fecha_hora IS NOT NULL AND tienda IS NOT NULL"
+
+    filas_hora = conn.execute(f"""
+        SELECT tienda, CAST(strftime('%H', fecha_hora) AS INTEGER) AS hora, COUNT(*) AS n
+        FROM reviews {clause}
+        GROUP BY tienda, hora
+    """, params).fetchall()
+    filas_dia = conn.execute(f"""
+        SELECT tienda, CAST(strftime('%w', fecha_hora) AS INTEGER) AS dow, COUNT(*) AS n
+        FROM reviews {clause}
+        GROUP BY tienda, dow
+    """, params).fetchall()
+    conn.close()
+
+    tiendas = sorted({r["tienda"] for r in filas_hora} | {r["tienda"] for r in filas_dia})
+
+    por_hora_map = {}
+    for r in filas_hora:
+        por_hora_map.setdefault(r["tienda"], {})[r["hora"]] = r["n"]
+    series_hora = [
+        {"tienda": t, "datos": [por_hora_map.get(t, {}).get(h, 0) for h in range(24)]}
+        for t in tiendas
+    ]
+    series_hora.sort(key=lambda s: -sum(s["datos"]))
+
+    orden_lunes_primero = [1, 2, 3, 4, 5, 6, 0]
+    por_dia_map = {}
+    for r in filas_dia:
+        por_dia_map.setdefault(r["tienda"], {})[r["dow"]] = r["n"]
+    series_dia = [
+        {"tienda": t, "datos": [por_dia_map.get(t, {}).get(dow, 0) for dow in orden_lunes_primero]}
+        for t in tiendas
+    ]
+    series_dia.sort(key=lambda s: -sum(s["datos"]))
+
+    return {"por_hora": series_hora, "por_dia_semana": series_dia}
 
 
 def get_evolucion_por_tienda(date_from, date_to, solo_google=False):

@@ -244,6 +244,10 @@ def stats(
     else:
         result["total_google"] = None
         result["completo"] = analytics.get_all_stores_completeness()
+        # Barras apiladas de "Distribución de estrellas" — solo aporta algo
+        # en "Todas" (con una tienda ya es una única serie, igual que la
+        # aggregada de arriba).
+        result["distribucion_por_tienda"] = analytics.get_distribucion_por_tienda(where, params)
     return result
 
 
@@ -259,7 +263,10 @@ def timeline_horas(
     solo_google: bool = False,
 ):
     where, params = build_filters(rating, sentiment, date_from, date_to, q, staff, tienda, solo_google)
-    return analytics.get_hourly_distribution(where, params)
+    resultado = analytics.get_hourly_distribution(where, params)
+    if not tienda:
+        resultado["por_tienda"] = analytics.get_hourly_distribution_por_tienda(where, params)
+    return resultado
 
 
 @router.get("/rating-progress")
