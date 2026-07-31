@@ -341,7 +341,7 @@ async function wireRecordatorio(auditoriaF) {
     const empresaNombre = EMPRESA === "saona" ? "Saona" : "Krispy Kreme España";
     const remitente = usuarioActual?.nombre || "Equipo RRHH";
     const asunto = encodeURIComponent("Recordatorio: Entrevista de Salida pendiente");
-    const lineaEnlace = enlaceCorto ? `👉🏽 ${enlaceCorto}` : "👉🏽 Entrevista de salida (pídele el enlace a RRHH)";
+    const lineaEnlace = enlaceCorto ? `👉🏽 Entrevista de salida: ${enlaceCorto}` : "👉🏽 Entrevista de salida";
     const cuerpo = encodeURIComponent(
       `Hola,\n\n` +
         `Soy ${remitente}, espero estés super bien.\n` +
