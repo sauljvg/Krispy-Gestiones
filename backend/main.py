@@ -115,11 +115,6 @@ app.include_router(router, prefix="/api", dependencies=[Depends(require_resenas)
 
 
 @app.on_event("startup")
-def _start_daily_scraper():
-    scrape_jobs.start_daily_scheduler()
-
-
-@app.on_event("startup")
 def _start_db_backups():
     backups_module.start_scheduler()
 

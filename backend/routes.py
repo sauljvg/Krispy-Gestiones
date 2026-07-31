@@ -9,7 +9,6 @@ from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
 import analytics
-import scrape_jobs
 from db import dict_rows, get_connection
 from request_context import tiendas_permitidas_actual
 from utils import paginate, read_transactions_xlsx, rows_to_csv, rows_to_xlsx
@@ -354,35 +353,12 @@ def set_transactions(body: TransactionsIn):
     return {"ok": True}
 
 
-@router.post("/scrape")
-def start_scrape(tienda: str | None = None, empresa: str = "kk", completo: bool = False):
-    """Lanza scraper_v2.py --update para `tienda` (nombre público o clave), o
-    para las tiendas de `empresa` en cola si no se especifica. No bloquea: el
-    progreso se consulta en /scrape/status. `completo=true` hace un escaneo
-    completo del histórico en vez del incremental — requiere `tienda` (no
-    tiene sentido en cola para varias tiendas, tarda mucho más)."""
-    if completo and not tienda:
-        raise HTTPException(400, "El escaneo completo requiere elegir una tienda concreta.")
-    if tienda:
-        key = scrape_jobs.resolve_tienda_key(tienda)
-        if key is None:
-            raise HTTPException(404, f"Tienda desconocida: '{tienda}'")
-        ok, error = scrape_jobs.start_update(tienda_key=key, all_keys=scrape_jobs.all_tienda_keys(), completo=completo)
-    else:
-        ok, error = scrape_jobs.start_update(all_keys=scrape_jobs.tienda_keys_de_empresa(empresa))
-    if not ok:
-        raise HTTPException(409, error)
-    return {"ok": True}
-
-
-@router.get("/scrape/status")
-def scrape_status(tienda: str | None = None, empresa: str = "kk"):
-    """Estado de la actualización en curso (o de la última). Sin `tienda`
-    devuelve el estado de las tiendas de `empresa`."""
-    keys = [scrape_jobs.resolve_tienda_key(tienda)] if tienda else scrape_jobs.tienda_keys_de_empresa(empresa)
-    if tienda and keys[0] is None:
-        raise HTTPException(404, f"Tienda desconocida: '{tienda}'")
-    return {"tiendas": {key: scrape_jobs.read_status(key) for key in keys}}
+# El botón "Actualizar"/"Escaneo completo" que lanzaba scraper_v2.py desde
+# aquí se quitó: el contenedor de producción no tiene Chrome instalado, así
+# que en Railway ese botón nunca funcionó de verdad (fallaba en silencio).
+# El scraping de Maps sigue existiendo como herramienta de terminal en local
+# (scraper/scraper_v2.py) para quien tenga Chrome con sesión propia — la vía
+# soportada dentro de la app es "Importar Takeout".
 
 
 @router.post("/transactions/upload")

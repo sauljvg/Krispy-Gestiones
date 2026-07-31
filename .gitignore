@@ -14,3 +14,4 @@ uploads/
 
 *.db
 backups/
+scraper/reconciliacion_*.csv

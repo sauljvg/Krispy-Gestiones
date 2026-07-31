@@ -416,106 +416,6 @@ function goToLatest() {
   return refreshAll();
 }
 
-let scrapePollTimer = null;
-
-async function startScrapeUpdate() {
-  const tienda = state.tienda;
-  const url = conEmpresaURL(tienda ? `${API_BASE}/scrape?tienda=${encodeURIComponent(tienda)}` : `${API_BASE}/scrape`);
-  const res = await fetch(url, { method: "POST" });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    alert(`No se pudo iniciar la actualización: ${body.detail || res.statusText}`);
-    return;
-  }
-  pollScrapeStatus(tienda);
-}
-
-async function startScrapeCompleto() {
-  const tienda = state.tienda;
-  if (!tienda) {
-    alert("Elige primero una tienda concreta arriba — el escaneo completo no es para todas a la vez, tarda demasiado.");
-    return;
-  }
-  if (!confirm(`Esto va a recorrer TODO el histórico de reseñas de ${tienda}, no solo lo nuevo. Puede tardar 20-40 minutos con Chrome abierto. ¿Continuar?`)) return;
-  const url = conEmpresaURL(`${API_BASE}/scrape?tienda=${encodeURIComponent(tienda)}&completo=true`);
-  const res = await fetch(url, { method: "POST" });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    alert(`No se pudo iniciar el escaneo completo: ${body.detail || res.statusText}`);
-    return;
-  }
-  pollScrapeStatus(tienda);
-}
-
-function renderScrapeTooltip(e) {
-  const tooltipEl = document.getElementById("scrape-info-tooltip");
-  if (!e) {
-    tooltipEl.textContent = "Esperando datos…";
-    return;
-  }
-  const totalGoogle = e.total_google != null ? e.total_google.toLocaleString("es-ES") : "desconocido";
-  const visibles = e.reviews_visibles != null ? e.reviews_visibles.toLocaleString("es-ES") : "—";
-  const lines = [
-    `<b>Tienda:</b> ${escapeHTML(e.tienda || "")}`,
-    `<b>Total en Google:</b> ${totalGoogle}`,
-    `<b>Encontradas ahora:</b> ${visibles}`,
-  ];
-  if (e.nuevas != null) lines.push(`<b>Nuevas (no vistas antes):</b> ${e.nuevas}`);
-  if (e.ya_conocidas != null) lines.push(`<b>Ya conocidas:</b> ${e.ya_conocidas.toLocaleString("es-ES")}`);
-  tooltipEl.innerHTML = lines.join("<br>");
-}
-
-async function pollScrapeStatusTick(tienda, progressEl, msgEl, btn) {
-  try {
-    const url = tienda
-      ? `${API_BASE}/scrape/status?tienda=${encodeURIComponent(tienda)}`
-      : `${API_BASE}/scrape/status`;
-    const { tiendas } = await fetchJSON(url);
-    const entries = Object.values(tiendas);
-    const running = entries.filter((e) => e.status === "running" || e.en_ejecucion);
-    const errored = entries.filter((e) => e.status === "error");
-
-    if (running.length) {
-      const e = running[0];
-      const nuevas = e.nuevas != null ? ` (${e.nuevas} nuevas)` : "";
-      msgEl.textContent = `${e.tienda || ""}: ${e.mensaje || "actualizando…"}${nuevas}`;
-      renderScrapeTooltip(e);
-      return;
-    }
-
-    clearInterval(scrapePollTimer);
-    scrapePollTimer = null;
-    progressEl.hidden = true;
-    btn.disabled = false;
-    msgEl.textContent = "";
-    renderScrapeTooltip(null);
-    if (errored.length) {
-      alert(`Error actualizando ${errored.map((e) => e.tienda).join(", ")}: ${errored[0].mensaje}`);
-    }
-    await loadStores();
-    await loadStoreRanking();
-    await goToLatest();
-  } catch (err) {
-    console.error("Fallo consultando estado de scraping:", err);
-  }
-}
-
-function pollScrapeStatus(tienda) {
-  const progressEl = document.getElementById("scrape-progress");
-  const msgEl = document.getElementById("scrape-progress-msg");
-  const btn = document.getElementById("btn-refresh");
-  progressEl.hidden = false;
-  btn.disabled = true;
-  renderScrapeTooltip(null);
-
-  if (scrapePollTimer) clearInterval(scrapePollTimer);
-  // Primer sondeo inmediato (setInterval no dispara hasta pasado el primer
-  // intervalo, así que sin esto el tooltip se queda en "Esperando datos…"
-  // varios segundos aunque el scraper ya esté avanzando).
-  pollScrapeStatusTick(tienda, progressEl, msgEl, btn);
-  scrapePollTimer = setInterval(() => pollScrapeStatusTick(tienda, progressEl, msgEl, btn), 3000);
-}
-
 function clearFilters() {
   document.getElementById("filter-tienda").value = "";
   document.getElementById("filter-rating").value = "";
@@ -575,8 +475,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     e.target.textContent = horarioVisible ? "Ocultar" : "Mostrar";
     if (horarioVisible) loadHorario().catch((err) => console.error("Fallo cargando horario:", err));
   });
-  document.getElementById("btn-refresh").addEventListener("click", startScrapeUpdate);
-  document.getElementById("btn-scan-completo").addEventListener("click", startScrapeCompleto);
   document.getElementById("btn-export-csv").addEventListener("click", exportExcel);
   document.getElementById("input-transactions-month").value = new Date().toISOString().slice(0, 7);
   document.getElementById("input-transactions-month").addEventListener("change", () => {

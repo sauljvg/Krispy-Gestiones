@@ -448,46 +448,6 @@ h3 {
   font-size: 13px;
 }
 
-.scrape-progress {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.scrape-info-wrap { position: relative; display: inline-flex; align-items: center; }
-.scrape-info-btn {
-  background: none;
-  border: none;
-  cursor: help;
-  color: var(--text-secondary);
-  font-size: 15px;
-  line-height: 1;
-  padding: 0;
-}
-.scrape-info-btn:hover { color: var(--acento); }
-.scrape-info-tooltip {
-  display: none;
-  position: absolute;
-  top: 140%;
-  right: 0;
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  font-size: 12px;
-  color: var(--text-primary);
-  white-space: nowrap;
-  box-shadow: 0 4px 16px rgba(0,0,0,.25);
-  z-index: 20;
-  text-align: left;
-  line-height: 1.6;
-}
-.scrape-info-wrap:hover .scrape-info-tooltip,
-.scrape-info-wrap:focus-within .scrape-info-tooltip { display: block; }
-.scrape-info-tooltip b { color: var(--acento); }
-
 /* Botón ⓘ genérico para explicar un título sin ensuciar la pantalla con el
    texto siempre visible — hover en desktop, tap en móvil (la clase "open" la
    pone JS al hacer clic/tap, ya que touch no dispara :hover de forma fiable). */
@@ -525,25 +485,6 @@ h3 {
 .info-tip-wrap:hover .info-tip-box,
 .info-tip-wrap:focus-within .info-tip-box,
 .info-tip-wrap.open .info-tip-box { display: block; }
-.scrape-progress-bar {
-  width: 90px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--gridline);
-  overflow: hidden;
-}
-.scrape-progress-fill {
-  height: 100%;
-  width: 30%;
-  background: var(--acento);
-  border-radius: 999px;
-  animation: scrape-indeterminate 1.2s ease-in-out infinite;
-}
-@keyframes scrape-indeterminate {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(330%); }
-}
-
 .filters-row {
   display: flex;
   flex-wrap: wrap;
