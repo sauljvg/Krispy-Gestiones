@@ -50,6 +50,11 @@ def ensure_encuestas_tables():
     cols_encuestas = {row[1] for row in conn.execute("PRAGMA table_info(encuestas)")}
     if "tipo_entrevista_empresa" not in cols_encuestas:
         conn.execute("ALTER TABLE encuestas ADD COLUMN tipo_entrevista_empresa TEXT")
+    if "enlace_corto" not in cols_encuestas:
+        # Enlace acortado a mano (TinyURL o similar) para usar en emails/
+        # recordatorios en vez del "enlace público" largo — puramente
+        # informativo, el backend no lo usa para resolver la encuesta.
+        conn.execute("ALTER TABLE encuestas ADD COLUMN enlace_corto TEXT")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS encuesta_paginas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -331,6 +336,21 @@ def list_encuestas():
     return [_row_encuesta(r) for r in rows]
 
 
+def get_enlace_corto_entrevista(empresa):
+    """El enlace corto (TinyURL) del test que alimenta la Entrevista de
+    Salida de esta empresa — para el botón "Enviar Recordatorio" de
+    Entrevista de Salida, que no tiene por qué tener acceso al módulo Test.
+    Si hay más de un test marcado para la misma empresa (no debería, pero no
+    hay constraint que lo impida), se usa el más reciente."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT enlace_corto FROM encuestas WHERE tipo_entrevista_empresa = ? ORDER BY id DESC LIMIT 1",
+        (empresa,),
+    ).fetchone()
+    conn.close()
+    return row["enlace_corto"] if row else None
+
+
 def _fetch_estructura(conn, encuesta_id):
     paginas = conn.execute(
         "SELECT * FROM encuesta_paginas WHERE encuesta_id = ? ORDER BY orden", (encuesta_id,)
@@ -406,13 +426,13 @@ def create_encuesta(titulo):
     return encuesta_id
 
 
-def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None):
+def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None):
     conn = get_connection()
     conn.execute(
         "UPDATE encuestas SET titulo = ?, mensaje_final = ?, color_boton = ?, tipo_informe_clave = ?, "
-        "tipo_entrevista_empresa = ? WHERE id = ?",
+        "tipo_entrevista_empresa = ?, enlace_corto = ? WHERE id = ?",
         (titulo.strip(), mensaje_final.strip(), color_boton.strip(), tipo_informe_clave or None,
-         tipo_entrevista_empresa or None, encuesta_id),
+         tipo_entrevista_empresa or None, (enlace_corto or "").strip() or None, encuesta_id),
     )
     conn.commit()
     conn.close()

@@ -7,6 +7,7 @@ let chartMotivos = null;
 let chartEvolucionTotal = null;
 let chartEvolucionMinMax = null;
 let MARCA_COLOR = "#006838";
+let usuarioActual = null;
 
 // Icono SVG en vez de 🔗 — se ve igual de nítido en cualquier sistema.
 const ICONO_ENLACE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
@@ -314,7 +315,7 @@ function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquet
 // con todos los correos en copia oculta (bcc) y abre el cliente de correo
 // del propio usuario, que es quien de verdad manda el email desde su
 // cuenta — así no depende de tener el dominio verificado en Resend.
-function wireRecordatorio(auditoriaF) {
+async function wireRecordatorio(auditoriaF) {
   const btn = document.getElementById("btn-enviar-recordatorio");
   const hint = document.getElementById("recordatorio-hint");
   const conEmail = auditoriaF.filter((a) => a.email);
@@ -325,11 +326,34 @@ function wireRecordatorio(auditoriaF) {
     conEmail.length === 0
       ? "Ninguna de estas salidas tiene email guardado (la hoja Salidas Totales no traía columna de correo)."
       : `${conEmail.length} con email · ${sinEmail} sin email (no se les puede incluir).`;
+
+  let enlaceCorto = "";
+  try {
+    const res = await fetch(`${AUTH_API_BASE}/encuestas/enlace-corto-entrevista/${EMPRESA}`);
+    if (res.ok) enlaceCorto = (await res.json()).enlace_corto || "";
+  } catch {
+    // Sin enlace corto configurado o sin conexión: el mailto se arma igual,
+    // solo que sin el enlace en el cuerpo (mejor que bloquear el botón).
+  }
+
   btn.onclick = () => {
     const destinatarios = conEmail.map((a) => a.email).join(",");
+    const empresaNombre = EMPRESA === "saona" ? "Saona" : "Krispy Kreme España";
+    const remitente = usuarioActual?.nombre || "Equipo RRHH";
     const asunto = encodeURIComponent("Recordatorio: Entrevista de Salida pendiente");
+    const lineaEnlace = enlaceCorto ? `👉🏽 ${enlaceCorto}` : "👉🏽 Entrevista de salida (pídele el enlace a RRHH)";
     const cuerpo = encodeURIComponent(
-      "Hola,\n\nVemos que aún no has completado el formulario de Entrevista de Salida. Te agradeceríamos que lo respondieras cuando puedas.\n\nGracias."
+      `Hola,\n\n` +
+        `Soy ${remitente}, espero estés super bien.\n` +
+        `Quisiera pedirte unos minutos para completar la entrevista de salida.\n` +
+        `Tu experiencia con nosotros es importante porque nos ayuda a mejorar procesos, liderazgo, ambiente de trabajo y todo lo que forma parte del día a día en ${empresaNombre}.\n` +
+        `La encuesta no te tomará más de 3 minutos y tus respuestas nos permitirán tomar decisiones más acertadas para que la experiencia de las personas que se incorporen después sea cada vez mejor.\n\n` +
+        `Aquí tienes el enlace para responder:\n` +
+        `${lineaEnlace}\n\n` +
+        `Gracias por dedicarle este tiempo y por todo lo que has aportado durante tu etapa con nosotros.\n` +
+        `Tu opinión realmente nos ayuda a seguir mejorando.\n\n` +
+        `Un abrazo,\n` +
+        `Equipo RRHH - ${empresaNombre}`
     );
     window.location.href = `mailto:?bcc=${encodeURIComponent(destinatarios)}&subject=${asunto}&body=${cuerpo}`;
   };
@@ -597,6 +621,7 @@ function renderListaComentarios(container, textos) {
 document.addEventListener("DOMContentLoaded", async () => {
   const user = await checkAuth("/entrevistas.html");
   if (!user) return;
+  usuarioActual = user;
   const moduloRequerido = EMPRESA === "saona" ? "saona_informes" : "informes";
   if (!(user.modulos || []).includes(moduloRequerido)) {
     window.location.href = "/";

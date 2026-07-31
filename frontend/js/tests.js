@@ -122,6 +122,7 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     // compartido con el slug largo sigue funcionando igual.
     const codigoCorto = String(currentTest.id).padStart(4, "0");
     document.getElementById("test-enlace-publico").value = `${location.origin}/encuesta.html?slug=${codigoCorto}`;
+    document.getElementById("test-enlace-corto").value = currentTest.enlace_corto || "";
     document.getElementById("fondo-preview").hidden = !currentTest.tiene_fondo;
     if (currentTest.tiene_fondo) {
       document.getElementById("fondo-preview").src = `${AUTH_API_BASE}/encuestas/encuestas/${testId}/fondo?t=${Date.now()}`;
@@ -141,6 +142,7 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("test-color-boton").value = "#5b2a2a";
     document.getElementById("test-tipo-informe").value = "";
     document.getElementById("test-enlace-publico").value = "";
+    document.getElementById("test-enlace-corto").value = "";
     document.getElementById("fondo-preview").hidden = true;
     document.getElementById("btn-publicar-test").hidden = true;
     document.getElementById("btn-despublicar-test").hidden = true;
@@ -186,6 +188,7 @@ async function guardarTest() {
     color_boton: document.getElementById("test-color-boton").value,
     tipo_informe_clave: destino.startsWith("informe:") ? destino.slice("informe:".length) : null,
     tipo_entrevista_empresa: destino.startsWith("entrevista:") ? destino.slice("entrevista:".length) : null,
+    enlace_corto: document.getElementById("test-enlace-corto").value.trim() || null,
   };
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}`, {
     method: "PUT",

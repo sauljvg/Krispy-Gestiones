@@ -27,6 +27,7 @@ class EncuestaEditarIn(BaseModel):
     color_boton: str = "#5b2a2a"
     tipo_informe_clave: str | None = None
     tipo_entrevista_empresa: str | None = None
+    enlace_corto: str | None = None
 
 
 class PaginaIn(BaseModel):
@@ -84,6 +85,14 @@ def list_encuestas_route(_user: dict = Depends(require_tests)):
     return encuestas_module.list_encuestas()
 
 
+@router.get("/encuestas/enlace-corto-entrevista/{empresa}")
+def enlace_corto_entrevista_route(empresa: str, _user: dict = Depends(get_current_user)):
+    """Solo el enlace corto del test de Entrevista de Salida de esta
+    empresa — sin exigir el módulo Test, para el botón "Enviar
+    Recordatorio" de Entrevista de Salida (que sí requiere Informes)."""
+    return {"enlace_corto": encuestas_module.get_enlace_corto_entrevista(empresa)}
+
+
 @router.get("/encuestas/en-vivo")
 def en_vivo_route(_user: dict = Depends(require_tests)):
     """Cuántas personas están respondiendo cada test AHORA MISMO (heartbeat
@@ -136,7 +145,7 @@ def update_encuesta_route(encuesta_id: int, body: EncuestaEditarIn, _user: dict 
         raise HTTPException(status_code=404, detail="Encuesta no encontrada")
     encuestas_module.update_encuesta(
         encuesta_id, body.titulo, body.mensaje_final, body.color_boton,
-        body.tipo_informe_clave, body.tipo_entrevista_empresa,
+        body.tipo_informe_clave, body.tipo_entrevista_empresa, body.enlace_corto,
     )
     return {"ok": True}
 
