@@ -37,8 +37,19 @@ CURRENT_DATE = datetime.now()
 # Qué tienda scrapear: `python scraper_v2.py <clave>` (ver stores.py). Sin
 # argumento, usa la tienda por defecto (mantiene el comportamiento anterior).
 # `--update` activa el modo incremental (ver UPDATE_MODE más abajo).
+# `--reconciliar` hace una pasada completa (igual que sin --update) y al
+# final compara lo que sigue visible en Maps contra lo que ya tenemos en la
+# BD para esta tienda — las que NO aparecieron son candidatas a "borradas
+# por la persona o retiradas por Google" (ver RECONCILIAR_MODE más abajo).
 _args = [a for a in sys.argv[1:] if not a.startswith("--")]
 UPDATE_MODE = "--update" in sys.argv
+RECONCILIAR_MODE = "--reconciliar" in sys.argv
+if RECONCILIAR_MODE and UPDATE_MODE:
+    # --update para en el primer tramo de reseñas ya conocidas, así que no
+    # llega a ver el resto — con eso, todo lo que no vea parecería "borrado"
+    # sin serlo. La reconciliación necesita la pasada completa.
+    print("--reconciliar ignora --update (necesita ver TODAS las reseñas visibles, no solo las nuevas).")
+    UPDATE_MODE = False
 STORE_KEY = _args[0] if _args else DEFAULT_STORE
 if STORE_KEY not in STORES:
     print(f"Tienda desconocida: '{STORE_KEY}'. Opciones: {', '.join(STORES)}")
@@ -788,6 +799,45 @@ def save_outputs(reviews):
         print(f"Total combinado (todas las tiendas en la BD): {len(all_reviews)}")
 
 
+def reporte_reconciliacion(tienda, existing_before, visible_ids):
+    """Compara lo que ya teníamos en la BD (antes de esta pasada) contra lo
+    que sigue visible en Maps ahora mismo. Lo que está en la BD pero no
+    salió en esta pasada completa es candidato a "borrada por la persona o
+    retirada por Google" — pero el scraping de Maps puede fallar por
+    bloqueos de automatización, así que esto NO se borra solo: se guarda un
+    CSV para revisar a mano antes de decidir nada."""
+    faltantes_ids = existing_before - visible_ids
+    print(f"\n{'='*60}\nRECONCILIACIÓN — {tienda}\n{'='*60}")
+    print(f"En BD antes de esta pasada: {len(existing_before)}")
+    print(f"Vistas en esta pasada por Maps: {len(visible_ids)}")
+    print(f"En BD pero NO vistas ahora: {len(faltantes_ids)}")
+
+    if not faltantes_ids:
+        print("Nada que reportar — todo lo que teníamos sigue visible en Maps.")
+        return
+
+    conn = sqlite3.connect(config.DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    placeholders = ",".join("?" * len(faltantes_ids))
+    filas = cur.execute(
+        f"SELECT review_id, autor, fecha, fecha_datetime, calificacion, texto "
+        f"FROM reviews WHERE review_id IN ({placeholders})",
+        list(faltantes_ids),
+    ).fetchall()
+    conn.close()
+
+    reporte_path = os.path.join(os.path.dirname(__file__), f"reconciliacion_{STORE_KEY}.csv")
+    with open(reporte_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["review_id", "autor", "fecha", "fecha_datetime", "calificacion", "texto"])
+        writer.writeheader()
+        writer.writerows(dict(fila) for fila in filas)
+
+    print(f"\nDetalle de las {len(filas)} candidatas a borradas guardado en: {reporte_path}")
+    for fila in filas:
+        print(f"  - {fila['autor']} ({fila['fecha_datetime'] or fila['fecha']}, {fila['calificacion']}): {(fila['texto'] or '')[:80]}")
+
+
 def run_login_setup():
     """Abre un Chrome real (mismo perfil persistente que usan los scrapes) en
     la página de login de Google y espera a que el usuario inicie sesión a
@@ -889,10 +939,16 @@ if __name__ == "__main__":
     acquire_lock()
     try:
         write_status(status="running", mensaje="Iniciando Chrome…", reviews_visibles=0, nuevas=0)
+        # Se captura ANTES de scrapear/guardar: es la foto de "qué teníamos"
+        # contra la que se compara lo que siga visible al final.
+        existing_before = get_existing_review_ids(STORE_NAME) if RECONCILIAR_MODE else None
         try:
             raw = run_manual_assist() if MANUAL_MODE else scrape_all_reviews()
             reviews = process_reviews(raw)
             save_outputs(reviews)
+            if RECONCILIAR_MODE:
+                visible_ids = {r["review_id"] for r in reviews}
+                reporte_reconciliacion(STORE_NAME, existing_before, visible_ids)
         except Exception as e:
             write_status(status="error", mensaje=str(e))
             raise
