@@ -1,7 +1,13 @@
 import os
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-DB_PATH = os.path.join(PROJECT_ROOT, "krispy_kreme.db")
+# DATA_DIR es la misma variable de entorno que usa backend/db.py para
+# apuntar al volumen persistente en producción — sin esto, el import de
+# Takeout (y cualquier otro uso de este config.py) escribía en un
+# krispy_kreme.db distinto dentro de la carpeta del proyecto, invisible
+# para la app real y probablemente no escribible en el contenedor.
+DATA_DIR = os.environ.get("DATA_DIR") or PROJECT_ROOT
+DB_PATH = os.path.join(DATA_DIR, "krispy_kreme.db")
 JSON_OUTPUT_PATH = os.path.join(PROJECT_ROOT, "krispy_kreme_todas_resenas.json")
 CSV_OUTPUT_PATH = os.path.join(PROJECT_ROOT, "krispy_kreme_todas_resenas.csv")
 
