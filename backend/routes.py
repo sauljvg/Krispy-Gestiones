@@ -437,6 +437,12 @@ def import_takeout(file: UploadFile = File(...)):
             report = import_takeout_module.run_import(extract_dir)
         except SystemExit as e:
             raise HTTPException(400, str(e))
+        except Exception as e:
+            # El 500 genérico de Starlette no manda detail en JSON, así que
+            # en producción llegaba al navegador completamente vacío y no
+            # daba ninguna pista de qué fallaba de verdad. Se captura aquí
+            # para que el propio error diga qué excepción fue.
+            raise HTTPException(500, f"{type(e).__name__}: {e}")
 
         total_nuevas = sum(r["nuevas"] for r in report)
         return {"ok": True, "total_nuevas": total_nuevas, "tiendas": report}
