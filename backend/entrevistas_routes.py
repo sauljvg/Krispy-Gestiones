@@ -18,6 +18,10 @@ class MatchIn(BaseModel):
     respuesta_id: int
     salida_id: int
 
+
+class MotivoIn(BaseModel):
+    motivo: str
+
 router = APIRouter()
 
 
@@ -111,6 +115,22 @@ def borrar_match_route(oleada_id: int, respuesta_id: int, _user: dict = Depends(
 @router.delete("/{oleada_id}/respuestas/{respuesta_id}")
 def borrar_respuesta_route(oleada_id: int, respuesta_id: int, _user: dict = Depends(require_entrevistas_oleada)):
     entrevistas_module.borrar_respuesta(respuesta_id)
+    return {"ok": True}
+
+
+@router.get("/{oleada_id}/respuestas")
+def list_respuestas_route(oleada_id: int, centro: str | None = None, _user: dict = Depends(require_entrevistas_oleada)):
+    return entrevistas_module.list_respuestas_con_motivo(oleada_id, centro)
+
+
+@router.patch("/{oleada_id}/respuestas/{respuesta_id}/motivo")
+def update_motivo_route(oleada_id: int, respuesta_id: int, body: MotivoIn, _user: dict = Depends(require_entrevistas_oleada)):
+    if not body.motivo.strip():
+        raise HTTPException(status_code=400, detail="El motivo no puede estar vacío")
+    try:
+        entrevistas_module.update_motivo(respuesta_id, body.motivo.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True}
 
 

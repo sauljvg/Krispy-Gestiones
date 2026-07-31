@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krispy Gestiones · Perfil DISC</title>
+<link rel="icon" type="image/png" href="assets/favicon-kk.png">
+<script>
+  (function () {
+    var guardado = localStorage.getItem("kt-theme");
+    if (guardado === "light" || guardado === "dark") {
+      document.documentElement.dataset.theme = guardado;
+    }
+  })();
+</script>
+<link rel="stylesheet" href="css/styles.css?v=20260728a">
+<script src="js/vendor/chart.umd.min.js?v=20260723g"></script>
+<style>
+  .disc-wrap { max-width: 900px; margin: 0 auto; padding: 0 0 40px; }
+  .disc-tabs { display: flex; gap: 8px; margin: 18px 0; }
+  .disc-tabs button { padding: 8px 16px; }
+  .disc-tabs button.active { background: var(--acento); color: #fff; border-color: var(--acento); }
+
+  .disc-nombre-row { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .disc-nombre-row input { flex: 1; min-width: 220px; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 14px; }
+  .disc-progreso { font-size: 13px; color: var(--text-secondary); }
+
+  .disc-preview-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 20px; position: sticky; top: 8px; z-index: 5; }
+  .disc-preview-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .disc-preview-tipo { font-size: 22px; font-weight: 700; color: var(--acento); }
+  .disc-preview-chart-wrap { max-width: 340px; margin: 8px auto 0; }
+
+  .disc-pregunta { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; border-left: 4px solid var(--border); transition: border-color .15s; }
+  .disc-pregunta.respondida { border-left-color: var(--status-good, #2e9e5b); }
+  .disc-pregunta-num { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+  .disc-pregunta-hint { font-size: 12px; color: var(--text-secondary); margin: 0 0 8px; }
+  .disc-opciones { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .disc-opciones li {
+    display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-page); cursor: grab; font-size: 14px;
+    user-select: none;
+  }
+  .disc-opciones li.dragging { opacity: 0.4; }
+  .disc-rank-badge {
+    display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+    border-radius: 50%; background: var(--border); color: var(--text-primary); font-size: 12px; font-weight: 700; flex: none;
+  }
+  .disc-opciones li:nth-child(1) .disc-rank-badge { background: #2e9e5b; color: #fff; }
+  .disc-opciones li:nth-child(2) .disc-rank-badge { background: #6ab04c; color: #fff; }
+
+  .disc-guardar-row { position: sticky; bottom: 0; background: var(--surface-page); padding: 14px 0; margin-top: 10px; text-align: center; }
+
+  .disc-resultado-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 20px; text-align: center; margin-top: 20px; }
+  .disc-resultado-tipo { font-size: 34px; font-weight: 700; color: var(--acento); margin: 6px 0 14px; }
+  .disc-resultado-chart-wrap { max-width: 380px; margin: 0 auto; }
+  .disc-resultado-acciones { margin-top: 16px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+  .disc-historico-toolbar { display: flex; gap: 10px; margin: 14px 0; flex-wrap: wrap; }
+  .disc-historico-toolbar input { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 14px; flex: 1; min-width: 200px; }
+  .disc-historico-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .disc-historico-table th { text-align: left; font-size: 12px; text-transform: uppercase; color: var(--text-muted); padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  .disc-historico-table td { padding: 8px 10px; border-bottom: 1px solid var(--gridline); }
+  .disc-tipo-pill { display: inline-block; padding: 2px 10px; border-radius: 999px; background: var(--acento); color: #fff; font-weight: 700; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon" id="brand-icon">🍩</span>
+      <div>
+        <h1 id="brand-title">Krispy Gestiones</h1>
+        <p class="subtitle">Perfil DISC</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="btn btn-ghost hamburger-btn" title="Atrás" aria-label="Atrás" onclick="history.back()">←</button>
+      <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
+      <div class="hamburger-wrap">
+        <button id="btn-hamburger" class="btn btn-ghost hamburger-btn" aria-label="Menú" aria-haspopup="true" aria-expanded="false">☰</button>
+        <div id="hamburger-menu" class="hamburger-menu" hidden>
+          <span id="topbar-user" class="topbar-user" hidden></span>
+          <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema">🌙 Cambiar tema</button>
+          <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="disc-wrap">
+    <div class="hero-banner">
+      <span class="eyebrow">Portal interno</span>
+      <h1>Perfil DISC</h1>
+      <p>Test de comportamiento D/I/S/C — aproximación al método TTI Success Insights.</p>
+    </div>
+
+    <div class="disc-tabs">
+      <button type="button" id="tab-nuevo" class="active">Nuevo test</button>
+      <button type="button" id="tab-historico">Histórico</button>
+    </div>
+
+    <div id="vista-nuevo">
+      <div class="disc-nombre-row">
+        <input type="text" id="input-nombre-disc" placeholder="Nombre y apellido del empleado">
+        <span class="disc-progreso" id="disc-progreso">0 / 24 respondidas</span>
+      </div>
+
+      <div class="disc-preview-card">
+        <div class="disc-preview-head">
+          <span>Vista previa en tiempo real</span>
+          <span class="disc-preview-tipo" id="disc-preview-tipo">— —</span>
+        </div>
+        <div class="disc-preview-chart-wrap"><canvas id="chart-disc-preview"></canvas></div>
+      </div>
+
+      <div id="disc-preguntas-wrap"></div>
+
+      <div class="disc-guardar-row">
+        <button type="button" id="btn-guardar-disc" class="btn btn-primary" disabled>Guardar resultado</button>
+      </div>
+
+      <div class="disc-resultado-card" id="disc-resultado-card" hidden>
+        <h2>Resultado guardado</h2>
+        <div class="disc-resultado-tipo" id="disc-resultado-tipo"></div>
+        <div class="disc-resultado-chart-wrap"><canvas id="chart-disc-resultado"></canvas></div>
+        <div class="disc-resultado-acciones">
+          <button type="button" id="btn-exportar-pdf-disc" class="btn btn-ghost">⬇ Exportar PDF</button>
+          <button type="button" id="btn-nuevo-test-disc" class="btn btn-ghost">＋ Nuevo test</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="vista-historico" hidden>
+      <div class="disc-historico-toolbar">
+        <input type="text" id="input-buscar-historico" placeholder="Buscar por nombre...">
+      </div>
+      <table class="disc-historico-table">
+        <thead><tr><th>Nombre</th><th>Fecha</th><th>Tipo</th><th>D</th><th>I</th><th>S</th><th>C</th><th></th></tr></thead>
+        <tbody id="tabla-historico-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="js/theme.js?v=20260723g"></script>
+<script src="js/auth-common.js?v=20260723g"></script>
+<script src="js/topbar-menu.js?v=20260723g"></script>
+<script src="js/disc_form.js?v=20260731a"></script>
+</body>
+</html>

@@ -932,6 +932,64 @@ def _fetch_respuestas(conn, oleada_id, centro):
     return [(r["id"], json.loads(r["datos_json"])) for r in rows]
 
 
+def list_respuestas_con_motivo(oleada_id, centro=None):
+    """Una fila por respuesta (nombre + motivo de salida tal cual esta
+    registrado hoy) -- para poder corregir a mano el motivo cuando el que
+    marco la persona en el formulario no refleja el motivo real de su
+    salida (ver update_motivo)."""
+    conn = get_connection()
+    filas_con_id = _fetch_respuestas(conn, oleada_id, centro)
+    conn.close()
+    if not filas_con_id:
+        return []
+    todas_las_filas = [datos for _id, datos in filas_con_id]
+    roles = _column_roles(_union_headers(todas_las_filas), todas_las_filas)
+    motivo_col = roles["motivo_col"]
+    nombre_col = _mejor_columna_nombre(_union_headers(todas_las_filas), roles["metadata"])
+    centro_col = roles["centro_col"]
+    return [
+        {
+            "id": respuesta_id,
+            "nombre": (fila.get(nombre_col) or "").strip() if nombre_col else None,
+            "centro": fila.get(centro_col) if centro_col else None,
+            "motivo": fila.get(motivo_col) if motivo_col else None,
+        }
+        for respuesta_id, fila in filas_con_id
+    ]
+
+
+def update_motivo(respuesta_id, nuevo_motivo):
+    """Corrige el motivo de salida de UNA respuesta concreta -- el motivo que
+    la persona marco en el formulario no siempre coincide con el motivo real
+    de su baja, y esto permite a RRHH ajustarlo sin tener que reimportar el
+    Excel entero. Escribe directamente en datos_json (misma columna que ya
+    detecta _column_roles como "motivo"), asi compute_reporte lo recoge en el
+    siguiente calculo sin cambios adicionales."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT oleada_id, datos_json FROM entrevistas_respuestas WHERE id = ?", (respuesta_id,)
+    ).fetchone()
+    if row is None:
+        conn.close()
+        raise ValueError("Respuesta no encontrada")
+
+    todas_las_filas = [datos for _id, datos in _fetch_respuestas(conn, row["oleada_id"], None)]
+    roles = _column_roles(_union_headers(todas_las_filas), todas_las_filas)
+    motivo_col = roles["motivo_col"]
+    if not motivo_col:
+        conn.close()
+        raise ValueError("Esta oleada no tiene una columna de motivo de salida reconocida")
+
+    datos = json.loads(row["datos_json"])
+    datos[motivo_col] = nuevo_motivo
+    conn.execute(
+        "UPDATE entrevistas_respuestas SET datos_json = ? WHERE id = ?",
+        (json.dumps(datos, ensure_ascii=False, default=str), respuesta_id),
+    )
+    conn.commit()
+    conn.close()
+
+
 def compute_reporte(oleada_id, centro=None):
     conn = get_connection()
     filas_con_id = _fetch_respuestas(conn, oleada_id, centro)

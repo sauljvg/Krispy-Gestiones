@@ -502,6 +502,97 @@ async function loadEvolucion(centro) {
   }
 }
 
+// El motivo que cada persona marcó en su propio formulario a veces no
+// refleja el motivo real de la baja (lo confirmó el usuario tras revisar
+// varias respuestas) — esta lista deja corregirlo respuesta por respuesta,
+// sin tener que reimportar el Excel. Se recarga junto con el resto del
+// reporte (loadReporte), así que siempre refleja el centro/oleada actual.
+async function loadRespuestasEditables(centro) {
+  const params = new URLSearchParams();
+  if (centro) params.set("centro", centro);
+  const res = await fetch(`${AUTH_API_BASE}/entrevistas/${currentOleada}/respuestas?${params.toString()}`);
+  if (!res.ok) return;
+  const data = await res.json();
+  renderTablaMotivosEditar(data.filter((r) => r.motivo !== null && r.motivo !== undefined));
+}
+
+function renderTablaMotivosEditar(filas) {
+  const tbody = document.getElementById("tabla-motivos-editar-body");
+  if (filas.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="3" class="staff-hint">(sin respuestas con motivo registrado)</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filas
+    .map(
+      (f) => `
+    <tr data-id="${f.id}">
+      <td>${escapeHTML(f.nombre || "(sin nombre)")}</td>
+      <td>
+        <span class="motivo-texto">${escapeHTML(f.motivo || "—")}</span>
+        <input type="text" class="motivo-input" value="${escapeHTML(f.motivo || "")}" hidden>
+      </td>
+      <td style="white-space:nowrap;">
+        <button type="button" class="btn-registrar-salida btn-editar-motivo">Editar</button>
+        <button type="button" class="btn-registrar-salida btn-guardar-motivo" hidden>Guardar</button>
+        <button type="button" class="btn-registrar-salida btn-ghost btn-cancelar-motivo" hidden>Cancelar</button>
+      </td>
+    </tr>`
+    )
+    .join("");
+
+  tbody.querySelectorAll("tr").forEach((tr) => {
+    const texto = tr.querySelector(".motivo-texto");
+    const input = tr.querySelector(".motivo-input");
+    const btnEditar = tr.querySelector(".btn-editar-motivo");
+    const btnGuardar = tr.querySelector(".btn-guardar-motivo");
+    const btnCancelar = tr.querySelector(".btn-cancelar-motivo");
+
+    const entrarEdicion = () => {
+      texto.hidden = true;
+      input.hidden = false;
+      btnEditar.hidden = true;
+      btnGuardar.hidden = false;
+      btnCancelar.hidden = false;
+      input.focus();
+    };
+    const salirEdicion = () => {
+      texto.hidden = false;
+      input.hidden = true;
+      btnEditar.hidden = false;
+      btnGuardar.hidden = true;
+      btnCancelar.hidden = true;
+    };
+
+    btnEditar.addEventListener("click", entrarEdicion);
+    btnCancelar.addEventListener("click", () => {
+      input.value = texto.textContent;
+      salirEdicion();
+    });
+    btnGuardar.addEventListener("click", async () => {
+      const nuevoMotivo = input.value.trim();
+      if (!nuevoMotivo) {
+        alert("El motivo no puede quedar vacío.");
+        return;
+      }
+      const respuestaId = tr.dataset.id;
+      const res = await fetch(`${AUTH_API_BASE}/entrevistas/${currentOleada}/respuestas/${respuestaId}/motivo`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ motivo: nuevoMotivo }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || "No se pudo guardar el motivo.");
+        return;
+      }
+      // El motivo editado cambia el recuento del gráfico "Motivos de
+      // salida" — se recarga el reporte entero (no solo esta tabla) para
+      // que el gráfico y la tabla queden consistentes entre sí.
+      await loadReporte(currentCentro);
+    });
+  });
+}
+
 async function loadReporte(centro) {
   currentCentro = centro;
   const params = new URLSearchParams();
@@ -589,6 +680,7 @@ async function loadReporte(centro) {
   if (data.motivos && data.motivos.length > 0) {
     motivosCard.hidden = false;
     renderChartMotivos(data.motivos);
+    await loadRespuestasEditables(centro);
   } else {
     motivosCard.hidden = true;
   }
