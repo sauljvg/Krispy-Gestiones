@@ -9,7 +9,6 @@ Uso:
 
 La carpeta debe contener "Takeout/Perfil de Empresa en Google/account-*/".
 """
-import glob
 import json
 import os
 import re
@@ -245,18 +244,22 @@ def get_total_google(tienda):
 
 
 def find_account_dir(takeout_root):
-    # Se busca de forma recursiva (en vez de exigir exactamente
-    # "Takeout/Perfil de Empresa en Google/account-*" en la raíz) porque
-    # según cómo se descargue/reempaquete el .zip de Takeout, esa carpeta
-    # "Takeout" a veces no está en el nivel superior del zip.
-    pattern = os.path.join(takeout_root, "**", "Perfil de Empresa en Google", "account-*")
-    matches = glob.glob(pattern, recursive=True)
-    if not matches:
-        raise SystemExit(
-            "No se encontró la carpeta 'Perfil de Empresa en Google/account-*' dentro del .zip subido. "
-            "Sube el .zip tal cual lo descarga Google Takeout, sin extraerlo ni reorganizar sus carpetas."
-        )
-    return matches[0]
+    # Búsqueda recursiva e insensible a mayúsculas/minúsculas: en Windows
+    # (donde esto se probó primero) glob.glob ya ignora mayúsculas por el
+    # propio filesystem, pero en producción (Linux, filesystem sensible a
+    # mayúsculas) el nombre real de la carpeta dentro del .zip de Takeout
+    # puede venir como "Perfil de empresa en Google" (e minúscula) en vez
+    # de "Perfil de Empresa en Google", y el glob exacto no encontraba nada.
+    for dirpath, dirnames, _filenames in os.walk(takeout_root):
+        if os.path.basename(dirpath).lower() != "perfil de empresa en google":
+            continue
+        for name in dirnames:
+            if name.lower().startswith("account-"):
+                return os.path.join(dirpath, name)
+    raise SystemExit(
+        "No se encontró la carpeta 'Perfil de Empresa en Google/account-*' dentro del .zip subido. "
+        "Sube el .zip tal cual lo descarga Google Takeout, sin extraerlo ni reorganizar sus carpetas."
+    )
 
 
 def run_import(takeout_root, log=lambda msg: None):
