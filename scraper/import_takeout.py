@@ -245,11 +245,16 @@ def get_total_google(tienda):
 
 
 def find_account_dir(takeout_root):
-    pattern = os.path.join(takeout_root, "Takeout", "Perfil de Empresa en Google", "account-*")
-    matches = glob.glob(pattern)
+    # Se busca de forma recursiva (en vez de exigir exactamente
+    # "Takeout/Perfil de Empresa en Google/account-*" en la raíz) porque
+    # según cómo se descargue/reempaquete el .zip de Takeout, esa carpeta
+    # "Takeout" a veces no está en el nivel superior del zip.
+    pattern = os.path.join(takeout_root, "**", "Perfil de Empresa en Google", "account-*")
+    matches = glob.glob(pattern, recursive=True)
     if not matches:
         raise SystemExit(
-            f"No se encontró 'Takeout/Perfil de Empresa en Google/account-*' dentro de {takeout_root}"
+            "No se encontró la carpeta 'Perfil de Empresa en Google/account-*' dentro del .zip subido. "
+            "Sube el .zip tal cual lo descarga Google Takeout, sin extraerlo ni reorganizar sus carpetas."
         )
     return matches[0]
 

@@ -129,7 +129,7 @@ async function loadCentros() {
   // Botones "Todas las tiendas"/"Todas las fábricas" solo tienen sentido si
   // de verdad hay al menos una fábrica en esta oleada — si no, dividir no
   // aporta nada (sería idéntico a "Todos los centros").
-  if (centros.some((c) => /fabrica/i.test(c))) {
+  if (centros.some((c) => /f[aá]brica/i.test(c))) {
     cards.push(`<div class="centro-card" data-centro="" data-solo-tipo="tienda">🏬 Todas las tiendas</div>`);
     cards.push(`<div class="centro-card" data-centro="" data-solo-tipo="fabrica">🏭 Todas las fábricas</div>`);
   }
