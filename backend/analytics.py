@@ -98,12 +98,12 @@ def get_timeline(where="", params=None):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute(f"""
-        SELECT substr(fecha_datetime, 1, 7) AS mes, COUNT(*) AS cantidad,
+        SELECT fecha_datetime AS dia, COUNT(*) AS cantidad,
                AVG(calificacion_num) AS promedio
         FROM reviews
         {sql_where}
-        GROUP BY mes
-        ORDER BY mes ASC
+        GROUP BY dia
+        ORDER BY dia ASC
     """, sql_params)
     data = dict_rows(cur)
     conn.close()
@@ -114,51 +114,50 @@ def get_timeline_por_tienda(where="", params=None, date_from=None, date_to=None)
     """Como get_timeline pero con una línea ACUMULADA por tienda en vez de
     un único agregado global — para la vista "Todas" del timeline, donde
     interesa ver el crecimiento de cada tienda por separado, no solo el
-    volumen total mes a mes.
+    volumen total día a día.
 
     `where`/`params` NO deben traer ya el filtro de fecha (se calcula el
     acumulado sobre el histórico COMPLETO a propósito): si un rango
-    Desde/Hasta reseteara el acumulado a 0 en el mes de inicio, esta línea
+    Desde/Hasta reseteara el acumulado a 0 en el día de inicio, esta línea
     dejaría de coincidir con la tabla de "cambio" que se muestra debajo
     (esa sí calcula el total real acumulado hasta cada fecha). `date_from`/
-    `date_to`, si se pasan, solo recortan qué meses se DEVUELVEN — el valor
-    acumulado de cada uno sigue siendo el histórico real hasta ese mes."""
+    `date_to`, si se pasan, solo recortan qué días se DEVUELVEN — el valor
+    acumulado de cada uno sigue siendo el histórico real hasta ese día."""
     sql_where, sql_params = _combine_where("fecha_datetime IS NOT NULL AND tienda IS NOT NULL", where, params)
     conn = get_connection()
     cur = conn.cursor()
     cur.execute(f"""
-        SELECT tienda, substr(fecha_datetime, 1, 7) AS mes, COUNT(*) AS cantidad
+        SELECT tienda, fecha_datetime AS dia, COUNT(*) AS cantidad
         FROM reviews
         {sql_where}
-        GROUP BY tienda, mes
-        ORDER BY mes ASC
+        GROUP BY tienda, dia
+        ORDER BY dia ASC
     """, sql_params)
     filas = dict_rows(cur)
     conn.close()
 
-    todos_los_meses = sorted({f["mes"] for f in filas})
+    todos_los_dias = sorted({f["dia"] for f in filas})
     por_tienda = {}
     for f in filas:
-        por_tienda.setdefault(f["tienda"], {})[f["mes"]] = f["cantidad"]
+        por_tienda.setdefault(f["tienda"], {})[f["dia"]] = f["cantidad"]
 
-    mes_desde = date_from[:7] if date_from else None
-    mes_hasta = date_to[:7] if date_to else None
-    meses_visibles = [
-        m for m in todos_los_meses
-        if (not mes_desde or m >= mes_desde) and (not mes_hasta or m <= mes_hasta)
+    dias_visibles = [
+        d for d in todos_los_dias
+        if (not date_from or d >= date_from) and (not date_to or d <= date_to)
     ]
+    set_dias_visibles = set(dias_visibles)
 
     series = []
-    for tienda, conteos_por_mes in por_tienda.items():
+    for tienda, conteos_por_dia in por_tienda.items():
         acumulado = 0
         puntos = []
-        for mes in todos_los_meses:
-            acumulado += conteos_por_mes.get(mes, 0)
-            if mes in meses_visibles:
+        for dia in todos_los_dias:
+            acumulado += conteos_por_dia.get(dia, 0)
+            if dia in set_dias_visibles:
                 puntos.append(acumulado)
         series.append({"tienda": tienda, "acumulado": puntos})
     series.sort(key=lambda s: -(s["acumulado"][-1] if s["acumulado"] else 0))
-    return {"meses": meses_visibles, "series": series}
+    return {"dias": dias_visibles, "series": series}
 
 
 def get_keywords(limit=20, where="", params=None):

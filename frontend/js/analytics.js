@@ -13,9 +13,12 @@ function cssVar(name) {
 
 // Con `porTienda` (solo llega cuando la vista es "Todas", ver loadTimeline)
 // se dibuja una línea ACUMULADA por tienda en vez del único agregado
-// mensual — así se ve el crecimiento de cada una en el mismo gráfico, con o
-// sin filtro de fechas puesto (los meses que se muestren ya vienen
-// recortados desde el backend si hay Desde/Hasta).
+// diario — así se ve el crecimiento de cada una en el mismo gráfico, con o
+// sin filtro de fechas puesto (los días que se muestren ya vienen
+// recortados desde el backend si hay Desde/Hasta). Granularidad diaria (no
+// mensual): con meses de historia esto son varios cientos de puntos, así
+// que se dibuja sin marcador por punto (solo la línea) para que no se vea
+// saturado — Chart.js igual resalta el punto más cercano al pasar el ratón.
 function renderTimelineChart(timeline, porTienda) {
   const ctx = document.getElementById("chart-timeline");
   if (timelineChart) timelineChart.destroy();
@@ -27,20 +30,22 @@ function renderTimelineChart(timeline, porTienda) {
       borderColor: PALETA_EVOLUCION[i % PALETA_EVOLUCION.length],
       backgroundColor: PALETA_EVOLUCION[i % PALETA_EVOLUCION.length],
       borderWidth: 2,
-      pointRadius: 2,
+      pointRadius: 0,
+      pointHoverRadius: 4,
       fill: false,
-      tension: 0.15,
+      tension: 0.1,
     }));
     timelineChart = new Chart(ctx, {
       type: "line",
-      data: { labels: porTienda.meses, datasets },
+      data: { labels: porTienda.dias, datasets },
       options: {
         responsive: true,
+        interaction: { mode: "index", intersect: false },
         plugins: {
           legend: { position: "bottom", labels: { usePointStyle: true, pointStyle: "circle", color: cssVar("--text-muted") } },
         },
         scales: {
-          x: { grid: { color: cssVar("--gridline") }, ticks: { color: cssVar("--text-muted") } },
+          x: { grid: { color: cssVar("--gridline") }, ticks: { color: cssVar("--text-muted"), autoSkip: true, maxRotation: 0 } },
           y: { beginAtZero: true, grid: { color: cssVar("--gridline") }, ticks: { color: cssVar("--text-muted"), precision: 0 } },
         },
       },
@@ -48,28 +53,30 @@ function renderTimelineChart(timeline, porTienda) {
     return;
   }
 
-  const labels = timeline.map((t) => t.mes);
+  const labels = timeline.map((t) => t.dia);
   const counts = timeline.map((t) => t.cantidad);
   timelineChart = new Chart(ctx, {
     type: "line",
     data: {
       labels,
       datasets: [{
-        label: "Reseñas por mes",
+        label: "Reseñas por día",
         data: counts,
         borderColor: cssVar("--acento"),
         backgroundColor: cssVar("--acento") + "26",
         borderWidth: 2,
-        pointRadius: 3,
+        pointRadius: 0,
+        pointHoverRadius: 4,
         fill: true,
-        tension: 0.25,
+        tension: 0.2,
       }],
     },
     options: {
       responsive: true,
+      interaction: { mode: "index", intersect: false },
       plugins: { legend: { display: false } },
       scales: {
-        x: { grid: { color: cssVar("--gridline") }, ticks: { color: cssVar("--text-muted") } },
+        x: { grid: { color: cssVar("--gridline") }, ticks: { color: cssVar("--text-muted"), autoSkip: true, maxRotation: 0 } },
         y: { beginAtZero: true, grid: { color: cssVar("--gridline") }, ticks: { color: cssVar("--text-muted") } },
       },
     },

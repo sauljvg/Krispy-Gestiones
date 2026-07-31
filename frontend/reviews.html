@@ -152,7 +152,12 @@
           <option value="peor">Peor valoradas</option>
         </select>
       </div>
-      <div class="filter-group">
+      <!-- Oculto a propósito: va junto con "Scrap Absoluto" (ver
+           scraper/scrap_absoluto.py) — si algún día se activa ese proyecto,
+           basta con quitar este `hidden` para volver a mostrarlo. El
+           checkbox y todo su cableado en dashboard.js/backend se dejan
+           intactos para no tener que reconstruirlo luego. -->
+      <div class="filter-group" hidden>
         <label>&nbsp;</label>
         <label class="filter-toggle-google" title="Excluye del todo (totales, promedio, % positivas, ranking) las reseñas que la reconciliación manual (scraper --reconciliar) marcó como ya no visibles en Google — para ver exactamente lo mismo que muestra la ficha pública.">
           <input type="checkbox" id="filter-solo-google"> Solo Google
@@ -288,7 +293,7 @@
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
 <script src="js/filters.js?v=20260731a"></script>
-<script src="js/analytics.js?v=20260731b"></script>
+<script src="js/analytics.js?v=20260731c"></script>
 <script src="js/dashboard.js?v=20260731d"></script>
 </body>
 </html>
