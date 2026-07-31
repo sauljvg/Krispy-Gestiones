@@ -27,8 +27,12 @@ function escapeHTML(str) {
 // por el middleware de permisos, así que aquí solo hace falta bloquear la UI.
 let tiendasPermitidas = [];
 
+function soloGoogleQS() {
+  return state.soloGoogle ? "solo_google=true" : "";
+}
+
 async function loadStores() {
-  const { stores } = await fetchJSON(`${API_BASE}/stores`);
+  const { stores } = await fetchJSON(`${API_BASE}/stores?${soloGoogleQS()}`);
   const select = document.getElementById("filter-tienda");
   const current = select.value;
   const restringidoAUna = tiendasPermitidas.length === 1;
@@ -79,8 +83,8 @@ async function loadStoreRanking() {
   // (igual que ya hacían las transacciones). El de valoración media usa el
   // acumulado histórico (stores sin `mes`), ya que no tiene sentido acotarlo.
   const [{ stores: storesMes }, { stores: storesTotal }, { transacciones: mesValores }] = await Promise.all([
-    fetchJSON(`${API_BASE}/stores?order_by=tasa&mes=${encodeURIComponent(mes)}`),
-    fetchJSON(`${API_BASE}/stores`),
+    fetchJSON(`${API_BASE}/stores?order_by=tasa&mes=${encodeURIComponent(mes)}&${soloGoogleQS()}`),
+    fetchJSON(`${API_BASE}/stores?${soloGoogleQS()}`),
     fetchJSON(`${API_BASE}/transactions?mes=${encodeURIComponent(mes)}`),
   ]);
   document.getElementById("store-ranking-list").innerHTML =
@@ -295,6 +299,13 @@ function reviewCardHTML(r) {
   const stars = r.calificacion_num ? "★".repeat(r.calificacion_num) + "☆".repeat(5 - r.calificacion_num) : "—";
   const fechaExacta = formatFechaExacta(r.fecha_datetime) || escapeHTML(r.fecha_categoria || "");
   const horaExacta = formatHoraExacta(r.fecha_hora);
+  // visible_en_google=0: la reconciliación manual (scraper --reconciliar) no
+  // la encontró en una pasada completa en vivo — se muestra igual (en modo
+  // "mostrar todo") pero marcada, para que quede claro por qué no suma en el
+  // toggle "Solo Google".
+  const noVisible = r.visible_en_google === 0
+    ? `<span class="badge badge-no-google" title="La reconciliación manual no la encontró visible en Google la última vez que se revisó">🚫 no visible en Google</span>`
+    : "";
   return `
     <div class="review-item">
       <div class="review-top">
@@ -303,6 +314,7 @@ function reviewCardHTML(r) {
           <span class="review-stars">${stars}</span>
           <span${horaExacta ? ` title="${horaExacta} (hora de Madrid)"` : ""}>${fechaExacta}</span>
           <span class="badge badge-${r.sentiment}">${r.sentiment}</span>
+          ${noVisible}
         </span>
       </div>
       <div class="review-text">${r.texto ? escapeHTML(r.texto) : '<i>Sin comentario, solo calificación.</i>'}</div>
@@ -467,6 +479,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   tiendasPermitidas = user.tiendas || [];
 
   wireFilters(() => refreshAll(), () => loadReviews());
+
+  const soloGoogleEl = document.getElementById("filter-solo-google");
+  state.soloGoogle = localStorage.getItem("kt-resenas-solo-google") === "1";
+  soloGoogleEl.checked = state.soloGoogle;
+  soloGoogleEl.addEventListener("change", () => {
+    state.soloGoogle = soloGoogleEl.checked;
+    localStorage.setItem("kt-resenas-solo-google", state.soloGoogle ? "1" : "0");
+    state.page = 1;
+    Promise.all([loadStores(), loadStoreRanking(), refreshAll()]).catch((err) =>
+      console.error("Fallo aplicando el toggle Solo Google:", err)
+    );
+  });
 
   document.getElementById("btn-toggle-horario").addEventListener("click", (e) => {
     horarioVisible = !horarioVisible;

@@ -799,13 +799,67 @@ def save_outputs(reviews):
         print(f"Total combinado (todas las tiendas en la BD): {len(all_reviews)}")
 
 
+def _push_produccion(tienda, no_visibles, vistas_ahora):
+    """Envía el resultado de la reconciliación a la BD REAL de producción vía
+    la API (POST /reviews/reconciliacion) — un commit a GitHub no serviría
+    para esto, la base de datos vive fuera de git a propósito.
+
+    Necesita KT_USERNAME/KT_PIN en el entorno (las mismas credenciales con
+    las que entrarías a la web) y, opcionalmente, KT_API_BASE si no es la URL
+    de producción por defecto. Si no están puestas, avisa y no manda nada —
+    el CSV local se genera igual, esto es un paso opcional aparte."""
+    username = os.environ.get("KT_USERNAME")
+    pin = os.environ.get("KT_PIN")
+    if not username or not pin:
+        print(
+            "\n(Aviso: KT_USERNAME/KT_PIN no están en el entorno, así que esto NO se "
+            "subió a producción — se quedó solo en el CSV local. Para subirlo, define "
+            "esas dos variables y vuelve a correr este comando.)"
+        )
+        return
+
+    try:
+        import requests
+    except ImportError:
+        print("\n(Aviso: falta el paquete 'requests' — instálalo con 'pip install requests' para poder subir a producción.)")
+        return
+
+    api_base = os.environ.get("KT_API_BASE", "https://krispyrh.up.railway.app").rstrip("/")
+    empresa = STORES.get(STORE_KEY, {}).get("empresa", "kk")
+
+    session = requests.Session()
+    try:
+        login = session.post(f"{api_base}/api/auth/login-pin", json={"username": username, "pin": pin}, timeout=15)
+        if not login.ok:
+            print(f"\n(No se pudo subir a producción: login falló — {login.status_code} {login.text[:200]})")
+            return
+
+        res = session.post(
+            f"{api_base}/api/reviews/reconciliacion?empresa={empresa}",
+            json={"tienda": tienda, "no_visibles": list(no_visibles), "vistas_ahora": list(vistas_ahora)},
+            timeout=30,
+        )
+        if not res.ok:
+            print(f"\n(No se pudo subir a producción: {res.status_code} {res.text[:200]})")
+            return
+        body = res.json()
+        print(
+            f"\n✓ Subido a producción: {body['marcadas_no_visibles']} marcadas como no visibles, "
+            f"{body['marcadas_visibles']} confirmadas como visibles (toggle 'Solo Google' del dashboard)."
+        )
+    except requests.RequestException as e:
+        print(f"\n(No se pudo subir a producción: {e})")
+
+
 def reporte_reconciliacion(tienda, existing_before, visible_ids):
     """Compara lo que ya teníamos en la BD (antes de esta pasada) contra lo
     que sigue visible en Maps ahora mismo. Lo que está en la BD pero no
     salió en esta pasada completa es candidato a "borrada por la persona o
     retirada por Google" — pero el scraping de Maps puede fallar por
-    bloqueos de automatización, así que esto NO se borra solo: se guarda un
-    CSV para revisar a mano antes de decidir nada."""
+    bloqueos de automatización, así que esto NO se borra de la BD local: se
+    guarda un CSV para revisar a mano, y (si hay credenciales) se sube el
+    resultado a producción como un marcador aparte (visible_en_google),
+    nunca como un DELETE — reversible sin más que volver a correr esto."""
     faltantes_ids = existing_before - visible_ids
     print(f"\n{'='*60}\nRECONCILIACIÓN — {tienda}\n{'='*60}")
     print(f"En BD antes de esta pasada: {len(existing_before)}")
@@ -814,6 +868,7 @@ def reporte_reconciliacion(tienda, existing_before, visible_ids):
 
     if not faltantes_ids:
         print("Nada que reportar — todo lo que teníamos sigue visible en Maps.")
+        _push_produccion(tienda, [], visible_ids)
         return
 
     conn = sqlite3.connect(config.DB_PATH)
@@ -836,6 +891,8 @@ def reporte_reconciliacion(tienda, existing_before, visible_ids):
     print(f"\nDetalle de las {len(filas)} candidatas a borradas guardado en: {reporte_path}")
     for fila in filas:
         print(f"  - {fila['autor']} ({fila['fecha_datetime'] or fila['fecha']}, {fila['calificacion']}): {(fila['texto'] or '')[:80]}")
+
+    _push_produccion(tienda, faltantes_ids, visible_ids)
 
 
 def run_login_setup():

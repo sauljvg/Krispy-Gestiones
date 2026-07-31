@@ -15,7 +15,7 @@
     }
   })();
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260728a">
+<link rel="stylesheet" href="css/styles.css?v=20260731a">
 <script src="js/vendor/chart.umd.min.js?v=20260723g"></script>
 </head>
 <body>
@@ -154,6 +154,12 @@
       </div>
       <div class="filter-group">
         <label>&nbsp;</label>
+        <label class="filter-toggle-google" title="Excluye del todo (totales, promedio, % positivas, ranking) las reseñas que la reconciliación manual (scraper --reconciliar) marcó como ya no visibles en Google — para ver exactamente lo mismo que muestra la ficha pública.">
+          <input type="checkbox" id="filter-solo-google"> Solo Google
+        </label>
+      </div>
+      <div class="filter-group">
+        <label>&nbsp;</label>
         <button id="btn-clear-filters" class="btn btn-ghost">✕ Limpiar filtros</button>
       </div>
     </section>
@@ -273,8 +279,8 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/filters.js?v=20260723g"></script>
+<script src="js/filters.js?v=20260731a"></script>
 <script src="js/analytics.js?v=20260723g"></script>
-<script src="js/dashboard.js?v=20260731a"></script>
+<script src="js/dashboard.js?v=20260731b"></script>
 </body>
 </html>

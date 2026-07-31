@@ -78,6 +78,13 @@ def _ensure_reviews_columns():
         for col in ("fecha_hora", "respuesta_texto", "respuesta_fecha"):
             if col not in cols:
                 conn.execute(f"ALTER TABLE reviews ADD COLUMN {col} TEXT")
+        # NULL/1 = sigue visible en Google (valor por defecto); 0 = la
+        # reconciliación manual (scraper --reconciliar) no la encontró en una
+        # pasada completa en vivo — la persona la borró o Google la retiró.
+        # La rellena backend/routes.py (POST /reviews/reconciliacion), nunca
+        # el scraper directamente (no escribe en la BD de producción).
+        if "visible_en_google" not in cols:
+            conn.execute("ALTER TABLE reviews ADD COLUMN visible_en_google INTEGER")
         conn.commit()
     conn.close()
 

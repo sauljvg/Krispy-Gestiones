@@ -19,9 +19,14 @@ import import_takeout as import_takeout_module  # noqa: E402
 router = APIRouter()
 
 
-def build_filters(rating, sentiment, date_from, date_to, q, staff=None, tienda=None):
+def build_filters(rating, sentiment, date_from, date_to, q, staff=None, tienda=None, solo_google=False):
     clauses = []
     params = []
+
+    if solo_google:
+        # NULL cuenta como "visible" (valor por defecto antes de reconciliar
+        # nunca esa tienda) — solo se excluye lo marcado explícitamente 0.
+        clauses.append("(visible_en_google IS NULL OR visible_en_google = 1)")
 
     # Gerentes/area managers con tiendas asignadas solo pueden ver esas
     # tiendas, sin importar qué pida el query param — si piden una que no
@@ -123,9 +128,10 @@ def list_reviews(
     hora: int | None = Query(default=None, ge=0, le=23),
     dia_semana: str | None = None,
     sort: str = Query(default="recientes", pattern="^(recientes|antiguas|mejor|peor)$"),
+    solo_google: bool = False,
 ):
     page, page_size, offset = paginate(page, page_size)
-    where, params = build_filters(rating, sentiment, date_from, date_to, q, staff, tienda)
+    where, params = build_filters(rating, sentiment, date_from, date_to, q, staff, tienda, solo_google)
     where, params = apply_hora_dia(where, params, hora, dia_semana)
 
     order_by = {
@@ -144,7 +150,7 @@ def list_reviews(
         f"""
         SELECT review_id, tienda, autor, fecha, fecha_datetime, fecha_hora, fecha_categoria,
                calificacion, calificacion_num, texto, es_reciente, sentiment, sentiment_score,
-               respuesta_texto, respuesta_fecha
+               respuesta_texto, respuesta_fecha, visible_en_google
         FROM reviews {where}
         ORDER BY {order_by}
         LIMIT ? OFFSET ?
@@ -163,8 +169,8 @@ def list_reviews(
     }
 
 
-def _filtered_rows(rating, sentiment, date_from, date_to, q, staff=None, tienda=None, hora=None, dia_semana=None):
-    where, params = build_filters(rating, sentiment, date_from, date_to, q, staff, tienda)
+def _filtered_rows(rating, sentiment, date_from, date_to, q, staff=None, tienda=None, hora=None, dia_semana=None, solo_google=False):
+    where, params = build_filters(rating, sentiment, date_from, date_to, q, staff, tienda, solo_google)
     where, params = apply_hora_dia(where, params, hora, dia_semana)
     conn = get_connection()
     cur = conn.cursor()
@@ -185,8 +191,9 @@ def export_reviews_csv(
     tienda: str | None = None,
     hora: int | None = Query(default=None, ge=0, le=23),
     dia_semana: str | None = None,
+    solo_google: bool = False,
 ):
-    rows = _filtered_rows(rating, sentiment, date_from, date_to, q, staff, tienda, hora, dia_semana)
+    rows = _filtered_rows(rating, sentiment, date_from, date_to, q, staff, tienda, hora, dia_semana, solo_google)
     csv_text = rows_to_csv(rows)
     return PlainTextResponse(
         csv_text,
@@ -206,8 +213,9 @@ def export_reviews_xlsx(
     tienda: str | None = None,
     hora: int | None = Query(default=None, ge=0, le=23),
     dia_semana: str | None = None,
+    solo_google: bool = False,
 ):
-    rows = _filtered_rows(rating, sentiment, date_from, date_to, q, staff, tienda, hora, dia_semana)
+    rows = _filtered_rows(rating, sentiment, date_from, date_to, q, staff, tienda, hora, dia_semana, solo_google)
     xlsx_bytes = rows_to_xlsx(rows)
     return Response(
         xlsx_bytes,
@@ -225,8 +233,9 @@ def stats(
     q: str | None = None,
     staff: str | None = None,
     tienda: str | None = None,
+    solo_google: bool = False,
 ):
-    where, params = build_filters(rating, sentiment, date_from, date_to, q, staff, tienda)
+    where, params = build_filters(rating, sentiment, date_from, date_to, q, staff, tienda, solo_google)
     result = analytics.get_stats(where, params)
     if tienda:
         total_google = analytics.get_store_total_google(tienda)
@@ -247,8 +256,9 @@ def timeline_horas(
     q: str | None = None,
     staff: str | None = None,
     tienda: str | None = None,
+    solo_google: bool = False,
 ):
-    where, params = build_filters(rating, sentiment, date_from, date_to, q, staff, tienda)
+    where, params = build_filters(rating, sentiment, date_from, date_to, q, staff, tienda, solo_google)
     return analytics.get_hourly_distribution(where, params)
 
 
@@ -261,8 +271,9 @@ def rating_progress(
     q: str | None = None,
     staff: str | None = None,
     tienda: str | None = None,
+    solo_google: bool = False,
 ):
-    where, params = build_filters(rating, sentiment, date_from, date_to, q, staff, tienda)
+    where, params = build_filters(rating, sentiment, date_from, date_to, q, staff, tienda, solo_google)
     return analytics.get_rating_progress(where, params)
 
 
@@ -275,8 +286,9 @@ def timeline(
     q: str | None = None,
     staff: str | None = None,
     tienda: str | None = None,
+    solo_google: bool = False,
 ):
-    where, params = build_filters(rating, sentiment, date_from, date_to, q, staff, tienda)
+    where, params = build_filters(rating, sentiment, date_from, date_to, q, staff, tienda, solo_google)
     return {"timeline": analytics.get_timeline(where, params)}
 
 
@@ -290,8 +302,9 @@ def keywords(
     q: str | None = None,
     staff: str | None = None,
     tienda: str | None = None,
+    solo_google: bool = False,
 ):
-    where, params = build_filters(rating, sentiment, date_from, date_to, q, staff, tienda)
+    where, params = build_filters(rating, sentiment, date_from, date_to, q, staff, tienda, solo_google)
     return {"keywords": analytics.get_keywords(limit, where, params)}
 
 
@@ -303,6 +316,7 @@ def staff_mentions(
     date_to: str | None = None,
     q: str | None = None,
     tienda: str | None = None,
+    solo_google: bool = False,
 ):
     # Nota: no acepta `staff` — esta es la lista base que alimenta los clics
     # del ranking; filtrarla por staff sería circular.
@@ -310,7 +324,7 @@ def staff_mentions(
     # pila puede ser una persona distinta en cada local). Con una tienda
     # seleccionada se cuenta solo ahí; con "Todas" se cuenta cada una POR SU
     # PROPIA tienda por separado (nunca mezcladas) y se etiqueta cada fila.
-    where, params = build_filters(rating, sentiment, date_from, date_to, q, tienda=tienda)
+    where, params = build_filters(rating, sentiment, date_from, date_to, q, tienda=tienda, solo_google=solo_google)
     if tienda:
         return analytics.get_staff_mentions(tienda, where, params)
     return analytics.get_staff_mentions_all_stores(where, params)
@@ -320,13 +334,14 @@ def staff_mentions(
 def stores(
     order_by: str = Query(default="total", pattern="^(total|tasa)$"),
     mes: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    solo_google: bool = False,
 ):
     """Tiendas presentes en la BD con su nº de reseñas — alimenta el selector
     de tienda y el ranking comparativo entre locales (`order_by=tasa` para
     ordenar por reseñas/transacciones). Con `mes` (YYYY-MM), tanto las
     reseñas como las transacciones se acotan a ese mes en vez de mostrar el
     acumulado histórico."""
-    return {"stores": analytics.get_store_stats(order_by, mes)}
+    return {"stores": analytics.get_store_stats(order_by, mes, solo_google)}
 
 
 MES_PATTERN = r"^\d{4}-\d{2}$"
@@ -359,6 +374,45 @@ def set_transactions(body: TransactionsIn):
 # El scraping de Maps sigue existiendo como herramienta de terminal en local
 # (scraper/scraper_v2.py) para quien tenga Chrome con sesión propia — la vía
 # soportada dentro de la app es "Importar Takeout".
+
+
+class ReconciliacionIn(BaseModel):
+    tienda: str
+    no_visibles: list[str] = []
+    vistas_ahora: list[str] = []
+
+
+@router.post("/reviews/reconciliacion")
+def marcar_reconciliacion(body: ReconciliacionIn):
+    """Recibe el resultado de `python scraper_v2.py <tienda> --reconciliar`
+    corrido en local y lo aplica a la BD real de producción — un commit a
+    GitHub no sirve para esto (la base de datos vive fuera de git a
+    propósito, ver DATA_DIR en db.py). `no_visibles`: review_id que la
+    pasada completa en vivo no encontró (se marcan visible_en_google=0, así
+    el toggle "solo Google" del dashboard las excluye de todo: totales,
+    promedio, %positivas, ranking). `vistas_ahora`: review_id que sí se
+    vieron, para desmarcar las que una reconciliación anterior había
+    marcado como no visibles y que desde entonces reaparecieron."""
+    conn = get_connection()
+    if body.no_visibles:
+        placeholders = ",".join("?" * len(body.no_visibles))
+        conn.execute(
+            f"UPDATE reviews SET visible_en_google = 0 WHERE review_id IN ({placeholders})",
+            body.no_visibles,
+        )
+    if body.vistas_ahora:
+        placeholders = ",".join("?" * len(body.vistas_ahora))
+        conn.execute(
+            f"UPDATE reviews SET visible_en_google = 1 WHERE review_id IN ({placeholders})",
+            body.vistas_ahora,
+        )
+    conn.commit()
+    conn.close()
+    return {
+        "ok": True,
+        "marcadas_no_visibles": len(body.no_visibles),
+        "marcadas_visibles": len(body.vistas_ahora),
+    }
 
 
 @router.post("/transactions/upload")

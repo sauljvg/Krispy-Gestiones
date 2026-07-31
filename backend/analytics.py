@@ -372,7 +372,7 @@ def get_all_stores_completeness():
     return all(row["total_google"] and row["total"] >= row["total_google"] for row in rows)
 
 
-def get_store_stats(order_by="total", mes=None):
+def get_store_stats(order_by="total", mes=None, solo_google=False):
     """Reseñas, promedio y (si se han cargado) transacciones + tasa por
     tienda — para el selector de tienda y el ranking comparativo entre
     locales.
@@ -388,20 +388,25 @@ def get_store_stats(order_by="total", mes=None):
     transacciones terminan en una reseña, así una tienda pequeña con pocas
     reseñas pero también pocas transacciones puede rankear mejor que una
     tienda grande con muchas reseñas pero muchísimas más transacciones.
+
+    `solo_google=True` excluye las reseñas marcadas visible_en_google=0 (ver
+    POST /reviews/reconciliacion) — no pasa por build_filters como el resto
+    de endpoints porque esta consulta arma su propio SQL con GROUP BY tienda.
     """
+    filtro_google = " AND (r.visible_en_google IS NULL OR r.visible_en_google = 1)" if solo_google else ""
     conn = get_connection()
     cur = conn.cursor()
     if mes:
-        cur.execute("""
+        cur.execute(f"""
             SELECT r.tienda AS tienda, COUNT(*) AS total, AVG(r.calificacion_num) AS promedio,
                    t.transacciones AS transacciones
             FROM reviews r
             LEFT JOIN store_transactions t ON t.tienda = r.tienda AND t.mes = ?
-            WHERE r.tienda IS NOT NULL AND substr(r.fecha_datetime, 1, 7) = ?
+            WHERE r.tienda IS NOT NULL AND substr(r.fecha_datetime, 1, 7) = ?{filtro_google}
             GROUP BY r.tienda
         """, (mes, mes))
     else:
-        cur.execute("""
+        cur.execute(f"""
             SELECT r.tienda AS tienda, COUNT(*) AS total, AVG(r.calificacion_num) AS promedio,
                    t.transacciones AS transacciones
             FROM reviews r
@@ -410,7 +415,7 @@ def get_store_stats(order_by="total", mes=None):
                 FROM store_transactions
                 GROUP BY tienda
             ) t ON t.tienda = r.tienda
-            WHERE r.tienda IS NOT NULL
+            WHERE r.tienda IS NOT NULL{filtro_google}
             GROUP BY r.tienda
         """)
     rows = dict_rows(cur)
