@@ -243,13 +243,38 @@ def get_total_google(tienda):
         conn.close()
 
 
+def _describir_estructura(root, max_depth=4, max_entradas=80):
+    """Árbol compacto de lo que realmente hay dentro del .zip subido, para
+    diagnosticar cuando no coincide con lo que se espera (los nombres de
+    carpeta de Takeout varían según idioma/versión y no hay forma de
+    adivinarlos todos de antemano)."""
+    root = os.path.abspath(root)
+    lineas = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        if len(lineas) >= max_entradas:
+            lineas.append("… (recortado)")
+            break
+        profundidad = dirpath[len(root):].count(os.sep)
+        if profundidad > max_depth:
+            dirnames[:] = []
+            continue
+        rel = os.path.relpath(dirpath, root)
+        prefijo = "  " * profundidad
+        lineas.append(f"{prefijo}{rel}/")
+        for nombre in sorted(dirnames)[:10]:
+            lineas.append(f"{prefijo}  {nombre}/")
+        for nombre in sorted(filenames)[:5]:
+            lineas.append(f"{prefijo}  {nombre}")
+    return "\n".join(lineas)
+
+
 def find_account_dir(takeout_root):
     # Búsqueda recursiva e insensible a mayúsculas/minúsculas: en Windows
     # (donde esto se probó primero) glob.glob ya ignora mayúsculas por el
     # propio filesystem, pero en producción (Linux, filesystem sensible a
     # mayúsculas) el nombre real de la carpeta dentro del .zip de Takeout
-    # puede venir como "Perfil de empresa en Google" (e minúscula) en vez
-    # de "Perfil de Empresa en Google", y el glob exacto no encontraba nada.
+    # puede venir con otra combinación de mayúsculas, y el glob exacto no
+    # encontraba nada.
     for dirpath, dirnames, _filenames in os.walk(takeout_root):
         if os.path.basename(dirpath).lower() != "perfil de empresa en google":
             continue
@@ -257,8 +282,9 @@ def find_account_dir(takeout_root):
             if name.lower().startswith("account-"):
                 return os.path.join(dirpath, name)
     raise SystemExit(
-        "No se encontró la carpeta 'Perfil de Empresa en Google/account-*' dentro del .zip subido. "
-        "Sube el .zip tal cual lo descarga Google Takeout, sin extraerlo ni reorganizar sus carpetas."
+        "No se encontró la carpeta 'Perfil de Empresa en Google/account-*' dentro del .zip subido.\n\n"
+        "Esto es lo que sí contiene el .zip que subiste:\n"
+        f"{_describir_estructura(takeout_root)}"
     )
 
 
