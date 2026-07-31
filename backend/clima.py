@@ -483,7 +483,17 @@ def _es_fabrica(centro):
     return "fabrica" in _normaliza_header(centro)
 
 
-def _fetch_respuestas(conn, oleada_id, centro, centros_permitidos=None):
+def _pasa_filtro_tipo(centro, solo_tipo):
+    if _es_oficinas(centro):
+        return False
+    if solo_tipo == "tienda":
+        return not _es_fabrica(centro)
+    if solo_tipo == "fabrica":
+        return _es_fabrica(centro)
+    return True
+
+
+def _fetch_respuestas(conn, oleada_id, centro, centros_permitidos=None, solo_tipo=None):
     if centro:
         rows = conn.execute(
             "SELECT datos_json FROM clima_respuestas WHERE oleada_id = ? AND centro = ?", (oleada_id, centro)
@@ -495,15 +505,17 @@ def _fetch_respuestas(conn, oleada_id, centro, centros_permitidos=None):
     # seleccionable individualmente en el grid. centros_permitidos (gerente
     # restringido a su/s centro/s, ver usuario_clima_centros) se aplica igual
     # que la exclusión de Oficinas, para que el agregado de "todos los
-    # centros" de un gerente restringido solo cuente los suyos.
+    # centros" de un gerente restringido solo cuente los suyos. solo_tipo
+    # ("tienda"/"fabrica") acota además a "Todas las tiendas"/"Todas las
+    # fábricas" en vez del agregado de absolutamente todo el mundo.
     rows = conn.execute("SELECT datos_json, centro FROM clima_respuestas WHERE oleada_id = ?", (oleada_id,)).fetchall()
     return [
         json.loads(r["datos_json"]) for r in rows
-        if not _es_oficinas(r["centro"]) and (not centros_permitidos or r["centro"] in centros_permitidos)
+        if _pasa_filtro_tipo(r["centro"], solo_tipo) and (not centros_permitidos or r["centro"] in centros_permitidos)
     ]
 
 
-def _empleados_total(conn, oleada_id, centro, centros_permitidos=None):
+def _empleados_total(conn, oleada_id, centro, centros_permitidos=None, solo_tipo=None):
     if centro:
         row = conn.execute(
             "SELECT empleados FROM clima_plantilla WHERE oleada_id = ? AND centro = ?", (oleada_id, centro)
@@ -514,7 +526,7 @@ def _empleados_total(conn, oleada_id, centro, centros_permitidos=None):
         return None
     return sum(
         r["empleados"] for r in rows
-        if not _es_oficinas(r["centro"]) and (not centros_permitidos or r["centro"] in centros_permitidos)
+        if _pasa_filtro_tipo(r["centro"], solo_tipo) and (not centros_permitidos or r["centro"] in centros_permitidos)
     )
 
 
@@ -536,16 +548,16 @@ def _respuesta_con_valor(texto):
     return limpio.lower() not in _RESPUESTAS_SIN_VALOR
 
 
-def compute_reporte(oleada_id, centro=None, centros_permitidos=None):
+def compute_reporte(oleada_id, centro=None, centros_permitidos=None, solo_tipo=None):
     conn = get_connection()
-    filas = _fetch_respuestas(conn, oleada_id, centro, centros_permitidos)
+    filas = _fetch_respuestas(conn, oleada_id, centro, centros_permitidos, solo_tipo)
     if not filas:
         conn.close()
         raise ValueError("No hay respuestas para este centro en esta oleada")
 
     roles = _column_roles(list(filas[0].keys()))
     n = len(filas)
-    empleados = _empleados_total(conn, oleada_id, centro, centros_permitidos)
+    empleados = _empleados_total(conn, oleada_id, centro, centros_permitidos, solo_tipo)
     participacion = round(n / empleados * 100, 1) if empleados else None
 
     def stats_pregunta(header):
@@ -643,6 +655,7 @@ def compute_reporte(oleada_id, centro=None, centros_permitidos=None):
     return {
         "oleada_id": oleada_id,
         "centro": centro,
+        "solo_tipo": solo_tipo,
         "n": n,
         "empleados": empleados,
         "participacion": participacion,

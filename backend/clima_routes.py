@@ -78,26 +78,32 @@ def _validar_centro_permitido(centro, centros_permitidos):
 
 
 @router.get("/{oleada_id}/reporte")
-def reporte_route(oleada_id: int, centro: str | None = None, user: dict = Depends(require_clima_oleada)):
+def reporte_route(
+    oleada_id: int, centro: str | None = None, solo_tipo: str | None = None,
+    user: dict = Depends(require_clima_oleada),
+):
     centros_permitidos = clima_module.get_centros_permitidos(user["id"])
     _validar_centro_permitido(centro, centros_permitidos)
     try:
-        return clima_module.compute_reporte(oleada_id, centro, centros_permitidos)
+        return clima_module.compute_reporte(oleada_id, centro, centros_permitidos, solo_tipo)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.get("/{oleada_id}/reporte.pdf")
-def reporte_pdf_route(oleada_id: int, centro: str | None = None, user: dict = Depends(require_clima_oleada)):
+def reporte_pdf_route(
+    oleada_id: int, centro: str | None = None, solo_tipo: str | None = None,
+    user: dict = Depends(require_clima_oleada),
+):
     centros_permitidos = clima_module.get_centros_permitidos(user["id"])
     _validar_centro_permitido(centro, centros_permitidos)
     try:
-        reporte = clima_module.compute_reporte(oleada_id, centro, centros_permitidos)
+        reporte = clima_module.compute_reporte(oleada_id, centro, centros_permitidos, solo_tipo)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     empresa = clima_module.get_oleada_empresa(oleada_id) or "kk"
     pdf_bytes = generar_pdf(reporte, empresa=empresa)
-    nombre = f"clima_laboral_{centro or 'global'}.pdf".replace(" ", "_")
+    nombre = f"clima_laboral_{centro or solo_tipo or 'global'}.pdf".replace(" ", "_")
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

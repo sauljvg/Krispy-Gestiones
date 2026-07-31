@@ -397,7 +397,8 @@ def generar_pdf(reporte, empresa="kk"):
         story.append(logo)
         story.append(Spacer(1, 8))
 
-    titulo_centro = reporte["centro"] or "Todos los centros"
+    _titulos_solo_tipo = {"tienda": "Todas las tiendas", "fabrica": "Todas las fábricas"}
+    titulo_centro = reporte["centro"] or _titulos_solo_tipo.get(reporte.get("solo_tipo")) or "Todos los centros"
     story.append(Paragraph(f"Clima Laboral {nombre_empresa} — {titulo_centro}", TITULO_STYLE))
 
     empleados_txt = reporte["empleados"] if reporte["empleados"] is not None else "—"

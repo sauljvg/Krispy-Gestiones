@@ -1,5 +1,6 @@
 let currentOleada = null;
 let currentCentro = null;
+let currentSoloTipo = null;
 
 const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" ? "saona" : "kk";
 function conEmpresa(params) {
@@ -124,20 +125,26 @@ async function loadCentros() {
   const res = await fetch(`${AUTH_API_BASE}/clima/${currentOleada}/centros`);
   const centros = await res.json();
   const grid = document.getElementById("centro-grid");
-  const cards = [`<div class="centro-card" data-centro="">🏢 Todos los centros</div>`].concat(
-    centros.map((c) => `<div class="centro-card" data-centro="${escapeHTML(c)}">${escapeHTML(c)}</div>`)
-  );
+  const cards = [`<div class="centro-card" data-centro="">🏢 Todos los centros</div>`];
+  // Botones "Todas las tiendas"/"Todas las fábricas" solo tienen sentido si
+  // de verdad hay al menos una fábrica en esta oleada — si no, dividir no
+  // aporta nada (sería idéntico a "Todos los centros").
+  if (centros.some((c) => /fabrica/i.test(c))) {
+    cards.push(`<div class="centro-card" data-centro="" data-solo-tipo="tienda">🏬 Todas las tiendas</div>`);
+    cards.push(`<div class="centro-card" data-centro="" data-solo-tipo="fabrica">🏭 Todas las fábricas</div>`);
+  }
+  cards.push(...centros.map((c) => `<div class="centro-card" data-centro="${escapeHTML(c)}">${escapeHTML(c)}</div>`));
   grid.innerHTML = cards.join("");
   grid.querySelectorAll(".centro-card").forEach((card) => {
     card.addEventListener("click", () => {
       grid.querySelectorAll(".centro-card").forEach((c) => c.classList.remove("active"));
       card.classList.add("active");
-      loadReporte(card.dataset.centro || null);
+      loadReporte(card.dataset.centro || null, card.dataset.soloTipo || null);
     });
   });
   if (centros.length > 0) {
     grid.querySelector(".centro-card").classList.add("active");
-    await loadReporte(null);
+    await loadReporte(null, null);
   }
 }
 
@@ -321,10 +328,12 @@ function descargarChartPNG(canvasId, nombreArchivo) {
   a.click();
 }
 
-async function loadReporte(centro) {
+async function loadReporte(centro, soloTipo) {
   currentCentro = centro;
+  currentSoloTipo = soloTipo || null;
   const params = new URLSearchParams();
   if (centro) params.set("centro", centro);
+  if (currentSoloTipo) params.set("solo_tipo", currentSoloTipo);
   const res = await fetch(`${AUTH_API_BASE}/clima/${currentOleada}/reporte?${params.toString()}`);
   if (!res.ok) return;
   const data = await res.json();
@@ -453,6 +462,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btn-exportar-pdf").addEventListener("click", () => {
     const params = new URLSearchParams();
     if (currentCentro) params.set("centro", currentCentro);
+    if (currentSoloTipo) params.set("solo_tipo", currentSoloTipo);
     window.open(`${AUTH_API_BASE}/clima/${currentOleada}/reporte.pdf?${params.toString()}`, "_blank");
   });
 

@@ -165,10 +165,12 @@ def list_contactos_route(_user: dict = Depends(require_boletines)):
 
 @router.post("/contactos")
 def add_contacto_route(body: ContactoIn, _user: dict = Depends(require_boletines)):
-    if not body.nombre.strip() or "@" not in body.email:
-        raise HTTPException(status_code=400, detail="Nombre y email válidos son obligatorios")
+    if not body.nombre.strip():
+        raise HTTPException(status_code=400, detail="El nombre es obligatorio")
     try:
         contacto_id = boletines_module.add_contacto(body.nombre.strip(), body.email.strip().lower())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         raise HTTPException(status_code=400, detail="Ese email ya está en la lista de contactos")
     return {"ok": True, "id": contacto_id}

@@ -5,6 +5,7 @@ propio usuario decide a quién le llega cada boletín)."""
 import base64
 import io
 import os
+import re
 
 import requests
 from openpyxl import load_workbook
@@ -14,6 +15,16 @@ from db import DATA_DIR, get_connection
 RESEND_API_URL = "https://api.resend.com/emails"
 PDF_DIR = os.path.join(DATA_DIR, "uploads", "boletines")
 IMAGENES_DIR = os.path.join(DATA_DIR, "uploads", "boletines_imagenes")
+
+# Formato básico (local@dominio.tld, sin espacios) — no pretende cubrir todo
+# RFC 5322, solo descartar lo obviamente mal escrito ("asdf@", "@asdf",
+# "correo sin arroba"). No se usa pydantic.EmailStr para no añadir la
+# dependencia email-validator solo para esto.
+_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _email_valido(email):
+    return bool(email) and bool(_EMAIL_RE.match(email.strip()))
 
 
 def ensure_boletin_tables():
@@ -258,6 +269,8 @@ def list_contactos(solo_activos=False):
 
 
 def add_contacto(nombre, email):
+    if not _email_valido(email):
+        raise ValueError("El email no tiene un formato válido")
     conn = get_connection()
     try:
         cur = conn.execute("INSERT INTO boletin_contactos (nombre, email) VALUES (?, ?)", (nombre, email))
@@ -316,7 +329,7 @@ def import_contactos_excel(file_bytes):
             continue
         email = str(row[idx_email]).strip().lower() if idx_email < len(row) and row[idx_email] else ""
         nombre = str(row[idx_nombre]).strip() if idx_nombre is not None and idx_nombre < len(row) and row[idx_nombre] else email
-        if "@" not in email:
+        if not _email_valido(email):
             invalidos += 1
             continue
         existe = conn.execute("SELECT id FROM boletin_contactos WHERE email = ?", (email,)).fetchone()

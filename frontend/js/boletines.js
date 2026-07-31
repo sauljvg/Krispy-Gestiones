@@ -246,11 +246,16 @@ async function loadContactos() {
   if (currentPostId) renderDestinatarios();
 }
 
+// Mismo formato mínimo que valida el backend (local@dominio.tld, sin
+// espacios) — no cubre todo RFC 5322, solo descarta lo obviamente mal
+// escrito, para no dejar pasar contactos que luego fallan al enviar.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 async function agregarContacto() {
   const nombre = document.getElementById("contacto-nombre").value.trim();
   const email = document.getElementById("contacto-email").value.trim();
-  if (!nombre || !email.includes("@")) {
-    alert("Nombre y email válidos son obligatorios.");
+  if (!nombre || !EMAIL_RE.test(email)) {
+    alert("Nombre y email con formato válido (ej. nombre@dominio.com) son obligatorios.");
     return;
   }
   const res = await fetch(`${AUTH_API_BASE}/boletines/contactos`, {
