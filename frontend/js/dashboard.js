@@ -207,15 +207,15 @@ async function loadTimeline() {
 // siempre se ve, con o sin fechas), esta sí necesita un rango Desde/Hasta
 // concreto para tener sentido (son solo 2 puntos: inicio y fin).
 async function loadEvolucionTabla() {
-  const tabla = document.getElementById("evolucion-tabla");
+  const detalle = document.getElementById("evolucion-detalle");
   if (state.tienda || !state.dateFrom || !state.dateTo) {
-    tabla.hidden = true;
+    detalle.hidden = true;
     return;
   }
   const params = new URLSearchParams({ date_from: state.dateFrom, date_to: state.dateTo });
   if (state.soloGoogle) params.set("solo_google", "true");
   const { evolucion } = await fetchJSON(`${API_BASE}/timeline-evolucion?${params.toString()}`);
-  tabla.hidden = evolucion.length === 0;
+  detalle.hidden = evolucion.length === 0;
   if (!evolucion.length) return;
 
   document.getElementById("evolucion-desde").textContent = formatFechaExacta(state.dateFrom);

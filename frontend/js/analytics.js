@@ -144,9 +144,9 @@ function renderDistributionChart(distribucion, porTienda) {
     },
   });
 
-  const tabla = document.getElementById("distribucion-tabla");
-  if (!tabla) return;
-  tabla.hidden = !apilado;
+  const detalle = document.getElementById("distribucion-detalle");
+  if (!detalle) return;
+  detalle.hidden = !apilado;
   if (apilado) {
     document.getElementById("distribucion-tabla-body").innerHTML = distribucionFilaHTML(porTienda);
   }

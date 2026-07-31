@@ -588,6 +588,41 @@ h3 {
 
 .staff-hint { margin: -6px 0 10px; font-size: 12px; color: var(--text-muted); }
 
+/* Tabla de datos genérica (no interactiva, a diferencia de .staff-table) —
+   usada para los desgloses debajo de gráficos (evolución por tienda,
+   distribución de estrellas...). Mismo estilo de cabecera/bordes que
+   .staff-table para que no desentone con el resto de la página. */
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px; }
+.data-table th {
+  text-align: left;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  color: var(--text-muted);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.data-table td { padding: 7px 10px; border-bottom: 1px solid var(--gridline); white-space: nowrap; }
+.data-table th:not(:first-child), .data-table td:not(:first-child) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.data-table tr:last-child td { border-bottom: none; }
+
+/* Envoltorio <details> plegable para esas tablas — mismo patrón que
+   .auditoria-details en Entrevista de Salida. */
+.chart-table-details { margin-top: 10px; }
+.chart-table-details summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 6px 0;
+}
+.chart-table-details summary:hover { color: var(--text-primary); }
+.chart-table-details[open] summary { margin-bottom: 4px; }
+
 .staff-active-filter {
   display: flex;
   align-items: center;

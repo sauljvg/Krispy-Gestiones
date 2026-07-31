@@ -15,7 +15,7 @@
     }
   })();
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260731a">
+<link rel="stylesheet" href="css/styles.css?v=20260731b">
 <script src="js/vendor/chart.umd.min.js?v=20260723g"></script>
 </head>
 <body>
@@ -174,22 +174,25 @@
         <h2>Timeline de reseñas</h2>
         <p class="staff-hint">Con "Todas" en Tienda, una línea acumulada por tienda (si eliges una tienda concreta, el total mensual de esa tienda).</p>
         <canvas id="chart-timeline" height="260"></canvas>
-        <table class="posts-table" id="evolucion-tabla" hidden>
-          <caption class="staff-hint" style="text-align:left; caption-side:top; padding-bottom:6px;">
-            Cambio entre <b id="evolucion-desde"></b> y <b id="evolucion-hasta"></b> (pon Desde/Hasta para verlo)
-          </caption>
-          <thead><tr><th>Tienda</th><th>Reseñas</th><th>Valoración</th><th>Cambio</th></tr></thead>
-          <tbody id="evolucion-tabla-body"></tbody>
-        </table>
+        <details class="chart-table-details" id="evolucion-detalle" hidden>
+          <summary>Ver tabla: cambio entre <b id="evolucion-desde"></b> y <b id="evolucion-hasta"></b></summary>
+          <table class="data-table" id="evolucion-tabla">
+            <thead><tr><th>Tienda</th><th>Reseñas</th><th>Valoración</th><th>Cambio</th></tr></thead>
+            <tbody id="evolucion-tabla-body"></tbody>
+          </table>
+        </details>
       </div>
       <div class="chart-card">
         <h2>Distribución de estrellas</h2>
         <p class="staff-hint">Pasa el ratón por una barra para ver el desglose completo — los segmentos pequeños (4★-1★) pueden ser difíciles de distinguir a simple vista.</p>
         <canvas id="chart-distribution" height="260"></canvas>
-        <table class="posts-table" id="distribucion-tabla" hidden>
-          <thead><tr><th>Tienda</th><th>5★</th><th>4★</th><th>3★</th><th>2★</th><th>1★</th><th>Total</th></tr></thead>
-          <tbody id="distribucion-tabla-body"></tbody>
-        </table>
+        <details class="chart-table-details" id="distribucion-detalle" hidden>
+          <summary>Ver tabla con los números exactos</summary>
+          <table class="data-table" id="distribucion-tabla">
+            <thead><tr><th>Tienda</th><th>5★</th><th>4★</th><th>3★</th><th>2★</th><th>1★</th><th>Total</th></tr></thead>
+            <tbody id="distribucion-tabla-body"></tbody>
+          </table>
+        </details>
       </div>
     </section>
 
@@ -298,7 +301,7 @@
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
 <script src="js/filters.js?v=20260731a"></script>
-<script src="js/analytics.js?v=20260731e"></script>
-<script src="js/dashboard.js?v=20260731e"></script>
+<script src="js/analytics.js?v=20260731f"></script>
+<script src="js/dashboard.js?v=20260731f"></script>
 </body>
 </html>
