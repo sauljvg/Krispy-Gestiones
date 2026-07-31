@@ -423,7 +423,13 @@ def import_takeout(file: UploadFile = File(...)):
         extract_target = ("\\\\?\\" + os.path.abspath(extract_dir)) if os.name == "nt" else extract_dir
         try:
             with zipfile.ZipFile(zip_path) as zf:
-                zf.extractall(extract_target)
+                # El export de Takeout incluye las fotos adjuntas a cada
+                # reseña ("media-*"), que pueden pesar >150 MB y que el
+                # importador nunca lee (solo usa los reviews*.json). Se
+                # omiten al extraer para no gastar de más disco/memoria del
+                # contenedor con archivos que no hacen falta.
+                miembros = [m for m in zf.infolist() if not os.path.basename(m.filename).lower().startswith("media-")]
+                zf.extractall(extract_target, members=miembros)
         except zipfile.BadZipFile:
             raise HTTPException(400, "El archivo no es un .zip válido.")
 

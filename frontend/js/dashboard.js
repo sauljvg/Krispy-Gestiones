@@ -123,7 +123,7 @@ async function uploadTakeoutZip(file) {
     const res = await fetch(conEmpresaURL(`${API_BASE}/import/takeout`), { method: "POST", body: formData });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-      alert(`No se pudo importar el Takeout: ${body.detail || res.statusText}`);
+      alert(`No se pudo importar el Takeout: ${body.detail || res.statusText || `error HTTP ${res.status}`}`);
       return;
     }
     const lineas = body.tiendas
