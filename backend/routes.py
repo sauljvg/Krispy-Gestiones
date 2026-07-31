@@ -289,7 +289,16 @@ def timeline(
     solo_google: bool = False,
 ):
     where, params = build_filters(rating, sentiment, date_from, date_to, q, staff, tienda, solo_google)
-    return {"timeline": analytics.get_timeline(where, params)}
+    resultado = {"timeline": analytics.get_timeline(where, params)}
+    if not tienda:
+        # Desglose por tienda solo tiene sentido en "Todas" — con una tienda
+        # ya elegida sería una única línea idéntica a "timeline". Se calcula
+        # con un `where` SIN fecha (histórico completo) para que el
+        # acumulado no arranque en 0 al inicio del rango — ver el docstring
+        # de get_timeline_por_tienda.
+        where_sin_fecha, params_sin_fecha = build_filters(rating, sentiment, None, None, q, staff, tienda, solo_google)
+        resultado["por_tienda"] = analytics.get_timeline_por_tienda(where_sin_fecha, params_sin_fecha, date_from, date_to)
+    return resultado
 
 
 @router.get("/timeline-evolucion")

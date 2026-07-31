@@ -167,22 +167,20 @@
     <section class="charts-row">
       <div class="chart-card">
         <h2>Timeline de reseñas</h2>
+        <p class="staff-hint">Con "Todas" en Tienda, una línea acumulada por tienda (si eliges una tienda concreta, el total mensual de esa tienda).</p>
         <canvas id="chart-timeline" height="260"></canvas>
+        <table class="posts-table" id="evolucion-tabla" hidden>
+          <caption class="staff-hint" style="text-align:left; caption-side:top; padding-bottom:6px;">
+            Cambio entre <b id="evolucion-desde"></b> y <b id="evolucion-hasta"></b> (pon Desde/Hasta para verlo)
+          </caption>
+          <thead><tr><th>Tienda</th><th>Reseñas</th><th>Valoración</th><th>Cambio</th></tr></thead>
+          <tbody id="evolucion-tabla-body"></tbody>
+        </table>
       </div>
       <div class="chart-card">
         <h2>Distribución de estrellas</h2>
         <canvas id="chart-distribution" height="260"></canvas>
       </div>
-    </section>
-
-    <section class="chart-card" id="evolucion-card" hidden>
-      <h2>Evolución por tienda</h2>
-      <p class="staff-hint">Comparativa de reseñas y valoración media acumuladas entre <b id="evolucion-desde"></b> y <b id="evolucion-hasta"></b> (selecciona "Todas" en Tienda y pon Desde/Hasta para verla).</p>
-      <canvas id="chart-evolucion" height="260"></canvas>
-      <table class="posts-table" id="evolucion-tabla">
-        <thead><tr><th>Tienda</th><th>Reseñas</th><th>Valoración</th><th>Cambio</th></tr></thead>
-        <tbody id="evolucion-tabla-body"></tbody>
-      </table>
     </section>
 
     <section class="chart-card">
@@ -290,7 +288,7 @@
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
 <script src="js/filters.js?v=20260731a"></script>
-<script src="js/analytics.js?v=20260731a"></script>
-<script src="js/dashboard.js?v=20260731c"></script>
+<script src="js/analytics.js?v=20260731b"></script>
+<script src="js/dashboard.js?v=20260731d"></script>
 </body>
 </html>

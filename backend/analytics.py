@@ -110,6 +110,57 @@ def get_timeline(where="", params=None):
     return data
 
 
+def get_timeline_por_tienda(where="", params=None, date_from=None, date_to=None):
+    """Como get_timeline pero con una línea ACUMULADA por tienda en vez de
+    un único agregado global — para la vista "Todas" del timeline, donde
+    interesa ver el crecimiento de cada tienda por separado, no solo el
+    volumen total mes a mes.
+
+    `where`/`params` NO deben traer ya el filtro de fecha (se calcula el
+    acumulado sobre el histórico COMPLETO a propósito): si un rango
+    Desde/Hasta reseteara el acumulado a 0 en el mes de inicio, esta línea
+    dejaría de coincidir con la tabla de "cambio" que se muestra debajo
+    (esa sí calcula el total real acumulado hasta cada fecha). `date_from`/
+    `date_to`, si se pasan, solo recortan qué meses se DEVUELVEN — el valor
+    acumulado de cada uno sigue siendo el histórico real hasta ese mes."""
+    sql_where, sql_params = _combine_where("fecha_datetime IS NOT NULL AND tienda IS NOT NULL", where, params)
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(f"""
+        SELECT tienda, substr(fecha_datetime, 1, 7) AS mes, COUNT(*) AS cantidad
+        FROM reviews
+        {sql_where}
+        GROUP BY tienda, mes
+        ORDER BY mes ASC
+    """, sql_params)
+    filas = dict_rows(cur)
+    conn.close()
+
+    todos_los_meses = sorted({f["mes"] for f in filas})
+    por_tienda = {}
+    for f in filas:
+        por_tienda.setdefault(f["tienda"], {})[f["mes"]] = f["cantidad"]
+
+    mes_desde = date_from[:7] if date_from else None
+    mes_hasta = date_to[:7] if date_to else None
+    meses_visibles = [
+        m for m in todos_los_meses
+        if (not mes_desde or m >= mes_desde) and (not mes_hasta or m <= mes_hasta)
+    ]
+
+    series = []
+    for tienda, conteos_por_mes in por_tienda.items():
+        acumulado = 0
+        puntos = []
+        for mes in todos_los_meses:
+            acumulado += conteos_por_mes.get(mes, 0)
+            if mes in meses_visibles:
+                puntos.append(acumulado)
+        series.append({"tienda": tienda, "acumulado": puntos})
+    series.sort(key=lambda s: -(s["acumulado"][-1] if s["acumulado"] else 0))
+    return {"meses": meses_visibles, "series": series}
+
+
 def get_keywords(limit=20, where="", params=None):
     params = params or []
     conn = get_connection()

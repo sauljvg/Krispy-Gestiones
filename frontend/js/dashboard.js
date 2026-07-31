@@ -199,30 +199,27 @@ async function loadRatingProgress() {
 
 async function loadTimeline() {
   const params = currentQueryParams();
-  const { timeline } = await fetchJSON(`${API_BASE}/timeline?${params.toString()}`);
-  renderTimelineChart(timeline);
+  const { timeline, por_tienda } = await fetchJSON(`${API_BASE}/timeline?${params.toString()}`);
+  renderTimelineChart(timeline, por_tienda);
 }
 
-// Solo tiene sentido en la vista "Todas" (comparar tiendas entre sí) con un
-// rango Desde/Hasta concreto puesto — sin eso se oculta la tarjeta entera en
-// vez de mostrar un gráfico vacío o engañoso.
-async function loadEvolucionTiendas() {
-  const card = document.getElementById("evolucion-card");
+// Tabla de "cuánto cambió cada tienda" — a diferencia del gráfico (que
+// siempre se ve, con o sin fechas), esta sí necesita un rango Desde/Hasta
+// concreto para tener sentido (son solo 2 puntos: inicio y fin).
+async function loadEvolucionTabla() {
+  const tabla = document.getElementById("evolucion-tabla");
   if (state.tienda || !state.dateFrom || !state.dateTo) {
-    card.hidden = true;
+    tabla.hidden = true;
     return;
   }
   const params = new URLSearchParams({ date_from: state.dateFrom, date_to: state.dateTo });
   if (state.soloGoogle) params.set("solo_google", "true");
   const { evolucion } = await fetchJSON(`${API_BASE}/timeline-evolucion?${params.toString()}`);
-  card.hidden = evolucion.length === 0;
+  tabla.hidden = evolucion.length === 0;
   if (!evolucion.length) return;
 
-  const labelInicio = formatFechaExacta(state.dateFrom);
-  const labelFinal = formatFechaExacta(state.dateTo);
-  document.getElementById("evolucion-desde").textContent = labelInicio;
-  document.getElementById("evolucion-hasta").textContent = labelFinal;
-  renderEvolucionChart(evolucion, labelInicio, labelFinal);
+  document.getElementById("evolucion-desde").textContent = formatFechaExacta(state.dateFrom);
+  document.getElementById("evolucion-hasta").textContent = formatFechaExacta(state.dateTo);
   document.getElementById("evolucion-tabla-body").innerHTML = evolucion.map(evolucionFilaHTML).join("");
 }
 
@@ -424,7 +421,7 @@ async function refreshAll() {
     ["stats", loadStats()],
     ["rating-progress", loadRatingProgress()],
     ["timeline", loadTimeline()],
-    ["evolucion", loadEvolucionTiendas()],
+    ["evolucion", loadEvolucionTabla()],
     ["horario", loadHorario()],
     ["keywords", loadKeywords()],
     ["staff", loadStaffMentions()],
