@@ -83,6 +83,24 @@ function renderTimelineChart(timeline, porTienda) {
   });
 }
 
+// Tooltip compartido de las barras apiladas: en modo "index" muestra TODAS
+// las tiendas de esa barra en un único tooltip (no solo el segmento
+// diminuto bajo el cursor), y se filtran los ceros para que no se llene de
+// líneas irrelevantes — así los segmentos de 1-2px de las categorías
+// pequeñas (4★, 3★...) siguen siendo legibles al pasar el ratón, aunque a
+// simple vista no se distingan los colores.
+const TOOLTIP_APILADO = {
+  mode: "index",
+  intersect: false,
+  filter: (item) => item.raw > 0,
+  callbacks: {
+    footer: (items) => {
+      const total = items.reduce((sum, it) => sum + it.raw, 0);
+      return `Total: ${total.toLocaleString("es-ES")}`;
+    },
+  },
+};
+
 // `porTienda` (solo llega en la vista "Todas", ver loadStats) dibuja barras
 // APILADAS, una serie de color por tienda, en vez de una única barra
 // agregada — mismo patrón que el timeline.
@@ -117,6 +135,7 @@ function renderDistributionChart(distribucion, porTienda) {
       responsive: true,
       plugins: {
         legend: { display: apilado, position: "bottom", labels: { usePointStyle: true, pointStyle: "circle", color: cssVar("--text-muted") } },
+        tooltip: apilado ? TOOLTIP_APILADO : undefined,
       },
       scales: {
         x: { stacked: apilado, grid: { display: false }, ticks: { color: cssVar("--text-muted") } },
@@ -124,6 +143,26 @@ function renderDistributionChart(distribucion, porTienda) {
       },
     },
   });
+
+  const tabla = document.getElementById("distribucion-tabla");
+  if (!tabla) return;
+  tabla.hidden = !apilado;
+  if (apilado) {
+    document.getElementById("distribucion-tabla-body").innerHTML = distribucionFilaHTML(porTienda);
+  }
+}
+
+// Tabla con los números exactos de cada tienda × estrella — el complemento
+// necesario del gráfico apilado: los segmentos de las categorías pequeñas
+// (4★, 3★, 2★, 1★) son demasiado finos para leer el color a simple vista.
+function distribucionFilaHTML(porTienda) {
+  return porTienda.series
+    .map((s) => {
+      const total = s.datos.reduce((a, b) => a + b, 0);
+      const celdas = porTienda.estrellas.map((e, i) => `<td>${s.datos[i].toLocaleString("es-ES")}</td>`).join("");
+      return `<tr><td>${escapeHTML(s.tienda)}</td>${celdas}<td><b>${total.toLocaleString("es-ES")}</b></td></tr>`;
+    })
+    .join("");
 }
 
 function renderHoraChart(porHora, seriesPorTienda) {
@@ -148,6 +187,7 @@ function renderHoraChart(porHora, seriesPorTienda) {
       },
       plugins: {
         legend: { display: apilado, position: "bottom", labels: { usePointStyle: true, pointStyle: "circle", color: cssVar("--text-muted") } },
+        tooltip: apilado ? TOOLTIP_APILADO : undefined,
       },
       scales: {
         x: { stacked: apilado, grid: { display: false }, ticks: { color: cssVar("--text-muted") } },
@@ -179,6 +219,7 @@ function renderDiaSemanaChart(porDia, seriesPorTienda) {
       },
       plugins: {
         legend: { display: apilado, position: "bottom", labels: { usePointStyle: true, pointStyle: "circle", color: cssVar("--text-muted") } },
+        tooltip: apilado ? TOOLTIP_APILADO : undefined,
       },
       scales: {
         x: { stacked: apilado, grid: { display: false }, ticks: { color: cssVar("--text-muted") } },
