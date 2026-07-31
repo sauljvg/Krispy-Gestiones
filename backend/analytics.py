@@ -345,6 +345,60 @@ def get_hourly_distribution(where, params):
     }
 
 
+def get_evolucion_por_tienda(date_from, date_to, solo_google=False):
+    """Para la vista "Todas" con Desde/Hasta puestos: cuántas reseñas y qué
+    valoración media tenía cada tienda ACUMULADO hasta cada fecha límite —
+    así se ve cuánto creció cada una en ese periodo (al estilo del
+    comparativo "22 de mayo vs 26 de julio"), no solo el total agregado que
+    ya muestra el timeline por mes.
+
+    Se ignoran a propósito los filtros de estrellas/sentimiento/búsqueda —
+    no tienen sentido para un comparativo de crecimiento — pero si respeta
+    las tiendas permitidas del usuario y el toggle "Solo Google".
+    """
+    filtro_google = " AND (visible_en_google IS NULL OR visible_en_google = 1)" if solo_google else ""
+    conn = get_connection()
+    permitidas = tiendas_permitidas_actual.get()
+    clause_tienda = ""
+    params = []
+    if permitidas:
+        placeholders = ",".join("?" * len(permitidas))
+        clause_tienda = f" AND tienda IN ({placeholders})"
+        params = list(permitidas)
+    rows = conn.execute(f"""
+        SELECT tienda, fecha_datetime, calificacion_num
+        FROM reviews
+        WHERE tienda IS NOT NULL AND fecha_datetime IS NOT NULL{filtro_google}{clause_tienda}
+    """, params).fetchall()
+    conn.close()
+
+    por_tienda = {}
+    for r in rows:
+        d = por_tienda.setdefault(r["tienda"], {"inicio": [], "final": []})
+        if r["fecha_datetime"] <= date_to:
+            d["final"].append(r["calificacion_num"])
+        if r["fecha_datetime"] <= date_from:
+            d["inicio"].append(r["calificacion_num"])
+
+    def _promedio(calificaciones):
+        con_nota = [c for c in calificaciones if c is not None]
+        return round(sum(con_nota) / len(con_nota), 2) if con_nota else None
+
+    resultado = []
+    for tienda, d in por_tienda.items():
+        if not d["final"]:
+            continue  # sin ninguna reseña hasta la fecha final, no aporta nada al comparativo
+        resultado.append({
+            "tienda": tienda,
+            "total_inicio": len(d["inicio"]),
+            "total_final": len(d["final"]),
+            "promedio_inicio": _promedio(d["inicio"]),
+            "promedio_final": _promedio(d["final"]),
+        })
+    resultado.sort(key=lambda r: -r["total_final"])
+    return resultado
+
+
 def get_store_total_google(tienda):
     """Total de reseñas que Google anunció la última vez que se scrapeó esta
     tienda (o None si nunca se guardó). Sirve para el check de "100%

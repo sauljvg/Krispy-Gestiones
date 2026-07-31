@@ -2,6 +2,11 @@ let timelineChart = null;
 let distributionChart = null;
 let horaChart = null;
 let diaSemanaChart = null;
+let evolucionChart = null;
+
+// Paleta fija por tienda (no depende de design-tokens.json, que es de marca
+// KK/Saona — aquí hacen falta N colores distintos para distinguir líneas).
+const PALETA_EVOLUCION = ["#1b5e20", "#c62828", "#1565c0", "#ef6c00", "#6a1b9a", "#00838f", "#ad1457"];
 
 function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -133,6 +138,52 @@ function renderDiaSemanaChart(porDia) {
       },
     },
   });
+}
+
+function renderEvolucionChart(evolucion, labelInicio, labelFinal) {
+  const ctx = document.getElementById("chart-evolucion");
+  if (evolucionChart) evolucionChart.destroy();
+  const datasets = evolucion.map((e, i) => ({
+    label: e.tienda,
+    data: [e.total_inicio, e.total_final],
+    borderColor: PALETA_EVOLUCION[i % PALETA_EVOLUCION.length],
+    backgroundColor: PALETA_EVOLUCION[i % PALETA_EVOLUCION.length],
+    pointRadius: 4,
+    borderWidth: 2,
+    tension: 0,
+  }));
+  evolucionChart = new Chart(ctx, {
+    type: "line",
+    data: { labels: [labelInicio, labelFinal], datasets },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: "bottom", labels: { usePointStyle: true, pointStyle: "circle", color: cssVar("--text-muted") } },
+      },
+      scales: {
+        x: { grid: { color: cssVar("--gridline") }, ticks: { color: cssVar("--text-muted") } },
+        y: { beginAtZero: true, grid: { color: cssVar("--gridline") }, ticks: { color: cssVar("--text-muted"), precision: 0 } },
+      },
+    },
+  });
+}
+
+function evolucionFilaHTML(e) {
+  const deltaResenas = e.total_final - e.total_inicio;
+  const tieneAmbasNotas = e.promedio_inicio != null && e.promedio_final != null;
+  const deltaEstrellas = tieneAmbasNotas ? Math.round((e.promedio_final - e.promedio_inicio) * 10) / 10 : null;
+  const claseDelta = deltaResenas > 0 ? "rating-trend-up" : deltaResenas < 0 ? "rating-trend-down" : "";
+  const textoDelta = deltaEstrellas !== null
+    ? `${deltaResenas >= 0 ? "+" : ""}${deltaResenas} reseñas / ${deltaEstrellas >= 0 ? "+" : ""}${deltaEstrellas.toFixed(1)}★`
+    : `${deltaResenas >= 0 ? "+" : ""}${deltaResenas} reseñas`;
+  return `
+    <tr>
+      <td>${escapeHTML(e.tienda)}</td>
+      <td>${e.total_inicio.toLocaleString("es-ES")} → ${e.total_final.toLocaleString("es-ES")}</td>
+      <td>${e.promedio_inicio ?? "—"} → ${e.promedio_final ?? "—"} ★</td>
+      <td class="${claseDelta}">${textoDelta}</td>
+    </tr>
+  `;
 }
 
 function renderKeywords(keywords) {

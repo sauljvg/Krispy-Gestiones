@@ -292,6 +292,14 @@ def timeline(
     return {"timeline": analytics.get_timeline(where, params)}
 
 
+@router.get("/timeline-evolucion")
+def timeline_evolucion(date_from: str, date_to: str, solo_google: bool = False):
+    """Comparativa de reseñas/valoración ACUMULADAS por tienda entre dos
+    fechas — para la vista "Todas" con Desde/Hasta puestos: cuánto creció
+    cada tienda en ese periodo (ver analytics.get_evolucion_por_tienda)."""
+    return {"evolucion": analytics.get_evolucion_por_tienda(date_from, date_to, solo_google)}
+
+
 @router.get("/keywords")
 def keywords(
     limit: int = 20,
