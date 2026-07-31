@@ -1,8 +1,12 @@
 const LETRAS_DISC_PUB = ["D", "I", "S", "C"];
 const ICONO_FLECHA_ARRIBA_PUB = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>`;
 const ICONO_FLECHA_ABAJO_PUB = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+const POR_PAGINA_PUB = 4;
+
 let PREGUNTAS_DISC_PUB = [];
 let respondidasPub = new Set();
+let paginaActualPub = 0;
+let totalPaginasPub = 1;
 
 function escapeHTML(str) {
   const div = document.createElement("div");
@@ -20,35 +24,49 @@ function shuffle(arr) {
 }
 
 function leerRespuestasActualesPub() {
-  return [...document.querySelectorAll(".disc-pub-opciones")].map((ul) =>
-    [...ul.querySelectorAll("li")].map((li) => li.dataset.letra)
-  );
+  return [...document.querySelectorAll(".disc-pub-opciones")]
+    .sort((a, b) => Number(a.dataset.q) - Number(b.dataset.q))
+    .map((ul) => [...ul.querySelectorAll("li")].map((li) => li.dataset.letra));
 }
 
+// ==================== Render preguntas, en paginas de 4 ====================
+
 function renderPreguntasPub() {
+  totalPaginasPub = Math.ceil(PREGUNTAS_DISC_PUB.length / POR_PAGINA_PUB);
   const wrap = document.getElementById("disc-pub-preguntas-wrap");
-  wrap.innerHTML = PREGUNTAS_DISC_PUB.map((p, i) => {
-    const opciones = shuffle(LETRAS_DISC_PUB.map((letra) => ({ letra, texto: p[letra] })));
-    const lis = opciones
-      .map(
-        (o) => `
-      <li draggable="true" data-letra="${o.letra}">
-        <span class="disc-pub-rank-badge"></span>
-        <span class="disc-pub-opcion-texto">${escapeHTML(o.texto)}</span>
-        <span class="disc-pub-opcion-flechas">
-          <button type="button" class="btn-flecha-arriba-pub" aria-label="Subir">${ICONO_FLECHA_ARRIBA_PUB}</button>
-          <button type="button" class="btn-flecha-abajo-pub" aria-label="Bajar">${ICONO_FLECHA_ABAJO_PUB}</button>
-        </span>
-      </li>`
-      )
+
+  const paginasHtml = [];
+  for (let pagina = 0; pagina < totalPaginasPub; pagina++) {
+    const inicio = pagina * POR_PAGINA_PUB;
+    const preguntasPagina = PREGUNTAS_DISC_PUB.slice(inicio, inicio + POR_PAGINA_PUB);
+    const bloques = preguntasPagina
+      .map((p, offset) => {
+        const i = inicio + offset;
+        const opciones = shuffle(LETRAS_DISC_PUB.map((letra) => ({ letra, texto: p[letra] })));
+        const lis = opciones
+          .map(
+            (o) => `
+          <li draggable="true" data-letra="${o.letra}">
+            <span class="disc-pub-rank-badge"></span>
+            <span class="disc-pub-opcion-texto">${escapeHTML(o.texto)}</span>
+            <span class="disc-pub-opcion-flechas">
+              <button type="button" class="btn-flecha-arriba-pub" aria-label="Subir">${ICONO_FLECHA_ARRIBA_PUB}</button>
+              <button type="button" class="btn-flecha-abajo-pub" aria-label="Bajar">${ICONO_FLECHA_ABAJO_PUB}</button>
+            </span>
+          </li>`
+          )
+          .join("");
+        return `
+        <div class="disc-pub-pregunta" id="disc-pub-pregunta-${i}">
+          <div class="disc-pub-pregunta-num">Pregunta ${i + 1} / ${PREGUNTAS_DISC_PUB.length}</div>
+          <p class="disc-pub-hint">Ordena arrastrando o con las flechas: arriba = lo que más te describe, abajo = lo que menos.</p>
+          <ul class="disc-pub-opciones" data-q="${i}">${lis}</ul>
+        </div>`;
+      })
       .join("");
-    return `
-    <div class="disc-pub-pregunta" id="disc-pub-pregunta-${i}">
-      <div class="disc-pub-pregunta-num">Pregunta ${i + 1} / ${PREGUNTAS_DISC_PUB.length}</div>
-      <p class="disc-pub-hint">Ordena arrastrando o con las flechas: arriba = lo que más te describe, abajo = lo que menos.</p>
-      <ul class="disc-pub-opciones" data-q="${i}">${lis}</ul>
-    </div>`;
-  }).join("");
+    paginasHtml.push(`<div class="disc-pub-pagina" data-pagina="${pagina}"${pagina === 0 ? "" : " hidden"}>${bloques}</div>`);
+  }
+  wrap.innerHTML = paginasHtml.join("");
 
   wrap.querySelectorAll(".disc-pub-opciones").forEach((ul) => {
     actualizarBadgesPub(ul);
@@ -131,11 +149,48 @@ function marcarRespondidaPub(ul) {
   actualizarProgresoPub();
 }
 
-function actualizarProgresoPub() {
-  document.getElementById("disc-pub-progreso").textContent = `${respondidasPub.size} / ${PREGUNTAS_DISC_PUB.length} respondidas`;
-  const nombreOk = document.getElementById("input-nombre-pub").value.trim().length > 0;
-  document.getElementById("btn-enviar-pub").disabled = !(nombreOk && respondidasPub.size === PREGUNTAS_DISC_PUB.length);
+// ==================== Paginacion ====================
+
+function paginaCompletaPub(pagina) {
+  const inicio = pagina * POR_PAGINA_PUB;
+  for (let i = inicio; i < inicio + POR_PAGINA_PUB && i < PREGUNTAS_DISC_PUB.length; i++) {
+    if (!respondidasPub.has(i)) return false;
+  }
+  return true;
 }
+
+function mostrarPaginaPub(n) {
+  document.querySelectorAll(".disc-pub-pagina").forEach((div) => {
+    div.hidden = Number(div.dataset.pagina) !== n;
+  });
+  paginaActualPub = n;
+  actualizarProgresoPub();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function actualizarProgresoPub() {
+  document.getElementById("disc-pub-progreso-txt").textContent =
+    `Página ${paginaActualPub + 1} de ${totalPaginasPub} · ${respondidasPub.size} / ${PREGUNTAS_DISC_PUB.length} respondidas`;
+  document.getElementById("disc-pub-progreso-fill").style.width =
+    `${(respondidasPub.size / (PREGUNTAS_DISC_PUB.length || 1)) * 100}%`;
+
+  document.getElementById("btn-atras-pub").disabled = paginaActualPub === 0;
+
+  const esUltima = paginaActualPub === totalPaginasPub - 1;
+  const btnSiguiente = document.getElementById("btn-siguiente-pub");
+  const btnEnviar = document.getElementById("btn-enviar-pub");
+  btnSiguiente.hidden = esUltima;
+  btnEnviar.hidden = !esUltima;
+
+  if (!esUltima) {
+    btnSiguiente.disabled = !paginaCompletaPub(paginaActualPub);
+  } else {
+    const nombreOk = document.getElementById("input-nombre-pub").value.trim().length > 0;
+    btnEnviar.disabled = !(nombreOk && respondidasPub.size === PREGUNTAS_DISC_PUB.length);
+  }
+}
+
+// ==================== Enviar ====================
 
 async function enviarRespuestasPub() {
   const nombre = document.getElementById("input-nombre-pub").value.trim();
@@ -178,4 +233,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("input-nombre-pub").addEventListener("input", actualizarProgresoPub);
   document.getElementById("btn-enviar-pub").addEventListener("click", enviarRespuestasPub);
+  document.getElementById("btn-atras-pub").addEventListener("click", () => mostrarPaginaPub(paginaActualPub - 1));
+  document.getElementById("btn-siguiente-pub").addEventListener("click", () => {
+    if (paginaCompletaPub(paginaActualPub)) mostrarPaginaPub(paginaActualPub + 1);
+  });
 });

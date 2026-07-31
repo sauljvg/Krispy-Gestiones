@@ -27,8 +27,11 @@
     width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #ccc; font-size: 15px; font-family: inherit;
   }
   .disc-pub-progreso { position: sticky; top: 0; background: #f5f0e8; padding: 10px 0; text-align: center; font-size: 13px; color: #555; z-index: 5; }
+  .disc-pub-progreso-barra { max-width: 300px; height: 5px; background: #e2dbcd; border-radius: 3px; margin: 6px auto 0; overflow: hidden; }
+  .disc-pub-progreso-fill { height: 100%; background: #5b2a2a; border-radius: 3px; transition: width .2s; }
 
   .disc-pub-pregunta { border-top: 1px solid #eee; padding: 16px 0; border-left: 4px solid transparent; padding-left: 10px; margin-left: -10px; transition: border-color .15s; }
+  .disc-pub-pregunta:first-child { border-top: none; }
   .disc-pub-pregunta.respondida { border-left-color: #2e9e5b; }
   .disc-pub-pregunta-num { font-size: 12px; color: #888; margin-bottom: 6px; }
   .disc-pub-hint { font-size: 12px; color: #777; margin: 0 0 8px; }
@@ -54,13 +57,19 @@
   .disc-pub-opcion-flechas button:disabled { opacity: 0.25; cursor: default; }
   .disc-pub-opcion-flechas button:hover:not(:disabled) { border-color: #5b2a2a; color: #5b2a2a; }
 
-  .disc-pub-enviar-row { text-align: center; padding: 20px 0 4px; }
+  .disc-pub-nav-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 4px 0; }
   .disc-pub-btn {
     background: #5b2a2a; color: #fff; border: none; border-radius: 10px; padding: 13px 28px;
     font-size: 16px; font-weight: 600; cursor: pointer;
   }
   .disc-pub-btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .disc-pub-btn:hover:not(:disabled) { filter: brightness(1.08); }
+  .disc-pub-btn-secundario {
+    background: #fff; color: #5b2a2a; border: 1px solid #5b2a2a; border-radius: 10px; padding: 13px 22px;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .disc-pub-btn-secundario:disabled { opacity: 0.3; cursor: not-allowed; }
+  .disc-pub-nav-spacer { flex: 1; }
 
   .disc-pub-gracias { text-align: center; padding: 20px 0; }
   .disc-pub-gracias h2 { font-size: 22px; margin: 0 0 10px; }
@@ -90,12 +99,20 @@
       </div>
     </div>
 
-    <div class="disc-pub-progreso" id="disc-pub-progreso">0 / 24 respondidas</div>
+    <div class="disc-pub-progreso">
+      <span id="disc-pub-progreso-txt">Página 1 de 6 · 0 / 24 respondidas</span>
+      <div class="disc-pub-progreso-barra"><div class="disc-pub-progreso-fill" id="disc-pub-progreso-fill" style="width:0%"></div></div>
+    </div>
 
     <div class="disc-pub-card" id="disc-pub-preguntas-wrap"></div>
 
-    <div class="disc-pub-card disc-pub-enviar-row">
-      <button type="button" id="btn-enviar-pub" class="disc-pub-btn" disabled>Enviar respuestas</button>
+    <div class="disc-pub-card">
+      <div class="disc-pub-nav-row">
+        <button type="button" id="btn-atras-pub" class="disc-pub-btn-secundario" disabled>← Atrás</button>
+        <span class="disc-pub-nav-spacer"></span>
+        <button type="button" id="btn-siguiente-pub" class="disc-pub-btn" disabled>Siguiente →</button>
+        <button type="button" id="btn-enviar-pub" class="disc-pub-btn" hidden disabled>Enviar respuestas</button>
+      </div>
       <p class="disc-pub-error" id="disc-pub-error" hidden></p>
       <p class="disc-pub-privacidad-nota">
         Tus datos se usan solo para este proceso de evaluación de Krispy Kreme España.

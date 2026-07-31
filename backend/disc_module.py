@@ -129,6 +129,15 @@ def ensure_disc_tables():
             perfil_natural JSON NOT NULL
         )
     """)
+    # Fila unica de ajustes (hoy solo el enlace corto manual del test
+    # publico, ej. TinyURL) -- mismo patron que encuestas.enlace_corto.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS disc_ajustes (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            enlace_corto TEXT
+        )
+    """)
+    conn.execute("INSERT OR IGNORE INTO disc_ajustes (id, enlace_corto) VALUES (1, NULL)")
     conn.commit()
     conn.close()
 
@@ -139,6 +148,10 @@ ensure_disc_tables()
 class CalcularBody(BaseModel):
     nombre: str
     respuestas: list[list[str]]
+
+
+class AjustesBody(BaseModel):
+    enlace_corto: str | None = None
 
 
 def require_disc(user: dict = Depends(get_current_user)) -> dict:
@@ -153,6 +166,26 @@ router = APIRouter()
 @router.get("/preguntas")
 def preguntas_route(_user: dict = Depends(require_disc)):
     return PREGUNTAS_DISC
+
+
+@router.get("/ajustes")
+def ajustes_route(_user: dict = Depends(require_disc)):
+    conn = get_connection()
+    row = conn.execute("SELECT enlace_corto FROM disc_ajustes WHERE id = 1").fetchone()
+    conn.close()
+    return {"enlace_corto": row["enlace_corto"] if row else None}
+
+
+@router.patch("/ajustes")
+def actualizar_ajustes_route(body: AjustesBody, _user: dict = Depends(require_disc)):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE disc_ajustes SET enlace_corto = ? WHERE id = 1",
+        ((body.enlace_corto or "").strip() or None,),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 @router.get("/config")

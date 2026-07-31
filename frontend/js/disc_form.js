@@ -1,9 +1,12 @@
 const LETRAS_DISC = ["D", "I", "S", "C"];
 const ICONO_FLECHA_ARRIBA = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>`;
 const ICONO_FLECHA_ABAJO = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+const POR_PAGINA_DISC = 4;
 
 let PREGUNTAS_DISC = [];
 let respondidas = new Set();
+let paginaActualDisc = 0;
+let totalPaginasDisc = 1;
 let chartResultado = null;
 let ultimoResultado = null;
 
@@ -27,47 +30,58 @@ function colorTextoActual() {
 }
 
 function leerRespuestasActuales() {
-  return [...document.querySelectorAll(".disc-opciones")].map((ul) =>
-    [...ul.querySelectorAll("li")].map((li) => li.dataset.letra)
-  );
+  return [...document.querySelectorAll(".disc-opciones")]
+    .sort((a, b) => Number(a.dataset.q) - Number(b.dataset.q))
+    .map((ul) => [...ul.querySelectorAll("li")].map((li) => li.dataset.letra));
 }
 
-// ==================== Render preguntas + reordenar (drag o flechas) ====================
-// Dos formas de ordenar cada pregunta, a proposito: arrastrar (raton) y
-// flechas subir/bajar (funciona igual en movil, donde el drag-and-drop
-// nativo no es fiable con el dedo).
+// ==================== Render preguntas, en paginas de 4 + reordenar (drag o flechas) ====================
 
 function renderPreguntas() {
+  totalPaginasDisc = Math.ceil(PREGUNTAS_DISC.length / POR_PAGINA_DISC);
   const wrap = document.getElementById("disc-preguntas-wrap");
-  wrap.innerHTML = PREGUNTAS_DISC.map((p, i) => {
-    const opciones = shuffle(LETRAS_DISC.map((letra) => ({ letra, texto: p[letra] })));
-    const lis = opciones
-      .map(
-        (o, rankIdx) => `
-      <li draggable="true" data-letra="${o.letra}">
-        <span class="disc-rank-badge">${rankIdx + 1}</span>
-        <span class="disc-opcion-texto">${escapeHTML(o.texto)}</span>
-        <span class="disc-opcion-flechas">
-          <button type="button" class="btn-flecha-arriba" aria-label="Subir">${ICONO_FLECHA_ARRIBA}</button>
-          <button type="button" class="btn-flecha-abajo" aria-label="Bajar">${ICONO_FLECHA_ABAJO}</button>
-        </span>
-      </li>`
-      )
+
+  const paginasHtml = [];
+  for (let pagina = 0; pagina < totalPaginasDisc; pagina++) {
+    const inicio = pagina * POR_PAGINA_DISC;
+    const preguntasPagina = PREGUNTAS_DISC.slice(inicio, inicio + POR_PAGINA_DISC);
+    const bloques = preguntasPagina
+      .map((p, offset) => {
+        const i = inicio + offset;
+        const opciones = shuffle(LETRAS_DISC.map((letra) => ({ letra, texto: p[letra] })));
+        const lis = opciones
+          .map(
+            (o) => `
+          <li draggable="true" data-letra="${o.letra}">
+            <span class="disc-rank-badge"></span>
+            <span class="disc-opcion-texto">${escapeHTML(o.texto)}</span>
+            <span class="disc-opcion-flechas">
+              <button type="button" class="btn-flecha-arriba" aria-label="Subir">${ICONO_FLECHA_ARRIBA}</button>
+              <button type="button" class="btn-flecha-abajo" aria-label="Bajar">${ICONO_FLECHA_ABAJO}</button>
+            </span>
+          </li>`
+          )
+          .join("");
+        return `
+        <div class="disc-pregunta" id="disc-pregunta-${i}">
+          <div class="disc-pregunta-num">Pregunta ${i + 1} / ${PREGUNTAS_DISC.length}</div>
+          <p class="disc-pregunta-hint">Ordena arrastrando o con las flechas: arriba = lo que más te describe, abajo = lo que menos.</p>
+          <ul class="disc-opciones" data-q="${i}">${lis}</ul>
+        </div>`;
+      })
       .join("");
-    return `
-    <div class="disc-pregunta" id="disc-pregunta-${i}">
-      <div class="disc-pregunta-num">Pregunta ${i + 1} / ${PREGUNTAS_DISC.length}</div>
-      <p class="disc-pregunta-hint">Ordena arrastrando o con las flechas: arriba = lo que más te describe, abajo = lo que menos.</p>
-      <ul class="disc-opciones" data-q="${i}">${lis}</ul>
-    </div>`;
-  }).join("");
+    paginasHtml.push(`<div class="disc-pagina" data-pagina="${pagina}"${pagina === 0 ? "" : " hidden"}>${bloques}</div>`);
+  }
+  wrap.innerHTML = paginasHtml.join("");
 
   wrap.querySelectorAll(".disc-opciones").forEach((ul) => {
+    actualizarBadges(ul);
     habilitarDragDrop(ul);
     habilitarFlechas(ul);
     actualizarFlechasDisabled(ul);
   });
   respondidas = new Set();
+  paginaActualDisc = 0;
   actualizarProgreso();
 }
 
@@ -147,10 +161,45 @@ function marcarRespondida(ul) {
   actualizarProgreso();
 }
 
+// ==================== Paginacion ====================
+
+function paginaCompletaDisc(pagina) {
+  const inicio = pagina * POR_PAGINA_DISC;
+  for (let i = inicio; i < inicio + POR_PAGINA_DISC && i < PREGUNTAS_DISC.length; i++) {
+    if (!respondidas.has(i)) return false;
+  }
+  return true;
+}
+
+function mostrarPaginaDisc(n) {
+  document.querySelectorAll(".disc-pagina").forEach((div) => {
+    div.hidden = Number(div.dataset.pagina) !== n;
+  });
+  paginaActualDisc = n;
+  actualizarProgreso();
+  document.getElementById("detalle-manual").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 function actualizarProgreso() {
-  document.getElementById("disc-progreso").textContent = `${respondidas.size} / ${PREGUNTAS_DISC.length} respondidas`;
-  const nombreOk = document.getElementById("input-nombre-disc").value.trim().length > 0;
-  document.getElementById("btn-guardar-disc").disabled = !(nombreOk && respondidas.size === PREGUNTAS_DISC.length);
+  document.getElementById("disc-progreso-txt").textContent =
+    `Página ${paginaActualDisc + 1} de ${totalPaginasDisc} · ${respondidas.size} / ${PREGUNTAS_DISC.length} respondidas`;
+  document.getElementById("disc-progreso-fill").style.width =
+    `${(respondidas.size / (PREGUNTAS_DISC.length || 1)) * 100}%`;
+
+  document.getElementById("btn-atras-disc").disabled = paginaActualDisc === 0;
+
+  const esUltima = paginaActualDisc === totalPaginasDisc - 1;
+  const btnSiguiente = document.getElementById("btn-siguiente-disc");
+  const btnGuardar = document.getElementById("btn-guardar-disc");
+  btnSiguiente.hidden = esUltima;
+  btnGuardar.hidden = !esUltima;
+
+  if (!esUltima) {
+    btnSiguiente.disabled = !paginaCompletaDisc(paginaActualDisc);
+  } else {
+    const nombreOk = document.getElementById("input-nombre-disc").value.trim().length > 0;
+    btnGuardar.disabled = !(nombreOk && respondidas.size === PREGUNTAS_DISC.length);
+  }
 }
 
 function renderRadar(canvasId, adaptado, natural, setter, existing) {
@@ -270,7 +319,49 @@ function nuevoTest() {
   document.getElementById("disc-informe-perfil").innerHTML = "";
   ultimoResultado = null;
   renderPreguntas();
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  document.getElementById("detalle-manual").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ==================== Enlace publico + enlace corto ====================
+
+async function cargarEnlaces() {
+  document.getElementById("input-enlace-publico").value = `${window.location.origin}/disc_publico.html`;
+  try {
+    const res = await fetch(`${AUTH_API_BASE}/disc/ajustes`);
+    if (res.ok) {
+      const data = await res.json();
+      document.getElementById("input-enlace-corto").value = data.enlace_corto || "";
+    }
+  } catch {
+    // sin conexion: se deja vacio, no bloquea el resto de la pagina
+  }
+}
+
+async function copiarAlPortapapeles(texto, btn) {
+  const textoOriginal = btn.textContent;
+  try {
+    await navigator.clipboard.writeText(texto);
+    btn.textContent = "✓ Copiado";
+  } catch {
+    prompt("Copia el enlace:", texto);
+    return;
+  }
+  setTimeout(() => { btn.textContent = textoOriginal; }, 2000);
+}
+
+async function guardarEnlaceCorto() {
+  const btn = document.getElementById("btn-guardar-enlace-corto");
+  const valor = document.getElementById("input-enlace-corto").value.trim();
+  const textoOriginal = btn.textContent;
+  btn.disabled = true;
+  const res = await fetch(`${AUTH_API_BASE}/disc/ajustes`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enlace_corto: valor }),
+  });
+  btn.disabled = false;
+  btn.textContent = res.ok ? "✓ Guardado" : "Error";
+  setTimeout(() => { btn.textContent = textoOriginal; }, 2000);
 }
 
 // ==================== Histórico ====================
@@ -345,6 +436,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   wireUserBar(user);
 
+  await cargarEnlaces();
+
   const preguntasRes = await fetch(`${AUTH_API_BASE}/disc/preguntas`);
   PREGUNTAS_DISC = await preguntasRes.json();
 
@@ -353,23 +446,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("input-nombre-disc").addEventListener("input", actualizarProgreso);
   document.getElementById("btn-guardar-disc").addEventListener("click", guardarResultado);
   document.getElementById("btn-nuevo-test-disc").addEventListener("click", nuevoTest);
+  document.getElementById("btn-atras-disc").addEventListener("click", () => mostrarPaginaDisc(paginaActualDisc - 1));
+  document.getElementById("btn-siguiente-disc").addEventListener("click", () => {
+    if (paginaCompletaDisc(paginaActualDisc)) mostrarPaginaDisc(paginaActualDisc + 1);
+  });
 
   document.getElementById("tab-nuevo").addEventListener("click", () => mostrarTab("nuevo"));
   document.getElementById("tab-historico").addEventListener("click", () => mostrarTab("historico"));
 
-  document.getElementById("btn-copiar-enlace-publico").addEventListener("click", async (e) => {
-    const enlace = `${window.location.origin}/disc_publico.html`;
-    const btn = e.currentTarget;
-    const textoOriginal = btn.textContent;
-    try {
-      await navigator.clipboard.writeText(enlace);
-      btn.textContent = "✓ Enlace copiado";
-    } catch {
-      prompt("Copia el enlace:", enlace);
-      return;
-    }
-    setTimeout(() => { btn.textContent = textoOriginal; }, 2000);
+  document.getElementById("btn-copiar-enlace-publico").addEventListener("click", (e) => {
+    copiarAlPortapapeles(document.getElementById("input-enlace-publico").value, e.currentTarget);
   });
+  document.getElementById("btn-guardar-enlace-corto").addEventListener("click", guardarEnlaceCorto);
 
   document.getElementById("input-buscar-historico").addEventListener("input", (e) => {
     const q = e.target.value.trim().toLowerCase();

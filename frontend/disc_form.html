@@ -21,9 +21,27 @@
   .disc-tabs button { padding: 8px 16px; }
   .disc-tabs button.active { background: var(--acento); color: #fff; border-color: var(--acento); }
 
+  .disc-enlace-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; margin-bottom: 18px; }
+  .disc-enlace-card h2 { margin: 0 0 4px; font-size: 16px; }
+  .disc-enlace-hint { font-size: 12px; color: var(--text-secondary); margin: 0 0 12px; }
+  .disc-enlace-row { display: flex; gap: 8px; }
+  .disc-enlace-row input {
+    flex: 1; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 13px; font-family: monospace;
+  }
+  .disc-enlace-corto-row { margin-top: 14px; }
+  .disc-enlace-corto-row label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+
+  #detalle-manual { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 4px 18px 18px; margin-bottom: 20px; }
+  #detalle-manual summary { cursor: pointer; padding: 14px 0; font-weight: 600; font-size: 14px; color: var(--text-secondary); }
+
   .disc-nombre-row { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
   .disc-nombre-row input { flex: 1; min-width: 220px; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 14px; }
-  .disc-progreso { font-size: 13px; color: var(--text-secondary); }
+  .disc-progreso { font-size: 13px; color: var(--text-secondary); margin-bottom: 14px; }
+  .disc-progreso-barra { max-width: 320px; height: 5px; background: var(--border); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .disc-progreso-fill { height: 100%; background: var(--acento); border-radius: 3px; transition: width .2s; }
+  .disc-nav-row { display: flex; align-items: center; gap: 10px; padding: 14px 0 4px; }
+  .disc-nav-spacer { flex: 1; }
 
   .disc-pregunta { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; border-left: 4px solid var(--border); transition: border-color .15s; }
   .disc-pregunta.respondida { border-left-color: var(--status-good, #2e9e5b); }
@@ -51,8 +69,6 @@
   }
   .disc-opcion-flechas button:disabled { opacity: 0.25; cursor: default; }
   .disc-opcion-flechas button:hover:not(:disabled) { border-color: var(--acento); color: var(--acento); }
-
-  .disc-guardar-row { position: sticky; bottom: 0; background: var(--surface-page); padding: 14px 0; margin-top: 10px; text-align: center; }
 
   .disc-resultado-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 20px; text-align: center; margin-top: 20px; }
   .disc-resultado-tipo { font-size: 34px; font-weight: 700; color: var(--acento); margin: 6px 0 14px; }
@@ -108,33 +124,59 @@
     </div>
 
     <div class="disc-tabs">
-      <button type="button" id="tab-nuevo" class="active">Nuevo test</button>
+      <button type="button" id="tab-nuevo" class="active">Enviar test</button>
       <button type="button" id="tab-historico">Histórico</button>
-      <button type="button" id="btn-copiar-enlace-publico" class="btn btn-ghost">🔗 Copiar enlace público</button>
     </div>
 
     <div id="vista-nuevo">
-      <div class="disc-nombre-row">
-        <input type="text" id="input-nombre-disc" placeholder="Nombre y apellido del empleado">
-        <span class="disc-progreso" id="disc-progreso">0 / 24 respondidas</span>
-      </div>
-
-      <div id="disc-preguntas-wrap"></div>
-
-      <div class="disc-guardar-row">
-        <button type="button" id="btn-guardar-disc" class="btn btn-primary" disabled>Guardar resultado</button>
-      </div>
-
-      <div class="disc-resultado-card" id="disc-resultado-card" hidden>
-        <h2>Resultado guardado</h2>
-        <div class="disc-resultado-tipo" id="disc-resultado-tipo"></div>
-        <div class="disc-resultado-chart-wrap"><canvas id="chart-disc-resultado"></canvas></div>
-        <div class="disc-resultado-acciones">
-          <button type="button" id="btn-exportar-pdf-disc" class="btn btn-ghost">⬇ Exportar PDF</button>
-          <button type="button" id="btn-nuevo-test-disc" class="btn btn-ghost">＋ Nuevo test</button>
+      <div class="disc-enlace-card">
+        <h2>Enlace para que la persona responda</h2>
+        <p class="disc-enlace-hint">Compártelo directamente — no hace falta cuenta en el portal. La persona no verá su resultado; eso se consulta después en el Histórico.</p>
+        <div class="disc-enlace-row">
+          <input type="text" id="input-enlace-publico" readonly>
+          <button type="button" id="btn-copiar-enlace-publico" class="btn btn-primary">🔗 Copiar</button>
         </div>
-        <div id="disc-informe-perfil" class="disc-informe-perfil"></div>
+        <div class="disc-enlace-corto-row">
+          <label for="input-enlace-corto">Enlace corto (ej. TinyURL, opcional)</label>
+          <div class="disc-enlace-row">
+            <input type="text" id="input-enlace-corto" placeholder="https://tinyurl.com/...">
+            <button type="button" id="btn-guardar-enlace-corto" class="btn btn-ghost">Guardar</button>
+          </div>
+        </div>
       </div>
+
+      <details id="detalle-manual">
+        <summary>Rellenar el test manualmente (RRHH)</summary>
+
+        <div class="disc-nombre-row">
+          <input type="text" id="input-nombre-disc" placeholder="Nombre y apellido del empleado">
+        </div>
+
+        <div class="disc-progreso" id="disc-progreso">
+          <span id="disc-progreso-txt">Página 1 de 6 · 0 / 24 respondidas</span>
+          <div class="disc-progreso-barra"><div class="disc-progreso-fill" id="disc-progreso-fill" style="width:0%"></div></div>
+        </div>
+
+        <div id="disc-preguntas-wrap"></div>
+
+        <div class="disc-nav-row">
+          <button type="button" id="btn-atras-disc" class="btn btn-ghost" disabled>← Atrás</button>
+          <span class="disc-nav-spacer"></span>
+          <button type="button" id="btn-siguiente-disc" class="btn btn-primary" disabled>Siguiente →</button>
+          <button type="button" id="btn-guardar-disc" class="btn btn-primary" hidden disabled>Guardar resultado</button>
+        </div>
+
+        <div class="disc-resultado-card" id="disc-resultado-card" hidden>
+          <h2>Resultado guardado</h2>
+          <div class="disc-resultado-tipo" id="disc-resultado-tipo"></div>
+          <div class="disc-resultado-chart-wrap"><canvas id="chart-disc-resultado"></canvas></div>
+          <div class="disc-resultado-acciones">
+            <button type="button" id="btn-exportar-pdf-disc" class="btn btn-ghost">⬇ Exportar PDF</button>
+            <button type="button" id="btn-nuevo-test-disc" class="btn btn-ghost">＋ Nuevo test</button>
+          </div>
+          <div id="disc-informe-perfil" class="disc-informe-perfil"></div>
+        </div>
+      </details>
     </div>
 
     <div id="vista-historico" hidden>
