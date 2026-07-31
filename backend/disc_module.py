@@ -178,15 +178,14 @@ def perfil_route(tipo: str, _user: dict = Depends(require_disc)):
     return perfil
 
 
-@router.post("/calcular")
-def calcular_route(body: CalcularBody, _user: dict = Depends(require_disc)):
-    if not body.nombre.strip():
+def _calcular_y_guardar(nombre, respuestas):
+    if not nombre.strip():
         raise HTTPException(status_code=400, detail="El nombre es obligatorio")
-    if len(body.respuestas) != len(PREGUNTAS_DISC):
-        raise HTTPException(status_code=400, detail=f"Se esperan {len(PREGUNTAS_DISC)} respuestas, llegaron {len(body.respuestas)}")
+    if len(respuestas) != len(PREGUNTAS_DISC):
+        raise HTTPException(status_code=400, detail=f"Se esperan {len(PREGUNTAS_DISC)} respuestas, llegaron {len(respuestas)}")
 
     try:
-        puntos_brutos = calculator.calcular_puntos_brutos(body.respuestas)
+        puntos_brutos = calculator.calcular_puntos_brutos(respuestas)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -200,8 +199,8 @@ def calcular_route(body: CalcularBody, _user: dict = Depends(require_disc)):
             perfil_adaptado, perfil_natural)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
-            body.nombre.strip(),
-            json.dumps(body.respuestas, ensure_ascii=False),
+            nombre.strip(),
+            json.dumps(respuestas, ensure_ascii=False),
             json.dumps(puntos_brutos, ensure_ascii=False),
             tipo_disc,
             puntos_brutos["D"], puntos_brutos["I"], puntos_brutos["S"], puntos_brutos["C"],
@@ -215,13 +214,18 @@ def calcular_route(body: CalcularBody, _user: dict = Depends(require_disc)):
 
     return {
         "id": nuevo_id,
-        "nombre": body.nombre.strip(),
+        "nombre": nombre.strip(),
         "puntos_brutos": puntos_brutos,
         "tipo_disc": tipo_disc,
         "perfil_adaptado": perfiles["adaptado"],
         "perfil_natural": perfiles["natural"],
         "perfil_info": obtener_perfil(tipo_disc),
     }
+
+
+@router.post("/calcular")
+def calcular_route(body: CalcularBody, _user: dict = Depends(require_disc)):
+    return _calcular_y_guardar(body.nombre, body.respuestas)
 
 
 def _row_to_dict(row):
@@ -283,3 +287,24 @@ def resultado_pdf_route(resultado_id: int, _user: dict = Depends(require_disc)):
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'},
     )
+
+
+# ==================== Router publico (sin login) ====================
+# Para que cualquier empleado pueda responder el test desde un enlace, igual
+# que antes se hacia con Microsoft Forms, sin necesitar cuenta en el portal.
+# A proposito NUNCA devuelve puntuaciones/tipo/informe en la respuesta -- el
+# resultado se calcula y se guarda igual que en la ruta interna, pero quien
+# responde no lo ve; solo lo consulta despues quien tenga acceso al modulo
+# DISC (ver require_disc arriba).
+router_publico = APIRouter()
+
+
+@router_publico.get("/preguntas")
+def preguntas_publico_route():
+    return PREGUNTAS_DISC
+
+
+@router_publico.post("/calcular")
+def calcular_publico_route(body: CalcularBody):
+    _calcular_y_guardar(body.nombre, body.respuestas)
+    return {"ok": True}

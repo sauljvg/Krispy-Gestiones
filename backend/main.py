@@ -37,6 +37,7 @@ from boletines_routes import router as boletines_router
 from boletines_routes import router_publico as boletines_router_publico
 from clima_routes import router as clima_router
 from disc_module import router as disc_router
+from disc_module import router_publico as disc_router_publico
 from encuestas_routes import router as encuestas_router
 from encuestas_routes import router_publico as encuestas_router_publico
 from entrevistas_routes import router as entrevistas_router
@@ -113,6 +114,7 @@ app.include_router(boletines_router_publico, prefix="/api/public/boletines")
 app.include_router(encuestas_router, prefix="/api/encuestas")
 app.include_router(encuestas_router_publico, prefix="/api/public/encuestas")
 app.include_router(disc_router, prefix="/api/disc")
+app.include_router(disc_router_publico, prefix="/api/public/disc")
 app.include_router(router, prefix="/api", dependencies=[Depends(require_resenas)])
 
 

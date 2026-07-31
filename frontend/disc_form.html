@@ -25,11 +25,6 @@
   .disc-nombre-row input { flex: 1; min-width: 220px; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 14px; }
   .disc-progreso { font-size: 13px; color: var(--text-secondary); }
 
-  .disc-preview-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 20px; position: sticky; top: 8px; z-index: 5; }
-  .disc-preview-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-  .disc-preview-tipo { font-size: 22px; font-weight: 700; color: var(--acento); }
-  .disc-preview-chart-wrap { max-width: 340px; margin: 8px auto 0; }
-
   .disc-pregunta { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; border-left: 4px solid var(--border); transition: border-color .15s; }
   .disc-pregunta.respondida { border-left-color: var(--status-good, #2e9e5b); }
   .disc-pregunta-num { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
@@ -47,6 +42,15 @@
   }
   .disc-opciones li:nth-child(1) .disc-rank-badge { background: #2e9e5b; color: #fff; }
   .disc-opciones li:nth-child(2) .disc-rank-badge { background: #6ab04c; color: #fff; }
+  .disc-opcion-texto { flex: 1; }
+  .disc-opcion-flechas { display: flex; flex-direction: column; gap: 3px; flex: none; }
+  .disc-opcion-flechas button {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; height: 22px; border-radius: 5px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-secondary); cursor: pointer; padding: 0;
+  }
+  .disc-opcion-flechas button:disabled { opacity: 0.25; cursor: default; }
+  .disc-opcion-flechas button:hover:not(:disabled) { border-color: var(--acento); color: var(--acento); }
 
   .disc-guardar-row { position: sticky; bottom: 0; background: var(--surface-page); padding: 14px 0; margin-top: 10px; text-align: center; }
 
@@ -106,20 +110,13 @@
     <div class="disc-tabs">
       <button type="button" id="tab-nuevo" class="active">Nuevo test</button>
       <button type="button" id="tab-historico">Histórico</button>
+      <button type="button" id="btn-copiar-enlace-publico" class="btn btn-ghost">🔗 Copiar enlace público</button>
     </div>
 
     <div id="vista-nuevo">
       <div class="disc-nombre-row">
         <input type="text" id="input-nombre-disc" placeholder="Nombre y apellido del empleado">
         <span class="disc-progreso" id="disc-progreso">0 / 24 respondidas</span>
-      </div>
-
-      <div class="disc-preview-card">
-        <div class="disc-preview-head">
-          <span>Vista previa en tiempo real</span>
-          <span class="disc-preview-tipo" id="disc-preview-tipo">— —</span>
-        </div>
-        <div class="disc-preview-chart-wrap"><canvas id="chart-disc-preview"></canvas></div>
       </div>
 
       <div id="disc-preguntas-wrap"></div>

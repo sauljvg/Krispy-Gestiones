@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Test DISC</title>
+<link rel="icon" type="image/png" href="assets/favicon-kk.png">
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; font-family: system-ui, sans-serif;
+    background: #f5f0e8; color: #222; padding: 24px 12px;
+  }
+  .disc-pub-wrap { max-width: 640px; margin: 0 auto; }
+  .disc-pub-card {
+    background: rgba(255,255,255,0.97); border-radius: 18px; box-shadow: 0 12px 40px rgba(0,0,0,0.12);
+    padding: 32px 36px; margin-bottom: 20px;
+  }
+  @media (max-width: 480px) { .disc-pub-card { padding: 22px 18px; } }
+  .disc-pub-titulo { font-size: 24px; font-weight: 700; margin: 0 0 8px; }
+  .disc-pub-instrucciones { font-size: 14px; color: #555; line-height: 1.55; margin: 0 0 4px; }
+
+  .disc-pub-nombre-row { margin: 18px 0 8px; }
+  .disc-pub-nombre-row label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+  .disc-pub-nombre-row input {
+    width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #ccc; font-size: 15px; font-family: inherit;
+  }
+  .disc-pub-progreso { position: sticky; top: 0; background: #f5f0e8; padding: 10px 0; text-align: center; font-size: 13px; color: #555; z-index: 5; }
+
+  .disc-pub-pregunta { border-top: 1px solid #eee; padding: 16px 0; border-left: 4px solid transparent; padding-left: 10px; margin-left: -10px; transition: border-color .15s; }
+  .disc-pub-pregunta.respondida { border-left-color: #2e9e5b; }
+  .disc-pub-pregunta-num { font-size: 12px; color: #888; margin-bottom: 6px; }
+  .disc-pub-hint { font-size: 12px; color: #777; margin: 0 0 8px; }
+  .disc-pub-opciones { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .disc-pub-opciones li {
+    display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-radius: 8px;
+    border: 1px solid #ddd; background: #fafafa; cursor: grab; font-size: 15px; user-select: none;
+  }
+  .disc-pub-opciones li.dragging { opacity: 0.4; }
+  .disc-pub-rank-badge {
+    display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px;
+    border-radius: 50%; background: #ddd; color: #333; font-size: 12px; font-weight: 700; flex: none;
+  }
+  .disc-pub-opciones li:nth-child(1) .disc-pub-rank-badge { background: #2e9e5b; color: #fff; }
+  .disc-pub-opciones li:nth-child(2) .disc-pub-rank-badge { background: #6ab04c; color: #fff; }
+  .disc-pub-opcion-texto { flex: 1; }
+  .disc-pub-opcion-flechas { display: flex; flex-direction: column; gap: 3px; flex: none; }
+  .disc-pub-opcion-flechas button {
+    display: flex; align-items: center; justify-content: center;
+    width: 30px; height: 24px; border-radius: 5px; border: 1px solid #ccc;
+    background: #fff; color: #555; cursor: pointer; padding: 0;
+  }
+  .disc-pub-opcion-flechas button:disabled { opacity: 0.25; cursor: default; }
+  .disc-pub-opcion-flechas button:hover:not(:disabled) { border-color: #5b2a2a; color: #5b2a2a; }
+
+  .disc-pub-enviar-row { text-align: center; padding: 20px 0 4px; }
+  .disc-pub-btn {
+    background: #5b2a2a; color: #fff; border: none; border-radius: 10px; padding: 13px 28px;
+    font-size: 16px; font-weight: 600; cursor: pointer;
+  }
+  .disc-pub-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .disc-pub-btn:hover:not(:disabled) { filter: brightness(1.08); }
+
+  .disc-pub-gracias { text-align: center; padding: 20px 0; }
+  .disc-pub-gracias h2 { font-size: 22px; margin: 0 0 10px; }
+  .disc-pub-gracias p { color: #555; font-size: 15px; }
+
+  .disc-pub-error { color: #900; font-size: 13px; margin-top: 8px; text-align: center; }
+  .disc-pub-privacidad-nota { font-size: 11px; color: #999; margin: 14px 0 0; line-height: 1.4; text-align: center; }
+  .disc-pub-privacidad-nota a { color: #777; }
+</style>
+</head>
+<body>
+<div class="disc-pub-wrap">
+  <div class="disc-pub-card">
+    <h1 class="disc-pub-titulo">Perfil DISC</h1>
+    <p class="disc-pub-instrucciones">
+      La siguiente encuesta consta de 24 marcos de palabras. Cada marco contiene cuatro conjuntos de palabras.
+      En cada marco, ordena los conjuntos de palabras del que MÁS se parece a tu comportamiento al que MENOS
+      se parece a tu comportamiento (arrastra para ordenar). Responde con naturalidad, sin pensarlo demasiado.
+    </p>
+  </div>
+
+  <div id="vista-formulario">
+    <div class="disc-pub-card">
+      <div class="disc-pub-nombre-row">
+        <label for="input-nombre-pub">Nombre y apellido *</label>
+        <input type="text" id="input-nombre-pub" placeholder="Escribe tu nombre completo">
+      </div>
+    </div>
+
+    <div class="disc-pub-progreso" id="disc-pub-progreso">0 / 24 respondidas</div>
+
+    <div class="disc-pub-card" id="disc-pub-preguntas-wrap"></div>
+
+    <div class="disc-pub-card disc-pub-enviar-row">
+      <button type="button" id="btn-enviar-pub" class="disc-pub-btn" disabled>Enviar respuestas</button>
+      <p class="disc-pub-error" id="disc-pub-error" hidden></p>
+      <p class="disc-pub-privacidad-nota">
+        Tus datos se usan solo para este proceso de evaluación de Krispy Kreme España.
+        Más información en nuestra <a href="/privacidad.html" target="_blank" rel="noopener">política de privacidad</a>.
+      </p>
+    </div>
+  </div>
+
+  <div id="vista-gracias" class="disc-pub-card disc-pub-gracias" hidden>
+    <h2>¡Gracias!</h2>
+    <p>Tus respuestas han sido registradas correctamente.</p>
+  </div>
+</div>
+
+<script src="js/disc_publico.js?v=20260731a"></script>
+</body>
+</html>

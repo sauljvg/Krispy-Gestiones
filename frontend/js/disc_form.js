@@ -1,15 +1,9 @@
 const LETRAS_DISC = ["D", "I", "S", "C"];
-const COLOR_LETRA_DISC = { D: "#f15b4e", I: "#f2d351", S: "#80ba5b", C: "#5090ad" };
+const ICONO_FLECHA_ARRIBA = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>`;
+const ICONO_FLECHA_ABAJO = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
 
 let PREGUNTAS_DISC = [];
-let PESOS_RANKING = [4, 3, 2, 1];
-let FACTORES_TTI = {
-  adaptado: { top: 3.5, bottom: 0.7, target: 200 },
-  natural: { top: 3.8, bottom: 0.5, target: 205 },
-};
-
 let respondidas = new Set();
-let chartPreview = null;
 let chartResultado = null;
 let ultimoResultado = null;
 
@@ -32,71 +26,49 @@ function colorTextoActual() {
   return getComputedStyle(document.documentElement).getPropertyValue("--text-primary").trim() || "#000";
 }
 
-// ==================== Algoritmo (espejo del backend, ver disc_module.py) ====================
-
-function calcularPuntosBrutos(respuestas) {
-  const puntos = { D: 0, I: 0, S: 0, C: 0 };
-  respuestas.forEach((ordenLetras) => {
-    ordenLetras.forEach((letra, i) => {
-      puntos[letra] += PESOS_RANKING[i];
-    });
-  });
-  return puntos;
-}
-
-function perfilTti(puntosBrutos, perfil) {
-  const factores = FACTORES_TTI[perfil];
-  const orden = Object.entries(puntosBrutos).sort((a, b) => b[1] - a[1]);
-  const [[l1, v1], [l2, v2], [l3, v3], [l4, v4]] = orden;
-  const total = v1 + v2 + v3 + v4;
-  if (total <= 0) return { D: 0, I: 0, S: 0, C: 0 };
-  const [pct1, pct2, pct3, pct4] = [v1, v2, v3, v4].map((v) => (v / total) * 100);
-  const val1 = pct1 * factores.top;
-  const val2 = pct2 * factores.top;
-  const val3 = pct3 * factores.bottom;
-  const val4 = pct4 * factores.bottom;
-  const totalPol = val1 + val2 + val3 + val4;
-  const factorNorm = totalPol ? factores.target / totalPol : 0;
-  const resultado = {};
-  resultado[l1] = Math.round(val1 * factorNorm);
-  resultado[l2] = Math.round(val2 * factorNorm);
-  resultado[l3] = Math.round(val3 * factorNorm);
-  resultado[l4] = Math.round(val4 * factorNorm);
-  return resultado;
-}
-
-function tipoDisc(perfil) {
-  const orden = Object.entries(perfil).sort((a, b) => b[1] - a[1]);
-  return orden[0][0] + orden[1][0];
-}
-
 function leerRespuestasActuales() {
   return [...document.querySelectorAll(".disc-opciones")].map((ul) =>
     [...ul.querySelectorAll("li")].map((li) => li.dataset.letra)
   );
 }
 
-// ==================== Render preguntas + drag&drop ====================
+// ==================== Render preguntas + reordenar (drag o flechas) ====================
+// Dos formas de ordenar cada pregunta, a proposito: arrastrar (raton) y
+// flechas subir/bajar (funciona igual en movil, donde el drag-and-drop
+// nativo no es fiable con el dedo).
 
 function renderPreguntas() {
   const wrap = document.getElementById("disc-preguntas-wrap");
   wrap.innerHTML = PREGUNTAS_DISC.map((p, i) => {
     const opciones = shuffle(LETRAS_DISC.map((letra) => ({ letra, texto: p[letra] })));
     const lis = opciones
-      .map((o, rankIdx) => `<li draggable="true" data-letra="${o.letra}"><span class="disc-rank-badge">${rankIdx + 1}</span>${escapeHTML(o.texto)}</li>`)
+      .map(
+        (o, rankIdx) => `
+      <li draggable="true" data-letra="${o.letra}">
+        <span class="disc-rank-badge">${rankIdx + 1}</span>
+        <span class="disc-opcion-texto">${escapeHTML(o.texto)}</span>
+        <span class="disc-opcion-flechas">
+          <button type="button" class="btn-flecha-arriba" aria-label="Subir">${ICONO_FLECHA_ARRIBA}</button>
+          <button type="button" class="btn-flecha-abajo" aria-label="Bajar">${ICONO_FLECHA_ABAJO}</button>
+        </span>
+      </li>`
+      )
       .join("");
     return `
     <div class="disc-pregunta" id="disc-pregunta-${i}">
       <div class="disc-pregunta-num">Pregunta ${i + 1} / ${PREGUNTAS_DISC.length}</div>
-      <p class="disc-pregunta-hint">Arrastra para ordenar: arriba = lo que más te describe, abajo = lo que menos.</p>
+      <p class="disc-pregunta-hint">Ordena arrastrando o con las flechas: arriba = lo que más te describe, abajo = lo que menos.</p>
       <ul class="disc-opciones" data-q="${i}">${lis}</ul>
     </div>`;
   }).join("");
 
-  wrap.querySelectorAll(".disc-opciones").forEach((ul) => habilitarDragDrop(ul));
+  wrap.querySelectorAll(".disc-opciones").forEach((ul) => {
+    habilitarDragDrop(ul);
+    habilitarFlechas(ul);
+    actualizarFlechasDisabled(ul);
+  });
   respondidas = new Set();
   actualizarProgreso();
-  recalcularPreview();
 }
 
 function habilitarDragDrop(ul) {
@@ -107,8 +79,8 @@ function habilitarDragDrop(ul) {
     li.addEventListener("dragend", () => {
       li.classList.remove("dragging");
       actualizarBadges(ul);
+      actualizarFlechasDisabled(ul);
       marcarRespondida(ul);
-      recalcularPreview();
     });
   });
 
@@ -135,9 +107,36 @@ function elementoTrasCursor(container, y) {
   ).element;
 }
 
+function habilitarFlechas(ul) {
+  ul.querySelectorAll(".btn-flecha-arriba").forEach((btn) => {
+    btn.addEventListener("click", () => moverOpcion(btn.closest("li"), -1, ul));
+  });
+  ul.querySelectorAll(".btn-flecha-abajo").forEach((btn) => {
+    btn.addEventListener("click", () => moverOpcion(btn.closest("li"), 1, ul));
+  });
+}
+
+function moverOpcion(li, direccion, ul) {
+  const hermano = direccion === -1 ? li.previousElementSibling : li.nextElementSibling;
+  if (!hermano) return;
+  if (direccion === -1) ul.insertBefore(li, hermano);
+  else ul.insertBefore(hermano, li);
+  actualizarBadges(ul);
+  actualizarFlechasDisabled(ul);
+  marcarRespondida(ul);
+}
+
 function actualizarBadges(ul) {
   ul.querySelectorAll("li").forEach((li, i) => {
     li.querySelector(".disc-rank-badge").textContent = i + 1;
+  });
+}
+
+function actualizarFlechasDisabled(ul) {
+  const lis = [...ul.querySelectorAll("li")];
+  lis.forEach((li, i) => {
+    li.querySelector(".btn-flecha-arriba").disabled = i === 0;
+    li.querySelector(".btn-flecha-abajo").disabled = i === lis.length - 1;
   });
 }
 
@@ -152,21 +151,6 @@ function actualizarProgreso() {
   document.getElementById("disc-progreso").textContent = `${respondidas.size} / ${PREGUNTAS_DISC.length} respondidas`;
   const nombreOk = document.getElementById("input-nombre-disc").value.trim().length > 0;
   document.getElementById("btn-guardar-disc").disabled = !(nombreOk && respondidas.size === PREGUNTAS_DISC.length);
-}
-
-// ==================== Vista previa en tiempo real ====================
-
-function recalcularPreview() {
-  const respuestas = leerRespuestasActuales();
-  const puntosBrutos = calcularPuntosBrutos(respuestas);
-  const adaptado = perfilTti(puntosBrutos, "adaptado");
-  const natural = perfilTti(puntosBrutos, "natural");
-  const tipo = tipoDisc(adaptado);
-
-  document.getElementById("disc-preview-tipo").textContent = respondidas.size > 0 ? tipo : "— —";
-  renderRadar("chart-disc-preview", adaptado, natural, (c) => {
-    chartPreview = c;
-  }, chartPreview);
 }
 
 function renderRadar(canvasId, adaptado, natural, setter, existing) {
@@ -361,14 +345,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   wireUserBar(user);
 
-  const [preguntasRes, configRes] = await Promise.all([
-    fetch(`${AUTH_API_BASE}/disc/preguntas`),
-    fetch(`${AUTH_API_BASE}/disc/config`),
-  ]);
+  const preguntasRes = await fetch(`${AUTH_API_BASE}/disc/preguntas`);
   PREGUNTAS_DISC = await preguntasRes.json();
-  const config = await configRes.json();
-  PESOS_RANKING = config.pesos_ranking;
-  FACTORES_TTI = config.factores_tti;
 
   renderPreguntas();
 
@@ -379,6 +357,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("tab-nuevo").addEventListener("click", () => mostrarTab("nuevo"));
   document.getElementById("tab-historico").addEventListener("click", () => mostrarTab("historico"));
 
+  document.getElementById("btn-copiar-enlace-publico").addEventListener("click", async (e) => {
+    const enlace = `${window.location.origin}/disc_publico.html`;
+    const btn = e.currentTarget;
+    const textoOriginal = btn.textContent;
+    try {
+      await navigator.clipboard.writeText(enlace);
+      btn.textContent = "✓ Enlace copiado";
+    } catch {
+      prompt("Copia el enlace:", enlace);
+      return;
+    }
+    setTimeout(() => { btn.textContent = textoOriginal; }, 2000);
+  });
+
   document.getElementById("input-buscar-historico").addEventListener("input", (e) => {
     const q = e.target.value.trim().toLowerCase();
     renderHistorico(historicoCache.filter((it) => it.nombre.toLowerCase().includes(q)));
@@ -386,7 +378,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("btn-theme-toggle").addEventListener("click", () => {
     setTimeout(() => {
-      recalcularPreview();
       if (ultimoResultado && !document.getElementById("disc-resultado-card").hidden) {
         renderRadar("chart-disc-resultado", ultimoResultado.perfil_adaptado, ultimoResultado.perfil_natural, (c) => { chartResultado = c; }, chartResultado);
       }
