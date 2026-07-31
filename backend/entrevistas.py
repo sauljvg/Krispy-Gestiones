@@ -371,6 +371,12 @@ _PUESTOS_TIENDA = ("dependiente", "vendedor", "retail")
 
 _HORAS_SUFIJO_RE = re.compile(r"\s*\d+\s*h\s*$", re.IGNORECASE)
 
+# Mismo patrón que boletines.py/boletines.js — validar aquí evita que un
+# valor mal escrito en la columna de correo del Excel (típico: "N/A", un
+# teléfono pegado por error) acabe colándose en el destinatario del
+# "Enviar Recordatorio" (ver wireRecordatorio en entrevistas.js).
+_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
 
 def _puesto_canonico(puesto):
     """Unifica variantes del mismo puesto: quita el sufijo de horas del
@@ -471,10 +477,13 @@ def _parse_salidas_totales_plano(ws):
         centro = _centro_desde_compania_puesto(compania, puesto)
         if not centro:
             continue
+        email_limpio = str(email).strip() if email else None
+        if email_limpio and not _EMAIL_RE.match(email_limpio):
+            email_limpio = None
         salidas.append({
             "centro": centro, "nombre": str(nombre).strip(), "fecha_baja": fecha_baja.isoformat(),
             "puesto": _puesto_canonico(puesto),
-            "email": str(email).strip() if email else None,
+            "email": email_limpio,
         })
     return salidas
 

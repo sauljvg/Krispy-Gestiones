@@ -80,10 +80,23 @@ en `/`, así que un único proceso basta tanto en local como al desplegar (ver
 `.replit`). También puede lanzarse con `uvicorn backend.main:app --host
 0.0.0.0 --port 8000`.
 
-- `POST /api/scrape` / `GET /api/scrape/status` — lanza y consulta el botón
-  "Actualizar" del dashboard (modo `--update` incremental por tienda o para
-  todas). Además hay un scheduler interno que repite esta actualización todas
-  las noches a las 02:00 mientras el proceso siga vivo.
+- El botón "Actualizar" y el scheduler nocturno automático que lanzaban
+  `scraper_v2.py` desde la web se quitaron: el contenedor de producción no
+  tiene Chrome instalado, así que nunca funcionaron ahí de verdad. La vía
+  soportada dentro de la app para traer reseñas es **"Importar Takeout"**
+  (botón en el dashboard, sube el `.zip` que exporta Google Takeout de
+  "Perfil de Empresa en Google" — lee todas las oficiales y solo añade las
+  que falten, sin duplicar). El scraping de Maps con Selenium sigue
+  existiendo como herramienta de terminal en local
+  (`scraper/scraper_v2.py`, con o sin `--update`), para quien tenga Chrome
+  con sesión propia.
+- `python scraper/scraper_v2.py <clave> --reconciliar` / `scraper/scrap_absoluto.py`
+  — auditoría manual y opt-in (nada de esto corre solo) contra el número de
+  reseñas que Google anuncia públicamente: identifica cuáles de las que
+  tenemos guardadas ya no aparecen en vivo y, con `KT_USERNAME`/`KT_PIN` en
+  el entorno, sube el resultado a producción vía `POST
+  /api/reviews/reconciliacion`. El dashboard tiene un toggle "Solo Google"
+  para ver las cifras excluyendo esas reseñas.
 
 La mayoría de endpoints de lectura aceptan los mismos
 filtros `tienda`, `rating`, `sentiment`, `date_from`, `date_to`, `q` — así que
@@ -100,14 +113,15 @@ filtrado en el dashboard, no el total global:
 - `GET /api/reviews/export` — CSV con los mismos filtros
 - `GET /api/reviews/export/xlsx` — Excel (.xlsx) con los mismos filtros
 
-## 3. Desplegar (Replit u otro hosting)
+## 3. Desplegar
 
-El repo incluye `.replit` y `requirements.txt` listos para un despliegue
-directo: el comando de arranque es `python -m uvicorn backend.main:app
---host 0.0.0.0 --port $PORT`. Solo se despliega el dashboard de
-lectura (la base de datos ya scrapeada); el scraping con Selenium necesita un
-Chrome real y sigue corriendo en local — sube `krispy_kreme.db` actualizada
-al repo de vez en cuando para refrescar los datos del sitio desplegado.
+En producción (Railway, ver `Dockerfile`) `DATA_DIR` apunta a un volumen
+persistente donde vive `krispy_kreme.db` — **la base de datos está
+deliberadamente fuera de git** (ver `.gitignore`), así que nunca se
+actualiza con un `git push`: los datos nuevos entran solo vía "Importar
+Takeout" en la web, o restaurando un backup (ver `backend/backups.py`). El
+scraping con Selenium necesita un Chrome real y solo puede correr en local,
+nunca en el contenedor de producción.
 
 ## Notas sobre el análisis de sentimiento
 

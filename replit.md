@@ -31,9 +31,7 @@ requirements.txt
 
 ## Updating data
 
-The scraper runs locally (requires Chrome). To refresh data on Replit, run the scraper locally and commit/upload the updated `krispy_kreme.db`.
-
-A nightly scheduler inside the app also triggers incremental updates at 02:00 via `POST /api/scrape` (update mode), but this only works if you have a working scraper environment.
+The scraper runs locally (requires Chrome) — there is no in-app button or scheduler anymore that runs it server-side (the production container has no Chrome, so that path was removed). The supported way to bring in new reviews from the dashboard is the "Importar Takeout" button (uploads a Google Takeout .zip). `scraper/scraper_v2.py --reconciliar` / `scraper/scrap_absoluto.py` are opt-in local-only tools to audit reviews we have against what Google still shows publicly.
 
 ## Data persistence (Autoscale)
 
