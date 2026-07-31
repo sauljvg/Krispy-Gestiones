@@ -70,8 +70,12 @@ def longpath(p):
     """Windows corta en 260 caracteres; los nombres de archivo de Takeout
     (el ID completo de la reseña) los superan fácilmente combinados con
     rutas ya profundas. El prefijo \\\\?\\ hace que Windows use la API de
-    rutas largas sin límite práctico."""
+    rutas largas sin límite práctico — pero SOLO existe en Windows: en
+    producción (Linux) esas barras invertidas se toman como parte literal
+    del nombre y el archivo/carpeta real deja de encontrarse."""
     p = os.path.abspath(p)
+    if os.name != "nt":
+        return p
     if not p.startswith("\\\\?\\"):
         return "\\\\?\\" + p
     return p
