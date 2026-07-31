@@ -415,11 +415,15 @@ def import_takeout(file: UploadFile = File(...)):
         # Los nombres de archivo de Takeout (el ID completo de cada reseña)
         # son tan largos que, combinados con la ruta del directorio temporal,
         # superan el límite de 260 caracteres de Windows. El prefijo \\?\
-        # hace que Windows use la API de rutas largas sin ese límite.
-        extract_dir_longpath = "\\\\?\\" + os.path.abspath(extract_dir)
+        # hace que Windows use la API de rutas largas sin ese límite — pero
+        # SOLO existe en Windows: en Linux (producción) esas barras invertidas
+        # se tratan como caracteres normales del nombre, así que el zip se
+        # extraía en una carpeta con un nombre corrupto fuera de extract_dir
+        # y luego no se encontraba nada dentro.
+        extract_target = ("\\\\?\\" + os.path.abspath(extract_dir)) if os.name == "nt" else extract_dir
         try:
             with zipfile.ZipFile(zip_path) as zf:
-                zf.extractall(extract_dir_longpath)
+                zf.extractall(extract_target)
         except zipfile.BadZipFile:
             raise HTTPException(400, "El archivo no es un .zip válido.")
 
