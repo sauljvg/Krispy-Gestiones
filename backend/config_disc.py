@@ -1,6 +1,21 @@
 """Parametros del algoritmo DISC, ajustados con scipy.optimize (Nelder-Mead)
 contra los 21 resultados oficiales TTI disponibles en 'DISC KK'.
 
+IMPORTANTE -- que representa realmente esta comparacion: las 24 respuestas
+crudas (hoja "Respuestas" del Excel) NO son la sesion que produjo esos PDF
+oficiales. Los PDF son informes de TTI Success Insights, pagados aparte por
+cada persona, respondidos directamente en la plataforma de TTI. Las
+respuestas del Excel vienen de la herramienta propia (otra sesion, otro
+momento, posiblemente otra version del formulario). Es decir: NO se esta
+comparando "la misma respuesta procesada de dos formas" -- se esta
+comparando dos sesiones distintas de la misma persona, una con nuestra
+herramienta y otra con TTI. Es una senal aproximada de si nuestra
+herramienta tiende al mismo perfil que TTI para esa persona, no una prueba
+estricta de que el algoritmo reproduce el mismo calculo. Con eso en mente,
+la mejora medida abajo hay que leerla como "se acerca mas a lo que dice TTI
+para la misma persona en otro momento", no como "reproduce exactamente el
+mismo resultado".
+
 Antes (pesos originales 4,3,2,1 + factores V2): MAE=16.78 (precision aprox. 83.2%)
 Despues (optimizado, sobre la muestra de 11 personas con datos crudos):
   MAE=9.60 (precision aprox. 90.4%)

@@ -238,10 +238,39 @@ async function guardarResultado() {
   }
 }
 
+function renderInformePerfil(perfilInfo) {
+  const wrap = document.getElementById("disc-informe-perfil");
+  if (!perfilInfo) {
+    wrap.innerHTML = "";
+    return;
+  }
+  const lista = (items) => `<ul>${items.map((it) => `<li>${escapeHTML(it)}</li>`).join("")}</ul>`;
+  wrap.innerHTML = `
+    <h3>${escapeHTML(perfilInfo.nombre)}</h3>
+    <p class="disc-informe-resumen">${escapeHTML(perfilInfo.resumen)}</p>
+    <h4>Características generales</h4>
+    ${lista(perfilInfo.caracteristicas)}
+    <h4>Fortalezas</h4>
+    ${lista(perfilInfo.fortalezas)}
+    <h4>Posibles áreas de mejora</h4>
+    ${lista(perfilInfo.areas_de_mejora)}
+    <h4>Qué le motiva</h4>
+    ${lista(perfilInfo.motivadores)}
+    <h4>Bajo presión</h4>
+    <p>${escapeHTML(perfilInfo.bajo_presion)}</p>
+    <h4>Cómo comunicarse con esta persona</h4>
+    ${lista(perfilInfo.como_comunicarse)}
+    <h4>Entorno ideal</h4>
+    <p>${escapeHTML(perfilInfo.entorno_ideal)}</p>
+    <p class="disc-informe-nota">Contenido descriptivo propio, no es el informe oficial de TTI Success Insights.</p>
+  `;
+}
+
 function mostrarResultado(data) {
   ultimoResultado = data;
   document.getElementById("disc-resultado-card").hidden = false;
   document.getElementById("disc-resultado-tipo").textContent = data.tipo_disc;
+  renderInformePerfil(data.perfil_info);
   renderRadar("chart-disc-resultado", data.perfil_adaptado, data.perfil_natural, (c) => {
     chartResultado = c;
   }, chartResultado);
@@ -254,6 +283,8 @@ function mostrarResultado(data) {
 function nuevoTest() {
   document.getElementById("input-nombre-disc").value = "";
   document.getElementById("disc-resultado-card").hidden = true;
+  document.getElementById("disc-informe-perfil").innerHTML = "";
+  ultimoResultado = null;
   renderPreguntas();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }

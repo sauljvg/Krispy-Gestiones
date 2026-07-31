@@ -18,6 +18,7 @@ import auth as auth_module
 from auth_routes import get_current_user
 from config_disc import FACTORES_TTI, PESOS_RANKING
 from db import get_connection
+from disc_perfiles import PERFILES_DISC, obtener_perfil
 
 LETRAS = ["D", "I", "S", "C"]
 
@@ -162,6 +163,21 @@ def config_route(_user: dict = Depends(require_disc)):
     return {"pesos_ranking": calculator.pesos_ranking, "factores_tti": calculator.factores_tti}
 
 
+@router.get("/perfiles")
+def perfiles_route(_user: dict = Depends(require_disc)):
+    """Los 12 informes posibles (uno por cada combinacion letra primaria +
+    secundaria) -- contenido propio, no el de TTI (ver disc_perfiles.py)."""
+    return PERFILES_DISC
+
+
+@router.get("/perfiles/{tipo}")
+def perfil_route(tipo: str, _user: dict = Depends(require_disc)):
+    perfil = obtener_perfil(tipo.upper())
+    if not perfil:
+        raise HTTPException(status_code=404, detail=f"No existe un informe para el perfil '{tipo}'")
+    return perfil
+
+
 @router.post("/calcular")
 def calcular_route(body: CalcularBody, _user: dict = Depends(require_disc)):
     if not body.nombre.strip():
@@ -204,6 +220,7 @@ def calcular_route(body: CalcularBody, _user: dict = Depends(require_disc)):
         "tipo_disc": tipo_disc,
         "perfil_adaptado": perfiles["adaptado"],
         "perfil_natural": perfiles["natural"],
+        "perfil_info": obtener_perfil(tipo_disc),
     }
 
 
@@ -216,6 +233,7 @@ def _row_to_dict(row):
         "tipo_disc": row["tipo_disc"],
         "perfil_adaptado": json.loads(row["perfil_adaptado"]),
         "perfil_natural": json.loads(row["perfil_natural"]),
+        "perfil_info": obtener_perfil(row["tipo_disc"]),
     }
 
 

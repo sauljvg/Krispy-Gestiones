@@ -36,6 +36,10 @@ SUBTITULO_STYLE = ParagraphStyle("subtitulo", fontName=FUENTE_CONTENIDO, fontSiz
 SECCION_STYLE = ParagraphStyle("seccion", fontName=FUENTE_TITULO, fontSize=15, spaceBefore=14, spaceAfter=8)
 NOTA_STYLE = ParagraphStyle("nota", fontName=FUENTE_CONTENIDO, fontSize=9, textColor=GRIS_TEXTO, leading=13)
 TIPO_STYLE = ParagraphStyle("tipo", fontName=FUENTE_TITULO, fontSize=28, alignment=1, textColor=colors.black, spaceBefore=4, spaceAfter=4)
+NOMBRE_PERFIL_STYLE = ParagraphStyle("nombrePerfil", fontName=FUENTE_TITULO, fontSize=17, alignment=1, spaceAfter=4)
+RESUMEN_PERFIL_STYLE = ParagraphStyle("resumenPerfil", fontName=FUENTE_CONTENIDO, fontSize=12, alignment=1, textColor=GRIS_TEXTO, spaceAfter=14, leading=16)
+SUBSECCION_STYLE = ParagraphStyle("subseccion", fontName=FUENTE_TITULO, fontSize=12, spaceBefore=10, spaceAfter=4)
+LISTA_STYLE = ParagraphStyle("lista", fontName=FUENTE_CONTENIDO, fontSize=11, textColor=colors.black, leading=15)
 
 ANCHO_BARRA = 11 * cm
 
@@ -86,6 +90,36 @@ def _tabla_perfil(perfil):
     return t
 
 
+def _lista(items):
+    return Paragraph("<br/>".join(f"•&nbsp;&nbsp;{item}" for item in items), LISTA_STYLE)
+
+
+def _secciones_perfil(perfil_info):
+    """Bloque narrativo del informe por perfil (ver disc_perfiles.py) --
+    contenido propio, no el de TTI Success Insights."""
+    if not perfil_info:
+        return []
+    return [
+        Spacer(1, 6),
+        Paragraph(perfil_info["nombre"], NOMBRE_PERFIL_STYLE),
+        Paragraph(perfil_info["resumen"], RESUMEN_PERFIL_STYLE),
+        Paragraph("Características generales", SUBSECCION_STYLE),
+        _lista(perfil_info["caracteristicas"]),
+        Paragraph("Fortalezas", SUBSECCION_STYLE),
+        _lista(perfil_info["fortalezas"]),
+        Paragraph("Posibles áreas de mejora", SUBSECCION_STYLE),
+        _lista(perfil_info["areas_de_mejora"]),
+        Paragraph("Qué le motiva", SUBSECCION_STYLE),
+        _lista(perfil_info["motivadores"]),
+        Paragraph("Bajo presión", SUBSECCION_STYLE),
+        Paragraph(perfil_info["bajo_presion"], LISTA_STYLE),
+        Paragraph("Cómo comunicarse con esta persona", SUBSECCION_STYLE),
+        _lista(perfil_info["como_comunicarse"]),
+        Paragraph("Entorno ideal", SUBSECCION_STYLE),
+        Paragraph(perfil_info["entorno_ideal"], LISTA_STYLE),
+    ]
+
+
 def generar_pdf(resultado):
     """resultado: dict como el que devuelve disc_module._row_to_dict (nombre,
     fecha_test, puntos_brutos, tipo_disc, perfil_adaptado, perfil_natural)."""
@@ -108,12 +142,18 @@ def generar_pdf(resultado):
         Spacer(1, 10),
         Paragraph("Estilo Natural (auténtico / relajado)", SECCION_STYLE),
         _tabla_perfil(resultado["perfil_natural"]),
+    ]
+
+    story += _secciones_perfil(resultado.get("perfil_info"))
+
+    story += [
         Spacer(1, 20),
         Paragraph(
             "NOTAS IMPORTANTES: el perfil dominante (top-2 letras) es la parte más fiable de este "
-            "resultado. Los valores numéricos son una aproximación calibrada contra resultados TTI "
-            "oficiales, con un margen de error de aproximadamente ±10 puntos incluso tras la "
-            "optimización — no sustituyen un informe TTI Success Insights oficial.",
+            "resultado. Los valores numéricos son una aproximación calibrada con datos propios, con "
+            "un margen de error de aproximadamente ±10 puntos incluso tras la optimización. El texto "
+            "descriptivo de este informe es contenido propio (no de TTI Success Insights) — no "
+            "sustituye un informe TTI Success Insights oficial.",
             NOTA_STYLE,
         ),
     ]

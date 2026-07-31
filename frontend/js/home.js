@@ -14,7 +14,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const tieneModuloSaona = ["saona_resenas", "saona_informes", "saona_clima"].some((m) => modulos.includes(m));
   document.getElementById("card-saona").hidden = !tieneModuloSaona;
   if (user.rol === "admin") {
-    document.getElementById("card-usuarios").hidden = false;
+    document.getElementById("menu-ajustes").hidden = false;
     document.getElementById("card-saona").hidden = false;
   }
 });
