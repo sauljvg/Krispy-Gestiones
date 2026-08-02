@@ -36,6 +36,13 @@ _RESPUESTAS_SIN_VALOR = {".", "..", "…", "-", "sin comentarios", "sin comentar
 # esa persona cuenta como si fuera OTRO centro distinto.
 _CENTRO_ALIASES = {
     "princesa 7": "Princesa",
+    # _normaliza_header ya quita acentos, asi que "ParqueSur Fábrica" (con
+    # tilde, como lo escribio quien respondio) normaliza a la misma clave
+    # que "ParqueSur Fabrica" (el nombre canonico, sin tilde) -- sin este
+    # alias explicito, _normaliza_centro no encuentra nada en el diccionario
+    # y devuelve el texto original tal cual, dejando las dos variantes como
+    # centros distintos en vez de fusionarlas.
+    "parquesur fabrica": "ParqueSur Fabrica",
 }
 
 # Todas las tiendas/centros conocidos de Krispy Kreme — para poder registrar
@@ -642,8 +649,16 @@ def _migrar_alias_centro():
                 "UPDATE entrevistas_respuestas SET centro = ?, datos_json = ? WHERE id = ?",
                 (nuevo_centro, json.dumps(datos, ensure_ascii=False, default=str), fila["id"]),
             )
-    for viejo, nuevo in _CENTRO_ALIASES.items():
-        conn.execute("UPDATE entrevistas_salidas SET centro = ? WHERE LOWER(centro) = ?", (nuevo, viejo))
+    # Antes esto se hacia con "WHERE LOWER(centro) = ?" contra la clave del
+    # alias -- LOWER() de SQLite no quita acentos, asi que una variante como
+    # "ParqueSur Fábrica" (con tilde) nunca coincidia con la clave
+    # "parquesur fabrica" (sin tilde) y se quedaba sin migrar. Se usa la
+    # misma normalizacion en Python que ya aplica arriba a las respuestas.
+    salidas = conn.execute("SELECT id, centro FROM entrevistas_salidas").fetchall()
+    for s in salidas:
+        nuevo_centro = _normaliza_centro(s["centro"])
+        if nuevo_centro != s["centro"]:
+            conn.execute("UPDATE entrevistas_salidas SET centro = ? WHERE id = ?", (nuevo_centro, s["id"]))
     conn.commit()
     conn.close()
 
