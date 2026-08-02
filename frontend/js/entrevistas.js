@@ -64,12 +64,6 @@ function aplicarBrandingEmpresa() {
   if (favicon) favicon.href = "assets/favicon-saona.png";
   const title = document.getElementById("brand-title");
   if (title) title.textContent = "SAONA Gestiones";
-  const logo = document.getElementById("entrevistas-report-logo");
-  if (logo) {
-    logo.src = "assets/saona-logo.png";
-    logo.alt = "Saona";
-    logo.style.height = "90px";
-  }
   document.documentElement.dataset.empresa = "saona";
 }
 
