@@ -1005,6 +1005,37 @@ def update_motivo(respuesta_id, nuevo_motivo):
     conn.close()
 
 
+def update_centro(respuesta_id, nuevo_centro):
+    """Corrige el centro de UNA respuesta concreta -- el campo "Centro de
+    Trabajo" es texto libre en el formulario, y a veces alguien marca el
+    centro equivocado (p.ej. Fabrica en vez de Tienda). Igual que
+    update_motivo, escribe en la columna 'centro' Y en el valor embebido
+    dentro de datos_json (misma columna que detecta _column_roles), para que
+    reportes y el cruce con Salidas Totales queden consistentes."""
+    nuevo_centro = _normaliza_centro(nuevo_centro.strip())
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT oleada_id, datos_json FROM entrevistas_respuestas WHERE id = ?", (respuesta_id,)
+    ).fetchone()
+    if row is None:
+        conn.close()
+        raise ValueError("Respuesta no encontrada")
+
+    todas_las_filas = [datos for _id, datos in _fetch_respuestas(conn, row["oleada_id"], None)]
+    roles = _column_roles(_union_headers(todas_las_filas), todas_las_filas)
+    centro_col = roles["centro_col"]
+
+    datos = json.loads(row["datos_json"])
+    if centro_col:
+        datos[centro_col] = nuevo_centro
+    conn.execute(
+        "UPDATE entrevistas_respuestas SET centro = ?, datos_json = ? WHERE id = ?",
+        (nuevo_centro, json.dumps(datos, ensure_ascii=False, default=str), respuesta_id),
+    )
+    conn.commit()
+    conn.close()
+
+
 def compute_reporte(oleada_id, centro=None):
     conn = get_connection()
     filas_con_id = _fetch_respuestas(conn, oleada_id, centro)

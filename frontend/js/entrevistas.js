@@ -2,6 +2,7 @@ let currentOleada = null;
 let currentCentro = null;
 let ultimoReporte = null;
 let centrosActuales = [];
+let centrosConocidosCache = [];
 let chartsBloques = [];
 let chartMotivos = null;
 let chartEvolucionTotal = null;
@@ -94,6 +95,7 @@ async function loadCentros() {
   // todavía.
   const resConocidos = await fetch(`${AUTH_API_BASE}/entrevistas/centros-conocidos?${conEmpresa(new URLSearchParams())}`);
   const centrosConocidos = resConocidos.ok ? await resConocidos.json() : centros;
+  centrosConocidosCache = centrosConocidos;
   const selectManual = document.getElementById("salida-manual-centro");
   if (selectManual) selectManual.innerHTML = centrosConocidos.map((c) => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join("");
 
@@ -507,20 +509,34 @@ async function loadRespuestasEditables(centro) {
   const res = await fetch(`${AUTH_API_BASE}/entrevistas/${currentOleada}/respuestas?${params.toString()}`);
   if (!res.ok) return;
   const data = await res.json();
-  renderTablaMotivosEditar(data.filter((r) => r.motivo !== null && r.motivo !== undefined));
+  renderTablaMotivosEditar(data);
 }
 
 function renderTablaMotivosEditar(filas) {
   const tbody = document.getElementById("tabla-motivos-editar-body");
   if (filas.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="3" class="staff-hint">(sin respuestas con motivo registrado)</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="staff-hint">(sin respuestas en este centro)</td></tr>`;
     return;
   }
+  const opcionesCentro = (actual) =>
+    centrosConocidosCache
+      .map((c) => `<option value="${escapeHTML(c)}"${c === actual ? " selected" : ""}>${escapeHTML(c)}</option>`)
+      .join("");
+
   tbody.innerHTML = filas
     .map(
       (f) => `
     <tr data-id="${f.id}">
       <td>${escapeHTML(f.nombre || "(sin nombre)")}</td>
+      <td>
+        <span class="centro-texto">${escapeHTML(f.centro || "—")}</span>
+        <select class="select-vincular-salida centro-select" hidden>${opcionesCentro(f.centro)}</select>
+        <span class="celda-acciones">
+          <button type="button" class="btn-registrar-salida btn-editar-centro">Editar</button>
+          <button type="button" class="btn-registrar-salida btn-guardar-centro" hidden>Guardar</button>
+          <button type="button" class="btn-registrar-salida btn-ghost btn-cancelar-centro" hidden>Cancelar</button>
+        </span>
+      </td>
       <td>
         <span class="motivo-texto">${escapeHTML(f.motivo || "—")}</span>
         <input type="text" class="motivo-input" value="${escapeHTML(f.motivo || "")}" hidden>
@@ -535,55 +551,80 @@ function renderTablaMotivosEditar(filas) {
     .join("");
 
   tbody.querySelectorAll("tr").forEach((tr) => {
-    const texto = tr.querySelector(".motivo-texto");
-    const input = tr.querySelector(".motivo-input");
-    const btnEditar = tr.querySelector(".btn-editar-motivo");
-    const btnGuardar = tr.querySelector(".btn-guardar-motivo");
-    const btnCancelar = tr.querySelector(".btn-cancelar-motivo");
-
-    const entrarEdicion = () => {
-      texto.hidden = true;
-      input.hidden = false;
-      btnEditar.hidden = true;
-      btnGuardar.hidden = false;
-      btnCancelar.hidden = false;
-      input.focus();
-    };
-    const salirEdicion = () => {
-      texto.hidden = false;
-      input.hidden = true;
-      btnEditar.hidden = false;
-      btnGuardar.hidden = true;
-      btnCancelar.hidden = true;
-    };
-
-    btnEditar.addEventListener("click", entrarEdicion);
-    btnCancelar.addEventListener("click", () => {
-      input.value = texto.textContent;
-      salirEdicion();
+    wireEdicionInline(tr, {
+      textoSel: ".centro-texto", inputSel: ".centro-select", editarSel: ".btn-editar-centro",
+      guardarSel: ".btn-guardar-centro", cancelarSel: ".btn-cancelar-centro",
+      leerValor: (input) => input.value,
+      vacioMsg: "El centro no puede quedar vacío.",
+      endpoint: (id) => `${AUTH_API_BASE}/entrevistas/${currentOleada}/respuestas/${id}/centro`,
+      body: (valor) => ({ centro: valor }),
+      errorMsg: "No se pudo guardar el centro.",
     });
-    btnGuardar.addEventListener("click", async () => {
-      const nuevoMotivo = input.value.trim();
-      if (!nuevoMotivo) {
-        alert("El motivo no puede quedar vacío.");
-        return;
-      }
-      const respuestaId = tr.dataset.id;
-      const res = await fetch(`${AUTH_API_BASE}/entrevistas/${currentOleada}/respuestas/${respuestaId}/motivo`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ motivo: nuevoMotivo }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        alert(err.detail || "No se pudo guardar el motivo.");
-        return;
-      }
-      // El motivo editado cambia el recuento del gráfico "Motivos de
-      // salida" — se recarga el reporte entero (no solo esta tabla) para
-      // que el gráfico y la tabla queden consistentes entre sí.
-      await loadReporte(currentCentro);
+    wireEdicionInline(tr, {
+      textoSel: ".motivo-texto", inputSel: ".motivo-input", editarSel: ".btn-editar-motivo",
+      guardarSel: ".btn-guardar-motivo", cancelarSel: ".btn-cancelar-motivo",
+      leerValor: (input) => input.value.trim(),
+      vacioMsg: "El motivo no puede quedar vacío.",
+      endpoint: (id) => `${AUTH_API_BASE}/entrevistas/${currentOleada}/respuestas/${id}/motivo`,
+      body: (valor) => ({ motivo: valor }),
+      errorMsg: "No se pudo guardar el motivo.",
     });
+  });
+}
+
+// Patron compartido de "editar en línea" (texto/select -> guardar/cancelar)
+// para las columnas Centro y Motivo de la tabla de arriba — misma mecanica,
+// solo cambia el campo, el endpoint y el cuerpo del PATCH.
+function wireEdicionInline(tr, cfg) {
+  const texto = tr.querySelector(cfg.textoSel);
+  const input = tr.querySelector(cfg.inputSel);
+  const btnEditar = tr.querySelector(cfg.editarSel);
+  const btnGuardar = tr.querySelector(cfg.guardarSel);
+  const btnCancelar = tr.querySelector(cfg.cancelarSel);
+  const valorOriginal = input.value;
+
+  const entrarEdicion = () => {
+    texto.hidden = true;
+    input.hidden = false;
+    btnEditar.hidden = true;
+    btnGuardar.hidden = false;
+    btnCancelar.hidden = false;
+    input.focus();
+  };
+  const salirEdicion = () => {
+    texto.hidden = false;
+    input.hidden = true;
+    btnEditar.hidden = false;
+    btnGuardar.hidden = true;
+    btnCancelar.hidden = true;
+  };
+
+  btnEditar.addEventListener("click", entrarEdicion);
+  btnCancelar.addEventListener("click", () => {
+    input.value = valorOriginal;
+    salirEdicion();
+  });
+  btnGuardar.addEventListener("click", async () => {
+    const valor = cfg.leerValor(input);
+    if (!valor) {
+      alert(cfg.vacioMsg);
+      return;
+    }
+    const respuestaId = tr.dataset.id;
+    const res = await fetch(cfg.endpoint(respuestaId), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cfg.body(valor)),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.detail || cfg.errorMsg);
+      return;
+    }
+    // Cambiar el centro o el motivo afecta al recuento de "Motivos de
+    // salida" y a que tarjeta de centro cuenta esta respuesta — se recarga
+    // el reporte entero (no solo esta tabla) para que todo quede consistente.
+    await loadReporte(currentCentro);
   });
 }
 

@@ -22,6 +22,10 @@ class MatchIn(BaseModel):
 class MotivoIn(BaseModel):
     motivo: str
 
+
+class CentroIn(BaseModel):
+    centro: str
+
 router = APIRouter()
 
 
@@ -129,6 +133,17 @@ def update_motivo_route(oleada_id: int, respuesta_id: int, body: MotivoIn, _user
         raise HTTPException(status_code=400, detail="El motivo no puede estar vacío")
     try:
         entrevistas_module.update_motivo(respuesta_id, body.motivo.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
+@router.patch("/{oleada_id}/respuestas/{respuesta_id}/centro")
+def update_centro_route(oleada_id: int, respuesta_id: int, body: CentroIn, _user: dict = Depends(require_entrevistas_oleada)):
+    if not body.centro.strip():
+        raise HTTPException(status_code=400, detail="El centro no puede estar vacío")
+    try:
+        entrevistas_module.update_centro(respuesta_id, body.centro)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True}
