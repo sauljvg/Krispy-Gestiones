@@ -93,12 +93,18 @@ async function renderPdfInline(url, contenedor) {
     contenedor.innerHTML = "";
     const anchoDisponible = contenedor.clientWidth || 600;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // El canvas se pinta una sola vez a un tamaño fijo — si solo se ajustara
+    // al ancho visible se vería nítido a simple vista pero pixelado en
+    // cuanto se hace zoom (con el navegador o con dos dedos), porque no hay
+    // más detalle real que mostrar. Renderizar con el doble de resolución de
+    // la necesaria da margen para hacer zoom sin que se note.
+    const SOBREMUESTREO = 2;
     for (let num = 1; num <= pdf.numPages; num++) {
       const page = await pdf.getPage(num);
       if (miToken !== pdfRenderToken) return;
       const viewportBase = page.getViewport({ scale: 1 });
       const escala = anchoDisponible / viewportBase.width;
-      const viewport = page.getViewport({ scale: escala * dpr });
+      const viewport = page.getViewport({ scale: escala * dpr * SOBREMUESTREO });
       const canvas = document.createElement("canvas");
       canvas.className = "blog-pdf-pagina";
       canvas.width = viewport.width;
