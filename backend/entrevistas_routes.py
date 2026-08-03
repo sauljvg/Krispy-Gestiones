@@ -12,6 +12,7 @@ class SalidaIn(BaseModel):
     centro: str
     nombre: str
     fecha_baja: str
+    email: str | None = None
 
 
 class MatchIn(BaseModel):
@@ -100,7 +101,10 @@ def evolucion_route(oleada_id: int, centro: str | None = None, _user: dict = Dep
 def crear_salida_route(oleada_id: int, body: SalidaIn, _user: dict = Depends(require_entrevistas_oleada)):
     if not body.centro.strip() or not body.nombre.strip() or not body.fecha_baja.strip():
         raise HTTPException(status_code=400, detail="Centro, nombre y fecha de baja son obligatorios")
-    entrevistas_module.add_salida(oleada_id, body.centro.strip(), body.nombre.strip(), body.fecha_baja.strip())
+    try:
+        entrevistas_module.add_salida(oleada_id, body.centro.strip(), body.nombre.strip(), body.fecha_baja.strip(), body.email)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True}
 
 

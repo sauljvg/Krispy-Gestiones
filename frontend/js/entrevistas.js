@@ -440,14 +440,14 @@ async function vincularRespuestaSalida(respuestaId, salidaId) {
 async function registrarSalidaDesdeAuditoria(item) {
   const centro = item.centro || (centrosActuales[0] || "");
   const fecha = (item.fecha || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
-  await crearSalidaManual(centro, item.nombre, fecha);
+  await crearSalidaManual(centro, item.nombre, fecha, null);
 }
 
-async function crearSalidaManual(centro, nombre, fechaBaja) {
+async function crearSalidaManual(centro, nombre, fechaBaja, email) {
   const res = await fetch(`${AUTH_API_BASE}/entrevistas/${currentOleada}/salidas`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ centro, nombre, fecha_baja: fechaBaja }),
+    body: JSON.stringify({ centro, nombre, fecha_baja: fechaBaja, email: email || null }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -796,13 +796,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     const centro = document.getElementById("salida-manual-centro").value;
     const nombre = document.getElementById("salida-manual-nombre").value.trim();
     const fecha = document.getElementById("salida-manual-fecha").value;
+    const email = document.getElementById("salida-manual-email").value.trim();
     if (!centro || !nombre || !fecha) {
       alert("Completa centro, nombre y fecha de baja.");
       return;
     }
-    await crearSalidaManual(centro, nombre, fecha);
+    await crearSalidaManual(centro, nombre, fecha, email);
     document.getElementById("salida-manual-nombre").value = "";
     document.getElementById("salida-manual-fecha").value = "";
+    document.getElementById("salida-manual-email").value = "";
   });
 
   document.getElementById("btn-exportar-pdf").addEventListener("click", () => {

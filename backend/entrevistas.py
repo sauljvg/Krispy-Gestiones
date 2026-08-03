@@ -1312,16 +1312,21 @@ def borrar_respuesta(respuesta_id):
     conn.close()
 
 
-def add_salida(oleada_id, centro, nombre, fecha_baja):
+def add_salida(oleada_id, centro, nombre, fecha_baja, email=None):
     """Registra una salida real a mano, sin depender del Excel de "Salidas
     Totales" — sirve tanto para dar de alta a alguien que no vino en la hoja
     como para confirmar una respuesta que no cruzó automáticamente (se le
     pasa su propio nombre/centro/fecha y queda contada igual que si viniera
-    del Excel)."""
+    del Excel). El email es opcional pero, si se rellena, deja el registro
+    "completo": aparecerá con email en auditoría y el botón de recordatorio
+    (mailto) ya lo recogerá sin tener que pasar por el Excel."""
+    email_limpio = (email or "").strip() or None
+    if email_limpio and not _EMAIL_RE.match(email_limpio):
+        raise ValueError("El email no tiene un formato válido")
     conn = get_connection()
     conn.execute(
-        "INSERT INTO entrevistas_salidas (oleada_id, centro, nombre, fecha_baja) VALUES (?, ?, ?, ?)",
-        (oleada_id, centro, nombre, fecha_baja),
+        "INSERT INTO entrevistas_salidas (oleada_id, centro, nombre, fecha_baja, email) VALUES (?, ?, ?, ?, ?)",
+        (oleada_id, centro, nombre, fecha_baja, email_limpio),
     )
     conn.commit()
     conn.close()

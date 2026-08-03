@@ -83,7 +83,7 @@
     padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border);
     background: var(--surface-page); color: var(--text-primary); font-size: 13px;
   }
-  .salida-manual-row input[type="text"] { flex: 1; min-width: 160px; }
+  .salida-manual-row input[type="text"], .salida-manual-row input[type="email"] { flex: 1; min-width: 160px; }
   .detalle-bloque-details { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
   .detalle-bloque-details summary { cursor: pointer; font-size: 14px; font-weight: 600; padding: 4px 0; }
   .detalle-tabla { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
@@ -186,6 +186,7 @@
             <select id="salida-manual-centro"></select>
             <input type="text" id="salida-manual-nombre" placeholder="Nombre completo">
             <input type="date" id="salida-manual-fecha">
+            <input type="email" id="salida-manual-email" placeholder="Email (opcional, para el recordatorio)">
             <button id="btn-salida-manual-agregar" class="btn btn-ghost" type="button">＋ Agregar salida</button>
           </div>
         </div>
