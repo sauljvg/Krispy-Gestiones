@@ -15,23 +15,19 @@
 </script>
 <link rel="stylesheet" href="css/styles.css?v=20260728a">
 <style>
-  .blog-brand-logo { height: 64px; width: auto; display: block; }
-
-  /* Cabecera de bienvenida sobre el listado — para que la portada del blog
-     no sea solo una rejilla de tarjetas a secas. */
+  /* Cabecera de bienvenida sobre el listado: logo grande centrado con fondo
+     transparente (sin tarjeta ni caja) y el subtítulo debajo — sustituye al
+     logo pequeño que iba en el topbar. Solo se ve en el listado, no al leer
+     un boletín concreto. */
   .blog-hero {
-    max-width: 1400px; margin: 0 auto; padding: 28px 32px 0;
+    max-width: 700px; margin: 0 auto; padding: 32px 32px 8px;
+    display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px;
   }
-  .blog-hero-card {
-    background: linear-gradient(135deg, color-mix(in srgb, var(--acento) 14%, var(--surface-1)), var(--surface-1));
-    border: 1px solid var(--border); border-radius: 14px; padding: 22px 26px;
-    display: flex; align-items: center; gap: 18px;
-  }
-  .blog-hero-card img { height: 84px; width: auto; flex-shrink: 0; }
-  .blog-hero-card p { margin: 0; font-size: 14px; color: var(--text-secondary); line-height: 1.5; }
+  .blog-hero img { height: 150px; width: auto; max-width: 90%; }
+  .blog-hero p { margin: 0; font-size: 14px; color: var(--text-secondary); line-height: 1.5; max-width: 480px; }
   @media (max-width: 700px) {
-    .blog-hero { padding: 20px 16px 0; }
-    .blog-hero-card { flex-direction: column; text-align: center; padding: 20px; }
+    .blog-hero { padding: 24px 16px 4px; }
+    .blog-hero img { height: 110px; }
   }
 
   /* Cuando el boletín se publica solo con PDF (sin bloques de texto), la
@@ -149,19 +145,15 @@
 <body>
 <div class="app">
   <header class="topbar">
-    <div class="brand">
-      <img src="assets/la-receta-logo.png" alt="Krispy Kreme · La Receta Semanal" class="blog-brand-logo">
-    </div>
+    <div class="brand"></div>
     <div class="topbar-actions">
       <button type="button" id="btn-theme-toggle" class="btn btn-ghost hamburger-btn" aria-label="Cambiar tema">🌙</button>
     </div>
   </header>
 
   <div class="blog-hero" id="blog-hero">
-    <div class="blog-hero-card">
-      <img src="assets/la-receta-logo.png" alt="La Receta Semanal">
-      <p>Cada semana, novedades, recetas y noticias del equipo Krispy Kreme España. Elige un boletín de la lista para leerlo.</p>
-    </div>
+    <img src="assets/la-receta-logo.png" alt="La Receta Semanal">
+    <p>Cada semana, novedades, recetas y noticias del equipo Krispy Kreme España. Elige un boletín de la lista para leerlo.</p>
   </div>
 
   <div class="blog-layout">
