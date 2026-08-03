@@ -1332,6 +1332,17 @@ def add_salida(oleada_id, centro, nombre, fecha_baja, email=None):
     conn.close()
 
 
+def delete_salida(salida_id):
+    """Elimina una salida (p.ej. una dada de alta a mano por error) — junto
+    con su vínculo manual a una respuesta si tenía uno, para no dejar una
+    fila huérfana en entrevistas_matches_manual."""
+    conn = get_connection()
+    conn.execute("DELETE FROM entrevistas_matches_manual WHERE salida_id = ?", (salida_id,))
+    conn.execute("DELETE FROM entrevistas_salidas WHERE id = ?", (salida_id,))
+    conn.commit()
+    conn.close()
+
+
 def compute_evolucion(oleada_id, centro=None):
     """Evolución por cuatrimestre — equivalente a Resumen_General del
     script: cruza cada respuesta con su baja real (por centro + nombre) para

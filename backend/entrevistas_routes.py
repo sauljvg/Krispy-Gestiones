@@ -108,6 +108,12 @@ def crear_salida_route(oleada_id: int, body: SalidaIn, _user: dict = Depends(req
     return {"ok": True}
 
 
+@router.delete("/{oleada_id}/salidas/{salida_id}")
+def borrar_salida_route(oleada_id: int, salida_id: int, _user: dict = Depends(require_entrevistas_oleada)):
+    entrevistas_module.delete_salida(salida_id)
+    return {"ok": True}
+
+
 @router.post("/{oleada_id}/matches")
 def crear_match_route(oleada_id: int, body: MatchIn, _user: dict = Depends(require_entrevistas_oleada)):
     entrevistas_module.set_match_manual(body.respuesta_id, body.salida_id)

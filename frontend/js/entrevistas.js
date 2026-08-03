@@ -299,12 +299,26 @@ function renderDetalleBloques(statsPorPeriodo) {
     .join("");
 }
 
-function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquetaVacio) {
+function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquetaVacio, alEliminar) {
   const wrap = document.getElementById(wrapId);
   const lista = document.getElementById(listaId);
   document.getElementById(summaryId).textContent = `${items.length} ${etiquetaVacio}`;
   wrap.hidden = items.length === 0;
-  lista.innerHTML = items.map((it) => `<li><span>${escapeHTML(formatoItem(it))}</span></li>`).join("");
+  lista.innerHTML = items
+    .map((it) => `
+      <li>
+        <span>${escapeHTML(formatoItem(it))}</span>
+        ${alEliminar ? `<button type="button" class="btn-eliminar-auditoria" data-id="${it.salida_id}" title="Eliminar registro">🗑</button>` : ""}
+      </li>`)
+    .join("");
+  if (alEliminar) {
+    lista.querySelectorAll(".btn-eliminar-auditoria").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("¿Eliminar este registro de salida? Esta acción no se puede deshacer.")) return;
+        await alEliminar(Number(btn.dataset.id));
+      });
+    });
+  }
 }
 
 // Nunca se envía nada desde el servidor: el botón arma un enlace mailto:
@@ -457,6 +471,16 @@ async function crearSalidaManual(centro, nombre, fechaBaja, email) {
   await loadEvolucion(currentCentro);
 }
 
+async function eliminarSalida(salidaId) {
+  const res = await fetch(`${AUTH_API_BASE}/entrevistas/${currentOleada}/salidas/${salidaId}`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "No se pudo eliminar el registro.");
+    return;
+  }
+  await loadEvolucion(currentCentro);
+}
+
 async function loadEvolucion(centro) {
   const params = new URLSearchParams();
   if (centro) params.set("centro", centro);
@@ -488,7 +512,8 @@ async function loadEvolucion(centro) {
     renderAuditoria(
       "auditoria-f-wrap", "auditoria-f-summary", "auditoria-f-lista",
       data.auditoria_f, (a) => `${a.nombre} — ${a.centro || ""} (baja: ${(a.fecha_baja || "").slice(0, 10)})`,
-      "salidas sin ninguna respuesta detectada"
+      "salidas sin ninguna respuesta detectada",
+      eliminarSalida
     );
     wireRecordatorio(data.auditoria_f);
     renderAuditoriaG(data.auditoria_g, data.auditoria_f);
