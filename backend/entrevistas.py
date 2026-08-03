@@ -666,6 +666,7 @@ def ensure_entrevistas_tables():
     conn.commit()
     conn.close()
     _migrar_alias_centro()
+    _corregir_categoria_preguntas()
 
 
 def _migrar_alias_centro():
@@ -700,6 +701,79 @@ def _migrar_alias_centro():
         nuevo_centro = _normaliza_centro(s["centro"])
         if nuevo_centro != s["centro"]:
             conn.execute("UPDATE entrevistas_salidas SET centro = ? WHERE id = ?", (nuevo_centro, s["id"]))
+    conn.commit()
+    conn.close()
+
+
+# El enunciado de una pregunta de escala del constructor de Test lleva el
+# prefijo "Categoria." escrito A MANO (ver docstring de ingest_fila_directa)
+# -- no hay ninguna relacion automatica con la pagina donde vive hoy esa
+# pregunta en el constructor (encuesta_paginas ni siquiera tiene columna de
+# titulo; lo que se ve como "titulo" de pagina en el editor es su propio
+# campo "instrucciones"). Si alguien mueve una pregunta a otra pagina sin
+# retocar a mano el prefijo de su enunciado, el informe la sigue agrupando
+# para siempre bajo el bloque VIEJO, aunque en el constructor ya se vea bajo
+# la pagina nueva. Detectado en la Entrevista de Salida de KK: 3 preguntas
+# de "Kultura y Buen Rollo"/"Condiciones Laborales" seguian con el prefijo
+# de la pagina anterior.
+PREGUNTAS_CATEGORIA_CORREGIDA = {
+    # (categoria_vieja, texto_pregunta) -> categoria_nueva
+    ("Experiencia Krispy Kreme", "Los turnos y horarios se organizaban con claridad y previsión"): "Kultura y Buen Rollo",
+    ("Experiencia Krispy Kreme", "Me sentí tratado con respeto y empatía"): "Kultura y Buen Rollo",
+    ("Kultura y Buen Rollo", "Sentí que se reconocía mi aportación"): "Condiciones Laborales",
+}
+
+
+def _corregir_categoria_preguntas():
+    """Aplica PREGUNTAS_CATEGORIA_CORREGIDA en los dos sitios donde vive el
+    prefijo: encuesta_preguntas.etiqueta (para que las respuestas NUEVAS ya
+    salgan bien clasificadas) y entrevistas_respuestas.datos_json (para que
+    las respuestas YA guardadas se re-agrupen en el bloque correcto sin
+    esperar a que alguien vuelva a responder). Empareja por (categoria,
+    texto de pregunta sin espacios de mas) para pillar tambien las variantes
+    con doble/triple espacio que vienen del Excel viejo."""
+    conn = get_connection()
+
+    tiene_encuesta_preguntas = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='encuesta_preguntas'"
+    ).fetchone()
+    if tiene_encuesta_preguntas:
+        preguntas = conn.execute("SELECT id, etiqueta FROM encuesta_preguntas WHERE etiqueta LIKE '%.%'").fetchall()
+        for p in preguntas:
+            punto = p["etiqueta"].find(".")
+            if punto == -1:
+                continue
+            categoria, resto = p["etiqueta"][:punto], p["etiqueta"][punto + 1:]
+            if len(resto.strip()) <= 3:
+                continue
+            nueva_categoria = PREGUNTAS_CATEGORIA_CORREGIDA.get((categoria.strip(), _normaliza_espacios(resto)))
+            if nueva_categoria:
+                conn.execute(
+                    "UPDATE encuesta_preguntas SET etiqueta = ? WHERE id = ?",
+                    (f"{nueva_categoria}.{resto}", p["id"]),
+                )
+
+    filas = conn.execute("SELECT id, datos_json FROM entrevistas_respuestas").fetchall()
+    for fila in filas:
+        datos = json.loads(fila["datos_json"])
+        cambiado = False
+        for header in list(datos.keys()):
+            punto = header.find(".")
+            if punto == -1:
+                continue
+            categoria, resto = header[:punto], header[punto + 1:]
+            if len(resto.strip()) <= 3:
+                continue
+            nueva_categoria = PREGUNTAS_CATEGORIA_CORREGIDA.get((categoria.strip(), _normaliza_espacios(resto)))
+            if nueva_categoria:
+                datos[f"{nueva_categoria}.{resto}"] = datos.pop(header)
+                cambiado = True
+        if cambiado:
+            conn.execute(
+                "UPDATE entrevistas_respuestas SET datos_json = ? WHERE id = ?",
+                (json.dumps(datos, ensure_ascii=False, default=str), fila["id"]),
+            )
+
     conn.commit()
     conn.close()
 
