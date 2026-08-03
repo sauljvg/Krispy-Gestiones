@@ -299,11 +299,65 @@ function renderInformePerfil(perfilInfo) {
   `;
 }
 
+function renderInformeCompleto(informe) {
+  const wrap = document.getElementById("disc-informe-completo");
+  if (!informe) {
+    wrap.innerHTML = "";
+    return;
+  }
+  const lista = (items) => `<ul>${(items || []).map((it) => `<li>${escapeHTML(it)}</li>`).join("")}</ul>`;
+  const parrafos = (texto) =>
+    (texto || "").split("\n\n").filter((p) => p.trim()).map((p) => `<p>${escapeHTML(p)}</p>`).join("");
+  const estiloBloque = (bloques) =>
+    (bloques || [])
+      .map((b) => `<p><b>${escapeHTML(b.titulo)}</b><br>${escapeHTML(b.texto)}</p>`)
+      .join("");
+  const percepciones = informe.percepciones || {};
+  const influencias = informe.influencias_ocultas || {};
+  const potenciadores = informe.potenciadores_productividad || [];
+
+  wrap.innerHTML = `
+    <h4>Características generales</h4>
+    ${parrafos(informe.caracteristicas_generales)}
+    <h4>Valor que aporta a la organización</h4>
+    ${lista(informe.valor_organizacion)}
+    <h4>Puntos a tener en cuenta en la comunicación</h4>
+    <p><b>Maneras de comunicarse con esta persona:</b></p>
+    ${lista(informe.comunicacion_si)}
+    <p><b>Maneras de NO comunicarse con esta persona:</b></p>
+    ${lista(informe.comunicacion_no)}
+    <h4>Percepciones</h4>
+    <p><b>Se ve a sí misma como:</b></p>
+    ${lista(percepciones.auto_percepcion)}
+    <p><b>Bajo presión moderada:</b></p>
+    ${lista(percepciones.presion_moderada)}
+    <p><b>Bajo presión extrema:</b></p>
+    ${lista(percepciones.presion_extrema)}
+    <h4>Influencias potenciales ocultas</h4>
+    ${lista(influencias.bullets)}
+    <h4>Estilo Natural</h4>
+    ${estiloBloque(informe.estilo_natural)}
+    <h4>Estilo Adaptado</h4>
+    ${estiloBloque(informe.estilo_adaptado)}
+    ${lista(informe.estilo_adaptado_lista)}
+    <h4>Áreas de mejora</h4>
+    ${lista(informe.areas_mejora)}
+    <h4>Potenciadores de la Productividad</h4>
+    ${potenciadores.map((t) => `<p><b>${escapeHTML(t.titulo)}</b><br><i>${escapeHTML(t.enfoque)}</i></p>${lista(t.consejos)}`).join("")}
+    <p class="disc-informe-nota">
+      La Jerarquía Conductual, el Gráfico Contínuo y la Rueda de Perfiles Profesionales están disponibles
+      en el PDF exportable (⬇ Exportar PDF arriba).
+    </p>
+  `;
+}
+
 function mostrarResultado(data) {
   ultimoResultado = data;
+  document.getElementById("detalle-manual").open = true; // por si se llega desde "Ver informe" del historico, con el <details> cerrado
   document.getElementById("disc-resultado-card").hidden = false;
   document.getElementById("disc-resultado-tipo").textContent = data.tipo_disc;
   renderInformePerfil(data.perfil_info);
+  renderInformeCompleto(data.informe_completo);
   renderRadar("chart-disc-resultado", data.perfil_adaptado, data.perfil_natural, (c) => {
     chartResultado = c;
   }, chartResultado);
@@ -317,6 +371,7 @@ function nuevoTest() {
   document.getElementById("input-nombre-disc").value = "";
   document.getElementById("disc-resultado-card").hidden = true;
   document.getElementById("disc-informe-perfil").innerHTML = "";
+  document.getElementById("disc-informe-completo").innerHTML = "";
   ultimoResultado = null;
   renderPreguntas();
   document.getElementById("detalle-manual").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -393,6 +448,7 @@ function renderHistorico(items) {
       <td>${it.perfil_adaptado.S}</td>
       <td>${it.perfil_adaptado.C}</td>
       <td style="white-space:nowrap;">
+        <button type="button" class="btn-registrar-salida btn-ver-informe-historico">Ver informe</button>
         <button type="button" class="btn-registrar-salida btn-ver-pdf-historico">PDF</button>
         <button type="button" class="btn-registrar-salida btn-ghost btn-borrar-historico">Borrar</button>
       </td>
@@ -400,6 +456,15 @@ function renderHistorico(items) {
     )
     .join("");
 
+  tbody.querySelectorAll(".btn-ver-informe-historico").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = Number(btn.closest("tr").dataset.id);
+      const item = historicoCache.find((it) => it.id === id);
+      if (!item) return;
+      mostrarTab("nuevo");
+      mostrarResultado(item);
+    });
+  });
   tbody.querySelectorAll(".btn-ver-pdf-historico").forEach((btn) => {
     btn.addEventListener("click", () => {
       const id = btn.closest("tr").dataset.id;

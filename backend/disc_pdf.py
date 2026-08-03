@@ -584,14 +584,93 @@ def _seccion_potenciadores_productividad(informe):
     return bloques
 
 
-def generar_pdf(resultado):
-    """resultado: dict como el que devuelve disc_module._row_to_dict (nombre,
-    fecha_test, puntos_brutos, tipo_disc, perfil_adaptado, perfil_natural)."""
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer, pagesize=A4,
-        topMargin=2 * cm, bottomMargin=2 * cm, leftMargin=2 * cm, rightMargin=2 * cm,
-    )
+# ==================== Portada + índice ====================
+
+SECCIONES_INDICE = [
+    ("caracteristicas", "Características generales y valor que aporta"),
+    ("comunicacion", "Puntos a tener en cuenta en la comunicación"),
+    ("consejos", "Consejos de comunicación"),
+    ("percepciones", "Percepciones e influencias potenciales ocultas"),
+    ("descriptores", "Descriptores"),
+    ("estilo", "Estilo Natural y Adaptado"),
+    ("productividad", "Potenciadores de la Productividad"),
+    ("jerarquia", "Jerarquía Conductual"),
+    ("continuo", "Gráfico Contínuo Conductual"),
+    ("rueda", "Rueda de Perfiles Profesionales"),
+]
+# Paginas que ocupan la portada + el propio indice, para desplazar los
+# numeros de pagina registrados durante la pasada "en seco" (que solo mide
+# el cuerpo, sin portada ni indice todavia). Con 10 entradas el indice cabe
+# de sobra en 1 pagina -- si en el futuro creciera mucho, este numero
+# tendria que recalcularse dinamicamente en vez de asumirlo fijo.
+OFFSET_PORTADA_INDICE = 2
+
+# ParagraphStyle no escala el interlineado con fontSize automaticamente --
+# hay que fijar 'leading' a mano o los parrafos grandes se solapan con el
+# siguiente (reportlab usa un leading por defecto pensado para texto normal).
+PORTADA_TITULO_STYLE = ParagraphStyle("portadaTitulo", fontName=FUENTE_TITULO, fontSize=34, leading=40, alignment=1, spaceAfter=14)
+PORTADA_SUB_STYLE = ParagraphStyle("portadaSub", fontName=FUENTE_CONTENIDO, fontSize=13, leading=17, alignment=1, textColor=GRIS_TEXTO, spaceAfter=50)
+PORTADA_NOMBRE_STYLE = ParagraphStyle("portadaNombre", fontName=FUENTE_TITULO, fontSize=20, leading=24, alignment=1, spaceAfter=6)
+PORTADA_DATO_STYLE = ParagraphStyle("portadaDato", fontName=FUENTE_CONTENIDO, fontSize=12, leading=15, alignment=1, textColor=GRIS_TEXTO, spaceAfter=3)
+
+
+class _MarcaSeccion(Flowable):
+    """Flowable de altura cero: al dibujarse, registra en que pagina del
+    CUERPO (sin contar portada/indice, eso se suma despues) cayo esa
+    seccion -- se usa en una pasada previa "en seco" para poder imprimir un
+    indice con numeros de pagina reales antes del cuerpo."""
+
+    def __init__(self, clave, registro):
+        super().__init__()
+        self.clave = clave
+        self.registro = registro
+
+    def wrap(self, availWidth, availHeight):
+        return (0, 0)
+
+    def draw(self):
+        self.registro.setdefault(self.clave, self.canv.getPageNumber())
+
+
+def _portada(resultado):
+    return [
+        Spacer(1, 6 * cm),
+        Paragraph("Perfil DISC", PORTADA_TITULO_STYLE),
+        Paragraph("Aproximación al método TTI Success Insights", PORTADA_SUB_STYLE),
+        Paragraph(resultado["nombre"], PORTADA_NOMBRE_STYLE),
+        Paragraph("Krispy Gestiones", PORTADA_DATO_STYLE),
+        Paragraph(str(resultado["fecha_test"])[:10], PORTADA_DATO_STYLE),
+        PageBreak(),
+    ]
+
+
+def _indice(registro):
+    filas = []
+    for clave, titulo in SECCIONES_INDICE:
+        pagina_cuerpo = registro.get(clave)
+        texto_pagina = str(pagina_cuerpo + OFFSET_PORTADA_INDICE) if pagina_cuerpo else "—"
+        filas.append([Paragraph(titulo, LISTA_STYLE), Paragraph(texto_pagina, LISTA_STYLE)])
+    t = Table(filas, colWidths=[ANCHO_BARRA - 1 * cm, 2 * cm])
+    t.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.5, GRIS_CLARO),
+    ]))
+    return [
+        Paragraph("Índice", SECCION_STYLE),
+        Spacer(1, 10),
+        t,
+        PageBreak(),
+    ]
+
+
+def _construir_cuerpo(resultado, registro_paginas):
+    """Construye el cuerpo del informe (todo menos portada+indice), con una
+    _MarcaSeccion antes de cada seccion listada en SECCIONES_INDICE."""
+    def marca(clave):
+        return _MarcaSeccion(clave, registro_paginas)
 
     story = [
         Paragraph("Perfil DISC", TITULO_STYLE),
@@ -610,30 +689,30 @@ def generar_pdf(resultado):
 
     informe = resultado.get("informe_completo") or {}
 
-    story += [PageBreak()]
+    story += [PageBreak(), marca("caracteristicas")]
     story += _seccion_caracteristicas_valor(informe)
     story += _secciones_perfil(resultado.get("perfil_info"))
 
-    story += [PageBreak()]
+    story += [PageBreak(), marca("comunicacion")]
     story += _seccion_puntos_comunicacion(informe)
-    story += [PageBreak()]
+    story += [PageBreak(), marca("consejos")]
     story += _seccion_consejos_comunicacion()
-    story += [PageBreak()]
+    story += [PageBreak(), marca("percepciones")]
     story += _seccion_percepciones(informe)
     story += _seccion_influencias_ocultas(informe)
-    story += [PageBreak()]
+    story += [PageBreak(), marca("descriptores")]
     story += _seccion_descriptores(resultado["perfil_adaptado"])
-    story += [PageBreak()]
+    story += [PageBreak(), marca("estilo")]
     story += _seccion_estilo_natural_adaptado(informe)
     story += [PageBreak()]
     story += _seccion_estilo_lista_y_areas(informe)
-    story += [PageBreak()]
+    story += [PageBreak(), marca("productividad")]
     story += _seccion_potenciadores_productividad(informe)
-    story += [PageBreak()]
+    story += [PageBreak(), marca("jerarquia")]
     story += _seccion_jerarquia_conductual(informe)
-    story += [PageBreak()]
+    story += [PageBreak(), marca("continuo")]
     story += _seccion_grafico_continuo(resultado["perfil_natural"], resultado["perfil_adaptado"])
-    story += [PageBreak()]
+    story += [PageBreak(), marca("rueda")]
     story += _seccion_rueda_perfiles(resultado["perfil_natural"], resultado["perfil_adaptado"])
 
     story += [
@@ -647,6 +726,30 @@ def generar_pdf(resultado):
             NOTA_STYLE,
         ),
     ]
+    return story
 
-    doc.build(story)
+
+def generar_pdf(resultado):
+    """resultado: dict como el que devuelve disc_module._row_to_dict (nombre,
+    fecha_test, puntos_brutos, tipo_disc, perfil_adaptado, perfil_natural)."""
+    registro_paginas = {}
+    story_cuerpo = _construir_cuerpo(resultado, registro_paginas)
+
+    # Pasada 1: build "en seco" (buffer que se descarta) solo para que cada
+    # _MarcaSeccion registre en que pagina cae -- reportlab no permite saber
+    # esto de antemano sin renderizar de verdad. Se reconstruye el cuerpo de
+    # cero para la pasada final (mismo motivo que en pypdf: reusar los
+    # mismos objetos Flowable en dos doc.build() distintos no es seguro).
+    SimpleDocTemplate(
+        io.BytesIO(), pagesize=A4,
+        topMargin=2 * cm, bottomMargin=2 * cm, leftMargin=2 * cm, rightMargin=2 * cm,
+    ).build(story_cuerpo)
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        topMargin=2 * cm, bottomMargin=2 * cm, leftMargin=2 * cm, rightMargin=2 * cm,
+    )
+    story_final = _portada(resultado) + _indice(registro_paginas) + _construir_cuerpo(resultado, {})
+    doc.build(story_final)
     return buffer.getvalue()
