@@ -8,7 +8,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import Flowable, PageBreak, SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import Flowable, KeepTogether, PageBreak, SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
 from disc_contenido_fijo import CONSEJOS_COMUNICACION, DESCRIPTORES, descriptores_resaltados
 
@@ -33,6 +33,8 @@ with open(TOKENS_PATH, encoding="utf-8") as _f:
 COLOR_LETRA = {letra: colors.HexColor(hexval) for letra, hexval in _TOKENS["disc"].items() if not letra.startswith("_")}
 GRIS_TEXTO = colors.HexColor("#52514e")
 GRIS_CLARO = colors.HexColor("#e1e0d9")
+ACENTO_JERARQUIA = colors.HexColor("#006838")
+BANDA_POBLACION = colors.HexColor("#c8e6c9")
 
 TITULO_STYLE = ParagraphStyle("titulo", fontName=FUENTE_TITULO, fontSize=22, alignment=1, spaceAfter=6, leading=26)
 SUBTITULO_STYLE = ParagraphStyle("subtitulo", fontName=FUENTE_CONTENIDO, fontSize=13, alignment=1, textColor=GRIS_TEXTO, spaceAfter=16)
@@ -74,6 +76,60 @@ class BarraDisc(Flowable):
         c.setFont(FUENTE_CONTENIDO, 10)
         c.drawString(self.width + 8, 3, str(round(self.valor)))
         c.restoreState()
+
+
+class BarraJerarquia(Flowable):
+    """Fila de la Jerarquía Conductual: dos barras 0-100 (Natural y
+    Adaptado) para un mismo factor, con una banda sombreada central (~68%
+    de la población, aproximado -- no hay normas de población reales) y un
+    marcador de percentil (triángulo) sobre cada barra."""
+
+    ETIQUETAS = (("N", "valor_natural", "percentil_natural"), ("A", "valor_adaptado", "percentil_adaptado"))
+
+    def __init__(self, fila, width=ANCHO_BARRA, alto_barra=13, espacio=5):
+        super().__init__()
+        self.fila = fila
+        self.width = width
+        self.alto_barra = alto_barra
+        self.espacio = espacio
+        self.height = alto_barra * 2 + espacio
+
+    def wrap(self, availWidth, availHeight):
+        return (self.width, self.height)
+
+    def _dibujar_barra(self, y, valor, percentil, etiqueta):
+        c = self.canv
+        c.setFillColor(GRIS_CLARO)
+        c.roundRect(0, y, self.width, self.alto_barra, 3, fill=1, stroke=0)
+        # banda de poblacion (35-65) por encima del fondo, por debajo del relleno
+        x_banda = self.width * 0.35
+        ancho_banda = self.width * 0.30
+        c.setFillColor(BANDA_POBLACION)
+        c.rect(x_banda, y, ancho_banda, self.alto_barra, fill=1, stroke=0)
+        ancho_lleno = max(2, min(self.width, self.width * (valor / 100)))
+        c.setFillColor(ACENTO_JERARQUIA)
+        c.roundRect(0, y, ancho_lleno, self.alto_barra, 3, fill=1, stroke=0)
+        # marcador de percentil (triangulo)
+        x_marca = self.width * (percentil / 100)
+        c.setFillColor(colors.black)
+        c.setLineWidth(0)
+        p = c.beginPath()
+        p.moveTo(x_marca - 3, y + self.alto_barra + 4)
+        p.lineTo(x_marca + 3, y + self.alto_barra + 4)
+        p.lineTo(x_marca, y + self.alto_barra)
+        p.close()
+        c.drawPath(p, fill=1, stroke=0)
+        c.setFont(FUENTE_TITULO, 8)
+        c.drawString(-14, y + 3, etiqueta)
+        c.setFont(FUENTE_CONTENIDO, 8)
+        c.drawString(self.width + 6, y + 3, str(valor))
+
+    def draw(self):
+        self.canv.saveState()
+        for etiqueta, clave_valor, clave_percentil in self.ETIQUETAS:
+            y = self.height - self.alto_barra if etiqueta == "N" else 0
+            self._dibujar_barra(y, self.fila[clave_valor], self.fila[clave_percentil], etiqueta)
+        self.canv.restoreState()
 
 
 def _tabla_perfil(perfil):
@@ -174,6 +230,33 @@ def _seccion_descriptores(perfil_adaptado):
         Spacer(1, 10),
         _tabla("bajo"),
     ]
+
+
+def _seccion_jerarquia_conductual(informe):
+    """12 factores fijos (ver disc_jerarquia.py), ordenados de mayor a menor
+    según el perfil Adaptado de esta persona -- ranking y valores 100%
+    personalizados, aunque la fórmula que los deriva de D/I/S/C es una
+    aproximación propia (no hay fórmula TTI conocida, ver disc_jerarquia.py)."""
+    bloques = [
+        Spacer(1, 6),
+        Paragraph("Jerarquía Conductual", SECCION_STYLE),
+        Paragraph(
+            "Los 12 factores de comportamiento, ordenados de mayor a menor según esta persona. Cada fila "
+            "muestra su valor Natural (N) y Adaptado (A) en una escala 0-100; el triángulo marca su "
+            "percentil aproximado frente al resto de la población, y la banda sombreada representa donde "
+            "se sitúa aproximadamente el 68% de la población.",
+            NOTA_STYLE,
+        ),
+        Spacer(1, 10),
+    ]
+    for fila in informe.get("jerarquia_conductual", []):
+        bloques.append(KeepTogether([
+            Paragraph(f"<b>{fila['nombre']}</b> — {fila['definicion']}", ParagraphStyle(
+                "jerarquiaNombre", fontName=FUENTE_CONTENIDO, fontSize=10, spaceBefore=8, spaceAfter=4,
+            )),
+            BarraJerarquia(fila),
+        ]))
+    return bloques
 
 
 def _secciones_perfil(perfil_info):
@@ -365,6 +448,8 @@ def generar_pdf(resultado):
     story += _seccion_estilo_lista_y_areas(informe)
     story += [PageBreak()]
     story += _seccion_potenciadores_productividad(informe)
+    story += [PageBreak()]
+    story += _seccion_jerarquia_conductual(informe)
 
     story += [
         Spacer(1, 20),

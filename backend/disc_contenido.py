@@ -6,6 +6,7 @@ que volver a hacer el test. Lo usan tanto disc_module.py (para exponerlo en
 las rutas) como disc_pdf.py (para el PDF)."""
 
 from disc_contenido_fijo import banda
+from disc_jerarquia import combinar_jerarquias
 from disc_contenido_personalizado import (
     AREAS_MEJORA,
     CARACTERISTICAS_GENERALES,
@@ -74,4 +75,5 @@ def construir_informe_completo(nombre, tipo_disc, perfil_adaptado, perfil_natura
             "eje": eje_bajo_adaptado,
             "bullets": INFLUENCIAS_OCULTAS.get(eje_bajo_adaptado, []),
         },
+        "jerarquia_conductual": combinar_jerarquias(perfil_natural, perfil_adaptado),
     }
