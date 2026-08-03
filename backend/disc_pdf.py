@@ -1,4 +1,5 @@
 import io
+import json
 import os
 
 from reportlab.lib import colors
@@ -7,7 +8,9 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import Flowable, SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import Flowable, PageBreak, SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+from disc_contenido_fijo import CONSEJOS_COMUNICACION, DESCRIPTORES, descriptores_resaltados
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 FONT_DIR = os.path.join(ASSETS_DIR, "fonts")
@@ -21,13 +24,13 @@ try:
 except Exception:
     pass
 
-# Colores estandar DISC (los mismos del script Office/ExcelScript original).
-COLOR_LETRA = {
-    "D": colors.HexColor("#f15b4e"),
-    "I": colors.HexColor("#f2d351"),
-    "S": colors.HexColor("#80ba5b"),
-    "C": colors.HexColor("#5090ad"),
-}
+# Fuente única de verdad de colores, compartida con la web (disc_form.js) --
+# antes vivían hardcodeados aquí por separado (ver design-tokens.json).
+TOKENS_PATH = os.path.join(os.path.dirname(__file__), "..", "frontend", "assets", "design-tokens.json")
+with open(TOKENS_PATH, encoding="utf-8") as _f:
+    _TOKENS = json.load(_f)
+
+COLOR_LETRA = {letra: colors.HexColor(hexval) for letra, hexval in _TOKENS["disc"].items() if not letra.startswith("_")}
 GRIS_TEXTO = colors.HexColor("#52514e")
 GRIS_CLARO = colors.HexColor("#e1e0d9")
 
@@ -94,6 +97,85 @@ def _lista(items):
     return Paragraph("<br/>".join(f"•&nbsp;&nbsp;{item}" for item in items), LISTA_STYLE)
 
 
+NOMBRE_LETRA = {"D": "Dominancia", "I": "Influencia", "S": "Estabilidad", "C": "Conformidad"}
+
+ETIQUETA_EVITAR_STYLE = ParagraphStyle(
+    "etiquetaEvitar", fontName=FUENTE_TITULO, fontSize=10, spaceBefore=6, spaceAfter=2, textColor=GRIS_TEXTO,
+)
+
+
+def _seccion_consejos_comunicacion():
+    """Página 'Consejos de comunicación' -- contenido de referencia fijo
+    (ver disc_contenido_fijo.py), igual para cualquier persona: cómo tratar
+    a alguien de cada perfil D/I/S/C."""
+    bloques = [
+        Spacer(1, 6),
+        Paragraph("Consejos de comunicación", SECCION_STYLE),
+        Paragraph(
+            "Sugerencias para comunicarse mejor con cada tipo de persona, según cuál sea su estilo de "
+            "comportamiento predominante.",
+            NOTA_STYLE,
+        ),
+    ]
+    for letra in ("D", "I", "S", "C"):
+        info = CONSEJOS_COMUNICACION[letra]
+        bloques += [
+            Spacer(1, 6),
+            Paragraph(f"{NOMBRE_LETRA[letra]} — cuando se comunique con {info['descripcion']}:", SUBSECCION_STYLE),
+            _lista(info["hacer"]),
+            Paragraph("Evite:", ETIQUETA_EVITAR_STYLE),
+            _lista(info["evitar"]),
+        ]
+    return bloques
+
+
+def _seccion_descriptores(perfil_adaptado):
+    """Página 'Descriptores' -- banco fijo de 64 palabras (8 'alto' + 8
+    'bajo' por letra); se resalta en el color de cada letra el bloque que
+    corresponde a la banda de esa persona (ver descriptores_resaltados)."""
+    resaltados = descriptores_resaltados(perfil_adaptado)
+    letras = ("D", "I", "S", "C")
+    estilos_normal = {l: ParagraphStyle(f"desc_{l}_n", fontName=FUENTE_CONTENIDO, fontSize=9, textColor=colors.black) for l in letras}
+    estilos_resaltado = {l: ParagraphStyle(f"desc_{l}_r", fontName=FUENTE_TITULO, fontSize=9, textColor=COLOR_LETRA[l]) for l in letras}
+
+    def _tabla(bloque):
+        encabezado = [Paragraph(f"<b>{NOMBRE_LETRA[l]}</b>", ParagraphStyle(f"descHead_{l}", fontName=FUENTE_TITULO, fontSize=10, alignment=1)) for l in letras]
+        filas = [encabezado]
+        for i in range(8):
+            fila = []
+            for letra in letras:
+                palabra = DESCRIPTORES[letra][bloque][i]
+                marcado = resaltados.get(letra) == bloque
+                estilo = estilos_resaltado[letra] if marcado else estilos_normal[letra]
+                fila.append(Paragraph(palabra, estilo))
+            filas.append(fila)
+        ancho_col = (ANCHO_BARRA + 1.5 * cm) / 4
+        t = Table(filas, colWidths=[ancho_col] * 4)
+        t.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LINEBELOW", (0, 0), (-1, 0), 0.5, GRIS_CLARO),
+        ]))
+        return t
+
+    return [
+        Spacer(1, 6),
+        Paragraph("Descriptores", SECCION_STYLE),
+        Paragraph(
+            "Palabras que describen el estilo de comportamiento de esta persona -- cómo resuelve problemas y "
+            "enfrenta retos, influye en los demás, responde al ritmo del entorno y ante las reglas y "
+            "procedimientos. Se resalta el bloque que corresponde a su perfil en cada factor.",
+            NOTA_STYLE,
+        ),
+        Spacer(1, 8),
+        _tabla("alto"),
+        Spacer(1, 10),
+        _tabla("bajo"),
+    ]
+
+
 def _secciones_perfil(perfil_info):
     """Bloque narrativo del informe por perfil (ver disc_perfiles.py) --
     contenido propio, no el de TTI Success Insights."""
@@ -145,6 +227,11 @@ def generar_pdf(resultado):
     ]
 
     story += _secciones_perfil(resultado.get("perfil_info"))
+
+    story += [PageBreak()]
+    story += _seccion_consejos_comunicacion()
+    story += [PageBreak()]
+    story += _seccion_descriptores(resultado["perfil_adaptado"])
 
     story += [
         Spacer(1, 20),

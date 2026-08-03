@@ -57,5 +57,13 @@
     "chip": 8,
     "caja_score": 8,
     "barra": 6
+  },
+
+  "disc": {
+    "_comentario": "Colores estándar de las 4 letras D/I/S/C, compartidos entre disc_form.js (radar Chart.js) y disc_pdf.py — antes vivían hardcodeados por separado en cada sitio.",
+    "D": "#f15b4e",
+    "I": "#f2d351",
+    "S": "#80ba5b",
+    "C": "#5090ad"
   }
 }
