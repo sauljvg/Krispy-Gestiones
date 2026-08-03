@@ -64,6 +64,17 @@ def _normaliza_centro(centro):
     return _CENTRO_ALIASES.get(_normaliza_header(centro), centro)
 
 
+def _normaliza_espacios(texto):
+    """Colapsa espacios/tabs/saltos de linea internos a uno solo, sin tocar
+    mayusculas ni acentos (a diferencia de _normaliza_header, esto es para
+    TEXTO VISIBLE, no para comparar claves). Un mismo enunciado de pregunta
+    puede llegar con "  crecer" (doble espacio, tal cual lo exporto Google
+    Forms hace tiempo) y luego "crecer" (un espacio, tecleado de nuevo en el
+    constructor de Test) -- sin colapsar esto, _column_roles los trata como
+    dos preguntas distintas dentro del mismo bloque."""
+    return re.sub(r"\s+", " ", texto or "").strip()
+
+
 def _normaliza_header(h):
     return (h or "").strip().lower().replace("í", "i").replace("ó", "o").replace("á", "a").replace(
         "é", "e"
@@ -199,6 +210,36 @@ def _mejor_columna_nombre(headers, metadata_cols):
     return metadata_cols.get("nombre")
 
 
+def _agregar_pregunta_bloque(bloques, label, header, pregunta):
+    """Anade (header, pregunta) al bloque `label`, fusionando con una
+    entrada ya existente si su texto de pregunta es el mismo salvo espacios
+    internos (ver _normaliza_espacios) -- esto es lo que evita que la misma
+    pregunta salga duplicada en el informe cuando dos tandas de respuestas
+    (p.ej. un Excel viejo y el modulo de Test) escriben su encabezado con
+    distinto espaciado. Cada entrada guarda TODOS los headers que
+    representan esa pregunta, para que compute_reporte/compute_evolucion
+    puedan sumar los valores de las dos tandas en vez de quedarse solo con
+    la primera."""
+    pregunta_normalizada = _normaliza_espacios(pregunta)
+    lista = bloques.setdefault(label, [])
+    for entrada in lista:
+        if _normaliza_espacios(entrada["pregunta"]) == pregunta_normalizada:
+            entrada["headers"].append(header)
+            return
+    lista.append({"pregunta": pregunta_normalizada, "headers": [header]})
+
+
+def _valor_pregunta_fila(fila, headers):
+    """Primer valor no vacio entre los headers fusionados de una pregunta —
+    una fila real solo trae datos bajo UNO de los headers (el de la tanda
+    con la que se importo/respondio), nunca varios a la vez."""
+    for h in headers:
+        v = fila.get(h)
+        if v not in (None, ""):
+            return v
+    return None
+
+
 def _column_roles(headers, filas=None):
     """Dos formatos reconocidos para las preguntas de escala, además de
     preguntas sueltas sin bloque:
@@ -254,14 +295,14 @@ def _column_roles(headers, filas=None):
         m = _BLOQUE_PREGUNTA_RE.match(h)
         if m:
             prefijo, pregunta = m.group(1).strip(), m.group(2).strip()
-            bloques.setdefault(_normaliza_bloque_label(_bloque_label(prefijo)), []).append((h, pregunta))
+            _agregar_pregunta_bloque(bloques, _normaliza_bloque_label(_bloque_label(prefijo)), h, pregunta)
             continue
         if _tiene_categoria_en_texto(h):
             categoria, _, pregunta = h.partition(".")
-            bloques.setdefault(_normaliza_bloque_label(categoria.strip()), []).append((h, pregunta.strip()))
+            _agregar_pregunta_bloque(bloques, _normaliza_bloque_label(categoria.strip()), h, pregunta.strip())
             continue
         if _es_columna_likert(h, filas):
-            bloques.setdefault(GENERICO_BLOQUE_LABEL, []).append((h, h.strip()))
+            _agregar_pregunta_bloque(bloques, GENERICO_BLOQUE_LABEL, h, h.strip())
             continue
         abiertas.append(h)
 
@@ -1054,12 +1095,12 @@ def compute_reporte(oleada_id, centro=None):
         preguntas_detalle = []
         suma_bloque = 0.0
         count_bloque = 0
-        for header, texto_pregunta in preguntas:
-            valores = [v for v in (_likert_to_num(fila.get(header)) for fila in filas) if v is not None]
+        for entrada in preguntas:
+            valores = [v for v in (_likert_to_num(_valor_pregunta_fila(fila, entrada["headers"])) for fila in filas) if v is not None]
             if not valores:
                 continue
             promedio_p = sum(valores) / len(valores)
-            preguntas_detalle.append({"pregunta": texto_pregunta, "promedio": round(promedio_p, 2)})
+            preguntas_detalle.append({"pregunta": entrada["pregunta"], "promedio": round(promedio_p, 2)})
             suma_bloque += promedio_p
             count_bloque += 1
             suma_global += sum(valores)
@@ -1292,10 +1333,10 @@ def compute_evolucion(oleada_id, centro=None):
         bloques_stats = []
         for bloque_nombre, preguntas in roles["bloques"].items():
             items = []
-            for header, texto_pregunta in preguntas:
-                valores = [v for v in (_likert_to_num(f.get(header)) for f in p["filas"]) if v is not None]
+            for entrada in preguntas:
+                valores = [v for v in (_likert_to_num(_valor_pregunta_fila(f, entrada["headers"])) for f in p["filas"]) if v is not None]
                 media = sum(valores) / len(valores) if valores else None
-                items.append({"pregunta": texto_pregunta, "media": media, "n": len(valores)})
+                items.append({"pregunta": entrada["pregunta"], "media": media, "n": len(valores)})
             validos = [it for it in items if it["media"] is not None]
             total_n = sum(it["n"] for it in validos)
             total_ponderado = (sum(it["media"] * it["n"] for it in validos) / total_n) if total_n else None
