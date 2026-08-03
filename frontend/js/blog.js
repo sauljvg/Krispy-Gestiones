@@ -162,9 +162,13 @@ async function mostrarPost(id) {
     <div class="blog-pdf-wrap">
       <div class="blog-pdf-toolbar">
         <span>📄 Documento adjunto</span>
-        <a href="${pdfUrl}" download>⬇ Descargar PDF</a>
+        <span class="blog-pdf-toolbar-acciones">
+          <a href="${pdfUrl}" target="_blank" rel="noopener">👁 Ver PDF</a>
+          <a href="${pdfUrl}" download>⬇ Descargar PDF</a>
+        </span>
       </div>
       <iframe src="${pdfUrl}" class="blog-pdf-frame"></iframe>
+      <p class="blog-pdf-movil-aviso">En el móvil, si el documento no se desplaza aquí abajo, usa "Ver PDF" arriba — se abre en una pestaña propia donde sí puedes pasar de página.</p>
     </div>`
     : "";
   postEl.innerHTML = `
