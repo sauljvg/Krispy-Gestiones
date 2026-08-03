@@ -15,7 +15,7 @@
 </script>
 <link rel="stylesheet" href="css/styles.css?v=20260728a">
 <style>
-  .blog-brand-logo { height: 48px; width: auto; display: block; }
+  .blog-brand-logo { height: 64px; width: auto; display: block; }
 
   /* Cabecera de bienvenida sobre el listado — para que la portada del blog
      no sea solo una rejilla de tarjetas a secas. */
@@ -27,7 +27,7 @@
     border: 1px solid var(--border); border-radius: 14px; padding: 22px 26px;
     display: flex; align-items: center; gap: 18px;
   }
-  .blog-hero-card img { height: 56px; width: auto; flex-shrink: 0; }
+  .blog-hero-card img { height: 84px; width: auto; flex-shrink: 0; }
   .blog-hero-card p { margin: 0; font-size: 14px; color: var(--text-secondary); line-height: 1.5; }
   @media (max-width: 700px) {
     .blog-hero { padding: 20px 16px 0; }
@@ -38,13 +38,12 @@
      página no debe verse vacía antes del visor — se muestra este bloque de
      bienvenida con el logo en vez de nada. */
   .blog-post-intro {
-    display: flex; flex-direction: column; align-items: center; gap: 10px;
-    text-align: center; padding: 28px 20px; margin-bottom: 8px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 36px 20px; margin-bottom: 8px;
     background: color-mix(in srgb, var(--acento) 8%, var(--surface-1));
     border: 1px solid var(--border); border-radius: 14px;
   }
-  .blog-post-intro img { height: 64px; width: auto; }
-  .blog-post-intro p { margin: 0; font-size: 14px; color: var(--text-secondary); max-width: 480px; }
+  .blog-post-intro img { height: 120px; width: auto; max-width: 100%; }
 
   .blog-layout {
     max-width: 1400px; margin: 0 auto; padding: 24px 32px 60px;
@@ -181,6 +180,6 @@
 </div>
 <script src="js/vendor/pdf.min.js"></script>
 <script src="js/theme.js?v=20260723f"></script>
-<script src="js/blog.js?v=20260803b"></script>
+<script src="js/blog.js?v=20260803c"></script>
 </body>
 </html>

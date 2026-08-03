@@ -236,7 +236,6 @@ async function mostrarPost(id) {
     ? `
     <div class="blog-post-intro">
       <img src="assets/la-receta-logo.png" alt="La Receta Semanal">
-      <p>Este boletín se comparte como documento — tienes todo el contenido aquí abajo, sin salir de la página 👇</p>
     </div>`
     : "";
   postEl.innerHTML = `
