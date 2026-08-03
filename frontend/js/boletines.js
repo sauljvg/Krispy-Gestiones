@@ -1,5 +1,6 @@
 let currentPostId = null;
 let contactosActuales = [];
+let postTienePdf = false; // el PDF cuenta como contenido en sí mismo — no exige además un bloque
 
 // Icono SVG en vez de 🔗 — se ve igual de nítido en cualquier sistema.
 const ICONO_ENLACE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
@@ -87,6 +88,7 @@ async function abrirEditor(postId, esNuevo = false) {
   document.getElementById("btn-eliminar-post").hidden = false;
   document.getElementById("envio-section").hidden = false;
   document.getElementById("pdf-section").hidden = false;
+  postTienePdf = !!post.tiene_pdf;
   document.getElementById("pdf-actual-txt").innerHTML = post.tiene_pdf
     ? `📄 <a href="${AUTH_API_BASE}/boletines/posts/${postId}/pdf" target="_blank">Ver PDF actual</a>`
     : "Este boletín no tiene PDF adjunto todavía.";
@@ -118,8 +120,8 @@ async function guardarPost() {
     alert("El título es obligatorio.");
     return;
   }
-  if (!BoletinBuilder.tieneBloques()) {
-    alert("Añade al menos un bloque de contenido.");
+  if (!BoletinBuilder.tieneBloques() && !postTienePdf) {
+    alert("Añade al menos un bloque de contenido o adjunta un PDF.");
     return;
   }
   const body = JSON.stringify({

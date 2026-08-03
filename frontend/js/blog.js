@@ -162,6 +162,7 @@ function mostrarLista() {
   postIdActual = null;
   pdfRenderToken++; // descarta cualquier render de PDF en curso al volver a la lista
   quitarIndiceCapitulos();
+  document.getElementById("blog-hero").hidden = false;
   document.getElementById("blog-post").hidden = true;
   const listaEl = document.getElementById("blog-lista");
   listaEl.hidden = false;
@@ -191,6 +192,19 @@ function mostrarLista() {
   history.pushState({}, "", "/blog.html");
 }
 
+// Un boletín publicado solo con PDF (sin bloques) trae contenido_html vacío
+// o reducido a un <p></p> suelto — sin esto la página se ve completamente
+// en blanco hasta llegar al visor del PDF.
+function contenidoEstaVacio(html) {
+  const texto = (html || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/gi, "")
+    .trim();
+  return texto.length === 0;
+}
+
 async function mostrarPost(id) {
   const res = await fetch(`${API_BASE}/posts/${id}`);
   if (!res.ok) {
@@ -199,6 +213,7 @@ async function mostrarPost(id) {
   }
   const post = await res.json();
   postIdActual = id;
+  document.getElementById("blog-hero").hidden = true;
   document.getElementById("blog-lista").hidden = true;
   const postEl = document.getElementById("blog-post");
   postEl.hidden = false;
@@ -216,12 +231,21 @@ async function mostrarPost(id) {
       <div class="blog-pdf-paginas" id="blog-pdf-paginas"></div>
     </div>`
     : "";
+  const sinContenido = contenidoEstaVacio(post.contenido_html);
+  const introHtml = sinContenido && post.tiene_pdf
+    ? `
+    <div class="blog-post-intro">
+      <img src="assets/la-receta-logo.png" alt="La Receta Semanal">
+      <p>Este boletín se comparte como documento — tienes todo el contenido aquí abajo, sin salir de la página 👇</p>
+    </div>`
+    : "";
   postEl.innerHTML = `
     <button class="btn btn-ghost btn-volver-blog" type="button">← Volver</button>
     <div class="blog-post">
       <h1>${escapeHTML(post.titulo)}</h1>
       <div class="fecha">${(post.publicado_en || "").slice(0, 10)}</div>
-      <div class="contenido">${post.contenido_html}</div>
+      ${introHtml}
+      ${sinContenido ? "" : `<div class="contenido">${post.contenido_html}</div>`}
       ${pdfHtml}
     </div>
   `;

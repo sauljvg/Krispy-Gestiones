@@ -134,10 +134,13 @@ async function uploadTakeoutZip(file) {
       .map((t) => `${t.tienda}: +${t.nuevas} nuevas (total ${t.total_ahora}${t.total_google ? `/${t.total_google}` : ""})`)
       .join("\n");
     alert(`Importación completa — ${body.total_nuevas} reseñas nuevas en total.\n\n${lineas}`);
+    // Se actualiza primero y por separado: si loadStores/loadStoreRanking/
+    // refreshAll fallan por lo que sea, no debe arrastrar consigo la fecha
+    // de última importación (que sí se guardó bien en el servidor).
+    await cargarUltimaImportacionTakeout().catch((err) => console.error("No se pudo refrescar la fecha de última importación", err));
     await loadStores();
     await loadStoreRanking();
     await refreshAll();
-    await cargarUltimaImportacionTakeout();
   } finally {
     if (btn) btn.textContent = "📥 Importar Takeout";
   }
@@ -151,7 +154,10 @@ async function cargarUltimaImportacionTakeout() {
   if (!el) return;
   try {
     const res = await fetch(`${API_BASE}/import/takeout/ultima`);
-    if (!res.ok) return;
+    if (!res.ok) {
+      console.error("No se pudo obtener la fecha de última importación:", res.status);
+      return;
+    }
     const data = await res.json();
     if (!data.ultima_importacion) return;
     const fecha = new Date(`${data.ultima_importacion}Z`);
@@ -160,8 +166,9 @@ async function cargarUltimaImportacionTakeout() {
     });
     el.textContent = `🕒 Última actualización: ${texto}`;
     el.hidden = false;
-  } catch {
+  } catch (err) {
     // sin conexión: se deja oculto, no bloquea el resto de la página
+    console.error("No se pudo cargar la fecha de última importación:", err);
   }
 }
 

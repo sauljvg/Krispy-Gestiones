@@ -15,6 +15,37 @@
 </script>
 <link rel="stylesheet" href="css/styles.css?v=20260728a">
 <style>
+  .blog-brand-logo { height: 48px; width: auto; display: block; }
+
+  /* Cabecera de bienvenida sobre el listado — para que la portada del blog
+     no sea solo una rejilla de tarjetas a secas. */
+  .blog-hero {
+    max-width: 1400px; margin: 0 auto; padding: 28px 32px 0;
+  }
+  .blog-hero-card {
+    background: linear-gradient(135deg, color-mix(in srgb, var(--acento) 14%, var(--surface-1)), var(--surface-1));
+    border: 1px solid var(--border); border-radius: 14px; padding: 22px 26px;
+    display: flex; align-items: center; gap: 18px;
+  }
+  .blog-hero-card img { height: 56px; width: auto; flex-shrink: 0; }
+  .blog-hero-card p { margin: 0; font-size: 14px; color: var(--text-secondary); line-height: 1.5; }
+  @media (max-width: 700px) {
+    .blog-hero { padding: 20px 16px 0; }
+    .blog-hero-card { flex-direction: column; text-align: center; padding: 20px; }
+  }
+
+  /* Cuando el boletín se publica solo con PDF (sin bloques de texto), la
+     página no debe verse vacía antes del visor — se muestra este bloque de
+     bienvenida con el logo en vez de nada. */
+  .blog-post-intro {
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    text-align: center; padding: 28px 20px; margin-bottom: 8px;
+    background: color-mix(in srgb, var(--acento) 8%, var(--surface-1));
+    border: 1px solid var(--border); border-radius: 14px;
+  }
+  .blog-post-intro img { height: 64px; width: auto; }
+  .blog-post-intro p { margin: 0; font-size: 14px; color: var(--text-secondary); max-width: 480px; }
+
   .blog-layout {
     max-width: 1400px; margin: 0 auto; padding: 24px 32px 60px;
     display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 32px; align-items: start;
@@ -120,16 +151,19 @@
 <div class="app">
   <header class="topbar">
     <div class="brand">
-      <span class="brand-icon">📰</span>
-      <div>
-        <h1>Krispy Gestiones</h1>
-        <p class="subtitle">Boletines</p>
-      </div>
+      <img src="assets/la-receta-logo.png" alt="Krispy Kreme · La Receta Semanal" class="blog-brand-logo">
     </div>
     <div class="topbar-actions">
       <button type="button" id="btn-theme-toggle" class="btn btn-ghost hamburger-btn" aria-label="Cambiar tema">🌙</button>
     </div>
   </header>
+
+  <div class="blog-hero" id="blog-hero">
+    <div class="blog-hero-card">
+      <img src="assets/la-receta-logo.png" alt="La Receta Semanal">
+      <p>Cada semana, novedades, recetas y noticias del equipo Krispy Kreme España. Elige un boletín de la lista para leerlo.</p>
+    </div>
+  </div>
 
   <div class="blog-layout">
     <div class="blog-main">
@@ -147,6 +181,6 @@
 </div>
 <script src="js/vendor/pdf.min.js"></script>
 <script src="js/theme.js?v=20260723f"></script>
-<script src="js/blog.js?v=20260803a"></script>
+<script src="js/blog.js?v=20260803b"></script>
 </body>
 </html>
