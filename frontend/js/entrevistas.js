@@ -299,7 +299,7 @@ function renderDetalleBloques(statsPorPeriodo) {
     .join("");
 }
 
-function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquetaVacio, alEliminar) {
+function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquetaVacio, alEliminar, alEditarEmail) {
   const wrap = document.getElementById(wrapId);
   const lista = document.getElementById(listaId);
   document.getElementById(summaryId).textContent = `${items.length} ${etiquetaVacio}`;
@@ -308,7 +308,10 @@ function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquet
     .map((it) => `
       <li>
         <span>${escapeHTML(formatoItem(it))}</span>
-        ${alEliminar ? `<button type="button" class="btn-eliminar-auditoria" data-id="${it.salida_id}" title="Eliminar registro">🗑</button>` : ""}
+        <span class="auditoria-acciones">
+          ${alEditarEmail ? `<button type="button" class="btn-editar-email-auditoria${it.email ? "" : " btn-sin-email"}" data-id="${it.salida_id}" data-email="${escapeHTML(it.email || "")}" title="${it.email ? "Editar email" : "Falta el email — no llegará el recordatorio"}">✉ ${it.email ? "email" : "sin email"}</button>` : ""}
+          ${alEliminar ? `<button type="button" class="btn-eliminar-auditoria" data-id="${it.salida_id}" title="Eliminar registro">🗑</button>` : ""}
+        </span>
       </li>`)
     .join("");
   if (alEliminar) {
@@ -316,6 +319,16 @@ function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquet
       btn.addEventListener("click", async () => {
         if (!confirm("¿Eliminar este registro de salida? Esta acción no se puede deshacer.")) return;
         await alEliminar(Number(btn.dataset.id));
+      });
+    });
+  }
+  if (alEditarEmail) {
+    lista.querySelectorAll(".btn-editar-email-auditoria").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const actual = btn.dataset.email || "";
+        const nuevo = prompt("Email para el recordatorio:", actual);
+        if (nuevo === null) return;
+        await alEditarEmail(Number(btn.dataset.id), nuevo.trim());
       });
     });
   }
@@ -471,6 +484,20 @@ async function crearSalidaManual(centro, nombre, fechaBaja, email) {
   await loadEvolucion(currentCentro);
 }
 
+async function editarEmailSalida(salidaId, email) {
+  const res = await fetch(`${AUTH_API_BASE}/entrevistas/${currentOleada}/salidas/${salidaId}/email`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "No se pudo guardar el email.");
+    return;
+  }
+  await loadEvolucion(currentCentro);
+}
+
 async function eliminarSalida(salidaId) {
   const res = await fetch(`${AUTH_API_BASE}/entrevistas/${currentOleada}/salidas/${salidaId}`, { method: "DELETE" });
   if (!res.ok) {
@@ -513,7 +540,8 @@ async function loadEvolucion(centro) {
       "auditoria-f-wrap", "auditoria-f-summary", "auditoria-f-lista",
       data.auditoria_f, (a) => `${a.nombre} — ${a.centro || ""} (baja: ${(a.fecha_baja || "").slice(0, 10)})`,
       "salidas sin ninguna respuesta detectada",
-      eliminarSalida
+      eliminarSalida,
+      editarEmailSalida
     );
     wireRecordatorio(data.auditoria_f);
     renderAuditoriaG(data.auditoria_g, data.auditoria_f);

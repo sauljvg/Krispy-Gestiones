@@ -82,6 +82,13 @@
     border-radius: 6px; padding: 2px 7px; font-size: 12px; cursor: pointer; line-height: 1.4;
   }
   .btn-eliminar-auditoria:hover { border-color: #c0392b; }
+  .auditoria-acciones { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .btn-editar-email-auditoria {
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+    border-radius: 6px; padding: 2px 8px; font-size: 12px; cursor: pointer; white-space: nowrap;
+  }
+  .btn-editar-email-auditoria:hover { border-color: var(--acento); }
+  .btn-editar-email-auditoria.btn-sin-email { border-color: #c0392b; color: #c0392b; }
   .salida-manual-form { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
   .salida-manual-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .salida-manual-row select, .salida-manual-row input {

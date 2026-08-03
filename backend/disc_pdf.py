@@ -9,7 +9,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import Flowable, KeepTogether, PageBreak, SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import Flowable, Image, KeepTogether, PageBreak, SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
 from disc_contenido_fijo import (
     CONSEJOS_COMUNICACION,
@@ -23,6 +23,8 @@ from disc_contenido_fijo import (
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 FONT_DIR = os.path.join(ASSETS_DIR, "fonts")
+LOGO_PATH = os.path.join(ASSETS_DIR, "kk_logo.png")
+LOGO_RATIO_ALTO_ANCHO = 1601 / 4933  # proporcion real del wordmark (alto/ancho en px)
 FUENTE_TITULO = "Helvetica-Bold"
 FUENTE_CONTENIDO = "Helvetica"
 try:
@@ -633,8 +635,15 @@ class _MarcaSeccion(Flowable):
 
 
 def _portada(resultado):
-    return [
-        Spacer(1, 6 * cm),
+    bloques = [Spacer(1, 4 * cm)]
+    if os.path.exists(LOGO_PATH):
+        ancho_logo = 8 * cm
+        logo = Image(LOGO_PATH, width=ancho_logo, height=ancho_logo * LOGO_RATIO_ALTO_ANCHO)
+        logo.hAlign = "CENTER"
+        bloques += [logo, Spacer(1, 1.5 * cm)]
+    else:
+        bloques.append(Spacer(1, 2 * cm))
+    bloques += [
         Paragraph("Perfil DISC", PORTADA_TITULO_STYLE),
         Paragraph("Aproximación al método TTI Success Insights", PORTADA_SUB_STYLE),
         Paragraph(resultado["nombre"], PORTADA_NOMBRE_STYLE),
@@ -642,6 +651,7 @@ def _portada(resultado):
         Paragraph(str(resultado["fecha_test"])[:10], PORTADA_DATO_STYLE),
         PageBreak(),
     ]
+    return bloques
 
 
 def _indice(registro):

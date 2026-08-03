@@ -1332,6 +1332,23 @@ def add_salida(oleada_id, centro, nombre, fecha_baja, email=None):
     conn.close()
 
 
+def update_salida_email(salida_id, email):
+    """Rellena/corrige el email de una salida ya existente (p.ej. importada
+    del Excel sin esa columna, o con un dato equivocado) -- para no tener
+    que reimportar el Excel entero solo por eso. Deja el registro "completo"
+    de cara al recordatorio (mailto), igual que el email opcional del alta
+    manual."""
+    email_limpio = (email or "").strip()
+    if not email_limpio:
+        raise ValueError("El email no puede estar vacío")
+    if not _EMAIL_RE.match(email_limpio):
+        raise ValueError("El email no tiene un formato válido")
+    conn = get_connection()
+    conn.execute("UPDATE entrevistas_salidas SET email = ? WHERE id = ?", (email_limpio, salida_id))
+    conn.commit()
+    conn.close()
+
+
 def delete_salida(salida_id):
     """Elimina una salida (p.ej. una dada de alta a mano por error) — junto
     con su vínculo manual a una respuesta si tenía uno, para no dejar una

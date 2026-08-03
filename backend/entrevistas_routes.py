@@ -20,6 +20,10 @@ class MatchIn(BaseModel):
     salida_id: int
 
 
+class SalidaEmailIn(BaseModel):
+    email: str
+
+
 class MotivoIn(BaseModel):
     motivo: str
 
@@ -111,6 +115,15 @@ def crear_salida_route(oleada_id: int, body: SalidaIn, _user: dict = Depends(req
 @router.delete("/{oleada_id}/salidas/{salida_id}")
 def borrar_salida_route(oleada_id: int, salida_id: int, _user: dict = Depends(require_entrevistas_oleada)):
     entrevistas_module.delete_salida(salida_id)
+    return {"ok": True}
+
+
+@router.patch("/{oleada_id}/salidas/{salida_id}/email")
+def actualizar_salida_email_route(oleada_id: int, salida_id: int, body: SalidaEmailIn, _user: dict = Depends(require_entrevistas_oleada)):
+    try:
+        entrevistas_module.update_salida_email(salida_id, body.email)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True}
 
 
