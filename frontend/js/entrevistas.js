@@ -164,12 +164,12 @@ function renderChartBloque(canvasId, existingChart, items) {
 function renderChartMotivos(items) {
   const ctx = document.getElementById("chart-motivos");
   if (chartMotivos) chartMotivos.destroy();
-  ctx.parentElement.style.height = "320px";
+  ctx.parentElement.style.height = "420px";
   const colorTexto = colorTextoActual();
   chartMotivos = new Chart(ctx, {
     type: "bar",
     data: {
-      labels: items.map((i) => i.motivo),
+      labels: items.map((i) => wrapLabel(i.motivo, 12)),
       datasets: [{ data: items.map((i) => i.porcentaje), backgroundColor: MARCA_COLOR, borderRadius: 4 }],
     },
     options: {
@@ -177,7 +177,7 @@ function renderChartMotivos(items) {
       maintainAspectRatio: false,
       scales: {
         y: { min: 0, max: 100, ticks: { color: colorTexto, callback: (v) => `${v}%` }, grid: { color: "rgba(128,128,128,0.2)" } },
-        x: { ticks: { color: colorTexto, autoSkip: false, maxRotation: 60, minRotation: 30 }, grid: { display: false } },
+        x: { ticks: { color: colorTexto, autoSkip: false, maxRotation: 0, minRotation: 0 }, grid: { display: false } },
       },
       plugins: {
         legend: { display: false },
