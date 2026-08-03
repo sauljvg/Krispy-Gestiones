@@ -111,7 +111,14 @@ def descargar_pdf_route(post_id: int, _user: dict = Depends(require_boletines)):
         raise HTTPException(status_code=404, detail="Este boletín no tiene PDF adjunto")
     return FileResponse(
         pdf_info["ruta"], media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{pdf_info["nombre"]}"'},
+        headers={
+            "Content-Disposition": f'inline; filename="{pdf_info["nombre"]}"',
+            # Sin esto el navegador puede quedarse con la versión vieja del
+            # PDF tras reemplazarlo (el ETag/Last-Modified sí cambian, pero
+            # sin Cache-Control el navegador no siempre revalida antes de
+            # reusar la caché) — no-cache fuerza esa revalidación siempre.
+            "Cache-Control": "no-cache",
+        },
     )
 
 
@@ -219,5 +226,8 @@ def descargar_pdf_publico_route(post_id: int):
         raise HTTPException(status_code=404, detail="Este boletín no tiene PDF adjunto")
     return FileResponse(
         pdf_info["ruta"], media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{pdf_info["nombre"]}"'},
+        headers={
+            "Content-Disposition": f'inline; filename="{pdf_info["nombre"]}"',
+            "Cache-Control": "no-cache",
+        },
     )
