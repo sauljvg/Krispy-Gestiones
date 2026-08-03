@@ -1,10 +1,15 @@
 const API_BASE = `${window.location.origin}/api/public/boletines`;
 
+if (window.pdfjsLib) {
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = "js/vendor/pdf.worker.min.js";
+}
+
 let todosPosts = [];
 let ordenDescendente = true; // true = más recientes primero
 let postIdActual = null; // null = viendo la lista
 let indiceObserver = null;
 let revealObserver = null;
+let pdfRenderToken = 0; // se incrementa en cada mostrarPost para descartar renders de posts abandonados
 
 function quitarIndiceCapitulos() {
   if (indiceObserver) { indiceObserver.disconnect(); indiceObserver = null; }
@@ -71,6 +76,46 @@ function activarAnimacionesScroll(postEl) {
   hijos.forEach((el) => revealObserver.observe(el));
 }
 
+// Renderiza cada página del PDF como <canvas> dentro de la página, en vez de
+// un visor embebido en iframe — así el scroll es el scroll normal de la
+// página web (funciona igual en móvil, donde el visor nativo anidado en un
+// iframe solo dejaba ver la primera página).
+async function renderPdfInline(url, contenedor) {
+  const miToken = ++pdfRenderToken;
+  if (!window.pdfjsLib) {
+    contenedor.innerHTML = `<p class="blog-pdf-error">No se pudo cargar el visor de documentos. <a href="${url}" target="_blank" rel="noopener">Abrir el PDF en una pestaña nueva</a>.</p>`;
+    return;
+  }
+  contenedor.innerHTML = `<p class="blog-pdf-cargando">Cargando documento…</p>`;
+  try {
+    const pdf = await window.pdfjsLib.getDocument(url).promise;
+    if (miToken !== pdfRenderToken) return;
+    contenedor.innerHTML = "";
+    const anchoDisponible = contenedor.clientWidth || 600;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    for (let num = 1; num <= pdf.numPages; num++) {
+      const page = await pdf.getPage(num);
+      if (miToken !== pdfRenderToken) return;
+      const viewportBase = page.getViewport({ scale: 1 });
+      const escala = anchoDisponible / viewportBase.width;
+      const viewport = page.getViewport({ scale: escala * dpr });
+      const canvas = document.createElement("canvas");
+      canvas.className = "blog-pdf-pagina";
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      canvas.style.width = "100%";
+      canvas.style.height = "auto";
+      contenedor.appendChild(canvas);
+      await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+      if (miToken !== pdfRenderToken) return;
+    }
+  } catch (err) {
+    if (miToken !== pdfRenderToken) return;
+    console.error("No se pudo renderizar el PDF", err);
+    contenedor.innerHTML = `<p class="blog-pdf-error">No se pudo mostrar el documento aquí. <a href="${url}" target="_blank" rel="noopener">Ábrelo en una pestaña nueva</a>.</p>`;
+  }
+}
+
 function escapeHTML(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";
@@ -115,6 +160,7 @@ function renderSidebar() {
 
 function mostrarLista() {
   postIdActual = null;
+  pdfRenderToken++; // descarta cualquier render de PDF en curso al volver a la lista
   quitarIndiceCapitulos();
   document.getElementById("blog-post").hidden = true;
   const listaEl = document.getElementById("blog-lista");
@@ -163,12 +209,11 @@ async function mostrarPost(id) {
       <div class="blog-pdf-toolbar">
         <span>📄 Documento adjunto</span>
         <span class="blog-pdf-toolbar-acciones">
-          <a href="${pdfUrl}" target="_blank" rel="noopener">👁 Ver PDF</a>
+          <a href="${pdfUrl}" target="_blank" rel="noopener">↗ Abrir en pestaña</a>
           <a href="${pdfUrl}" download>⬇ Descargar PDF</a>
         </span>
       </div>
-      <iframe src="${pdfUrl}" class="blog-pdf-frame"></iframe>
-      <p class="blog-pdf-movil-aviso">En el móvil, si el documento no se desplaza aquí abajo, usa "Ver PDF" arriba — se abre en una pestaña propia donde sí puedes pasar de página.</p>
+      <div class="blog-pdf-paginas" id="blog-pdf-paginas"></div>
     </div>`
     : "";
   postEl.innerHTML = `
@@ -184,6 +229,11 @@ async function mostrarPost(id) {
   renderSidebar();
   montarIndiceCapitulos(postEl);
   activarAnimacionesScroll(postEl);
+  if (post.tiene_pdf) {
+    renderPdfInline(pdfUrl, document.getElementById("blog-pdf-paginas"));
+  } else {
+    pdfRenderToken++; // invalida cualquier render de PDF en curso de un post anterior
+  }
   history.pushState({}, "", `/blog.html?post=${id}`);
 }
 
