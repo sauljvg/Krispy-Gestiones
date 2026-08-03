@@ -9,7 +9,7 @@ from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
 import analytics
-from db import dict_rows, get_connection
+from db import dict_rows, get_connection, get_ultima_importacion_takeout, set_ultima_importacion_takeout
 from request_context import tiendas_permitidas_actual
 from utils import paginate, read_transactions_xlsx, rows_to_csv, rows_to_xlsx
 
@@ -499,6 +499,14 @@ def import_takeout(file: UploadFile = File(...)):
             raise HTTPException(500, f"{type(e).__name__}: {e}")
 
         total_nuevas = sum(r["nuevas"] for r in report)
+        set_ultima_importacion_takeout()
         return {"ok": True, "total_nuevas": total_nuevas, "tiendas": report}
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@router.get("/import/takeout/ultima")
+def ultima_importacion_takeout_route():
+    """Fecha/hora de la última importación de Takeout — visible para
+    cualquiera con acceso a Reseñas (hereda require_resenas del router)."""
+    return {"ultima_importacion": get_ultima_importacion_takeout()}

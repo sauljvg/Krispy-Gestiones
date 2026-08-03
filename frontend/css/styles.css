@@ -173,6 +173,8 @@ h3 {
 .topbar-group { display: flex; align-items: center; gap: 8px; padding-left: 14px; border-left: 1px solid var(--border); }
 .topbar-group:first-child { padding-left: 0; border-left: none; }
 
+.ultima-importacion-txt { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+
 /* Menú hamburguesa — agrupa Inicio/usuario/tema/Salir en un desplegable
    superpuesto, igual en todas las páginas, para no llenar el topbar de
    botones sueltos de cuenta/navegación. */

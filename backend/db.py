@@ -1,3 +1,4 @@
+import datetime
 import os
 import sqlite3
 
@@ -89,6 +90,42 @@ def _ensure_reviews_columns():
     conn.close()
 
 
+def _ensure_import_meta_table():
+    """Fila única con la fecha/hora de la última importación de Takeout —
+    visible para cualquiera con acceso a Reseñas, no solo quien la lanzó
+    (antes esa información no se guardaba en ningún sitio)."""
+    conn = get_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS import_meta (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            ultima_importacion_takeout TEXT
+        )
+    """)
+    conn.execute("INSERT OR IGNORE INTO import_meta (id, ultima_importacion_takeout) VALUES (1, NULL)")
+    conn.commit()
+    conn.close()
+
+
+def get_ultima_importacion_takeout():
+    conn = get_connection()
+    row = conn.execute("SELECT ultima_importacion_takeout FROM import_meta WHERE id = 1").fetchone()
+    conn.close()
+    return row["ultima_importacion_takeout"] if row else None
+
+
+def set_ultima_importacion_takeout():
+    # UTC, igual que reviews.creado_en — el frontend lo convierte a hora
+    # local del navegador al mostrarlo (ver reviews.js/dashboard.js).
+    conn = get_connection()
+    conn.execute(
+        "UPDATE import_meta SET ultima_importacion_takeout = ? WHERE id = 1",
+        (datetime.datetime.utcnow().isoformat(),),
+    )
+    conn.commit()
+    conn.close()
+
+
 _ensure_transactions_table()
 _ensure_store_meta_table()
 _ensure_reviews_columns()
+_ensure_import_meta_table()

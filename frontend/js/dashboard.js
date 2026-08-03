@@ -137,8 +137,31 @@ async function uploadTakeoutZip(file) {
     await loadStores();
     await loadStoreRanking();
     await refreshAll();
+    await cargarUltimaImportacionTakeout();
   } finally {
     if (btn) btn.textContent = "📥 Importar Takeout";
+  }
+}
+
+// Fecha/hora de la última importación de Takeout, visible para cualquiera
+// con acceso a Reseñas (no solo quien la ejecutó) — se guarda en el
+// servidor (ver db.get_ultima_importacion_takeout), no en localStorage.
+async function cargarUltimaImportacionTakeout() {
+  const el = document.getElementById("ultima-importacion-takeout");
+  if (!el) return;
+  try {
+    const res = await fetch(`${API_BASE}/import/takeout/ultima`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.ultima_importacion) return;
+    const fecha = new Date(`${data.ultima_importacion}Z`);
+    const texto = fecha.toLocaleString("es-ES", {
+      day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit",
+    });
+    el.textContent = `🕒 Última actualización: ${texto}`;
+    el.hidden = false;
+  } catch {
+    // sin conexión: se deja oculto, no bloquea el resto de la página
   }
 }
 
@@ -498,6 +521,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   wireUserBar(user);
   tiendasPermitidas = user.tiendas || [];
+
+  cargarUltimaImportacionTakeout();
 
   wireFilters(() => refreshAll(), () => loadReviews());
 
