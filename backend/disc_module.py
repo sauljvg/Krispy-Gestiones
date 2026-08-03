@@ -18,6 +18,7 @@ import auth as auth_module
 from auth_routes import get_current_user
 from config_disc import FACTORES_TTI, PESOS_RANKING
 from db import get_connection
+from disc_contenido import construir_informe_completo
 from disc_perfiles import PERFILES_DISC, obtener_perfil
 
 LETRAS = ["D", "I", "S", "C"]
@@ -253,6 +254,7 @@ def _calcular_y_guardar(nombre, respuestas):
         "perfil_adaptado": perfiles["adaptado"],
         "perfil_natural": perfiles["natural"],
         "perfil_info": obtener_perfil(tipo_disc),
+        "informe_completo": construir_informe_completo(nombre.strip(), tipo_disc, perfiles["adaptado"], perfiles["natural"]),
     }
 
 
@@ -262,15 +264,18 @@ def calcular_route(body: CalcularBody, _user: dict = Depends(require_disc)):
 
 
 def _row_to_dict(row):
+    perfil_adaptado = json.loads(row["perfil_adaptado"])
+    perfil_natural = json.loads(row["perfil_natural"])
     return {
         "id": row["id"],
         "nombre": row["nombre"],
         "fecha_test": row["fecha_test"],
         "puntos_brutos": json.loads(row["puntos_brutos"]),
         "tipo_disc": row["tipo_disc"],
-        "perfil_adaptado": json.loads(row["perfil_adaptado"]),
-        "perfil_natural": json.loads(row["perfil_natural"]),
+        "perfil_adaptado": perfil_adaptado,
+        "perfil_natural": perfil_natural,
         "perfil_info": obtener_perfil(row["tipo_disc"]),
+        "informe_completo": construir_informe_completo(row["nombre"], row["tipo_disc"], perfil_adaptado, perfil_natural),
     }
 
 

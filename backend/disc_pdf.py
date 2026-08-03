@@ -177,20 +177,19 @@ def _seccion_descriptores(perfil_adaptado):
 
 
 def _secciones_perfil(perfil_info):
-    """Bloque narrativo del informe por perfil (ver disc_perfiles.py) --
-    contenido propio, no el de TTI Success Insights."""
+    """Bloque narrativo corto del informe por TIPO (ver disc_perfiles.py) --
+    contenido propio, no el de TTI Success Insights. 'Características
+    generales' y 'Áreas de mejora' viven ahora en informe_completo (más
+    extensas, ver _seccion_caracteristicas_valor / _seccion_estilo_lista_y_areas
+    más abajo) -- aquí solo queda lo que no se duplica."""
     if not perfil_info:
         return []
     return [
         Spacer(1, 6),
         Paragraph(perfil_info["nombre"], NOMBRE_PERFIL_STYLE),
         Paragraph(perfil_info["resumen"], RESUMEN_PERFIL_STYLE),
-        Paragraph("Características generales", SUBSECCION_STYLE),
-        _lista(perfil_info["caracteristicas"]),
         Paragraph("Fortalezas", SUBSECCION_STYLE),
         _lista(perfil_info["fortalezas"]),
-        Paragraph("Posibles áreas de mejora", SUBSECCION_STYLE),
-        _lista(perfil_info["areas_de_mejora"]),
         Paragraph("Qué le motiva", SUBSECCION_STYLE),
         _lista(perfil_info["motivadores"]),
         Paragraph("Bajo presión", SUBSECCION_STYLE),
@@ -200,6 +199,125 @@ def _secciones_perfil(perfil_info):
         Paragraph("Entorno ideal", SUBSECCION_STYLE),
         Paragraph(perfil_info["entorno_ideal"], LISTA_STYLE),
     ]
+
+
+def _parrafos(texto):
+    """Convierte un texto con '\\n\\n' entre párrafos en varios Paragraph."""
+    return [Paragraph(p, LISTA_STYLE) for p in texto.split("\n\n") if p.strip()]
+
+
+def _seccion_caracteristicas_valor(informe):
+    """Páginas 'Características generales' + 'Valor que aporta a la
+    organización' -- narrativa larga por tipo + lista de valor."""
+    bloques = [
+        Spacer(1, 6),
+        Paragraph("Características generales", SECCION_STYLE),
+    ]
+    bloques += _parrafos(informe.get("caracteristicas_generales", ""))
+    bloques += [
+        Spacer(1, 10),
+        Paragraph("Valor que aporta a la organización", SECCION_STYLE),
+        _lista(informe.get("valor_organizacion", [])),
+    ]
+    return bloques
+
+
+def _seccion_puntos_comunicacion(informe):
+    """Página 'Puntos a tener en cuenta -- en la comunicación': qué hacer /
+    qué evitar al comunicarse CON esta persona (distinto de 'Consejos de
+    comunicación', que es al revés y siempre igual para todos)."""
+    return [
+        Spacer(1, 6),
+        Paragraph("Puntos a tener en cuenta en la comunicación", SECCION_STYLE),
+        Paragraph("Maneras de comunicarse con esta persona:", SUBSECCION_STYLE),
+        _lista(informe.get("comunicacion_si", [])),
+        Paragraph("Maneras de NO comunicarse con esta persona:", SUBSECCION_STYLE),
+        _lista(informe.get("comunicacion_no", [])),
+    ]
+
+
+def _seccion_percepciones(informe):
+    percepciones = informe.get("percepciones", {})
+    return [
+        Spacer(1, 6),
+        Paragraph("Percepciones", SECCION_STYLE),
+        Paragraph(
+            "Cómo se ve probablemente a sí misma esta persona, y cómo puede llegar a percibirse (o a ser "
+            "percibida) bajo distintos niveles de presión.",
+            NOTA_STYLE,
+        ),
+        Paragraph("Se ve a sí misma como:", SUBSECCION_STYLE),
+        _lista(percepciones.get("auto_percepcion", [])),
+        Paragraph("Bajo presión moderada:", SUBSECCION_STYLE),
+        _lista(percepciones.get("presion_moderada", [])),
+        Paragraph("Bajo presión extrema:", SUBSECCION_STYLE),
+        _lista(percepciones.get("presion_extrema", [])),
+    ]
+
+
+def _seccion_influencias_ocultas(informe):
+    info = informe.get("influencias_ocultas", {})
+    return [
+        Spacer(1, 6),
+        Paragraph("Influencias potenciales ocultas", SECCION_STYLE),
+        Paragraph(
+            f"Basado en su factor más bajo ({NOMBRE_LETRA.get(info.get('eje'), '')}), estas son situaciones "
+            "a las que conviene prestar atención.",
+            NOTA_STYLE,
+        ),
+        _lista(info.get("bullets", [])),
+    ]
+
+
+def _seccion_estilo_natural_adaptado(informe):
+    bloques = [
+        Spacer(1, 6),
+        Paragraph("Estilo Natural y Adaptado", SECCION_STYLE),
+        Paragraph(
+            "El estilo Natural es el comportamiento auténtico, el que surge de forma espontánea. El estilo "
+            "Adaptado es el que esta persona percibe que necesita mostrar en su entorno profesional actual.",
+            NOTA_STYLE,
+        ),
+    ]
+    for etiqueta, clave in (("Natural", "estilo_natural"), ("Adaptado", "estilo_adaptado")):
+        bloques.append(Paragraph(etiqueta, SUBSECCION_STYLE))
+        for bloque in informe.get(clave, []):
+            bloques.append(Paragraph(f"<b>{bloque['titulo']}</b>", LISTA_STYLE))
+            bloques.append(Paragraph(bloque["texto"], LISTA_STYLE))
+            bloques.append(Spacer(1, 4))
+    return bloques
+
+
+def _seccion_estilo_lista_y_areas(informe):
+    return [
+        Spacer(1, 6),
+        Paragraph("Estilo Adaptado", SECCION_STYLE),
+        _lista(informe.get("estilo_adaptado_lista", [])),
+        Spacer(1, 10),
+        Paragraph("Áreas de mejora", SECCION_STYLE),
+        _lista(informe.get("areas_mejora", [])),
+    ]
+
+
+def _seccion_potenciadores_productividad(informe):
+    bloques = [
+        Spacer(1, 6),
+        Paragraph("Potenciadores de la Productividad", SECCION_STYLE),
+        Paragraph(
+            "Áreas concretas en las que esta persona puede aumentar su productividad, junto con el motivo "
+            "por el que su estilo natural le dificulta más este punto en particular.",
+            NOTA_STYLE,
+        ),
+    ]
+    for tema in informe.get("potenciadores_productividad", []):
+        bloques += [
+            Paragraph(tema["titulo"], SUBSECCION_STYLE),
+            Paragraph(f"<i>{tema['enfoque']}</i>", LISTA_STYLE),
+            Spacer(1, 3),
+            _lista(tema["consejos"]),
+            Spacer(1, 6),
+        ]
+    return bloques
 
 
 def generar_pdf(resultado):
@@ -226,12 +344,27 @@ def generar_pdf(resultado):
         _tabla_perfil(resultado["perfil_natural"]),
     ]
 
+    informe = resultado.get("informe_completo") or {}
+
+    story += [PageBreak()]
+    story += _seccion_caracteristicas_valor(informe)
     story += _secciones_perfil(resultado.get("perfil_info"))
 
     story += [PageBreak()]
+    story += _seccion_puntos_comunicacion(informe)
+    story += [PageBreak()]
     story += _seccion_consejos_comunicacion()
     story += [PageBreak()]
+    story += _seccion_percepciones(informe)
+    story += _seccion_influencias_ocultas(informe)
+    story += [PageBreak()]
     story += _seccion_descriptores(resultado["perfil_adaptado"])
+    story += [PageBreak()]
+    story += _seccion_estilo_natural_adaptado(informe)
+    story += [PageBreak()]
+    story += _seccion_estilo_lista_y_areas(informe)
+    story += [PageBreak()]
+    story += _seccion_potenciadores_productividad(informe)
 
     story += [
         Spacer(1, 20),
