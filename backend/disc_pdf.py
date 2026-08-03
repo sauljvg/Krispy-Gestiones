@@ -1,5 +1,6 @@
 import io
 import json
+import math
 import os
 
 from reportlab.lib import colors
@@ -10,7 +11,15 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Flowable, KeepTogether, PageBreak, SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
-from disc_contenido_fijo import CONSEJOS_COMUNICACION, DESCRIPTORES, descriptores_resaltados
+from disc_contenido_fijo import (
+    CONSEJOS_COMUNICACION,
+    CONTINUUM_EJES,
+    DESCRIPTORES,
+    SECTORES_RUEDA,
+    _angulo_perfil,
+    descriptores_resaltados,
+    sector_mas_cercano,
+)
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 FONT_DIR = os.path.join(ASSETS_DIR, "fonts")
@@ -130,6 +139,134 @@ class BarraJerarquia(Flowable):
             y = self.height - self.alto_barra if etiqueta == "N" else 0
             self._dibujar_barra(y, self.fila[clave_valor], self.fila[clave_percentil], etiqueta)
         self.canv.restoreState()
+
+
+class BarraContinuo(Flowable):
+    """Gráfico Contínuo Conductual: una barra 0-100 por eje D/I/S/C, con
+    las dos etiquetas de extremo fijas (ver CONTINUUM_EJES) y dos
+    marcadores -- Natural y Adaptado -- para ver de un vistazo cuánto se
+    "mueve" esta persona entre su estilo auténtico y el profesional."""
+
+    def __init__(self, letra, titulo, etiqueta_izq, etiqueta_der, valor_natural, valor_adaptado, width=ANCHO_BARRA, height=62):
+        super().__init__()
+        self.letra = letra
+        self.titulo = titulo
+        self.etiqueta_izq = etiqueta_izq
+        self.etiqueta_der = etiqueta_der
+        self.valor_natural = valor_natural
+        self.valor_adaptado = valor_adaptado
+        self.width = width
+        self.height = height
+
+    def wrap(self, availWidth, availHeight):
+        return (self.width, self.height)
+
+    def _marcador(self, valor, etiqueta, y_marcador, y_texto, color):
+        c = self.canv
+        x = max(4, min(self.width - 4, self.width * (valor / 100)))
+        c.setFillColor(color)
+        c.circle(x, y_marcador, 4, fill=1, stroke=0)
+        c.setFont(FUENTE_TITULO, 7)
+        c.setFillColor(colors.black)
+        c.drawCentredString(x, y_texto, etiqueta)
+
+    def draw(self):
+        c = self.canv
+        c.saveState()
+        # titulo del eje + etiquetas de los dos extremos (sin flechas Unicode:
+        # la fuente de marca no trae ese glifo, se ve como un cuadro vacio)
+        c.setFont(FUENTE_CONTENIDO, 10)
+        c.setFillColor(colors.black)
+        c.drawString(0, self.height - 10, self.titulo)
+        c.setFont(FUENTE_CONTENIDO, 8)
+        c.setFillColor(GRIS_TEXTO)
+        c.drawString(0, self.height - 22, self.etiqueta_izq)
+        c.drawRightString(self.width, self.height - 22, self.etiqueta_der)
+
+        y_linea = 18
+        c.setStrokeColor(GRIS_CLARO)
+        c.setLineWidth(3)
+        c.line(0, y_linea, self.width, y_linea)
+        self._marcador(self.valor_natural, "N", y_linea + 8, y_linea + 15, ACENTO_JERARQUIA)
+        self._marcador(self.valor_adaptado, "A", y_linea - 8, y_linea - 17, COLOR_LETRA.get(self.letra, colors.grey))
+        c.restoreState()
+
+
+class RuedaPerfiles(Flowable):
+    """Rueda de Perfiles Profesionales: círculo con los 8 sectores
+    principales (fijos, ver SECTORES_RUEDA) y dos marcadores -- círculo
+    (Natural) y estrella (Adaptado) -- en el ángulo que corresponde a esta
+    persona. No incluye el anillo de 60 micro-posiciones de TTI (ver la
+    nota en disc_contenido_fijo.py: no se pudo validar esa numeración con
+    los datos disponibles), solo los 8 sectores principales, que sí están
+    validados."""
+
+    def __init__(self, perfil_natural, perfil_adaptado, radio=6.2 * cm):
+        super().__init__()
+        self.perfil_natural = perfil_natural
+        self.perfil_adaptado = perfil_adaptado
+        self.radio = radio
+        self.width = radio * 2 + 3.2 * cm
+        self.height = radio * 2 + 1.4 * cm
+
+    def wrap(self, availWidth, availHeight):
+        return (self.width, self.height)
+
+    def _punto(self, cx, cy, angulo_grados, radio):
+        rad = math.radians(angulo_grados)
+        return cx + radio * math.cos(rad), cy + radio * math.sin(rad)
+
+    def _dibujar_estrella(self, cx, cy, r):
+        c = self.canv
+        puntos = []
+        for i in range(10):
+            ang = math.radians(-90 + i * 36)
+            radio = r if i % 2 == 0 else r * 0.45
+            puntos.append((cx + radio * math.cos(ang), cy + radio * math.sin(ang)))
+        p = c.beginPath()
+        p.moveTo(*puntos[0])
+        for pt in puntos[1:]:
+            p.lineTo(*pt)
+        p.close()
+        c.drawPath(p, fill=1, stroke=0)
+
+    def draw(self):
+        c = self.canv
+        c.saveState()
+        cx, cy = self.width / 2 - 0.8 * cm, self.height / 2
+        c.setStrokeColor(GRIS_CLARO)
+        c.setLineWidth(1)
+        c.circle(cx, cy, self.radio, fill=0, stroke=1)
+
+        c.setFont(FUENTE_TITULO, 8)
+        c.setFillColor(GRIS_TEXTO)
+        for sector in SECTORES_RUEDA:
+            x, y = self._punto(cx, cy, sector["angulo"], self.radio + 0.55 * cm)
+            c.drawCentredString(x, y - 3, sector["nombre"])
+
+        for perfil, dibujar_estrella, color in (
+            (self.perfil_natural, False, ACENTO_JERARQUIA),
+            (self.perfil_adaptado, True, COLOR_LETRA["D"]),
+        ):
+            angulo = _angulo_perfil(perfil)
+            x, y = self._punto(cx, cy, angulo, self.radio * 0.7)
+            c.setFillColor(color)
+            if dibujar_estrella:
+                self._dibujar_estrella(x, y, 7)
+            else:
+                c.circle(x, y, 5, fill=1, stroke=0)
+
+        leyenda_x = self.width - 2.6 * cm
+        c.setFont(FUENTE_CONTENIDO, 9)
+        c.setFillColor(ACENTO_JERARQUIA)
+        c.circle(leyenda_x, self.height - 20, 4, fill=1, stroke=0)
+        c.setFillColor(colors.black)
+        c.drawString(leyenda_x + 10, self.height - 24, "Natural")
+        c.setFillColor(COLOR_LETRA["D"])
+        self._dibujar_estrella(leyenda_x, self.height - 40, 6)
+        c.setFillColor(colors.black)
+        c.drawString(leyenda_x + 10, self.height - 44, "Adaptado")
+        c.restoreState()
 
 
 def _tabla_perfil(perfil):
@@ -257,6 +394,50 @@ def _seccion_jerarquia_conductual(informe):
             BarraJerarquia(fila),
         ]))
     return bloques
+
+
+def _seccion_grafico_continuo(perfil_natural, perfil_adaptado):
+    """Gráfico Contínuo Conductual: 4 barras (una por eje), con las
+    etiquetas de extremo fijas y los marcadores Natural/Adaptado."""
+    bloques = [
+        Spacer(1, 6),
+        Paragraph("Gráfico Contínuo Conductual", SECCION_STYLE),
+        Paragraph(
+            "Representación visual de las puntuaciones de esta persona en cada uno de los cuatro factores "
+            "conductuales básicos, mostrando su estilo Natural (N) y Adaptado (A) en el mismo continuo.",
+            NOTA_STYLE,
+        ),
+        Spacer(1, 10),
+    ]
+    for letra in ("D", "I", "S", "C"):
+        eje = CONTINUUM_EJES[letra]
+        bloques.append(BarraContinuo(
+            letra, eje["titulo"], eje["izquierda"], eje["derecha"],
+            perfil_natural.get(letra, 0), perfil_adaptado.get(letra, 0),
+        ))
+        bloques.append(Spacer(1, 6))
+    return bloques
+
+
+def _seccion_rueda_perfiles(perfil_natural, perfil_adaptado):
+    _, sector_n1, sector_n2 = sector_mas_cercano(perfil_natural)
+    _, sector_a1, sector_a2 = sector_mas_cercano(perfil_adaptado)
+    return [
+        Spacer(1, 6),
+        Paragraph("Rueda de Perfiles Profesionales", SECCION_STYLE),
+        Paragraph(
+            "Ubica el estilo Natural (círculo) y Adaptado (estrella) de esta persona sobre los 8 estilos "
+            "profesionales principales. TTI subdivide esto en 60 micro-posiciones con nombres combinados; "
+            "no se pudo reconstruir esa numeración exacta con los datos disponibles, así que aquí se muestra "
+            "únicamente la posición sobre los 8 estilos principales, que sí está validada.",
+            NOTA_STYLE,
+        ),
+        Spacer(1, 10),
+        RuedaPerfiles(perfil_natural, perfil_adaptado),
+        Spacer(1, 10),
+        Paragraph(f"<b>Natural:</b> cerca de {sector_n1} (también hacia {sector_n2})", LISTA_STYLE),
+        Paragraph(f"<b>Adaptado:</b> cerca de {sector_a1} (también hacia {sector_a2})", LISTA_STYLE),
+    ]
 
 
 def _secciones_perfil(perfil_info):
@@ -450,6 +631,10 @@ def generar_pdf(resultado):
     story += _seccion_potenciadores_productividad(informe)
     story += [PageBreak()]
     story += _seccion_jerarquia_conductual(informe)
+    story += [PageBreak()]
+    story += _seccion_grafico_continuo(resultado["perfil_natural"], resultado["perfil_adaptado"])
+    story += [PageBreak()]
+    story += _seccion_rueda_perfiles(resultado["perfil_natural"], resultado["perfil_adaptado"])
 
     story += [
         Spacer(1, 20),

@@ -5,6 +5,7 @@ empresa ya tiene comprados (carpeta "DISC KK"), comparando el mismo texto en
 varias personas distintas para confirmar que no varía -- uso 100% interno,
 nunca se redistribuye ni se vende (autorizado explícitamente por el titular
 de la empresa)."""
+import math
 
 BANDAS = {"bajo": (0, 39), "medio": (40, 64), "alto": (65, 1000)}
 
@@ -147,10 +148,23 @@ FACTORES_JERARQUIA = [
 # ------------------------ Rueda de Perfiles Profesionales ---------------------
 # Página "RUEDA DE PERFILES PROFESIONALES": fondo fijo (8 sectores + letras
 # de eje), confirmado idéntico (mismas coordenadas) en las 3 personas
-# comparadas. El anillo de 60 posiciones combinadas y el cálculo exacto de
-# en qué posición cae cada persona se construyen y validan en la Fase D del
-# plan (necesitan contrastarse contra más PDFs reales antes de dar la
-# fórmula por buena) -- aquí solo va el fondo fijo de los 8 sectores.
+# comparadas.
+#
+# TTI subdivide además cada uno de estos 8 sectores en un anillo de 60
+# posiciones con nombres combinados (p.ej. "COORDINADOR ANALÍTICO"). Se
+# intentó reconstruir esa numeración exacta y NO se pudo validar: probada
+# contra los datos reales de una persona (Saúl Vásquez, cuya posición TTI
+# real -- (21) COORDINADOR ANALÍTICO en Natural, (22) ANALIZADOR COORDINADOR
+# en Adaptado -- ya conocíamos), la fórmula de ángulo more abajo sitúa
+# correctamente a esa persona muy cerca del sector COORDINADOR (que es
+# donde TTI también la sitúa), pero el NÚMERO exacto de posición (21/22)
+# no coincide con lo que da una división uniforme en 60 partes -- es
+# evidente que la numeración real de TTI no es una simple división angular
+# uniforme, y con solo 1-2 puntos de referencia no hay forma fiable de
+# reconstruir su fórmula exacta. Por eso aquí SOLO se usan los 8 sectores
+# principales (bien validados: reproducen exactamente las 8 esquinas
+# conocidas) y se ubica a cada persona por el sector más cercano, sin
+# fingir una posición numerada de 1 a 60 que no se puede verificar.
 SECTORES_RUEDA = [
     {"nombre": "IMPLEMENTADOR", "angulo": 90},
     {"nombre": "CONDUCTOR", "angulo": 47},
@@ -162,6 +176,29 @@ SECTORES_RUEDA = [
     {"nombre": "ANALIZADOR", "angulo": 133},
 ]
 EJES_RUEDA = {"C": "top-left", "D": "top-right", "I": "bottom-right", "S": "bottom-left"}
+
+
+def _angulo_perfil(perfil):
+    """Ángulo (grados, -180 a 180) de esta persona en la Rueda -- validado:
+    reproduce exactamente los 8 sectores de SECTORES_RUEDA cuando se le pasa
+    un perfil "puro" de una sola letra o de una pareja de letras adyacente."""
+    x = (perfil.get("D", 0) + perfil.get("I", 0)) - (perfil.get("S", 0) + perfil.get("C", 0))
+    y = (perfil.get("D", 0) + perfil.get("C", 0)) - (perfil.get("I", 0) + perfil.get("S", 0))
+    return math.degrees(math.atan2(y, x))
+
+
+def sector_mas_cercano(perfil):
+    """Devuelve (angulo, sector_principal, sector_secundario) -- el sector
+    de SECTORES_RUEDA más cercano al ángulo de esta persona, y el segundo
+    más cercano (para dar una idea de hacia qué otro sector se inclina)."""
+    angulo = _angulo_perfil(perfil)
+
+    def distancia_angular(a, b):
+        d = abs(a - b) % 360
+        return min(d, 360 - d)
+
+    ordenados = sorted(SECTORES_RUEDA, key=lambda s: distancia_angular(angulo, s["angulo"]))
+    return angulo, ordenados[0]["nombre"], ordenados[1]["nombre"]
 
 
 # --------------------------- Gráfico Contínuo Conductual -----------------------
