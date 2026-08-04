@@ -179,10 +179,14 @@ document.addEventListener("click", (e) => {
 
 // "David" -- asistente de IA del portal (Gemini). Botón flotante disponible
 // en cualquier página que cargue topbar-menu.js (todas las internas), igual
-// que el resto de widgets de este archivo. El historial vive solo en memoria
-// de la pestaña -- se pierde al recargar, a propósito, para no complicar
-// esto con guardado en servidor por ahora.
+// que el resto de widgets de este archivo. El historial se guarda en
+// sessionStorage (sobrevive a navegar entre páginas dentro de la misma
+// pestaña/sesión del navegador; se pierde al cerrarla, o con "Vaciar
+// conversación") -- a propósito no se guarda en el servidor.
 document.addEventListener("DOMContentLoaded", () => {
+  const STORAGE_KEY = "david_historial";
+  const MENSAJE_BIENVENIDA = 'Hola, soy David. Pregúntame cómo hacer cualquier cosa en el portal — por ejemplo "¿cómo exporto el informe de entrevista de salida?" o "¿cómo importo el excel de clima?".';
+
   const escapeHTML = (str) => {
     const div = document.createElement("div");
     div.textContent = str ?? "";
@@ -204,11 +208,12 @@ document.addEventListener("DOMContentLoaded", () => {
   panel.innerHTML = `
     <div class="david-head">
       <span>💬 David</span>
-      <button type="button" class="david-cerrar" aria-label="Cerrar">✕</button>
+      <div class="david-head-acciones">
+        <button type="button" class="david-vaciar" title="Vaciar conversación" aria-label="Vaciar conversación">🗑</button>
+        <button type="button" class="david-cerrar" aria-label="Cerrar">✕</button>
+      </div>
     </div>
-    <div class="david-mensajes" id="david-mensajes">
-      <div class="david-msg david-msg-david">Hola, soy David. Pregúntame cómo hacer cualquier cosa en el portal — por ejemplo "¿cómo exporto el informe de entrevista de salida?" o "¿cómo importo el excel de clima?".</div>
-    </div>
+    <div class="david-mensajes" id="david-mensajes"></div>
     <form class="david-form" id="david-form">
       <textarea id="david-input" placeholder="Escribe tu pregunta..." rows="1"></textarea>
       <button type="submit" id="david-enviar">➤</button>
@@ -219,21 +224,45 @@ document.addEventListener("DOMContentLoaded", () => {
   const form = panel.querySelector("#david-form");
   const input = panel.querySelector("#david-input");
   const btnEnviar = panel.querySelector("#david-enviar");
-  let historial = [];
   let enviando = false;
+
+  function cargarHistorial() {
+    try {
+      return JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "[]");
+    } catch {
+      return [];
+    }
+  }
+  let historial = cargarHistorial();
+
+  function guardarHistorial() {
+    if (historial.length > 20) historial = historial.slice(-20);
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(historial));
+  }
+
+  function formatearTexto(texto) {
+    // A David se le pide que no use markdown, pero por si se le escapa
+    // algún **negrita** suelto, se convierte en vez de mostrar los asteriscos.
+    return escapeHTML(texto)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\n/g, "<br>");
+  }
 
   function agregarMensaje(rol, texto) {
     const div = document.createElement("div");
     div.className = `david-msg david-msg-${rol}`;
-    // A David se le pide que no use markdown, pero por si se le escapa
-    // algún **negrita** suelto, se convierte en vez de mostrar los asteriscos.
-    div.innerHTML = escapeHTML(texto)
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/\n/g, "<br>");
+    div.innerHTML = formatearTexto(texto);
     mensajesWrap.appendChild(div);
     mensajesWrap.scrollTop = mensajesWrap.scrollHeight;
     return div;
   }
+
+  function reconstruirMensajes() {
+    mensajesWrap.innerHTML = "";
+    agregarMensaje("david", MENSAJE_BIENVENIDA);
+    historial.forEach((t) => agregarMensaje(t.rol === "david" ? "david" : "user", t.texto));
+  }
+  reconstruirMensajes();
 
   fab.addEventListener("click", () => {
     panel.hidden = !panel.hidden;
@@ -241,6 +270,12 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   panel.querySelector(".david-cerrar").addEventListener("click", () => {
     panel.hidden = true;
+  });
+  panel.querySelector(".david-vaciar").addEventListener("click", () => {
+    if (!confirm("¿Vaciar toda la conversación con David?")) return;
+    historial = [];
+    sessionStorage.removeItem(STORAGE_KEY);
+    reconstruirMensajes();
   });
 
   input.addEventListener("input", () => {
@@ -272,10 +307,10 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || "Error al preguntarle a David");
-      pensando.innerHTML = escapeHTML(data.respuesta).replace(/\n/g, "<br>");
+      pensando.innerHTML = formatearTexto(data.respuesta);
       historial.push({ rol: "user", texto: mensaje });
       historial.push({ rol: "david", texto: data.respuesta });
-      if (historial.length > 20) historial = historial.slice(-20);
+      guardarHistorial();
     } catch (err) {
       pensando.classList.add("david-msg-error");
       pensando.textContent = err.message || "No se pudo contactar a David. Inténtalo de nuevo.";

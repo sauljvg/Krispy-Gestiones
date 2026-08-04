@@ -923,8 +923,9 @@ html { scrollbar-gutter: stable; }
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 14px; background: var(--acento); color: #fff; font-weight: 600;
 }
-.david-head .david-cerrar { background: none; border: none; color: #fff; font-size: 16px; cursor: pointer; opacity: 0.85; }
-.david-head .david-cerrar:hover { opacity: 1; }
+.david-head-acciones { display: flex; align-items: center; gap: 10px; }
+.david-head .david-vaciar, .david-head .david-cerrar { background: none; border: none; color: #fff; font-size: 15px; cursor: pointer; opacity: 0.85; }
+.david-head .david-vaciar:hover, .david-head .david-cerrar:hover { opacity: 1; }
 .david-mensajes { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .david-msg { max-width: 88%; padding: 8px 11px; border-radius: 10px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; }
 .david-msg-david { align-self: flex-start; background: var(--surface-page); color: var(--text-primary); border: 1px solid var(--border); }

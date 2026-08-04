@@ -15,12 +15,17 @@ Login (login.html): el usuario escribe su nombre de usuario y pulsa "Continuar".
 introduce sus 4 digitos (se envia solo al completar el 4o digito, sin boton). Si es la primera vez,
 crea su propio PIN de 4 digitos (con "Repite el PIN"). Tras 5 fallos, la cuenta se bloquea 10 minutos.
 
-Home (index.html) muestra tarjetas segun los modulos que tenga el usuario: Resenas, Informes, Clima
-Laboral, Entrevista de Salida (vive dentro del modulo "Informes"), Reclutamiento (visible para
-cualquiera, no depende de modulo), Boletines, Test, y SAONA (si tiene algun modulo saona_* o es
-admin). El menu con tres lineas (arriba a la derecha) tiene "Ajustes" (solo admin, gestion de
-usuarios), "Cambiar tema" y "Salir". El boton de casa vuelve al Home, la flecha atras vuelve a la
-pagina anterior.
+Home (index.html) tiene una tarjeta propia y directa por cada modulo: "Resenas" (reviews.html),
+"Informes" (informes.html), "Clima Laboral" (clima.html), "Entrevista de Salida" (entrevistas.html),
+"Reclutamiento" (compartidos.html, visible para cualquiera, no depende de modulo), "Boletines"
+(boletines.html), "Test" (tests.html), "Perfil DISC" (disc_form.html), y "SAONA" (si tiene algun
+modulo saona_* o es admin). IMPORTANTE: "Informes" y "Entrevista de Salida" son DOS TARJETAS
+DISTINTAS que llevan a DOS PAGINAS DISTINTAS (informes.html no tiene nada de Entrevista de Salida) --
+solo comparten el mismo permiso de acceso por detras (el modulo "informes"), pero para entrar a
+Entrevista de Salida se pulsa DIRECTAMENTE su propia tarjeta "Entrevista de Salida" en el Home, nunca
+hay que pasar antes por la tarjeta "Informes". El menu con tres lineas (arriba a la derecha) tiene
+"Ajustes" (solo admin, gestion de usuarios), "Cambiar tema" y "Salir". El boton de casa vuelve al
+Home, la flecha atras vuelve a la pagina anterior.
 
 SAONA (saona.html) es el mismo hub pero para la marca Saona: Informes, Clima Laboral, Entrevista de
 Salida y Reclutamiento llevan el parametro ?empresa=saona en la URL, que es lo que separa esos datos
