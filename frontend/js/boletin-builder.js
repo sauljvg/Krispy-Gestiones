@@ -72,7 +72,7 @@ const BoletinBuilder = (function () {
     texto: { etiqueta: "Texto", icono: "📝" },
     imagen: { etiqueta: "Imagen", icono: "🖼️" },
     galeria: { etiqueta: "Galería de fotos", icono: "🖼️🖼️" },
-    video: { etiqueta: "Vídeo (YouTube)", icono: "🎬" },
+    video: { etiqueta: "Vídeo", icono: "🎬" },
     boton: { etiqueta: "Botón", icono: "🔘" },
     divisor: { etiqueta: "Divisor", icono: "➖" },
     espaciador: { etiqueta: "Espacio", icono: "↕️" },
@@ -99,35 +99,67 @@ const BoletinBuilder = (function () {
     return escapeHTML(str).replaceAll('"', "&quot;").replaceAll("'", "&#39;");
   }
 
-  // Acepta la URL completa (youtube.com/watch?v=, youtu.be/, /shorts/) o un
-  // ID de 11 caracteres pegado directamente -- lo que sea más cómodo copiar
-  // desde YouTube.
-  function extraerYoutubeId(texto) {
-    const t = (texto || "").trim();
-    const m = t.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|shorts\/|embed\/))([\w-]{11})/);
-    if (m) return m[1];
-    return /^[\w-]{11}$/.test(t) ? t : "";
+  // Reconoce YouTube, Google Drive y OneDrive/SharePoint a partir de
+  // cualquier enlace que se pegue, y devuelve ya calculados la URL de
+  // miniatura (si esa fuente tiene una pública) y la URL de inserción para
+  // el iframe. Google Drive: hay que compartir el archivo como "Cualquiera
+  // con el enlace" para que /preview y /thumbnail funcionen sin iniciar
+  // sesión. OneDrive/SharePoint no tiene un enlace de miniatura público
+  // fiable ni siempre acepta el enlace normal de "Compartir" dentro de un
+  // iframe -- hace falta el enlace que da su propia opción "Insertar"
+  // (Embed), que ya viene listo para esto.
+  function datosVideo(texto) {
+    const u = (texto || "").trim();
+    if (!u) return null;
+
+    const yt = u.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|shorts\/|embed\/))([\w-]{11})/);
+    if (yt || /^[\w-]{11}$/.test(u)) {
+      const id = yt ? yt[1] : u;
+      return {
+        fuente: "youtube",
+        thumb: `https://img.youtube.com/vi/${id}/hqdefault.jpg`,
+        embed: `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&modestbranding=1&rel=0`,
+      };
+    }
+
+    const gd = u.match(/drive\.google\.com\/(?:file\/d\/|open\?id=)([\w-]+)/);
+    if (gd) {
+      const id = gd[1];
+      return {
+        fuente: "drive",
+        thumb: `https://drive.google.com/thumbnail?id=${id}&sz=w1000`,
+        embed: `https://drive.google.com/file/d/${id}/preview`,
+      };
+    }
+
+    if (/onedrive\.live\.com|1drv\.ms|sharepoint\.com/.test(u)) {
+      return { fuente: "onedrive", thumb: null, embed: u };
+    }
+
+    return null;
   }
 
   // Convierte las miniaturas .boletin-video-thumb (ver htmlVideo) en un
   // reproductor "facade": de entrada solo se ve NUESTRA miniatura + botón de
-  // play (sin nada de YouTube todavía), y el iframe real no se carga hasta
-  // que se hace clic -- si el iframe se carga de una, YouTube pinta encima
-  // su propia portada de marca (título, canal, botón "Ver en YouTube") antes
-  // de arrancar, que es justo lo que no queríamos mostrar. Con autoplay=1 al
-  // hacer clic esa portada de YouTube se salta porque el vídeo arranca ya.
-  // Se llama tras pintar la vista previa aquí, y de forma independiente en
-  // blog.js tras pintar /blog.html (ese archivo no carga este módulo entero
-  // solo para esto, por eso está duplicada: no vale la pena una dependencia
-  // nueva por una función tan pequeña).
+  // play (sin nada de la fuente todavía), y el iframe real no se carga hasta
+  // que se hace clic -- si se carga de una, YouTube (y en menor medida otras
+  // fuentes) pinta encima su propia portada de marca antes de arrancar, que
+  // es justo lo que no queríamos mostrar. Se llama tras pintar la vista
+  // previa aquí, y de forma independiente en blog.js tras pintar
+  // /blog.html (ese archivo no carga este módulo entero solo para esto, por
+  // eso está duplicada: no vale la pena una dependencia nueva por una
+  // función tan pequeña).
   function activarVideosBoletin(root) {
-    root.querySelectorAll(".boletin-video-thumb[data-video-id]").forEach((a) => {
-      const id = a.dataset.videoId;
+    root.querySelectorAll(".boletin-video-thumb[data-video-embed]").forEach((a) => {
+      const embedUrl = a.dataset.videoEmbed;
+      const thumb = a.dataset.videoThumb;
       const wrap = document.createElement("div");
       wrap.className = "boletin-video-embed boletin-video-facade";
-      wrap.innerHTML = `<img src="https://img.youtube.com/vi/${id}/hqdefault.jpg" alt="Ver vídeo" loading="lazy"><span class="boletin-video-play"></span>`;
+      wrap.innerHTML = thumb
+        ? `<img src="${thumb}" alt="Ver vídeo" loading="lazy"><span class="boletin-video-play"></span>`
+        : `<span class="boletin-video-play"></span>`;
       wrap.addEventListener("click", () => {
-        wrap.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&modestbranding=1&rel=0" title="Vídeo" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+        wrap.innerHTML = `<iframe src="${embedUrl}" title="Vídeo" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
         wrap.classList.remove("boletin-video-facade");
       }, { once: true });
       a.replaceWith(wrap);
@@ -442,24 +474,27 @@ const BoletinBuilder = (function () {
   }
 
   // El HTML guardado (contenido_html) se reutiliza TAL CUAL tanto en
-  // /blog.html como en el correo que se envía por Resend -- un <iframe> de
-  // YouTube ahí no funcionaría en el correo (los clientes de email lo
-  // bloquean) y además dejaría descargar/seguir el enlace al canal. Por eso
-  // el bloque se guarda siempre como una miniatura con botón de "play" que
-  // enlaza al propio /blog.html del boletín (nunca a YouTube) -- en el
-  // correo se queda así (funciona igual que una imagen normal) y en
-  // /blog.html, boletin-video.js la sustituye por el reproductor embebido
-  // real en cuanto carga la página (ver activarVideosBoletin más abajo).
+  // /blog.html como en el correo que se envía por Resend -- un <iframe> ahí
+  // no funcionaría en el correo (los clientes de email lo bloquean) y
+  // además dejaría descargar/seguir el enlace a la fuente. Por eso el
+  // bloque se guarda siempre como una miniatura con botón de "play" que
+  // enlaza al propio /blog.html del boletín (nunca a YouTube/Drive/
+  // OneDrive) -- en el correo se queda así (funciona igual que una imagen
+  // normal) y en /blog.html, activarVideosBoletin la sustituye por el
+  // reproductor embebido real en cuanto se hace clic.
   function htmlVideo(b) {
-    const id = extraerYoutubeId(b.url);
-    if (!id) return "";
+    const datos = datosVideo(b.url);
+    if (!datos) return "";
     const radio = numOr(b.radio, 8, { "": 0 });
     const fondo = b.fondo && /^#[0-9a-fA-F]{6}$/.test(b.fondo) ? `background:${b.fondo};` : "";
     const destino = postId ? `${window.location.origin}/blog.html?post=${postId}` : "#";
+    const imgHtml = datos.thumb
+      ? `<img src="${datos.thumb}" alt="Ver vídeo" style="max-width:100%;width:100%;border-radius:${radio}px;display:block;">`
+      : `<div style="width:100%;padding-top:56.25%;background:#1a1a1a;border-radius:${radio}px;"></div>`;
     return `<div style="text-align:center;padding:12px 20px;${fondo}">
-      <a href="${escapeAttr(destino)}" class="boletin-video-thumb" data-video-id="${escapeAttr(id)}"
+      <a href="${escapeAttr(destino)}" class="boletin-video-thumb" data-video-embed="${escapeAttr(datos.embed)}" data-video-thumb="${escapeAttr(datos.thumb || "")}"
          style="display:inline-block;position:relative;max-width:100%;text-decoration:none;line-height:0;">
-        <img src="https://img.youtube.com/vi/${id}/hqdefault.jpg" alt="Ver vídeo" style="max-width:100%;width:100%;border-radius:${radio}px;display:block;">
+        ${imgHtml}
         <span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:60px;height:60px;background:rgba(0,0,0,0.65);border-radius:50%;">
           <span style="position:absolute;top:50%;left:54%;transform:translate(-50%,-50%);width:0;height:0;border-style:solid;border-width:11px 0 11px 18px;border-color:transparent transparent transparent #ffffff;"></span>
         </span>
@@ -854,15 +889,23 @@ const BoletinBuilder = (function () {
   }
 
   function formVideo(b) {
-    const id = extraerYoutubeId(b.url);
-    const previa = id
-      ? `<img src="https://img.youtube.com/vi/${id}/hqdefault.jpg" alt="" style="max-width:100%;border-radius:8px;display:block;margin-top:8px;">`
-      : `<p class="staff-hint">Pega el enlace y aparecerá la miniatura aquí.</p>`;
-    return `<p class="staff-hint">Sube el vídeo a YouTube como "Oculto" (no listado) y pega aquí su enlace. En el
-      correo se ve como una miniatura con botón de play (los emails no reproducen vídeo); al entrar a
-      /blog.html se reproduce dentro de la propia página, sin enlace a su canal ni botón de descarga
-      (YouTube exige dejar su logo pequeño en el reproductor, eso no se puede quitar).</p>
-      ${campoTexto("Enlace o ID del vídeo de YouTube", "url", b.url, "https://youtu.be/...")}
+    const datos = datosVideo(b.url);
+    let previa;
+    if (datos && datos.thumb) {
+      previa = `<img src="${datos.thumb}" alt="" style="max-width:100%;border-radius:8px;display:block;margin-top:8px;">`;
+    } else if (datos) {
+      const nombre = datos.fuente === "onedrive" ? "OneDrive" : datos.fuente;
+      previa = `<p class="staff-hint">Enlace de ${nombre} reconocido -- esta fuente no tiene miniatura pública, se mostrará un reproductor con fondo oscuro hasta que se pulse play.</p>`;
+    } else {
+      previa = `<p class="staff-hint">Pega el enlace y aparecerá la miniatura aquí (si la fuente la tiene).</p>`;
+    }
+    return `<p class="staff-hint">Pega el enlace de YouTube, Google Drive o OneDrive (debe estar compartido como
+      "Cualquiera con el enlace puede ver"). En YouTube súbelo como "Oculto"; en OneDrive usa el enlace que
+      da la opción "Insertar" (Embed) al compartir, no el de "Compartir" normal -- ese no siempre funciona
+      aquí dentro. En el correo se ve como una miniatura con botón de play (los emails no reproducen vídeo);
+      al entrar a /blog.html no se carga nada de la fuente hasta que se pulsa play, y entonces se reproduce
+      dentro de la propia página.</p>
+      ${campoTexto("Enlace del vídeo", "url", b.url, "https://...")}
       ${previa}
       ${campoNumero("Redondeo de esquinas", "radio", numOr(b.radio, 8, { "": 0 }), 0, 40)}
       ${campoColor("Color de fondo (opcional)", "fondo", b.fondo, "#ffffff", true)}`;

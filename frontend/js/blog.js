@@ -11,24 +11,27 @@ let indiceObserver = null;
 let revealObserver = null;
 let pdfRenderToken = 0; // se incrementa en cada mostrarPost para descartar renders de posts abandonados
 
-// Las miniaturas de vídeo (ver htmlVideo en boletin-builder.js) se guardan
-// como una imagen clicable -- email-safe, y también es lo que vería alguien
-// sin JS. Aquí se convierten en un reproductor "facade": de entrada solo se
-// ve NUESTRA miniatura + botón de play (nada de YouTube todavía); el iframe
-// real no se carga hasta el clic -- si se carga de una, YouTube pinta encima
-// su propia portada de marca (título, canal, botón "Ver en YouTube") antes
-// de arrancar, justo lo que no queríamos mostrar. Con autoplay=1 al hacer
-// clic esa portada se salta porque el vídeo arranca ya. Duplicada a
-// propósito respecto a boletin-builder.js: es una función pequeña y blog.js
-// no necesita cargar el constructor entero solo por esto.
+// Las miniaturas de vídeo (YouTube, Google Drive u OneDrive -- ver
+// datosVideo/htmlVideo en boletin-builder.js) se guardan como una imagen
+// clicable -- email-safe, y también es lo que vería alguien sin JS. Aquí se
+// convierten en un reproductor "facade": de entrada solo se ve NUESTRA
+// miniatura + botón de play (nada de la fuente todavía); el iframe real no
+// se carga hasta el clic -- si se carga de una, YouTube (y en menor medida
+// otras fuentes) pinta encima su propia portada de marca antes de arrancar,
+// justo lo que no queríamos mostrar. Duplicada a propósito respecto a
+// boletin-builder.js: es una función pequeña y blog.js no necesita cargar
+// el constructor entero solo por esto.
 function activarVideosBoletin(root) {
-  root.querySelectorAll(".boletin-video-thumb[data-video-id]").forEach((a) => {
-    const id = a.dataset.videoId;
+  root.querySelectorAll(".boletin-video-thumb[data-video-embed]").forEach((a) => {
+    const embedUrl = a.dataset.videoEmbed;
+    const thumb = a.dataset.videoThumb;
     const wrap = document.createElement("div");
     wrap.className = "boletin-video-embed boletin-video-facade";
-    wrap.innerHTML = `<img src="https://img.youtube.com/vi/${id}/hqdefault.jpg" alt="Ver vídeo" loading="lazy"><span class="boletin-video-play"></span>`;
+    wrap.innerHTML = thumb
+      ? `<img src="${thumb}" alt="Ver vídeo" loading="lazy"><span class="boletin-video-play"></span>`
+      : `<span class="boletin-video-play"></span>`;
     wrap.addEventListener("click", () => {
-      wrap.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&modestbranding=1&rel=0" title="Vídeo" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+      wrap.innerHTML = `<iframe src="${embedUrl}" title="Vídeo" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
       wrap.classList.remove("boletin-video-facade");
     }, { once: true });
     a.replaceWith(wrap);
