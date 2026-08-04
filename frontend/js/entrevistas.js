@@ -148,13 +148,21 @@ function renderChartBloque(canvasId, existingChart, items) {
   if (existingChart) existingChart.destroy();
   const colorTexto = colorTextoActual();
   const movil = window.innerWidth < UMBRAL_MOVIL_CHART;
-  ctx.parentElement.style.height = movil ? `${70 + items.length * 46}px` : "380px";
+  const labels = items.map((i) => wrapLabel(i.pregunta, movil ? 20 : 18));
+  // Chart.js reparte la altura total en partes IGUALES entre categorías --
+  // con una altura de fila fija, la pregunta que envuelve en más líneas se
+  // sale de su fila y pisa la de al lado. Se calcula la fila más alta que
+  // se necesita (según su etiqueta con más líneas) y se usa esa altura
+  // para TODAS las filas, para que ninguna se quede corta.
+  const maxLineas = movil ? Math.max(1, ...labels.map((l) => l.length)) : 1;
+  const altoFila = Math.max(34, maxLineas * 15 + 18);
+  ctx.parentElement.style.height = movil ? `${30 + items.length * altoFila}px` : "380px";
   const escalaValor = { min: 0, max: 5, ticks: { color: colorTexto }, grid: { color: "rgba(128,128,128,0.2)" } };
   const escalaCategoria = { ticks: { color: colorTexto, autoSkip: false, maxRotation: 0, minRotation: 0 }, grid: { display: false } };
   return new Chart(ctx, {
     type: "bar",
     data: {
-      labels: items.map((i) => wrapLabel(i.pregunta, movil ? 20 : 18)),
+      labels,
       datasets: [{ data: items.map((i) => i.promedio), backgroundColor: MARCA_COLOR, borderRadius: 4 }],
     },
     options: {
@@ -175,13 +183,16 @@ function renderChartMotivos(items) {
   if (chartMotivos) chartMotivos.destroy();
   const colorTexto = colorTextoActual();
   const movil = window.innerWidth < UMBRAL_MOVIL_CHART;
-  ctx.parentElement.style.height = movil ? `${70 + items.length * 42}px` : "420px";
+  const labels = items.map((i) => wrapLabel(i.motivo, movil ? 18 : 12));
+  const maxLineas = movil ? Math.max(1, ...labels.map((l) => l.length)) : 1;
+  const altoFila = Math.max(32, maxLineas * 15 + 16);
+  ctx.parentElement.style.height = movil ? `${30 + items.length * altoFila}px` : "420px";
   const escalaValor = { min: 0, max: 100, ticks: { color: colorTexto, callback: (v) => `${v}%` }, grid: { color: "rgba(128,128,128,0.2)" } };
   const escalaCategoria = { ticks: { color: colorTexto, autoSkip: false, maxRotation: 0, minRotation: 0 }, grid: { display: false } };
   chartMotivos = new Chart(ctx, {
     type: "bar",
     data: {
-      labels: items.map((i) => wrapLabel(i.motivo, movil ? 18 : 12)),
+      labels,
       datasets: [{ data: items.map((i) => i.porcentaje), backgroundColor: MARCA_COLOR, borderRadius: 4 }],
     },
     options: {
