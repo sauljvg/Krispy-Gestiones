@@ -49,28 +49,44 @@ BANDA_POBLACION = colors.HexColor("#c8e6c9")
 
 TITULO_STYLE = ParagraphStyle("titulo", fontName=FUENTE_TITULO, fontSize=22, alignment=1, spaceAfter=6, leading=26)
 SUBTITULO_STYLE = ParagraphStyle("subtitulo", fontName=FUENTE_CONTENIDO, fontSize=13, alignment=1, textColor=GRIS_TEXTO, spaceAfter=16)
-SECCION_STYLE = ParagraphStyle("seccion", fontName=FUENTE_TITULO, fontSize=15, spaceBefore=14, spaceAfter=8)
+# Banner de color solido -- antes era texto negro sin mas, ahora cada
+# titulo de seccion es una franja de color de marca con el texto en blanco
+# (mucho mas facil de mantener que anadir una regla/Flowable aparte detras
+# de cada uno de los ~15 titulos del informe).
+SECCION_STYLE = ParagraphStyle(
+    "seccion", fontName=FUENTE_TITULO, fontSize=15, spaceBefore=16, spaceAfter=10,
+    textColor=colors.white, backColor=ACENTO_JERARQUIA,
+    borderPadding=(7, 10, 7, 10), leading=18,
+)
 NOTA_STYLE = ParagraphStyle("nota", fontName=FUENTE_CONTENIDO, fontSize=9, textColor=GRIS_TEXTO, leading=13)
 TIPO_STYLE = ParagraphStyle("tipo", fontName=FUENTE_TITULO, fontSize=28, alignment=1, textColor=colors.black, spaceBefore=4, spaceAfter=4)
-NOMBRE_PERFIL_STYLE = ParagraphStyle("nombrePerfil", fontName=FUENTE_TITULO, fontSize=17, alignment=1, spaceAfter=4)
+NOMBRE_PERFIL_STYLE = ParagraphStyle("nombrePerfil", fontName=FUENTE_TITULO, fontSize=17, alignment=1, spaceAfter=4, textColor=ACENTO_JERARQUIA)
 RESUMEN_PERFIL_STYLE = ParagraphStyle("resumenPerfil", fontName=FUENTE_CONTENIDO, fontSize=12, alignment=1, textColor=GRIS_TEXTO, spaceAfter=14, leading=16)
-SUBSECCION_STYLE = ParagraphStyle("subseccion", fontName=FUENTE_TITULO, fontSize=12, spaceBefore=10, spaceAfter=4)
+SUBSECCION_STYLE = ParagraphStyle("subseccion", fontName=FUENTE_TITULO, fontSize=12, spaceBefore=10, spaceAfter=4, textColor=ACENTO_JERARQUIA)
 LISTA_STYLE = ParagraphStyle("lista", fontName=FUENTE_CONTENIDO, fontSize=11, textColor=colors.black, leading=15)
 
 ANCHO_BARRA = 11 * cm
 
 
-class BarraDisc(Flowable):
-    """Barra horizontal 0-100 para un valor D/I/S/C, con el color estandar
-    de esa letra."""
+class GraficoPerfilVertical(Flowable):
+    """Barras VERTICALES agrupadas D/I/S/C -- Natural (más clara) y
+    Adaptado (sólido) lado a lado por letra. Es la pieza central del
+    perfil en la primera página, y una versión reducida (con_leyenda=False,
+    con_valores=False) de este mismo Flowable se repite en la esquina
+    inferior derecha de cada página siguiente (ver _dibujar_esquina)."""
 
-    def __init__(self, letra, valor, width=ANCHO_BARRA, height=16, escala_max=100):
+    LETRAS = ("D", "I", "S", "C")
+
+    def __init__(self, perfil_natural, perfil_adaptado, width=ANCHO_BARRA + 1.5 * cm, height=6.4 * cm,
+                 con_leyenda=True, con_valores=True, fuente_escala=1.0):
         super().__init__()
-        self.letra = letra
-        self.valor = valor or 0
+        self.perfil_natural = perfil_natural
+        self.perfil_adaptado = perfil_adaptado
         self.width = width
         self.height = height
-        self.escala_max = escala_max
+        self.con_leyenda = con_leyenda
+        self.con_valores = con_valores
+        self.fuente_escala = fuente_escala
 
     def wrap(self, availWidth, availHeight):
         return (self.width, self.height)
@@ -78,14 +94,55 @@ class BarraDisc(Flowable):
     def draw(self):
         c = self.canv
         c.saveState()
-        c.setFillColor(GRIS_CLARO)
-        c.roundRect(0, 0, self.width, self.height, 4, fill=1, stroke=0)
-        ancho_lleno = max(2, min(self.width, self.width * (self.valor / self.escala_max)))
-        c.setFillColor(COLOR_LETRA.get(self.letra, colors.grey))
-        c.roundRect(0, 0, ancho_lleno, self.height, 4, fill=1, stroke=0)
-        c.setFillColor(colors.black)
-        c.setFont(FUENTE_CONTENIDO, 10)
-        c.drawString(self.width + 8, 3, str(round(self.valor)))
+        margen_inf = 16 * self.fuente_escala
+        margen_sup = (24 if self.con_leyenda else 6) * self.fuente_escala
+        alto_disponible = self.height - margen_inf - margen_sup
+        ancho_grupo = self.width / len(self.LETRAS)
+        ancho_barra = ancho_grupo * 0.26
+        gap = ancho_grupo * 0.05
+
+        if self.con_leyenda:
+            c.setFont(FUENTE_CONTENIDO, 8)
+            leyenda_x = self.width / 2 - 60
+            c.setFillColor(colors.Color(0.55, 0.55, 0.55, alpha=0.6))
+            c.rect(leyenda_x, self.height - 15, 8, 8, fill=1, stroke=0)
+            c.setFillColor(GRIS_TEXTO)
+            c.drawString(leyenda_x + 11, self.height - 14, "Natural")
+            c.setFillColor(colors.black)
+            c.rect(leyenda_x + 62, self.height - 15, 8, 8, fill=1, stroke=0)
+            c.setFillColor(GRIS_TEXTO)
+            c.drawString(leyenda_x + 73, self.height - 14, "Adaptado")
+
+        for i, letra in enumerate(self.LETRAS):
+            color = COLOR_LETRA.get(letra, colors.grey)
+            cx = i * ancho_grupo + ancho_grupo / 2
+
+            valor_n = self.perfil_natural.get(letra, 0)
+            alto_n = alto_disponible * (valor_n / 100)
+            x_n = cx - ancho_barra - gap / 2
+            c.setFillColor(colors.Color(color.red, color.green, color.blue, alpha=0.4))
+            c.roundRect(x_n, margen_inf, ancho_barra, alto_n, 2, fill=1, stroke=0)
+
+            valor_a = self.perfil_adaptado.get(letra, 0)
+            alto_a = alto_disponible * (valor_a / 100)
+            x_a = cx + gap / 2
+            c.setFillColor(color)
+            c.roundRect(x_a, margen_inf, ancho_barra, alto_a, 2, fill=1, stroke=0)
+
+            if self.con_valores:
+                c.setFont(FUENTE_CONTENIDO, 7 * self.fuente_escala)
+                c.setFillColor(GRIS_TEXTO)
+                c.drawCentredString(x_n + ancho_barra / 2, margen_inf + alto_n + 3, str(round(valor_n)))
+                c.setFillColor(colors.black)
+                c.drawCentredString(x_a + ancho_barra / 2, margen_inf + alto_a + 3, str(round(valor_a)))
+
+            c.setFont(FUENTE_TITULO, 10 * self.fuente_escala)
+            c.setFillColor(color)
+            c.drawCentredString(cx, margen_inf - 12 * self.fuente_escala, letra)
+
+        c.setStrokeColor(GRIS_CLARO)
+        c.setLineWidth(1)
+        c.line(0, margen_inf - 3, self.width, margen_inf - 3)
         c.restoreState()
 
 
@@ -218,6 +275,22 @@ class RuedaPerfiles(Flowable):
         rad = math.radians(angulo_grados)
         return cx + radio * math.cos(rad), cy + radio * math.sin(rad)
 
+    def _angulos_frontera(self):
+        """Ángulo medio entre cada par de sectores vecinos -- son las
+        líneas divisorias (tipo porción de tarta) que marcan dónde empieza
+        y termina cada sector, para que la rueda deje de verse como un
+        círculo plano con etiquetas sueltas alrededor."""
+        angulos = sorted(s["angulo"] for s in SECTORES_RUEDA)
+        fronteras = []
+        n = len(angulos)
+        for i in range(n):
+            a = angulos[i]
+            b = angulos[(i + 1) % n]
+            if i == n - 1:
+                b += 360  # el último tramo cruza el límite -180/180
+            fronteras.append((a + b) / 2)
+        return fronteras
+
     def _dibujar_estrella(self, cx, cy, r):
         c = self.canv
         puntos = []
@@ -239,6 +312,15 @@ class RuedaPerfiles(Flowable):
         c.setStrokeColor(GRIS_CLARO)
         c.setLineWidth(1)
         c.circle(cx, cy, self.radio, fill=0, stroke=1)
+
+        # líneas divisorias (tipo porción de tarta) entre cada sector y el
+        # siguiente, para que se vea claramente dónde empieza y termina
+        # cada uno en vez de solo etiquetas sueltas alrededor de un círculo.
+        c.setStrokeColor(colors.Color(0.7, 0.7, 0.68))
+        c.setLineWidth(0.75)
+        for angulo in self._angulos_frontera():
+            x, y = self._punto(cx, cy, angulo, self.radio)
+            c.line(cx, cy, x, y)
 
         c.setFont(FUENTE_TITULO, 8)
         c.setFillColor(GRIS_TEXTO)
@@ -271,21 +353,6 @@ class RuedaPerfiles(Flowable):
         c.restoreState()
 
 
-def _tabla_perfil(perfil):
-    filas = [["", ""]]
-    data = []
-    for letra in ("D", "I", "S", "C"):
-        data.append([
-            Paragraph(f"<b>{letra}</b>", ParagraphStyle("letra", fontName=FUENTE_TITULO, fontSize=12)),
-            BarraDisc(letra, perfil.get(letra, 0)),
-        ])
-    t = Table(data, colWidths=[1.2 * cm, ANCHO_BARRA + 1.5 * cm])
-    t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-    ]))
-    return t
 
 
 def _lista(items):
@@ -422,8 +489,8 @@ def _seccion_grafico_continuo(perfil_natural, perfil_adaptado):
 
 
 def _seccion_rueda_perfiles(perfil_natural, perfil_adaptado):
-    _, sector_n1, sector_n2 = sector_mas_cercano(perfil_natural)
-    _, sector_a1, sector_a2 = sector_mas_cercano(perfil_adaptado)
+    angulo_n, sector_n1, sector_n2 = sector_mas_cercano(perfil_natural)
+    angulo_a, sector_a1, sector_a2 = sector_mas_cercano(perfil_adaptado)
     return [
         Spacer(1, 6),
         Paragraph("Rueda de Perfiles Profesionales", SECCION_STYLE),
@@ -437,8 +504,8 @@ def _seccion_rueda_perfiles(perfil_natural, perfil_adaptado):
         Spacer(1, 10),
         RuedaPerfiles(perfil_natural, perfil_adaptado),
         Spacer(1, 10),
-        Paragraph(f"<b>Natural:</b> cerca de {sector_n1} (también hacia {sector_n2})", LISTA_STYLE),
-        Paragraph(f"<b>Adaptado:</b> cerca de {sector_a1} (también hacia {sector_a2})", LISTA_STYLE),
+        Paragraph(f"<b>Natural:</b> {sector_n1} {sector_n2} <font color='#999'>({angulo_n:.1f}°)</font>", LISTA_STYLE),
+        Paragraph(f"<b>Adaptado:</b> {sector_a1} {sector_a2} <font color='#999'>({angulo_a:.1f}°)</font>", LISTA_STYLE),
     ]
 
 
@@ -688,13 +755,12 @@ def _construir_cuerpo(resultado, registro_paginas):
         Paragraph("Aproximación al método TTI Success Insights", NOTA_STYLE),
         Spacer(1, 10),
         Paragraph("Perfil dominante", SECCION_STYLE),
-        Paragraph(resultado["tipo_disc"], TIPO_STYLE),
-        Spacer(1, 14),
-        Paragraph("Estilo Adaptado (contexto profesional)", SECCION_STYLE),
-        _tabla_perfil(resultado["perfil_adaptado"]),
+        Paragraph(resultado["tipo_disc"], ParagraphStyle(
+            "tipoColor", parent=TIPO_STYLE,
+            textColor=COLOR_LETRA.get(resultado["tipo_disc"][0], colors.black),
+        )),
         Spacer(1, 10),
-        Paragraph("Estilo Natural (auténtico / relajado)", SECCION_STYLE),
-        _tabla_perfil(resultado["perfil_natural"]),
+        GraficoPerfilVertical(resultado["perfil_natural"], resultado["perfil_adaptado"]),
     ]
 
     informe = resultado.get("informe_completo") or {}
@@ -739,6 +805,27 @@ def _construir_cuerpo(resultado, registro_paginas):
     return story
 
 
+def _dibujar_esquina(resultado):
+    """Version reducida de GraficoPerfilVertical (sin leyenda ni valores)
+    repetida en la esquina inferior derecha de cada pagina siguiente a la
+    portada -- para tener siempre a la vista el perfil Natural/Adaptado,
+    igual que hace el informe TTI real."""
+    mini = GraficoPerfilVertical(
+        resultado["perfil_natural"], resultado["perfil_adaptado"],
+        width=4.6 * cm, height=2.1 * cm, con_leyenda=False, con_valores=False, fuente_escala=0.72,
+    )
+
+    def dibujar(canv, doc):
+        canv.saveState()
+        x0 = A4[0] - mini.width - 1.6 * cm
+        y0 = 1.1 * cm
+        mini.canv = canv
+        mini.drawOn(canv, x0, y0)
+        canv.restoreState()
+
+    return dibujar
+
+
 def generar_pdf(resultado):
     """resultado: dict como el que devuelve disc_module._row_to_dict (nombre,
     fecha_test, puntos_brutos, tipo_disc, perfil_adaptado, perfil_natural)."""
@@ -761,5 +848,6 @@ def generar_pdf(resultado):
         topMargin=2 * cm, bottomMargin=2 * cm, leftMargin=2 * cm, rightMargin=2 * cm,
     )
     story_final = _portada(resultado) + _indice(registro_paginas) + _construir_cuerpo(resultado, {})
-    doc.build(story_final)
+    esquina = _dibujar_esquina(resultado)
+    doc.build(story_final, onLaterPages=esquina)
     return buffer.getvalue()
