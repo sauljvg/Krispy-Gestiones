@@ -135,27 +135,36 @@ function wrapLabel(texto, maxLen = 18) {
   return lineas;
 }
 
+// Por debajo de este ancho las etiquetas largas (motivos, preguntas) no
+// caben bajo cada barra vertical por mucho que se envuelvan en varias
+// líneas -- Chart.js las deja desbordar y se solapan entre sí. En vez de
+// intentar que quepan más apretadas, en móvil se cambia a barras
+// horizontales: cada etiqueta pasa a tener el ancho completo de la
+// pantalla en su propia fila, que es donde sí cabe un texto largo.
+const UMBRAL_MOVIL_CHART = 700;
+
 function renderChartBloque(canvasId, existingChart, items) {
   const ctx = document.getElementById(canvasId);
   if (existingChart) existingChart.destroy();
-  ctx.parentElement.style.height = "380px";
   const colorTexto = colorTextoActual();
+  const movil = window.innerWidth < UMBRAL_MOVIL_CHART;
+  ctx.parentElement.style.height = movil ? `${70 + items.length * 46}px` : "380px";
+  const escalaValor = { min: 0, max: 5, ticks: { color: colorTexto }, grid: { color: "rgba(128,128,128,0.2)" } };
+  const escalaCategoria = { ticks: { color: colorTexto, autoSkip: false, maxRotation: 0, minRotation: 0 }, grid: { display: false } };
   return new Chart(ctx, {
     type: "bar",
     data: {
-      labels: items.map((i) => wrapLabel(i.pregunta)),
+      labels: items.map((i) => wrapLabel(i.pregunta, movil ? 20 : 18)),
       datasets: [{ data: items.map((i) => i.promedio), backgroundColor: MARCA_COLOR, borderRadius: 4 }],
     },
     options: {
+      indexAxis: movil ? "y" : "x",
       responsive: true,
       maintainAspectRatio: false,
-      scales: {
-        y: { min: 0, max: 5, ticks: { color: colorTexto }, grid: { color: "rgba(128,128,128,0.2)" } },
-        x: { ticks: { color: colorTexto, autoSkip: false, maxRotation: 0, minRotation: 0 }, grid: { display: false } },
-      },
+      scales: movil ? { x: escalaValor, y: escalaCategoria } : { y: escalaValor, x: escalaCategoria },
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: (ctx) => `${ctx.parsed.y ?? 0} / 5` } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.parsed.x ?? ctx.parsed.y ?? 0} / 5` } },
       },
     },
   });
@@ -164,21 +173,22 @@ function renderChartBloque(canvasId, existingChart, items) {
 function renderChartMotivos(items) {
   const ctx = document.getElementById("chart-motivos");
   if (chartMotivos) chartMotivos.destroy();
-  ctx.parentElement.style.height = "420px";
   const colorTexto = colorTextoActual();
+  const movil = window.innerWidth < UMBRAL_MOVIL_CHART;
+  ctx.parentElement.style.height = movil ? `${70 + items.length * 42}px` : "420px";
+  const escalaValor = { min: 0, max: 100, ticks: { color: colorTexto, callback: (v) => `${v}%` }, grid: { color: "rgba(128,128,128,0.2)" } };
+  const escalaCategoria = { ticks: { color: colorTexto, autoSkip: false, maxRotation: 0, minRotation: 0 }, grid: { display: false } };
   chartMotivos = new Chart(ctx, {
     type: "bar",
     data: {
-      labels: items.map((i) => wrapLabel(i.motivo, 12)),
+      labels: items.map((i) => wrapLabel(i.motivo, movil ? 18 : 12)),
       datasets: [{ data: items.map((i) => i.porcentaje), backgroundColor: MARCA_COLOR, borderRadius: 4 }],
     },
     options: {
+      indexAxis: movil ? "y" : "x",
       responsive: true,
       maintainAspectRatio: false,
-      scales: {
-        y: { min: 0, max: 100, ticks: { color: colorTexto, callback: (v) => `${v}%` }, grid: { color: "rgba(128,128,128,0.2)" } },
-        x: { ticks: { color: colorTexto, autoSkip: false, maxRotation: 0, minRotation: 0 }, grid: { display: false } },
-      },
+      scales: movil ? { x: escalaValor, y: escalaCategoria } : { y: escalaValor, x: escalaCategoria },
       plugins: {
         legend: { display: false },
         tooltip: {
