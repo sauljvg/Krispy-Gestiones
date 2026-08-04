@@ -30,6 +30,10 @@ function activarVideosBoletin(root) {
     wrap.innerHTML = thumb
       ? `<img src="${thumb}" alt="Ver vídeo" loading="lazy"><span class="boletin-video-play"></span>`
       : `<span class="boletin-video-play"></span>`;
+    // Por si la miniatura falla al cargar (archivo borrado, permisos, etc.)
+    // -- se quita en vez de dejar el icono de imagen rota.
+    const img = wrap.querySelector("img");
+    if (img) img.addEventListener("error", () => img.remove(), { once: true });
     wrap.addEventListener("click", () => {
       wrap.innerHTML = `<iframe src="${embedUrl}" title="Vídeo" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
       wrap.classList.remove("boletin-video-facade");
@@ -275,7 +279,13 @@ async function mostrarPost(id) {
       <div class="blog-pdf-paginas" id="blog-pdf-paginas"></div>
     </div>`
     : "";
-  const sinContenido = contenidoEstaVacio(post.contenido_html);
+  // Si el boletín incluye el bloque "PDF adjunto" (ver htmlPdf en
+  // boletin-builder.js), el visor se monta en el sitio exacto donde se
+  // colocó ese bloque en vez de ir siempre al final -- así se puede poner
+  // el PDF antes de un vídeo, entre dos textos, etc. Los boletines
+  // antiguos (sin ese bloque) siguen cayendo al final, como siempre.
+  const tieneMarcadorPdf = /class="boletin-pdf-marker"/.test(post.contenido_html || "");
+  const sinContenido = contenidoEstaVacio(post.contenido_html) && !tieneMarcadorPdf;
   const introHtml = sinContenido && post.tiene_pdf
     ? `
     <div class="blog-post-intro">
@@ -289,10 +299,18 @@ async function mostrarPost(id) {
       <div class="fecha">${(post.publicado_en || "").slice(0, 10)}</div>
       ${introHtml}
       ${sinContenido ? "" : `<div class="contenido">${post.contenido_html}</div>`}
-      ${pdfHtml}
+      ${tieneMarcadorPdf ? "" : pdfHtml}
     </div>
   `;
   postEl.querySelector(".btn-volver-blog").addEventListener("click", mostrarLista);
+  // Sustituye el/los marcador(es) por el visor real -- si hubiera más de
+  // uno (no debería, solo hay un PDF por boletín) el primero se lleva el
+  // visor y el resto se quita, para no montar el mismo PDF dos veces.
+  const marcadores = postEl.querySelectorAll(".boletin-pdf-marker");
+  marcadores.forEach((marcador, i) => {
+    if (i === 0 && post.tiene_pdf) marcador.outerHTML = pdfHtml;
+    else marcador.remove();
+  });
   activarVideosBoletin(postEl);
   renderSidebar();
   montarIndiceCapitulos(postEl);

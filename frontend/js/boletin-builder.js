@@ -78,6 +78,7 @@ const BoletinBuilder = (function () {
     espaciador: { etiqueta: "Espacio", icono: "↕️" },
     columnas: { etiqueta: "Dos columnas", icono: "▥" },
     capitulo: { etiqueta: "Divisor de departamento", icono: "🏢" },
+    pdf: { etiqueta: "PDF adjunto", icono: "📄" },
     html_avanzado: { etiqueta: "HTML avanzado", icono: "💻" },
   };
 
@@ -125,9 +126,14 @@ const BoletinBuilder = (function () {
     const gd = u.match(/drive\.google\.com\/(?:file\/d\/|open\?id=)([\w-]+)/);
     if (gd) {
       const id = gd[1];
+      // El endpoint /thumbnail de Drive no es oficial y falla bastante
+      // (según cómo esté compartido el archivo, a veces devuelve error en
+      // vez de imagen) -- se vio como un icono de imagen rota sobre fondo
+      // negro. Mejor no intentarlo: fondo negro sólido siempre, como en
+      // OneDrive, hasta que se pulsa play.
       return {
         fuente: "drive",
-        thumb: `https://drive.google.com/thumbnail?id=${id}&sz=w1000`,
+        thumb: null,
         embed: `https://drive.google.com/file/d/${id}/preview`,
       };
     }
@@ -158,6 +164,11 @@ const BoletinBuilder = (function () {
       wrap.innerHTML = thumb
         ? `<img src="${thumb}" alt="Ver vídeo" loading="lazy"><span class="boletin-video-play"></span>`
         : `<span class="boletin-video-play"></span>`;
+      // Por si la miniatura falla al cargar (archivo borrado, permisos,
+      // etc.) -- se quita en vez de dejar el icono de imagen rota, y el
+      // fondo negro del contenedor se ve igual de bien con solo el botón.
+      const img = wrap.querySelector("img");
+      if (img) img.addEventListener("error", () => img.remove(), { once: true });
       wrap.addEventListener("click", () => {
         wrap.innerHTML = `<iframe src="${embedUrl}" title="Vídeo" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
         wrap.classList.remove("boletin-video-facade");
@@ -265,6 +276,8 @@ const BoletinBuilder = (function () {
                  espacio: 8, radio: 8, fondo: "", colorPie: "#666666", tamanoPie: 11 };
       case "video":
         return { id: nuevoId(), tipo, url: "", radio: 8, fondo: "" };
+      case "pdf":
+        return { id: nuevoId(), tipo };
       case "boton":
         return { id: nuevoId(), tipo, texto: "Más información", url: "", color: "#0b6b3a", fuente: "brandon",
                  colorTexto: "#ffffff", tamanoFuente: 15, interlineado: 1.2, espaciadoLetras: 0,
@@ -502,6 +515,17 @@ const BoletinBuilder = (function () {
     </div>`;
   }
 
+  // Marca DÓNDE debe aparecer el PDF adjunto del boletín (subido aparte,
+  // con el botón "Subir/reemplazar PDF" del editor -- solo hay un PDF por
+  // boletín, este bloque no lleva sus propios datos). blog.js busca este
+  // marcador y monta ahí el visor real; si el boletín no lleva este bloque
+  // (los antiguos no lo tenían), el PDF sigue cayendo al final como
+  // siempre. En el correo no se ve nada -- el PDF ya se manda como adjunto
+  // de verdad, no hace falta ningún hueco visual aquí.
+  function htmlPdf() {
+    return `<div class="boletin-pdf-marker"></div>`;
+  }
+
   function htmlBoton(b) {
     if (!b.texto || !b.texto.trim()) return "";
     const color = colorHex(b.color, "#0b6b3a");
@@ -589,6 +613,7 @@ const BoletinBuilder = (function () {
       case "imagen": return htmlImagen(b);
       case "galeria": return htmlGaleria(b);
       case "video": return htmlVideo(b);
+      case "pdf": return htmlPdf(b);
       case "boton": return htmlBoton(b);
       case "divisor": return htmlDivisor(b);
       case "espaciador": return htmlEspaciador(b);
@@ -911,6 +936,13 @@ const BoletinBuilder = (function () {
       ${campoColor("Color de fondo (opcional)", "fondo", b.fondo, "#ffffff", true)}`;
   }
 
+  function formPdf() {
+    return `<p class="staff-hint">Marca aquí el lugar donde debe aparecer el documento PDF adjunto a este
+      boletín -- súbelo con el botón "⬆ Subir/reemplazar PDF" más abajo, fuera de este bloque (solo hay un
+      PDF por boletín). Solo afecta a /blog.html: en el correo el PDF ya se manda como adjunto normal, no
+      cambia nada ahí.</p>`;
+  }
+
   function formBoton(b) {
     return `${campoTexto("Texto del botón", "texto", b.texto, "Más información")}
       ${barraEstiloTexto(b, { tamanoDefecto: 15, tamanoMin: 11, tamanoMax: 34, colorDefecto: "#ffffff", interlineadoDefecto: 1.2, alineacion: false })}
@@ -981,6 +1013,7 @@ const BoletinBuilder = (function () {
       case "imagen": return formImagen(b);
       case "galeria": return formGaleria(b);
       case "video": return formVideo(b);
+      case "pdf": return formPdf(b);
       case "boton": return formBoton(b);
       case "divisor": return formDivisor(b);
       case "espaciador": return formEspaciador(b);

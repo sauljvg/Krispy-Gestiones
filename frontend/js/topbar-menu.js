@@ -188,7 +188,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Genérico a propósito, sin ejemplos de secciones concretas (Clima, Entrevista de Salida...):
   // no todos los usuarios tienen acceso a todo, y nombrar una sección que alguien no puede ver
   // solo despierta curiosidad por algo a lo que no puede entrar.
-  const MENSAJE_BIENVENIDA = "Hola, soy David. Pregúntame cómo hacer cualquier cosa en Krispy RH y te ayudaré a hacerlo.";
+  const MENSAJE_BIENVENIDA = "Hola, soy David. Pregúntame cómo hacer cualquier cosa en este portal y te ayudaré a hacerlo.";
 
   const escapeHTML = (str) => {
     const div = document.createElement("div");

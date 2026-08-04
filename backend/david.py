@@ -81,14 +81,28 @@ salida".
 ## Boletines (boletines.html)
 
 "Nuevo boletin" abre el editor: Titulo, Resumen, y un constructor de bloques visuales (Encabezado,
-Titulo, Aviso destacado, Texto, Imagen, Galeria, Boton, Divisor, Espacio, Dos columnas, Divisor de
-departamento), con plantillas rapidas y un "Modo avanzado (HTML)" para casos que no cubran los
-bloques. Acciones: "Guardar", "Publicar"/"Despublicar", "Eliminar". Se puede adjuntar un PDF con
-"Subir/reemplazar PDF". Para enviarlo por email (solo boletines ya publicados): "Seleccionar todos" +
-"Enviar a seleccionados" (esto SI lo manda el propio servidor, de verdad, y dice a cuantos llego); o
-"Generar mailto" como alternativa manual (igual que en Entrevista de Salida, abre el correo del
-propio usuario). Los contactos se gestionan aparte con "Agregar contacto" o "Importar Excel". El
-boletin publicado se lee en blog.html?post=ID, sin login.
+Titulo, Aviso destacado, Texto, Imagen, Galeria, Video, PDF adjunto, Boton, Divisor, Espacio, Dos
+columnas, Divisor de departamento), con plantillas rapidas y un "Modo avanzado (HTML)" para casos que
+no cubran los bloques. Los bloques se pueden arrastrar/mover con las flechas para cambiar el orden en
+el que aparecen. Acciones: "Guardar", "Publicar"/"Despublicar", "Eliminar".
+
+Bloque "Video": acepta pegar un enlace de YouTube, Google Drive o OneDrive/SharePoint -- reconoce
+automaticamente cual es, no hay que elegir nada. El archivo debe estar compartido como "Cualquiera con
+el enlace puede ver" (en YouTube, subido como "Oculto"/no listado; en OneDrive hay que usar el enlace
+que da la opcion "Insertar"/Embed al compartir, no el de "Compartir" normal). En el correo se ve como
+una miniatura con boton de play (los emails no reproducen video); en /blog.html no se carga nada de la
+fuente hasta que se pulsa play, y entonces se reproduce dentro de la propia pagina, sin enlace a su
+canal ni boton de descarga.
+
+El PDF del boletin se sube aparte con el boton "Subir/reemplazar PDF" (uno solo por boletin, esto no
+es un bloque en si). Para elegir EN QUE PARTE del boletin aparece ese PDF (por ejemplo, antes de un
+video en vez de al final), se anade el bloque "PDF adjunto" en la posicion deseada -- si no se anade
+ese bloque, el PDF sigue apareciendo al final como siempre. Para enviarlo por email (solo boletines ya
+publicados): "Seleccionar todos" + "Enviar a seleccionados" (esto SI lo manda el propio servidor, de
+verdad, y dice a cuantos llego); o "Generar mailto" como alternativa manual (igual que en Entrevista
+de Salida, abre el correo del propio usuario) -- el PDF siempre va como adjunto real del email, eso no
+depende de donde se puso el bloque "PDF adjunto". Los contactos se gestionan aparte con "Agregar
+contacto" o "Importar Excel". El boletin publicado se lee en blog.html?post=ID, sin login.
 
 ## Informes (informes.html)
 
