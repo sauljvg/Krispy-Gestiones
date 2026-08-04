@@ -160,7 +160,16 @@ def preguntar(mensaje: str, historial: list[dict]) -> str:
     body = {
         "contents": contents,
         "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 800},
+        # thinkingBudget=0 desactiva el "razonamiento" interno del modelo -- sin esto, gemini-3.5-flash
+        # gasta buena parte de maxOutputTokens pensando y la respuesta visible se corta a mitad de
+        # frase (se vio en pruebas reales: una lista de 7 pasos se cortaba en el 7). No hace falta ese
+        # razonamiento para explicar botones del portal, así que se apaga y así toda la cuota de
+        # tokens es para el texto que de verdad se muestra.
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 1024,
+            "thinkingConfig": {"thinkingBudget": 0},
+        },
     }
 
     try:
@@ -181,4 +190,6 @@ def preguntar(mensaje: str, historial: list[dict]) -> str:
     texto = "".join(p.get("text", "") for p in partes).strip()
     if not texto:
         raise DavidError("Gemini devolvio una respuesta vacia")
+    if candidatos[0].get("finishReason") == "MAX_TOKENS":
+        texto += "\n\n(La respuesta se cortó por ser muy larga -- pregunta algo más concreto o pide que continúe.)"
     return texto
