@@ -2,6 +2,8 @@ import os
 
 import requests
 
+import auth as auth_module
+
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
@@ -149,7 +151,32 @@ class DavidError(Exception):
     pass
 
 
-def preguntar(mensaje: str, historial: list[dict]) -> str:
+def _texto_acceso(modulos_usuario: list[str]) -> str:
+    """Bloque de contexto POR PETICION (no forma parte del SYSTEM_PROMPT
+    fijo porque depende de quien pregunta) que le dice a David exactamente
+    a que tiene acceso ESTE usuario en concreto, para que no explique pasos
+    de una seccion que la persona ni siquiera puede abrir."""
+    permitidos = ["Reclutamiento (esto lo puede usar cualquier persona logueada)"]
+    permitidos += [nombre for clave, nombre in auth_module.MODULOS.items() if clave in modulos_usuario]
+    denegados = [nombre for clave, nombre in auth_module.MODULOS.items() if clave not in modulos_usuario]
+
+    texto = (
+        "Contexto de acceso de ESTE usuario en el portal ahora mismo (esto puede ser distinto para "
+        "cada persona que te pregunte):\n"
+        f"- SI tiene acceso a: {', '.join(permitidos)}.\n"
+    )
+    if denegados:
+        texto += f"- NO tiene acceso a: {', '.join(denegados)}.\n"
+    texto += (
+        "Si la pregunta trata sobre una seccion a la que este usuario NO tiene acceso (incluye "
+        "cualquier submodulo de SAONA si no aparece en la lista de \"SI tiene acceso\"), NO le "
+        "expliques los pasos: respondele con amabilidad y brevedad que no tiene acceso a esa parte "
+        "del portal, y que si lo necesita se lo pida a un administrador."
+    )
+    return texto
+
+
+def preguntar(mensaje: str, historial: list[dict], modulos_usuario: list[str]) -> str:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise DavidError("Falta configurar GEMINI_API_KEY en el entorno del servidor")
@@ -162,9 +189,11 @@ def preguntar(mensaje: str, historial: list[dict]) -> str:
             contents.append({"role": rol, "parts": [{"text": texto}]})
     contents.append({"role": "user", "parts": [{"text": mensaje}]})
 
+    system_instruction = f"{SYSTEM_PROMPT}\n\n{_texto_acceso(modulos_usuario)}"
+
     body = {
         "contents": contents,
-        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
         # thinkingBudget=0 desactiva el "razonamiento" interno del modelo -- sin esto, gemini-3.5-flash
         # gasta buena parte de maxOutputTokens pensando y la respuesta visible se corta a mitad de
         # frase (se vio en pruebas reales: una lista de 7 pasos se cortaba en el 7). No hace falta ese
