@@ -901,17 +901,31 @@ html { scrollbar-gutter: stable; }
 
 /* Respeta la preferencia del sistema de "reducir movimiento": desactiva
    transiciones y animaciones (mareos, distracción, accesibilidad). */
-/* Reproductor de vídeo de un boletín/blog -- boletin-builder.js pinta una
-   miniatura clicable (email-safe) y la sustituye por este iframe embebido
-   en cuanto carga la página (ver activarVideosBoletin). Contenedor 16:9
-   responsive con el truco clásico del padding-bottom. */
+/* Reproductor de vídeo de un boletín/blog (ver activarVideosBoletin en
+   boletin-builder.js y blog.js). Contenedor 16:9 responsive con el truco
+   clásico del padding-bottom. Empieza como "facade" -- solo miniatura +
+   botón de play propios, sin nada de YouTube -- y al hacer clic se convierte
+   en el iframe real (evita que YouTube pinte su portada de marca encima). */
 .boletin-video-embed {
   position: relative; width: 100%; max-width: 100%; padding-bottom: 56.25%;
-  height: 0; margin: 12px auto; border-radius: 8px; overflow: hidden;
+  height: 0; margin: 12px auto; border-radius: 8px; overflow: hidden; background: #000;
 }
 .boletin-video-embed iframe {
   position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;
 }
+.boletin-video-facade { cursor: pointer; }
+.boletin-video-facade img {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover;
+}
+.boletin-video-facade .boletin-video-play {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 64px; height: 64px; background: rgba(0, 0, 0, 0.65); border-radius: 50%;
+}
+.boletin-video-facade .boletin-video-play::after {
+  content: ""; position: absolute; top: 50%; left: 54%; transform: translate(-50%, -50%);
+  border-style: solid; border-width: 12px 0 12px 20px; border-color: transparent transparent transparent #fff;
+}
+.boletin-video-facade:hover .boletin-video-play { background: rgba(0, 0, 0, 0.8); }
 
 /* Asistente "David" (chat con IA) -- botón flotante + panel, ver
    topbar-menu.js. Mismo z-index alto que el resto de overlays flotantes de

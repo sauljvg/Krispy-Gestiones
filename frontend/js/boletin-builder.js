@@ -109,17 +109,27 @@ const BoletinBuilder = (function () {
     return /^[\w-]{11}$/.test(t) ? t : "";
   }
 
-  // Convierte las miniaturas .boletin-video-thumb (ver htmlVideo) en el
-  // reproductor embebido real -- se llama tras pintar la vista previa aquí,
-  // y de forma independiente en blog.js tras pintar /blog.html (ese archivo
-  // no carga este módulo entero solo para esto, por eso está duplicada: es
-  // una función de 10 líneas, no vale la pena una dependencia nueva).
+  // Convierte las miniaturas .boletin-video-thumb (ver htmlVideo) en un
+  // reproductor "facade": de entrada solo se ve NUESTRA miniatura + botón de
+  // play (sin nada de YouTube todavía), y el iframe real no se carga hasta
+  // que se hace clic -- si el iframe se carga de una, YouTube pinta encima
+  // su propia portada de marca (título, canal, botón "Ver en YouTube") antes
+  // de arrancar, que es justo lo que no queríamos mostrar. Con autoplay=1 al
+  // hacer clic esa portada de YouTube se salta porque el vídeo arranca ya.
+  // Se llama tras pintar la vista previa aquí, y de forma independiente en
+  // blog.js tras pintar /blog.html (ese archivo no carga este módulo entero
+  // solo para esto, por eso está duplicada: no vale la pena una dependencia
+  // nueva por una función tan pequeña).
   function activarVideosBoletin(root) {
     root.querySelectorAll(".boletin-video-thumb[data-video-id]").forEach((a) => {
       const id = a.dataset.videoId;
       const wrap = document.createElement("div");
-      wrap.className = "boletin-video-embed";
-      wrap.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?modestbranding=1&rel=0" title="Vídeo" loading="lazy" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+      wrap.className = "boletin-video-embed boletin-video-facade";
+      wrap.innerHTML = `<img src="https://img.youtube.com/vi/${id}/hqdefault.jpg" alt="Ver vídeo" loading="lazy"><span class="boletin-video-play"></span>`;
+      wrap.addEventListener("click", () => {
+        wrap.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&modestbranding=1&rel=0" title="Vídeo" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+        wrap.classList.remove("boletin-video-facade");
+      }, { once: true });
       a.replaceWith(wrap);
     });
   }
