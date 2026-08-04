@@ -176,3 +176,113 @@ document.addEventListener("click", (e) => {
     btn.closest(".info-tip-wrap").classList.toggle("open");
   }
 });
+
+// "David" -- asistente de IA del portal (Gemini). Botón flotante disponible
+// en cualquier página que cargue topbar-menu.js (todas las internas), igual
+// que el resto de widgets de este archivo. El historial vive solo en memoria
+// de la pestaña -- se pierde al recargar, a propósito, para no complicar
+// esto con guardado en servidor por ahora.
+document.addEventListener("DOMContentLoaded", () => {
+  const escapeHTML = (str) => {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  };
+
+  const fab = document.createElement("button");
+  fab.type = "button";
+  fab.id = "david-fab";
+  fab.className = "david-fab";
+  fab.setAttribute("aria-label", "Preguntarle a David");
+  fab.textContent = "💬";
+  document.body.appendChild(fab);
+
+  const panel = document.createElement("div");
+  panel.id = "david-panel";
+  panel.className = "david-panel";
+  panel.hidden = true;
+  panel.innerHTML = `
+    <div class="david-head">
+      <span>💬 David</span>
+      <button type="button" class="david-cerrar" aria-label="Cerrar">✕</button>
+    </div>
+    <div class="david-mensajes" id="david-mensajes">
+      <div class="david-msg david-msg-david">Hola, soy David. Pregúntame cómo hacer cualquier cosa en el portal — por ejemplo "¿cómo exporto el informe de entrevista de salida?" o "¿cómo importo el excel de clima?".</div>
+    </div>
+    <form class="david-form" id="david-form">
+      <textarea id="david-input" placeholder="Escribe tu pregunta..." rows="1"></textarea>
+      <button type="submit" id="david-enviar">➤</button>
+    </form>`;
+  document.body.appendChild(panel);
+
+  const mensajesWrap = panel.querySelector("#david-mensajes");
+  const form = panel.querySelector("#david-form");
+  const input = panel.querySelector("#david-input");
+  const btnEnviar = panel.querySelector("#david-enviar");
+  let historial = [];
+  let enviando = false;
+
+  function agregarMensaje(rol, texto) {
+    const div = document.createElement("div");
+    div.className = `david-msg david-msg-${rol}`;
+    // A David se le pide que no use markdown, pero por si se le escapa
+    // algún **negrita** suelto, se convierte en vez de mostrar los asteriscos.
+    div.innerHTML = escapeHTML(texto)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\n/g, "<br>");
+    mensajesWrap.appendChild(div);
+    mensajesWrap.scrollTop = mensajesWrap.scrollHeight;
+    return div;
+  }
+
+  fab.addEventListener("click", () => {
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden) input.focus();
+  });
+  panel.querySelector(".david-cerrar").addEventListener("click", () => {
+    panel.hidden = true;
+  });
+
+  input.addEventListener("input", () => {
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 110)}px`;
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const mensaje = input.value.trim();
+    if (!mensaje || enviando) return;
+    enviando = true;
+    btnEnviar.disabled = true;
+    agregarMensaje("user", mensaje);
+    input.value = "";
+    input.style.height = "auto";
+    const pensando = agregarMensaje("david", "…");
+    try {
+      const res = await fetch(`${window.location.origin}/api/david/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mensaje, historial }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || "Error al preguntarle a David");
+      pensando.innerHTML = escapeHTML(data.respuesta).replace(/\n/g, "<br>");
+      historial.push({ rol: "user", texto: mensaje });
+      historial.push({ rol: "david", texto: data.respuesta });
+      if (historial.length > 20) historial = historial.slice(-20);
+    } catch (err) {
+      pensando.classList.add("david-msg-error");
+      pensando.textContent = err.message || "No se pudo contactar a David. Inténtalo de nuevo.";
+    } finally {
+      mensajesWrap.scrollTop = mensajesWrap.scrollHeight;
+      enviando = false;
+      btnEnviar.disabled = false;
+    }
+  });
+});

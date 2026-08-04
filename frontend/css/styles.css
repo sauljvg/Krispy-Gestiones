@@ -901,6 +901,53 @@ html { scrollbar-gutter: stable; }
 
 /* Respeta la preferencia del sistema de "reducir movimiento": desactiva
    transiciones y animaciones (mareos, distracción, accesibilidad). */
+/* Asistente "David" (chat con IA) -- botón flotante + panel, ver
+   topbar-menu.js. Mismo z-index alto que el resto de overlays flotantes de
+   este archivo (menús, paneles de notificación). */
+.david-fab {
+  position: fixed; right: 20px; bottom: 20px; z-index: 200;
+  width: 52px; height: 52px; border-radius: 50%; border: none;
+  background: var(--acento); color: #fff; font-size: 22px; cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+}
+.david-fab:hover { filter: brightness(1.08); }
+.david-panel {
+  position: fixed; right: 20px; bottom: 84px; z-index: 200;
+  width: 340px; max-width: calc(100vw - 32px);
+  height: 460px; max-height: calc(100vh - 120px);
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.david-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; background: var(--acento); color: #fff; font-weight: 600;
+}
+.david-head .david-cerrar { background: none; border: none; color: #fff; font-size: 16px; cursor: pointer; opacity: 0.85; }
+.david-head .david-cerrar:hover { opacity: 1; }
+.david-mensajes { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.david-msg { max-width: 88%; padding: 8px 11px; border-radius: 10px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; }
+.david-msg-david { align-self: flex-start; background: var(--surface-page); color: var(--text-primary); border: 1px solid var(--border); }
+.david-msg-user { align-self: flex-end; background: var(--acento); color: #fff; }
+.david-msg-error { background: #fdecea; color: #b3261e; border: 1px solid #f5c6c2; }
+.david-form { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--border); }
+.david-form textarea {
+  flex: 1; resize: none; max-height: 110px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary);
+  font-family: inherit; font-size: 13.5px;
+}
+.david-form button {
+  border: none; border-radius: 8px; background: var(--acento); color: #fff;
+  width: 38px; font-size: 15px; cursor: pointer; flex-shrink: 0;
+}
+.david-form button:disabled { opacity: 0.6; cursor: default; }
+@media (max-width: 520px) {
+  .david-panel { right: 10px; left: 10px; width: auto; bottom: 78px; }
+  .david-fab { right: 14px; bottom: 14px; }
+}
+
+/* Respeta la preferencia del sistema de "reducir movimiento": desactiva
+   transiciones y animaciones (mareos, distracción, accesibilidad). */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .001ms !important;
