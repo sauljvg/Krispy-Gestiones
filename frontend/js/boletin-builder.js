@@ -72,6 +72,7 @@ const BoletinBuilder = (function () {
     texto: { etiqueta: "Texto", icono: "📝" },
     imagen: { etiqueta: "Imagen", icono: "🖼️" },
     galeria: { etiqueta: "Galería de fotos", icono: "🖼️🖼️" },
+    video: { etiqueta: "Vídeo (YouTube)", icono: "🎬" },
     boton: { etiqueta: "Botón", icono: "🔘" },
     divisor: { etiqueta: "Divisor", icono: "➖" },
     espaciador: { etiqueta: "Espacio", icono: "↕️" },
@@ -96,6 +97,31 @@ const BoletinBuilder = (function () {
 
   function escapeAttr(str) {
     return escapeHTML(str).replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+  }
+
+  // Acepta la URL completa (youtube.com/watch?v=, youtu.be/, /shorts/) o un
+  // ID de 11 caracteres pegado directamente -- lo que sea más cómodo copiar
+  // desde YouTube.
+  function extraerYoutubeId(texto) {
+    const t = (texto || "").trim();
+    const m = t.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|shorts\/|embed\/))([\w-]{11})/);
+    if (m) return m[1];
+    return /^[\w-]{11}$/.test(t) ? t : "";
+  }
+
+  // Convierte las miniaturas .boletin-video-thumb (ver htmlVideo) en el
+  // reproductor embebido real -- se llama tras pintar la vista previa aquí,
+  // y de forma independiente en blog.js tras pintar /blog.html (ese archivo
+  // no carga este módulo entero solo para esto, por eso está duplicada: es
+  // una función de 10 líneas, no vale la pena una dependencia nueva).
+  function activarVideosBoletin(root) {
+    root.querySelectorAll(".boletin-video-thumb[data-video-id]").forEach((a) => {
+      const id = a.dataset.videoId;
+      const wrap = document.createElement("div");
+      wrap.className = "boletin-video-embed";
+      wrap.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?modestbranding=1&rel=0" title="Vídeo" loading="lazy" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+      a.replaceWith(wrap);
+    });
   }
 
   function sanitizarHTML(html) {
@@ -195,6 +221,8 @@ const BoletinBuilder = (function () {
                  imagenId3: null, imagenDataUrl3: null, pie3: "",
                  imagenId4: null, imagenDataUrl4: null, pie4: "",
                  espacio: 8, radio: 8, fondo: "", colorPie: "#666666", tamanoPie: 11 };
+      case "video":
+        return { id: nuevoId(), tipo, url: "", radio: 8, fondo: "" };
       case "boton":
         return { id: nuevoId(), tipo, texto: "Más información", url: "", color: "#0b6b3a", fuente: "brandon",
                  colorTexto: "#ffffff", tamanoFuente: 15, interlineado: 1.2, espaciadoLetras: 0,
@@ -403,6 +431,32 @@ const BoletinBuilder = (function () {
     return `<div style="text-align:${align};padding:12px 20px;${fondo}">${conEnlace}${pie}</div>`;
   }
 
+  // El HTML guardado (contenido_html) se reutiliza TAL CUAL tanto en
+  // /blog.html como en el correo que se envía por Resend -- un <iframe> de
+  // YouTube ahí no funcionaría en el correo (los clientes de email lo
+  // bloquean) y además dejaría descargar/seguir el enlace al canal. Por eso
+  // el bloque se guarda siempre como una miniatura con botón de "play" que
+  // enlaza al propio /blog.html del boletín (nunca a YouTube) -- en el
+  // correo se queda así (funciona igual que una imagen normal) y en
+  // /blog.html, boletin-video.js la sustituye por el reproductor embebido
+  // real en cuanto carga la página (ver activarVideosBoletin más abajo).
+  function htmlVideo(b) {
+    const id = extraerYoutubeId(b.url);
+    if (!id) return "";
+    const radio = numOr(b.radio, 8, { "": 0 });
+    const fondo = b.fondo && /^#[0-9a-fA-F]{6}$/.test(b.fondo) ? `background:${b.fondo};` : "";
+    const destino = postId ? `${window.location.origin}/blog.html?post=${postId}` : "#";
+    return `<div style="text-align:center;padding:12px 20px;${fondo}">
+      <a href="${escapeAttr(destino)}" class="boletin-video-thumb" data-video-id="${escapeAttr(id)}"
+         style="display:inline-block;position:relative;max-width:100%;text-decoration:none;line-height:0;">
+        <img src="https://img.youtube.com/vi/${id}/hqdefault.jpg" alt="Ver vídeo" style="max-width:100%;width:100%;border-radius:${radio}px;display:block;">
+        <span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:60px;height:60px;background:rgba(0,0,0,0.65);border-radius:50%;">
+          <span style="position:absolute;top:50%;left:54%;transform:translate(-50%,-50%);width:0;height:0;border-style:solid;border-width:11px 0 11px 18px;border-color:transparent transparent transparent #ffffff;"></span>
+        </span>
+      </a>
+    </div>`;
+  }
+
   function htmlBoton(b) {
     if (!b.texto || !b.texto.trim()) return "";
     const color = colorHex(b.color, "#0b6b3a");
@@ -489,6 +543,7 @@ const BoletinBuilder = (function () {
       case "texto": return htmlTexto(b);
       case "imagen": return htmlImagen(b);
       case "galeria": return htmlGaleria(b);
+      case "video": return htmlVideo(b);
       case "boton": return htmlBoton(b);
       case "divisor": return htmlDivisor(b);
       case "espaciador": return htmlEspaciador(b);
@@ -788,6 +843,21 @@ const BoletinBuilder = (function () {
       ${campoColor("Color de fondo (opcional)", "fondo", b.fondo, "#ffffff", true)}`;
   }
 
+  function formVideo(b) {
+    const id = extraerYoutubeId(b.url);
+    const previa = id
+      ? `<img src="https://img.youtube.com/vi/${id}/hqdefault.jpg" alt="" style="max-width:100%;border-radius:8px;display:block;margin-top:8px;">`
+      : `<p class="staff-hint">Pega el enlace y aparecerá la miniatura aquí.</p>`;
+    return `<p class="staff-hint">Sube el vídeo a YouTube como "Oculto" (no listado) y pega aquí su enlace. En el
+      correo se ve como una miniatura con botón de play (los emails no reproducen vídeo); al entrar a
+      /blog.html se reproduce dentro de la propia página, sin enlace a su canal ni botón de descarga
+      (YouTube exige dejar su logo pequeño en el reproductor, eso no se puede quitar).</p>
+      ${campoTexto("Enlace o ID del vídeo de YouTube", "url", b.url, "https://youtu.be/...")}
+      ${previa}
+      ${campoNumero("Redondeo de esquinas", "radio", numOr(b.radio, 8, { "": 0 }), 0, 40)}
+      ${campoColor("Color de fondo (opcional)", "fondo", b.fondo, "#ffffff", true)}`;
+  }
+
   function formBoton(b) {
     return `${campoTexto("Texto del botón", "texto", b.texto, "Más información")}
       ${barraEstiloTexto(b, { tamanoDefecto: 15, tamanoMin: 11, tamanoMax: 34, colorDefecto: "#ffffff", interlineadoDefecto: 1.2, alineacion: false })}
@@ -857,6 +927,7 @@ const BoletinBuilder = (function () {
       case "texto": return formTexto(b);
       case "imagen": return formImagen(b);
       case "galeria": return formGaleria(b);
+      case "video": return formVideo(b);
       case "boton": return formBoton(b);
       case "divisor": return formDivisor(b);
       case "espaciador": return formEspaciador(b);
@@ -902,6 +973,7 @@ const BoletinBuilder = (function () {
     elPreview.innerHTML = bloques.length === 0
       ? `<p class="builder-vacio">La vista previa aparecerá aquí en cuanto añadas algún bloque.</p>`
       : getHtml();
+    activarVideosBoletin(elPreview);
   }
 
   function actualizarBloqueBody(id) {

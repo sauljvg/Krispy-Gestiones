@@ -11,6 +11,21 @@ let indiceObserver = null;
 let revealObserver = null;
 let pdfRenderToken = 0; // se incrementa en cada mostrarPost para descartar renders de posts abandonados
 
+// Las miniaturas de vídeo (ver htmlVideo en boletin-builder.js) se guardan
+// como una imagen clicable -- email-safe, y también es lo que vería alguien
+// sin JS -- y aquí se sustituyen por el reproductor embebido real. Duplicada
+// a propósito respecto a boletin-builder.js: es una función de 8 líneas y
+// blog.js no necesita cargar el constructor entero solo por esto.
+function activarVideosBoletin(root) {
+  root.querySelectorAll(".boletin-video-thumb[data-video-id]").forEach((a) => {
+    const id = a.dataset.videoId;
+    const wrap = document.createElement("div");
+    wrap.className = "boletin-video-embed";
+    wrap.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?modestbranding=1&rel=0" title="Vídeo" loading="lazy" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+    a.replaceWith(wrap);
+  });
+}
+
 function quitarIndiceCapitulos() {
   if (indiceObserver) { indiceObserver.disconnect(); indiceObserver = null; }
   const existente = document.getElementById("blog-indice-capitulos");
@@ -128,8 +143,13 @@ function escapeHTML(str) {
   return div.innerHTML;
 }
 
+// cache: "no-store" en ambos fetch de esta página -- las respuestas de
+// /api/* no llevan cabecera Cache-Control (ver no_cachear_estaticos en
+// main.py, que a propósito solo cubre estáticos), así que el navegador
+// puede quedarse con una respuesta vieja tras editar un boletín y seguir
+// mostrándola aquí hasta un refresco forzado, sin este flag.
 async function cargarTodosPosts() {
-  const res = await fetch(`${API_BASE}/posts`);
+  const res = await fetch(`${API_BASE}/posts`, { cache: "no-store" });
   todosPosts = await res.json();
 }
 
@@ -202,7 +222,13 @@ function mostrarLista() {
 // o reducido a un <p></p> suelto — sin esto la página se ve completamente
 // en blanco hasta llegar al visor del PDF.
 function contenidoEstaVacio(html) {
-  const texto = (html || "")
+  const h = html || "";
+  // Un bloque de imagen o vídeo (miniatura de YouTube, ver htmlVideo en
+  // boletin-builder.js) no deja texto visible al quitar las etiquetas, así
+  // que sin este chequeo se marcaba como "vacío" y se ocultaba entero un
+  // boletín que solo llevara una foto o un vídeo, sin nada de texto.
+  if (/<img[\s>]/i.test(h)) return false;
+  const texto = h
     .replace(/<style[\s\S]*?<\/style>/gi, "")
     .replace(/<script[\s\S]*?<\/script>/gi, "")
     .replace(/<[^>]*>/g, "")
@@ -212,7 +238,7 @@ function contenidoEstaVacio(html) {
 }
 
 async function mostrarPost(id) {
-  const res = await fetch(`${API_BASE}/posts/${id}`);
+  const res = await fetch(`${API_BASE}/posts/${id}`, { cache: "no-store" });
   if (!res.ok) {
     mostrarLista();
     return;
@@ -255,6 +281,7 @@ async function mostrarPost(id) {
     </div>
   `;
   postEl.querySelector(".btn-volver-blog").addEventListener("click", mostrarLista);
+  activarVideosBoletin(postEl);
   renderSidebar();
   montarIndiceCapitulos(postEl);
   activarAnimacionesScroll(postEl);
