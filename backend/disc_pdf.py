@@ -64,16 +64,108 @@ NOMBRE_PERFIL_STYLE = ParagraphStyle("nombrePerfil", fontName=FUENTE_TITULO, fon
 RESUMEN_PERFIL_STYLE = ParagraphStyle("resumenPerfil", fontName=FUENTE_CONTENIDO, fontSize=12, alignment=1, textColor=GRIS_TEXTO, spaceAfter=14, leading=16)
 SUBSECCION_STYLE = ParagraphStyle("subseccion", fontName=FUENTE_TITULO, fontSize=12, spaceBefore=10, spaceAfter=4, textColor=ACENTO_JERARQUIA)
 LISTA_STYLE = ParagraphStyle("lista", fontName=FUENTE_CONTENIDO, fontSize=11, textColor=colors.black, leading=15)
+GRAFICO_TITULO_STYLE = ParagraphStyle("graficoTitulo", fontName=FUENTE_TITULO, fontSize=12, alignment=1, spaceAfter=1)
+GRAFICO_SUB_STYLE = ParagraphStyle("graficoSub", fontName=FUENTE_CONTENIDO, fontSize=10, alignment=1, textColor=GRIS_TEXTO, spaceAfter=8)
 
 ANCHO_BARRA = 11 * cm
+ANCHO_GRAFICO_UNICO = 7.6 * cm
+# Punto neutro de cada eje: TTI normaliza la suma de las 4 letras a ~205-209
+# (no 100), así que el "centro" real de la escala no es 25 sino ~51 -- se usa
+# como línea de referencia horizontal en cada gráfico, igual que en TTI.
+PUNTO_NEUTRO_EJE = 51
+
+
+class GraficoPerfilUnico(Flowable):
+    """Un único gráfico de barras verticales D/I/S/C, con su propia escala
+    0-100 (líneas de cuadrícula cada 20 puntos), una línea de referencia
+    central y el valor exacto en un círculo de color debajo de cada barra
+    -- así es como TTI separa 'Gráfico I / Estilo Adaptado' de
+    'Gráfico II / Estilo Natural' en vez de mezclarlos en un único gráfico
+    combinado."""
+
+    LETRAS = ("D", "I", "S", "C")
+
+    def __init__(self, perfil, width=ANCHO_GRAFICO_UNICO, height=7.4 * cm,
+                 con_eje=True, con_circulos=True, fuente_escala=1.0, linea_central=PUNTO_NEUTRO_EJE):
+        super().__init__()
+        self.perfil = perfil
+        self.width = width
+        self.height = height
+        self.con_eje = con_eje
+        self.con_circulos = con_circulos
+        self.fuente_escala = fuente_escala
+        self.linea_central = linea_central
+
+    def wrap(self, availWidth, availHeight):
+        return (self.width, self.height)
+
+    def draw(self):
+        c = self.canv
+        c.saveState()
+        margen_izq = (18 if self.con_eje else 2) * self.fuente_escala
+        margen_sup = 16 * self.fuente_escala
+        margen_inf = (22 if self.con_circulos else 8) * self.fuente_escala
+        ancho_grafico = self.width - margen_izq
+        alto_grafico = self.height - margen_sup - margen_inf
+        ancho_col = ancho_grafico / len(self.LETRAS)
+        ancho_barra = ancho_col * 0.5
+
+        if self.con_eje:
+            c.setFont(FUENTE_CONTENIDO, 6.5 * self.fuente_escala)
+            for val in (0, 20, 40, 60, 80, 100):
+                y = margen_inf + alto_grafico * (val / 100)
+                c.setStrokeColor(GRIS_CLARO)
+                c.setLineWidth(0.5)
+                c.line(margen_izq, y, self.width, y)
+                c.setFillColor(GRIS_TEXTO)
+                c.drawRightString(margen_izq - 3, y - 2 * self.fuente_escala, str(val))
+
+        if self.linea_central is not None:
+            y = margen_inf + alto_grafico * (self.linea_central / 100)
+            c.setStrokeColor(colors.Color(0.55, 0.55, 0.55))
+            c.setLineWidth(1.3)
+            c.line(margen_izq, y, self.width, y)
+
+        for i, letra in enumerate(self.LETRAS):
+            color = COLOR_LETRA.get(letra, colors.grey)
+            cx = margen_izq + i * ancho_col + ancho_col / 2
+            valor = self.perfil.get(letra, 0)
+            alto = alto_grafico * (valor / 100)
+
+            c.setFillColor(color)
+            c.rect(cx - ancho_barra / 2, margen_inf, ancho_barra, alto, fill=1, stroke=0)
+
+            c.setFont(FUENTE_TITULO, 9 * self.fuente_escala)
+            c.setFillColor(color)
+            c.drawCentredString(cx, self.height - 9 * self.fuente_escala, letra)
+            c.setLineWidth(2)
+            c.setStrokeColor(color)
+            c.line(cx - 8 * self.fuente_escala, self.height - 13 * self.fuente_escala,
+                   cx + 8 * self.fuente_escala, self.height - 13 * self.fuente_escala)
+
+            if self.con_circulos:
+                cy = margen_inf * 0.5
+                r = 8.5 * self.fuente_escala
+                c.setFillColor(colors.white)
+                c.setStrokeColor(color)
+                c.setLineWidth(1.2)
+                c.circle(cx, cy, r, fill=1, stroke=1)
+                c.setFont(FUENTE_TITULO, 8 * self.fuente_escala)
+                c.setFillColor(color)
+                c.drawCentredString(cx, cy - 3 * self.fuente_escala, str(round(valor)))
+
+        c.setStrokeColor(colors.black)
+        c.setLineWidth(1)
+        c.line(margen_izq, margen_inf, self.width, margen_inf)
+        c.restoreState()
 
 
 class GraficoPerfilVertical(Flowable):
     """Barras VERTICALES agrupadas D/I/S/C -- Natural (más clara) y
-    Adaptado (sólido) lado a lado por letra. Es la pieza central del
-    perfil en la primera página, y una versión reducida (con_leyenda=False,
-    con_valores=False) de este mismo Flowable se repite en la esquina
-    inferior derecha de cada página siguiente (ver _dibujar_esquina)."""
+    Adaptado (sólido) lado a lado por letra. Versión reducida que se repite
+    en la esquina inferior derecha de cada página (ver _dibujar_esquina);
+    la página 1 usa dos GraficoPerfilUnico separados en su lugar, igual
+    que TTI."""
 
     LETRAS = ("D", "I", "S", "C")
 
@@ -353,6 +445,29 @@ class RuedaPerfiles(Flowable):
         c.restoreState()
 
 
+
+
+def _graficos_natural_adaptado(perfil_natural, perfil_adaptado):
+    """Los dos gráficos de barras separados, uno junto al otro, igual que
+    el informe TTI real: 'Gráfico I / Estilo Adaptado' a la izquierda,
+    'Gráfico II / Estilo Natural' a la derecha, cada uno con su propia
+    escala 0-100 y los valores exactos en círculos de color."""
+    celda_adaptado = [
+        Paragraph("Gráfico I", GRAFICO_TITULO_STYLE),
+        Paragraph("Estilo Adaptado", GRAFICO_SUB_STYLE),
+        GraficoPerfilUnico(perfil_adaptado),
+    ]
+    celda_natural = [
+        Paragraph("Gráfico II", GRAFICO_TITULO_STYLE),
+        Paragraph("Estilo Natural", GRAFICO_SUB_STYLE),
+        GraficoPerfilUnico(perfil_natural),
+    ]
+    t = Table([[celda_adaptado, celda_natural]], colWidths=[ANCHO_GRAFICO_UNICO + 0.8 * cm] * 2)
+    t.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+    ]))
+    return t
 
 
 def _lista(items):
@@ -760,7 +875,7 @@ def _construir_cuerpo(resultado, registro_paginas):
             textColor=COLOR_LETRA.get(resultado["tipo_disc"][0], colors.black),
         )),
         Spacer(1, 10),
-        GraficoPerfilVertical(resultado["perfil_natural"], resultado["perfil_adaptado"]),
+        _graficos_natural_adaptado(resultado["perfil_natural"], resultado["perfil_adaptado"]),
     ]
 
     informe = resultado.get("informe_completo") or {}

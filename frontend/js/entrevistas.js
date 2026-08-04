@@ -215,7 +215,10 @@ function renderChartEvolucionTotal(statsPorPeriodo) {
   if (chartEvolucionTotal) chartEvolucionTotal.destroy();
   ctx.parentElement.style.height = "320px";
   const colorTexto = colorTextoActual();
-  const nombresBloque = statsPorPeriodo.length ? statsPorPeriodo[0].bloques.map((b) => b.nombre) : [];
+  const movil = window.innerWidth < UMBRAL_MOVIL_CHART;
+  const nombresBloque = statsPorPeriodo.length
+    ? statsPorPeriodo[0].bloques.map((b) => (movil ? wrapLabel(b.nombre, 12) : b.nombre))
+    : [];
   const datasets = statsPorPeriodo.map((p, i) => ({
     label: p.label,
     data: p.bloques.map((b) => b.total_ponderado),
@@ -231,7 +234,7 @@ function renderChartEvolucionTotal(statsPorPeriodo) {
       maintainAspectRatio: false,
       scales: {
         y: { min: 1, max: 5, ticks: { color: colorTexto }, grid: { color: "rgba(128,128,128,0.2)" } },
-        x: { ticks: { color: colorTexto }, grid: { display: false } },
+        x: { ticks: { color: colorTexto, autoSkip: false, maxRotation: 0, minRotation: 0 }, grid: { display: false } },
       },
       plugins: {
         legend: { position: "bottom", labels: { color: colorTexto, usePointStyle: true, pointStyle: "circle" } },
@@ -245,8 +248,15 @@ function renderChartEvolucionMinMax(statsPorPeriodo) {
   if (chartEvolucionMinMax) chartEvolucionMinMax.destroy();
   ctx.parentElement.style.height = "320px";
   const colorTexto = colorTextoActual();
+  const movil = window.innerWidth < UMBRAL_MOVIL_CHART;
   const primerPeriodo = statsPorPeriodo[0];
-  const labels = primerPeriodo ? primerPeriodo.min_max.flatMap((m) => [`${m.bloque} (Mín)`, `${m.bloque} (Máx)`]) : [];
+  const labels = primerPeriodo
+    ? primerPeriodo.min_max.flatMap((m) => {
+        const min = `${m.bloque} (Mín)`;
+        const max = `${m.bloque} (Máx)`;
+        return movil ? [wrapLabel(min, 12), wrapLabel(max, 12)] : [min, max];
+      })
+    : [];
   const datasets = statsPorPeriodo.map((p, i) => ({
     label: p.label,
     data: p.min_max.flatMap((m) => [m.min, m.max]),
@@ -262,7 +272,7 @@ function renderChartEvolucionMinMax(statsPorPeriodo) {
       maintainAspectRatio: false,
       scales: {
         y: { min: 1, max: 5, ticks: { color: colorTexto }, grid: { color: "rgba(128,128,128,0.2)" } },
-        x: { ticks: { color: colorTexto, autoSkip: false, maxRotation: 45, minRotation: 0 }, grid: { display: false } },
+        x: { ticks: { color: colorTexto, autoSkip: false, maxRotation: movil ? 0 : 45, minRotation: 0 }, grid: { display: false } },
       },
       plugins: {
         legend: { position: "bottom", labels: { color: colorTexto, usePointStyle: true, pointStyle: "circle" } },

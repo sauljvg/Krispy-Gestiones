@@ -40,6 +40,11 @@
   .bloque-head h2 { margin: 0; font-size: 17px; }
   .bloque-score { font-size: 20px; font-weight: 700; color: var(--acento); }
   .chart-wrap { position: relative; }
+  .chart-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .chart-scroll .chart-inner { width: 100%; }
+  @media (max-width: 700px) {
+    .chart-scroll .chart-inner { width: 640px; }
+  }
 
   .motivos-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 20px; }
   .motivos-card h2 { margin: 0 0 12px; font-size: 17px; }
@@ -163,13 +168,13 @@
           <h2>Total Ponderado por Bloque</h2>
           <button type="button" class="btn btn-ghost btn-descargar-chart" data-target="chart-evolucion-total" data-nombre="total_ponderado_por_bloque">⬇ PNG</button>
         </div>
-        <div class="chart-wrap"><canvas id="chart-evolucion-total"></canvas></div>
+        <div class="chart-wrap chart-scroll"><div class="chart-inner"><canvas id="chart-evolucion-total"></canvas></div></div>
 
         <div class="evolucion-chart-head" style="margin-top:26px;">
           <h2>Ítem Mínimo y Máximo por Bloque</h2>
           <button type="button" class="btn btn-ghost btn-descargar-chart" data-target="chart-evolucion-minmax" data-nombre="item_minimo_maximo_por_bloque">⬇ PNG</button>
         </div>
-        <div class="chart-wrap"><canvas id="chart-evolucion-minmax"></canvas></div>
+        <div class="chart-wrap chart-scroll"><div class="chart-inner"><canvas id="chart-evolucion-minmax"></canvas></div></div>
 
         <div id="detalle-bloques-wrap"></div>
 
