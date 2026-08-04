@@ -160,84 +160,6 @@ class GraficoPerfilUnico(Flowable):
         c.restoreState()
 
 
-class GraficoPerfilVertical(Flowable):
-    """Barras VERTICALES agrupadas D/I/S/C -- Natural (más clara) y
-    Adaptado (sólido) lado a lado por letra. Versión reducida que se repite
-    en la esquina inferior derecha de cada página (ver _dibujar_esquina);
-    la página 1 usa dos GraficoPerfilUnico separados en su lugar, igual
-    que TTI."""
-
-    LETRAS = ("D", "I", "S", "C")
-
-    def __init__(self, perfil_natural, perfil_adaptado, width=ANCHO_BARRA + 1.5 * cm, height=6.4 * cm,
-                 con_leyenda=True, con_valores=True, fuente_escala=1.0):
-        super().__init__()
-        self.perfil_natural = perfil_natural
-        self.perfil_adaptado = perfil_adaptado
-        self.width = width
-        self.height = height
-        self.con_leyenda = con_leyenda
-        self.con_valores = con_valores
-        self.fuente_escala = fuente_escala
-
-    def wrap(self, availWidth, availHeight):
-        return (self.width, self.height)
-
-    def draw(self):
-        c = self.canv
-        c.saveState()
-        margen_inf = 16 * self.fuente_escala
-        margen_sup = (24 if self.con_leyenda else 6) * self.fuente_escala
-        alto_disponible = self.height - margen_inf - margen_sup
-        ancho_grupo = self.width / len(self.LETRAS)
-        ancho_barra = ancho_grupo * 0.26
-        gap = ancho_grupo * 0.05
-
-        if self.con_leyenda:
-            c.setFont(FUENTE_CONTENIDO, 8)
-            leyenda_x = self.width / 2 - 60
-            c.setFillColor(colors.Color(0.55, 0.55, 0.55, alpha=0.6))
-            c.rect(leyenda_x, self.height - 15, 8, 8, fill=1, stroke=0)
-            c.setFillColor(GRIS_TEXTO)
-            c.drawString(leyenda_x + 11, self.height - 14, "Natural")
-            c.setFillColor(colors.black)
-            c.rect(leyenda_x + 62, self.height - 15, 8, 8, fill=1, stroke=0)
-            c.setFillColor(GRIS_TEXTO)
-            c.drawString(leyenda_x + 73, self.height - 14, "Adaptado")
-
-        for i, letra in enumerate(self.LETRAS):
-            color = COLOR_LETRA.get(letra, colors.grey)
-            cx = i * ancho_grupo + ancho_grupo / 2
-
-            valor_n = self.perfil_natural.get(letra, 0)
-            alto_n = alto_disponible * (valor_n / 100)
-            x_n = cx - ancho_barra - gap / 2
-            c.setFillColor(colors.Color(color.red, color.green, color.blue, alpha=0.4))
-            c.roundRect(x_n, margen_inf, ancho_barra, alto_n, 2, fill=1, stroke=0)
-
-            valor_a = self.perfil_adaptado.get(letra, 0)
-            alto_a = alto_disponible * (valor_a / 100)
-            x_a = cx + gap / 2
-            c.setFillColor(color)
-            c.roundRect(x_a, margen_inf, ancho_barra, alto_a, 2, fill=1, stroke=0)
-
-            if self.con_valores:
-                c.setFont(FUENTE_CONTENIDO, 7 * self.fuente_escala)
-                c.setFillColor(GRIS_TEXTO)
-                c.drawCentredString(x_n + ancho_barra / 2, margen_inf + alto_n + 3, str(round(valor_n)))
-                c.setFillColor(colors.black)
-                c.drawCentredString(x_a + ancho_barra / 2, margen_inf + alto_a + 3, str(round(valor_a)))
-
-            c.setFont(FUENTE_TITULO, 10 * self.fuente_escala)
-            c.setFillColor(color)
-            c.drawCentredString(cx, margen_inf - 12 * self.fuente_escala, letra)
-
-        c.setStrokeColor(GRIS_CLARO)
-        c.setLineWidth(1)
-        c.line(0, margen_inf - 3, self.width, margen_inf - 3)
-        c.restoreState()
-
-
 class BarraJerarquia(Flowable):
     """Fila de la Jerarquía Conductual: dos barras 0-100 (Natural y
     Adaptado) para un mismo factor, con una banda sombreada central (~68%
@@ -508,34 +430,51 @@ def _seccion_consejos_comunicacion():
 
 def _seccion_descriptores(perfil_adaptado):
     """Página 'Descriptores' -- banco fijo de 64 palabras (8 'alto' + 8
-    'bajo' por letra); se resalta en el color de cada letra el bloque que
-    corresponde a la banda de esa persona (ver descriptores_resaltados)."""
+    'bajo' por letra) en UNA sola tabla continua, con la fila de nombres de
+    factor como franja de color en el medio (igual que TTI): arriba las 8
+    palabras 'alto', abajo las 8 'bajo'. El bloque (alto o bajo) que
+    corresponde a la banda real de esta persona en cada factor se pinta con
+    un tinte de fondo del color de esa letra, no solo el texto en negrita
+    (ver descriptores_resaltados)."""
     resaltados = descriptores_resaltados(perfil_adaptado)
     letras = ("D", "I", "S", "C")
-    estilos_normal = {l: ParagraphStyle(f"desc_{l}_n", fontName=FUENTE_CONTENIDO, fontSize=9, textColor=colors.black) for l in letras}
-    estilos_resaltado = {l: ParagraphStyle(f"desc_{l}_r", fontName=FUENTE_TITULO, fontSize=9, textColor=COLOR_LETRA[l]) for l in letras}
+    FILA_HEADER = 8  # separa las 8 filas "alto" (0-7) de las 8 "bajo" (9-16)
+    estilo_normal = ParagraphStyle("descNormal", fontName=FUENTE_CONTENIDO, fontSize=9, alignment=1, textColor=colors.black)
+    estilos_resaltado = {l: ParagraphStyle(f"desc_{l}_r", fontName=FUENTE_TITULO, fontSize=9, alignment=1, textColor=COLOR_LETRA[l]) for l in letras}
+    estilos_header = {l: ParagraphStyle(f"descHead_{l}", fontName=FUENTE_TITULO, fontSize=10, alignment=1, textColor=colors.white) for l in letras}
 
-    def _tabla(bloque):
-        encabezado = [Paragraph(f"<b>{NOMBRE_LETRA[l]}</b>", ParagraphStyle(f"descHead_{l}", fontName=FUENTE_TITULO, fontSize=10, alignment=1)) for l in letras]
-        filas = [encabezado]
-        for i in range(8):
-            fila = []
-            for letra in letras:
-                palabra = DESCRIPTORES[letra][bloque][i]
-                marcado = resaltados.get(letra) == bloque
-                estilo = estilos_resaltado[letra] if marcado else estilos_normal[letra]
-                fila.append(Paragraph(palabra, estilo))
-            filas.append(fila)
-        ancho_col = (ANCHO_BARRA + 1.5 * cm) / 4
-        t = Table(filas, colWidths=[ancho_col] * 4)
-        t.setStyle(TableStyle([
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ("LINEBELOW", (0, 0), (-1, 0), 0.5, GRIS_CLARO),
-        ]))
-        return t
+    def _fila(bloque, i):
+        fila = []
+        for letra in letras:
+            palabra = DESCRIPTORES[letra][bloque][i]
+            marcado = resaltados.get(letra) == bloque
+            estilo = estilos_resaltado[letra] if marcado else estilo_normal
+            fila.append(Paragraph(palabra, estilo))
+        return fila
+
+    filas = [_fila("alto", i) for i in range(8)]
+    filas.append([Paragraph(NOMBRE_LETRA[l], estilos_header[l]) for l in letras])
+    filas += [_fila("bajo", i) for i in range(8)]
+
+    ancho_col = (ANCHO_BARRA + 1.5 * cm) / 4
+    t = Table(filas, colWidths=[ancho_col] * 4)
+    estilo_tabla = [
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, FILA_HEADER), (-1, FILA_HEADER), 6),
+        ("BOTTOMPADDING", (0, FILA_HEADER), (-1, FILA_HEADER), 6),
+    ]
+    for idx, letra in enumerate(letras):
+        color_letra = COLOR_LETRA[letra]
+        estilo_tabla.append(("BACKGROUND", (idx, FILA_HEADER), (idx, FILA_HEADER), color_letra))
+        tinte = colors.Color(color_letra.red, color_letra.green, color_letra.blue, alpha=0.16)
+        if resaltados.get(letra) == "alto":
+            estilo_tabla.append(("BACKGROUND", (idx, 0), (idx, FILA_HEADER - 1), tinte))
+        elif resaltados.get(letra) == "bajo":
+            estilo_tabla.append(("BACKGROUND", (idx, FILA_HEADER + 1), (idx, len(filas) - 1), tinte))
+    t.setStyle(TableStyle(estilo_tabla))
 
     return [
         Spacer(1, 6),
@@ -543,13 +482,12 @@ def _seccion_descriptores(perfil_adaptado):
         Paragraph(
             "Palabras que describen el estilo de comportamiento de esta persona -- cómo resuelve problemas y "
             "enfrenta retos, influye en los demás, responde al ritmo del entorno y ante las reglas y "
-            "procedimientos. Se resalta el bloque que corresponde a su perfil en cada factor.",
+            "procedimientos. Se resalta con color de fondo el bloque que corresponde a su perfil en cada "
+            "factor.",
             NOTA_STYLE,
         ),
         Spacer(1, 8),
-        _tabla("alto"),
-        Spacer(1, 10),
-        _tabla("bajo"),
+        t,
     ]
 
 
@@ -921,21 +859,31 @@ def _construir_cuerpo(resultado, registro_paginas):
 
 
 def _dibujar_esquina(resultado):
-    """Version reducida de GraficoPerfilVertical (sin leyenda ni valores)
-    repetida en la esquina inferior derecha de cada pagina siguiente a la
-    portada -- para tener siempre a la vista el perfil Natural/Adaptado,
-    igual que hace el informe TTI real."""
-    mini = GraficoPerfilVertical(
-        resultado["perfil_natural"], resultado["perfil_adaptado"],
-        width=4.6 * cm, height=2.1 * cm, con_leyenda=False, con_valores=False, fuente_escala=0.72,
+    """Versión en miniatura de los dos GraficoPerfilUnico de la página 1
+    (Adaptado + Natural, uno junto al otro), repetida en la esquina inferior
+    derecha de cada página siguiente a la portada -- mismo estilo que el
+    gráfico grande, solo que a escala reducida, para tener siempre a la
+    vista el perfil sin tener que volver a la página 1."""
+    ancho_mini = 2.3 * cm
+    gap = 0.25 * cm
+    mini_adaptado = GraficoPerfilUnico(
+        resultado["perfil_adaptado"], width=ancho_mini, height=2.3 * cm,
+        con_eje=False, con_circulos=False, fuente_escala=0.5,
+    )
+    mini_natural = GraficoPerfilUnico(
+        resultado["perfil_natural"], width=ancho_mini, height=2.3 * cm,
+        con_eje=False, con_circulos=False, fuente_escala=0.5,
     )
 
     def dibujar(canv, doc):
         canv.saveState()
-        x0 = A4[0] - mini.width - 1.6 * cm
+        ancho_total = ancho_mini * 2 + gap
+        x0 = A4[0] - ancho_total - 1.6 * cm
         y0 = 1.1 * cm
-        mini.canv = canv
-        mini.drawOn(canv, x0, y0)
+        mini_adaptado.canv = canv
+        mini_adaptado.drawOn(canv, x0, y0)
+        mini_natural.canv = canv
+        mini_natural.drawOn(canv, x0 + ancho_mini + gap, y0)
         canv.restoreState()
 
     return dibujar
