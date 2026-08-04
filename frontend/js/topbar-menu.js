@@ -185,7 +185,10 @@ document.addEventListener("click", (e) => {
 // conversación") -- a propósito no se guarda en el servidor.
 document.addEventListener("DOMContentLoaded", () => {
   const STORAGE_KEY = "david_historial";
-  const MENSAJE_BIENVENIDA = 'Hola, soy David. Pregúntame cómo hacer cualquier cosa en el portal — por ejemplo "¿cómo exporto el informe de entrevista de salida?" o "¿cómo importo el excel de clima?".';
+  // Genérico a propósito, sin ejemplos de secciones concretas (Clima, Entrevista de Salida...):
+  // no todos los usuarios tienen acceso a todo, y nombrar una sección que alguien no puede ver
+  // solo despierta curiosidad por algo a lo que no puede entrar.
+  const MENSAJE_BIENVENIDA = "Hola, soy David. Pregúntame cómo hacer cualquier cosa en Krispy RH y te ayudaré a hacerlo.";
 
   const escapeHTML = (str) => {
     const div = document.createElement("div");
