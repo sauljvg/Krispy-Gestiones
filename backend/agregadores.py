@@ -151,28 +151,37 @@ _PATRON_VIA_NO_DIRECCION = re.compile(
 
 
 def _direccion_valida(texto: str) -> bool:
-    """Una autovía/M-45/M-30 no es una dirección a la que nadie pueda pedir --
-    probar ahí solo genera ruido de "no disponible" que no dice nada real
-    sobre cobertura. Fuera de eso no filtramos más: un polígono con calle
-    tiene tan poca cobertura real como cualquier otro sitio, y eso sí es
-    dato útil."""
-    return not _PATRON_VIA_NO_DIRECCION.match(texto.strip())
+    """Tiene que ser una calle real CON número de portal -- una autovía/M-45,
+    un polígono sin número o cualquier vía sin número no es una dirección a
+    la que nadie pueda pedir de verdad. Probar ahí solo genera ruido de "no
+    disponible" que no dice nada sobre cobertura real."""
+    t = texto.strip()
+    if _PATRON_VIA_NO_DIRECCION.match(t):
+        return False
+    return bool(re.match(r"^\d", t))
 
 
-def _punto_geocodificado_valido(lat, lng, intentos_extra=8, paso_km=0.05):
-    """Geocodifica un punto y, si cae en una vía sin contexto de reparto, lo
-    desplaza en pasos pequeños (ángulos dispersos para no quedar en la misma
-    autovía) hasta encontrar una calle real o agotar los intentos -- en ese
-    caso se queda con el último punto probado."""
+def _punto_geocodificado_valido(lat, lng, intentos_extra=10, paso_km=0.03, radio_max_km=0.3):
+    """Geocodifica un punto y, si no es una calle con número real, prueba
+    puntos cercanos en espiral alrededor del MISMO punto original (nunca más
+    lejos de radio_max_km, para que siga representando ese sitio del círculo
+    y no se desplace de zona) hasta encontrar una dirección numerada válida.
+    Si agota los intentos, se queda con el último probado."""
+    lat0, lng0 = lat, lng
     texto = _geocodificar(lat, lng)
-    bearing = 0
+    if _direccion_valida(texto):
+        return lat, lng, texto
+
+    mejor = (lat, lng, texto)
     for intento in range(1, intentos_extra + 1):
-        if _direccion_valida(texto):
-            break
-        bearing = (bearing + 47) % 360
-        lat, lng = _mover_punto(lat, lng, bearing, paso_km * intento)
-        texto = _geocodificar(lat, lng)
-    return lat, lng, texto
+        radio = min(paso_km * intento, radio_max_km)
+        bearing = (intento * 137) % 360  # ángulo dorado: cubre el círculo sin repetir dirección
+        lat_i, lng_i = _mover_punto(lat0, lng0, bearing, radio)
+        texto_i = _geocodificar(lat_i, lng_i)
+        mejor = (lat_i, lng_i, texto_i)
+        if _direccion_valida(texto_i):
+            return mejor
+    return mejor
 
 
 def reparar_direcciones_invalidas() -> dict:
