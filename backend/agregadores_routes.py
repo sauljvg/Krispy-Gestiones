@@ -62,7 +62,7 @@ class AlertaIn(BaseModel):
 class DireccionMoverIn(BaseModel):
     lat: float
     lng: float
-    direccion_text: str
+    direccion_text: str | None = None
 
 
 class DireccionNuevaIn(BaseModel):
@@ -180,6 +180,11 @@ def ultimos_route(tienda: str, horas: int = 24, _user: dict = Depends(require_ag
 @router.get("/mapa-datos")
 def mapa_datos_route(tienda: str, _user: dict = Depends(require_agregadores)):
     return agregadores_module.get_mapa_datos(tienda)
+
+
+@router.get("/mapa-datos-todas")
+def mapa_datos_todas_route(_user: dict = Depends(require_agregadores)):
+    return agregadores_module.get_mapa_datos_todas()
 
 
 @router.get("/alertas")

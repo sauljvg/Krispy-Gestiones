@@ -30,12 +30,28 @@
   .agr-panel { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
   .agr-panel h2 { font-size: 16px; margin: 0 0 12px; color: var(--text-secondary); }
   .agr-panel-mapa { padding: 16px; }
+  .agr-panel-mapa-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+  .agr-panel-mapa-header h2 { margin: 0; }
   #agr-map { height: 70vh; min-height: 480px; border-radius: 8px; overflow: hidden; }
+
+  .agr-filtro-agregador { display: flex; gap: 6px; flex-wrap: wrap; }
+  .agr-filtro-btn {
+    padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-secondary); font-size: 12px;
+    font-weight: 600; cursor: pointer;
+  }
+  .agr-filtro-btn.activo[data-agregador=""] { background: var(--acento-calido); color: #fff; border-color: var(--acento-calido); }
+  .agr-filtro-btn.activo[data-agregador="justeat"] { background: #ff8000; color: #fff; border-color: #ff8000; }
+  .agr-filtro-btn.activo[data-agregador="glovo"] { background: #ffc244; color: #4a3300; border-color: #ffc244; }
+  .agr-filtro-btn.activo[data-agregador="ubereats"] { background: #06c167; color: #fff; border-color: #06c167; }
 
   .agr-bottom-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; }
   @media (max-width: 900px) { .agr-bottom-grid { grid-template-columns: 1fr; } }
   .agr-leyenda { display: flex; gap: 16px; margin-top: 10px; font-size: 12px; color: var(--text-secondary); flex-wrap: wrap; }
   .agr-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
+  .agr-leyenda-item { cursor: pointer; user-select: none; padding: 2px 4px; border-radius: 4px; }
+  .agr-leyenda-item:hover { background: var(--surface-page); }
+  .agr-leyenda-item.oculto { opacity: 0.4; text-decoration: line-through; }
 
   .agr-marker-dot { background: transparent; border: none; }
   .agr-marker-dot span {
@@ -103,14 +119,17 @@
     </div>
 
     <div class="agr-panel agr-panel-mapa">
-      <h2>Mapa de cobertura</h2>
-      <div id="agr-map"></div>
-      <div class="agr-leyenda">
-        <span><i class="agr-dot" style="background:#0ca30c"></i> Disponible en todos</span>
-        <span><i class="agr-dot" style="background:#fab219"></i> Disponible en algunos</span>
-        <span><i class="agr-dot" style="background:#d03b3b"></i> No disponible (real)</span>
-        <span><i class="agr-dot" style="background:#898781"></i> Sin datos válidos</span>
+      <div class="agr-panel-mapa-header">
+        <h2>Mapa de cobertura</h2>
+        <div class="agr-filtro-agregador">
+          <button type="button" class="agr-filtro-btn activo" data-agregador="">Todos</button>
+          <button type="button" class="agr-filtro-btn" data-agregador="justeat">JustEat</button>
+          <button type="button" class="agr-filtro-btn" data-agregador="glovo">Glovo</button>
+          <button type="button" class="agr-filtro-btn" data-agregador="ubereats">Uber Eats</button>
+        </div>
       </div>
+      <div id="agr-map"></div>
+      <div id="agr-leyenda" class="agr-leyenda"></div>
     </div>
 
     <div class="agr-bottom-grid">

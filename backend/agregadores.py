@@ -252,15 +252,18 @@ def reparar_direcciones_invalidas() -> dict:
     return {"reparadas": len(reparadas), "detalle": reparadas}
 
 
-def mover_direccion_manual(direccion_id: int, lat: float, lng: float, direccion_text: str) -> dict | None:
-    """Reubicación manual desde el mapa del dashboard -- alguien con ojo
-    humano (o Google Maps) corrige un punto que Nominatim no supo resolver
-    bien. No se re-geocodifica: el texto lo pone quien lo mueve."""
+def mover_direccion_manual(direccion_id: int, lat: float, lng: float, direccion_text: str = None) -> dict | None:
+    """Reubicación manual desde el mapa del dashboard (arrastrar un punto).
+    Sin texto de dirección, se geocodifica automáticamente la posición nueva
+    -- si no, el texto quedaría desactualizado (el de antes de arrastrar, ya
+    no corresponde a dónde está el punto ahora)."""
     conn = get_connection()
     fila = conn.execute("SELECT id FROM agregadores_direcciones WHERE id=?", (direccion_id,)).fetchone()
     if not fila:
         conn.close()
         return None
+    if not direccion_text:
+        lat, lng, direccion_text = _punto_geocodificado_valido(lat, lng)
     conn.execute(
         "UPDATE agregadores_direcciones SET lat=?, lng=?, direccion_text=? WHERE id=?",
         (lat, lng, direccion_text, direccion_id),
@@ -507,6 +510,22 @@ def get_mapa_datos(tienda: str):
         "tienda": {"tienda": tienda, **tienda_info} if tienda_info else None,
         "direcciones": resultado,
     }
+
+
+def get_mapa_datos_todas():
+    """Igual que get_mapa_datos pero de las 6 tiendas a la vez, para la
+    vista "Todas" del mapa -- cada dirección lleva su slug de tienda para
+    poder identificar de cuál es en el popup."""
+    tiendas = []
+    direcciones = []
+    for slug in TIENDAS:
+        datos = get_mapa_datos(slug)
+        if datos["tienda"]:
+            tiendas.append(datos["tienda"])
+        for d in datos["direcciones"]:
+            d["tienda"] = slug
+            direcciones.append(d)
+    return {"tiendas": tiendas, "direcciones": direcciones}
 
 
 def get_alertas(tienda: str = None, horas: int = 24):
