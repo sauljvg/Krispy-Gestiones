@@ -20,7 +20,7 @@ AGREGADORES = ["justeat", "glovo", "ubereats"]
 FRECUENCIA_CHEQUEO_CERCANO_MIN = 10
 FRECUENCIA_CHEQUEO_COMPLETO_MIN = 60
 
-HORARIOS_PUNTA = [{"inicio": 9, "fin": 22}]
+HORARIOS_APERTURA = [{"inicio": 9, "fin": 22}]
 
 # Pausa entre chequeos individuales (dirección x agregador) para reducir el riesgo de
 # bloqueo anti-bot al no lanzar ráfagas de peticiones seguidas contra el mismo sitio.

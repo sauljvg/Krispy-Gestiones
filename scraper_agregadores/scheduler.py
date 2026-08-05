@@ -24,9 +24,9 @@ from utils import api_client
 logger = logging.getLogger("scheduler")
 
 
-def es_hora_punta(ahora: datetime = None) -> bool:
+def es_horario_apertura(ahora: datetime = None) -> bool:
     ahora = ahora or datetime.now()
-    return any(rango["inicio"] <= ahora.hour < rango["fin"] for rango in config.HORARIOS_PUNTA)
+    return any(rango["inicio"] <= ahora.hour < rango["fin"] for rango in config.HORARIOS_APERTURA)
 
 
 async def _chequear_agregador_aislado(tienda: str, agregador_nombre: str, cercano: bool) -> bool:
@@ -49,7 +49,7 @@ async def _chequeo(modo: str, cercano: bool):
     if not config.SCRAPER_ENABLED:
         logger.info("SCRAPER_ENABLED=False — se omite el chequeo (%s).", modo)
         return
-    if not es_hora_punta():
+    if not es_horario_apertura():
         logger.debug("Fuera de horas punta — se omite el chequeo (%s).", modo)
         return
 

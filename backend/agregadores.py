@@ -51,7 +51,7 @@ GRID_RADIOS_KM = [1.0, 2.5, 5.0, 7.0]
 GRID_RADIOS_CERCANO_KM = [1.0]
 GRID_ANGULOS_COUNT = 12
 
-HORARIOS_PUNTA = [{"inicio": 9, "fin": 22}]
+HORARIOS_APERTURA = [{"inicio": 9, "fin": 22}]
 FRECUENCIA_CHEQUEO_CERCANO_MIN = 10
 FRECUENCIA_CHEQUEO_COMPLETO_MIN = 60
 FALLOS_CONSECUTIVOS_ALERTA = 3
@@ -382,9 +382,9 @@ def get_reporte(tienda: str, desde: datetime, hasta: datetime):
     }
 
 
-def es_hora_punta(ahora: datetime = None) -> bool:
+def es_horario_apertura(ahora: datetime = None) -> bool:
     ahora = ahora or datetime.now()
-    return any(r["inicio"] <= ahora.hour < r["fin"] for r in HORARIOS_PUNTA)
+    return any(r["inicio"] <= ahora.hour < r["fin"] for r in HORARIOS_APERTURA)
 
 
 def get_estado():
@@ -403,7 +403,7 @@ def get_estado():
                 "chequeos_exitosos": None,
                 "chequeos_fallidos": None,
                 "frecuencia_esperada_min": frecuencia_min,
-                "retrasado": es_hora_punta(),
+                "retrasado": es_horario_apertura(),
                 "minutos_desde_ultima": None,
             }
         referencia = fila["fecha_fin"] or fila["fecha_inicio"]
@@ -411,7 +411,7 @@ def get_estado():
             datetime.now(timezone.utc) - datetime.fromisoformat(referencia)
         ).total_seconds() / 60
         margen = frecuencia_min * 3
-        retrasado = es_hora_punta() and minutos_desde > margen
+        retrasado = es_horario_apertura() and minutos_desde > margen
         return {
             "ultima_sesion_inicio": fila["fecha_inicio"],
             "ultima_sesion_fin": fila["fecha_fin"],
@@ -425,7 +425,7 @@ def get_estado():
 
     resultado = {
         "hora_servidor": datetime.now(timezone.utc).isoformat(),
-        "es_hora_punta": es_hora_punta(),
+        "es_horario_apertura": es_horario_apertura(),
         "cercano": _estado_modo("cercano", FRECUENCIA_CHEQUEO_CERCANO_MIN),
         "completo": _estado_modo("completo", FRECUENCIA_CHEQUEO_COMPLETO_MIN),
     }

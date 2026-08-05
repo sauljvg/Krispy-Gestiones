@@ -160,7 +160,7 @@ async function agrCargarEstado() {
   try {
     const res = await fetch(`${AGR_API}/estado`);
     const estado = await res.json();
-    if (!estado.es_hora_punta) {
+    if (!estado.es_horario_apertura) {
       pill.textContent = "⏸ Fuera de horario";
       pill.className = "agr-estado-pill neutro";
       return;

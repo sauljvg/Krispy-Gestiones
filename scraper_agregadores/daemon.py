@@ -11,7 +11,7 @@ import asyncio
 import logging
 
 import config
-from scheduler import crear_scheduler, es_hora_punta
+from scheduler import crear_scheduler, es_horario_apertura
 
 logging.basicConfig(
     level=config.SCRAPER_LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -30,12 +30,12 @@ async def main():
 
     logger.info(
         "Scraper daemon iniciado contra %s. Cercano cada %d min, completo cada %d min, "
-        "ambos solo durante horas punta (%s). En este momento %s hora punta.",
+        "ambos solo durante horario de apertura (%s). En este momento %s horario de apertura.",
         config.KG_API_BASE_URL,
         config.FRECUENCIA_CHEQUEO_CERCANO_MIN,
         config.FRECUENCIA_CHEQUEO_COMPLETO_MIN,
-        config.HORARIOS_PUNTA,
-        "SÍ es" if es_hora_punta() else "NO es",
+        config.HORARIOS_APERTURA,
+        "SÍ es" if es_horario_apertura() else "NO es",
     )
 
     try:
