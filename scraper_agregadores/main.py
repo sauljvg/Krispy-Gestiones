@@ -2,6 +2,7 @@
 la API en vivo de KG. Sin DB local — ver utils/api_client.py."""
 import asyncio
 import logging
+import re
 
 import config
 from scrapers.glovo import GlovoScraper
@@ -37,10 +38,17 @@ async def chequear_tienda(
     fallos_consecutivos = 0
 
     for i, direccion in enumerate(direcciones):
-        logger.info(
-            "Chequeando %s / %s @ %s", tienda, agregador_nombre, direccion["direccion_text"]
-        )
-        resultado = await scraper.verificar_disponibilidad(tienda, direccion["direccion_text"])
+        # Muchos puntos del grid caen en autovías/polígonos donde Nominatim no devuelve
+        # número de portal (ej. "Calle Puerto de Pajares, Poligono..." en vez de "15, Calle
+        # ..."). Sin número, el autocompletado del agregador puede sugerir un punto distinto
+        # al que realmente queremos comprobar -- se usan las coordenadas directamente en ese
+        # caso (Google Places, que es lo que usan estos tres, las reconoce y apunta exacto).
+        texto = direccion["direccion_text"]
+        tiene_numero = bool(re.match(r"^\d", texto.strip()))
+        consulta = texto if tiene_numero else f'{direccion["lat"]:.6f}, {direccion["lng"]:.6f}'
+
+        logger.info("Chequeando %s / %s @ %s", tienda, agregador_nombre, texto)
+        resultado = await scraper.verificar_disponibilidad(tienda, consulta)
 
         await api_client.enviar_chequeo(
             {
