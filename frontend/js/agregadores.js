@@ -82,10 +82,14 @@ function agrIconoDireccion(dir) {
   });
 }
 
-function agrIconoTienda() {
+function agrIconoTienda(tienda) {
+  // Parquesur ya lleva el letrero "Hot Now" (donuts recién hechos) en la
+  // tienda real -- de ahí el icono especial en negro para ese centro.
+  const esHotNow = tienda === "parquesur";
+  const src = esHotNow ? "assets/hotnow-icon-white.png" : "assets/shop-icon-white.png";
   return L.divIcon({
-    className: "agr-marker-tienda",
-    html: `<span><img src="assets/shop-icon-white.png" alt=""></span>`,
+    className: esHotNow ? "agr-marker-tienda agr-marker-tienda-hotnow" : "agr-marker-tienda",
+    html: `<span><img src="${src}" alt=""></span>`,
     iconSize: [38, 38],
     iconAnchor: [19, 19],
   });
@@ -278,7 +282,7 @@ function agrRenderMapa(data) {
   agrTiendaCentro = tienda;
   agrInitMap(tienda.lat, tienda.lng);
 
-  L.marker([tienda.lat, tienda.lng], { icon: agrIconoTienda() }).addTo(agrMap).bindPopup(`<b>${tienda.nombre}</b>`);
+  L.marker([tienda.lat, tienda.lng], { icon: agrIconoTienda(tienda.tienda) }).addTo(agrMap).bindPopup(`<b>${tienda.nombre}</b>`);
 
   agrLimpiarMapa();
   direcciones.forEach((dir) => agrAgregarMarcador(dir, { editable: true }));
@@ -300,7 +304,7 @@ function agrRenderMapaTodas(data) {
   agrInitMap(lat0, lng0);
 
   tiendas.forEach((t) => {
-    L.marker([t.lat, t.lng], { icon: agrIconoTienda() }).addTo(agrMap).bindPopup(`<b>${t.nombre}</b>`);
+    L.marker([t.lat, t.lng], { icon: agrIconoTienda(t.tienda) }).addTo(agrMap).bindPopup(`<b>${t.nombre}</b>`);
   });
 
   agrLimpiarMapa();
