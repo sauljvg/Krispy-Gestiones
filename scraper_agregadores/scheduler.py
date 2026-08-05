@@ -1,0 +1,113 @@
+"""Scheduler APScheduler: dos velocidades de chequeo en horas punta.
+
+No buscamos datos "en vivo" sino un informe de cuándo y dónde nos bloquean:
+  - CERCANO (pocos puntos, 1 km): cada 10 min, reacción rápida a un bloqueo total real.
+  - COMPLETO (48 puntos): cada 60 min, mapea la zona de cobertura sin machacar los sitios.
+
+Los 3 agregadores de una misma pasada corren en paralelo (sitios distintos, sin
+rate-limit cruzado); dentro de cada agregador las direcciones van secuenciales con pausa.
+Cada llamada a la API (POST /chequeo, etc.) usa su propia sesión HTTP — no hay estado
+compartido entre tareas paralelas, así que aquí no hay nada equivalente a los líos de
+concurrencia de SQLite que tuvimos cuando esto escribía a una DB local.
+"""
+import asyncio
+import logging
+from datetime import datetime
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.interval import IntervalTrigger
+
+import config
+from main import SCRAPERS, chequear_tienda
+from utils import api_client
+
+logger = logging.getLogger("scheduler")
+
+
+def es_hora_punta(ahora: datetime = None) -> bool:
+    ahora = ahora or datetime.now()
+    return any(rango["inicio"] <= ahora.hour < rango["fin"] for rango in config.HORARIOS_PUNTA)
+
+
+async def _chequear_agregador_aislado(tienda: str, agregador_nombre: str, cercano: bool) -> bool:
+    try:
+        await chequear_tienda(
+            tienda, agregador_nombre, cercano=cercano, delay_seg=config.DELAY_ENTRE_CHEQUEOS_SEG
+        )
+        return True
+    except Exception as exc:
+        logger.error("Fallo chequeando %s / %s: %s", tienda, agregador_nombre, exc)
+        await api_client.registrar_alerta(
+            tipo="scraper_error",
+            mensaje=f"{agregador_nombre}: excepción no controlada — {exc}",
+            tienda=tienda,
+        )
+        return False
+
+
+async def _chequeo(modo: str, cercano: bool):
+    if not config.SCRAPER_ENABLED:
+        logger.info("SCRAPER_ENABLED=False — se omite el chequeo (%s).", modo)
+        return
+    if not es_hora_punta():
+        logger.debug("Fuera de horas punta — se omite el chequeo (%s).", modo)
+        return
+
+    try:
+        sesion_id = await api_client.iniciar_sesion(modo)
+    except Exception as exc:
+        logger.error("No se pudo iniciar sesión en la API de KG (%s): %s", modo, exc)
+        return
+
+    exitosos = fallidos = 0
+    estado_final = "completado"
+
+    try:
+        for tienda in config.TIENDAS_SCHEDULER:
+            resultados = await asyncio.gather(
+                *(
+                    _chequear_agregador_aislado(tienda, agregador_nombre, cercano)
+                    for agregador_nombre in SCRAPERS
+                )
+            )
+            exitosos += sum(1 for r in resultados if r)
+            fallidos += sum(1 for r in resultados if not r)
+    except Exception as exc:
+        estado_final = "error"
+        logger.error("Sesión de scraper (%s) fallida: %s", modo, exc)
+
+    try:
+        await api_client.cerrar_sesion(sesion_id, estado_final, exitosos, fallidos)
+    except Exception as exc:
+        logger.error("No se pudo cerrar sesión en la API de KG: %s", exc)
+
+    logger.info("Chequeo %s terminado: %d ok, %d fallidos.", modo, exitosos, fallidos)
+
+
+async def chequeo_cercano():
+    await _chequeo("cercano", cercano=True)
+
+
+async def chequeo_completo():
+    await _chequeo("completo", cercano=False)
+
+
+def crear_scheduler() -> AsyncIOScheduler:
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(
+        chequeo_cercano,
+        trigger=IntervalTrigger(minutes=config.FRECUENCIA_CHEQUEO_CERCANO_MIN),
+        id="chequeo-cercano",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=60,
+    )
+    scheduler.add_job(
+        chequeo_completo,
+        trigger=IntervalTrigger(minutes=config.FRECUENCIA_CHEQUEO_COMPLETO_MIN),
+        id="chequeo-completo",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
+    )
+    return scheduler

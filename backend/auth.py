@@ -30,6 +30,7 @@ MODULOS = {
     "boletines": "Boletines",
     "tests": "Test",
     "disc": "Perfil DISC",
+    "agregadores": "Agregadores",
     "saona_resenas": "SAONA · Reseñas",
     "saona_informes": "SAONA · Informes",
     "saona_clima": "SAONA · Clima Laboral",

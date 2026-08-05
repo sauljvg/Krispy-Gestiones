@@ -11,6 +11,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("card-boletines").hidden = !modulos.includes("boletines");
   document.getElementById("card-tests").hidden = !modulos.includes("tests");
   document.getElementById("card-disc").hidden = !modulos.includes("disc");
+  document.getElementById("card-agregadores").hidden = !modulos.includes("agregadores");
   const tieneModuloSaona = ["saona_resenas", "saona_informes", "saona_clima"].some((m) => modulos.includes(m));
   document.getElementById("card-saona").hidden = !tieneModuloSaona;
   if (user.rol === "admin") {

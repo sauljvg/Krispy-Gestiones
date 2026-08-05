@@ -1,0 +1,76 @@
+"""Entry point: ejecuta un chequeo (una tienda x direcciones x un agregador) y lo envía a
+la API en vivo de KG. Sin DB local — ver utils/api_client.py."""
+import asyncio
+import logging
+
+import config
+from scrapers.glovo import GlovoScraper
+from scrapers.justeat import JustEatScraper
+from scrapers.ubereats import UberEatsScraper
+from utils import api_client
+
+logging.basicConfig(level=config.SCRAPER_LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("main")
+
+SCRAPERS = {
+    "justeat": JustEatScraper,
+    "glovo": GlovoScraper,
+    "ubereats": UberEatsScraper,
+}
+
+
+async def chequear_tienda(
+    tienda: str,
+    agregador_nombre: str,
+    cercano: bool = False,
+    max_direcciones: int = None,
+    delay_seg: int = 0,
+):
+    direcciones = await api_client.obtener_direcciones(tienda, cercano=cercano)
+    if max_direcciones:
+        direcciones = direcciones[:max_direcciones]
+
+    scraper = SCRAPERS[agregador_nombre](
+        timeout_seg=config.SCRAPER_TIMEOUT, retry_max=config.SCRAPER_RETRY_MAX
+    )
+
+    fallos_consecutivos = 0
+
+    for i, direccion in enumerate(direcciones):
+        logger.info(
+            "Chequeando %s / %s @ %s", tienda, agregador_nombre, direccion["direccion_text"]
+        )
+        resultado = await scraper.verificar_disponibilidad(tienda, direccion["direccion_text"])
+
+        await api_client.enviar_chequeo(
+            {
+                "tienda": tienda,
+                "agregador": agregador_nombre,
+                "direccion_id": direccion["id"],
+                "disponible": resultado.disponible,
+                "tiempo_entrega_min": resultado.tiempo_entrega_min,
+                "mensaje_bloqueo": resultado.mensaje_bloqueo,
+                "error_texto": resultado.error_texto,
+            }
+        )
+
+        logger.info("  -> disponible=%s tiempo=%s min", resultado.disponible, resultado.tiempo_entrega_min)
+
+        if resultado.error_texto:
+            fallos_consecutivos += 1
+        else:
+            fallos_consecutivos = 0
+
+        if delay_seg and i < len(direcciones) - 1:
+            await asyncio.sleep(delay_seg)
+
+
+async def main():
+    # Chequeo manual de validación: solo 1 dirección (la propia tienda) por agregador.
+    for tienda in config.TIENDAS_SCHEDULER:
+        for agregador_nombre in SCRAPERS:
+            await chequear_tienda(tienda, agregador_nombre, cercano=True, max_direcciones=1)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

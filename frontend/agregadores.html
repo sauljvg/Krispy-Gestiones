@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krispy Gestiones · Agregadores</title>
+<link rel="icon" type="image/png" href="assets/favicon-kk.png">
+<script>
+  (function () {
+    var guardado = localStorage.getItem("kt-theme");
+    if (guardado === "light" || guardado === "dark") {
+      document.documentElement.dataset.theme = guardado;
+    }
+  })();
+</script>
+<link rel="stylesheet" href="css/styles.css?v=20260728a">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="js/vendor/chart.umd.min.js?v=20260723g"></script>
+<style>
+  .agr-wrap { max-width: 1200px; margin: 0 auto; padding: 0 0 40px; }
+  .agr-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 16px 0; }
+  .agr-toolbar select { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 14px; }
+  .agr-estado-pill { padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+  .agr-estado-pill.ok { background: color-mix(in srgb, var(--status-good) 15%, transparent); color: var(--status-good); }
+  .agr-estado-pill.alerta { background: color-mix(in srgb, var(--status-critical) 15%, transparent); color: var(--status-critical); }
+  .agr-estado-pill.neutro { background: color-mix(in srgb, var(--text-muted) 15%, transparent); color: var(--text-muted); }
+
+  .agr-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .agr-grid { grid-template-columns: 1fr; } }
+  .agr-panel { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .agr-panel h2 { font-size: 16px; margin: 0 0 12px; color: var(--text-secondary); }
+  #agr-map { height: 420px; border-radius: 8px; overflow: hidden; }
+  .agr-leyenda { display: flex; gap: 16px; margin-top: 10px; font-size: 12px; color: var(--text-secondary); flex-wrap: wrap; }
+  .agr-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
+
+  .agr-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+  .agr-card { background: var(--surface-page); border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: center; }
+  .agr-card .valor { font-size: 1.4rem; font-weight: 700; color: var(--text-primary); }
+  .agr-card .etiqueta { font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; }
+  .agr-card .errores { margin-top: 6px; font-size: 0.7rem; color: var(--status-warning); }
+
+  #agr-tabla { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  #agr-tabla th, #agr-tabla td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  #agr-tabla th { color: var(--text-secondary); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; }
+  tr.agr-fila-error { background: color-mix(in srgb, var(--status-warning) 8%, transparent); }
+  .agr-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+  .agr-badge.si { background: color-mix(in srgb, var(--status-good) 15%, transparent); color: var(--status-good); }
+  .agr-badge.no { background: color-mix(in srgb, var(--status-critical) 15%, transparent); color: var(--status-critical); }
+  .agr-badge.error { background: color-mix(in srgb, var(--status-warning) 15%, transparent); color: var(--status-warning); }
+
+  #agr-alertas { list-style: none; margin: 0; padding: 0; max-height: 380px; overflow-y: auto; }
+  #agr-alertas li { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+  #agr-alertas .hora { color: var(--text-muted); font-size: 0.72rem; display: block; }
+  #agr-alertas .tipo { color: var(--acento-calido); font-weight: 600; margin-right: 6px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">🍩</span>
+      <div>
+        <h1>Krispy Gestiones</h1>
+        <p class="subtitle">Agregadores</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="btn btn-ghost hamburger-btn" title="Atrás" aria-label="Atrás" onclick="history.back()">←</button>
+      <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
+      <span id="topbar-user" hidden></span>
+      <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+    </div>
+  </header>
+
+  <div class="agr-wrap">
+    <div class="agr-toolbar">
+      <span id="agr-estado" class="agr-estado-pill neutro">…</span>
+      <label for="agr-tienda-select">Tienda:</label>
+      <select id="agr-tienda-select"></select>
+      <span id="agr-actualizado" style="color:var(--text-muted); font-size:12px;"></span>
+    </div>
+
+    <div class="agr-grid">
+      <div>
+        <div class="agr-panel">
+          <h2>Mapa de cobertura</h2>
+          <div id="agr-map"></div>
+          <div class="agr-leyenda">
+            <span><i class="agr-dot" style="background:#0ca30c"></i> Disponible en todos</span>
+            <span><i class="agr-dot" style="background:#fab219"></i> Disponible en algunos</span>
+            <span><i class="agr-dot" style="background:#d03b3b"></i> No disponible (real)</span>
+            <span><i class="agr-dot" style="background:#898781"></i> Sin datos válidos</span>
+          </div>
+        </div>
+        <div class="agr-panel">
+          <h2>Últimos chequeos</h2>
+          <div style="overflow-x:auto;">
+            <table id="agr-tabla">
+              <thead>
+                <tr><th>Hora</th><th>Agregador</th><th>Disponible</th><th>Tiempo</th><th>Dirección</th><th>Detalle</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="agr-panel">
+          <h2>Resumen (24h)</h2>
+          <div id="agr-cards" class="agr-cards"></div>
+          <canvas id="agr-chart"></canvas>
+        </div>
+        <div class="agr-panel">
+          <h2>Alertas (24h)</h2>
+          <ul id="agr-alertas"></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="js/theme.js?v=20260723g"></script>
+<script src="js/auth-common.js?v=20260723g"></script>
+<script src="js/topbar-menu.js?v=20260727a"></script>
+<script src="js/agregadores.js?v=20260805a"></script>
+</body>
+</html>

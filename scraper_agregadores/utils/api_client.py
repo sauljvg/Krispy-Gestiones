@@ -1,0 +1,61 @@
+"""Cliente HTTP hacia la API en vivo de Krispy Gestiones (backend/agregadores_routes.py).
+
+El scraper corre en un portátil aparte y no tiene sesión de usuario (no hay navegador de
+por medio) — se autentica con una API key fija en vez de cookie, solo válida para estos
+endpoints (ver require_api_key en el backend)."""
+import logging
+
+import aiohttp
+
+import config
+
+logger = logging.getLogger(__name__)
+
+
+def _headers():
+    return {"X-API-Key": config.KG_API_KEY, "Content-Type": "application/json"}
+
+
+async def obtener_direcciones(tienda: str, cercano: bool = False) -> list[dict]:
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/direcciones/{tienda}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            url, params={"cercano": str(cercano).lower()}, headers=_headers(), timeout=60
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+
+async def enviar_chequeo(data: dict):
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/chequeo"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=data, headers=_headers(), timeout=30) as resp:
+            resp.raise_for_status()
+
+
+async def iniciar_sesion(modo: str) -> int:
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/sesiones"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json={"modo": modo}, headers=_headers(), timeout=15) as resp:
+            resp.raise_for_status()
+            data = await resp.json()
+            return data["id"]
+
+
+async def cerrar_sesion(sesion_id: int, estado: str, exitosos: int, fallidos: int):
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/sesiones/{sesion_id}"
+    body = {"estado": estado, "chequeos_exitosos": exitosos, "chequeos_fallidos": fallidos}
+    async with aiohttp.ClientSession() as session:
+        async with session.put(url, json=body, headers=_headers(), timeout=15) as resp:
+            resp.raise_for_status()
+
+
+async def registrar_alerta(tipo: str, mensaje: str, tienda: str = None, agregador: str = None):
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/alertas"
+    body = {"tipo": tipo, "mensaje": mensaje, "tienda": tienda, "agregador": agregador}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=body, headers=_headers(), timeout=15) as resp:
+                resp.raise_for_status()
+    except Exception as exc:
+        logger.error("No se pudo registrar la alerta en KG: %s", exc)
