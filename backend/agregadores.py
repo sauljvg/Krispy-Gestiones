@@ -6,6 +6,8 @@ API en vivo (POST /api/agregadores/chequeo) con cada resultado; aquí solo se
 guarda y se sirve. Nada de esto toca Selenium ni el scraper de Reseñas."""
 import math
 import re
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 from db import get_connection
@@ -129,20 +131,34 @@ def _mover_punto(lat, lng, bearing_deg, distancia_km):
     return math.degrees(lat2_rad), math.degrees(lng2_rad)
 
 
-def _geocodificar(lat, lng):
-    """Reverse geocoding vía Nominatim. Se llama solo una vez por punto (se
-    cachea en agregadores_direcciones), así que no hace falta rate-limit
-    agresivo aquí — pero se limita igual por buena vecindad con su API."""
-    try:
-        from geopy.geocoders import Nominatim
+_NOMINATIM_LOCK = threading.Lock()
+_nominatim_ultima_llamada = 0.0
+_NOMINATIM_INTERVALO_MIN_SEG = 1.1  # política de Nominatim: máx. 1 petición/segundo
 
-        geocoder = Nominatim(user_agent="krispy-monitor-kg")
-        location = geocoder.reverse(f"{lat}, {lng}", timeout=10)
-        if location:
-            return location.address
-    except Exception:
-        pass
-    return f"({lat:.4f}, {lng:.4f})"
+
+def _geocodificar(lat, lng):
+    """Reverse geocoding vía Nominatim. Con la búsqueda en espiral de
+    _punto_geocodificado_valido ya no es "una vez por punto" -- puede haber
+    varios intentos seguidos, así que aquí sí hace falta espaciar las
+    llamadas o Nominatim empieza a bloquear/ralentizar el IP entero (nos
+    pasó: cada llamada tardaba 5-6s y fallaba tras machacarlo sin pausas)."""
+    global _nominatim_ultima_llamada
+    with _NOMINATIM_LOCK:
+        espera = _NOMINATIM_INTERVALO_MIN_SEG - (time.monotonic() - _nominatim_ultima_llamada)
+        if espera > 0:
+            time.sleep(espera)
+        _nominatim_ultima_llamada = time.monotonic()
+
+        try:
+            from geopy.geocoders import Nominatim
+
+            geocoder = Nominatim(user_agent="krispy-monitor-kg")
+            location = geocoder.reverse(f"{lat}, {lng}", timeout=6)
+            if location:
+                return location.address
+        except Exception:
+            pass
+        return f"({lat:.4f}, {lng:.4f})"
 
 
 _PATRON_VIA_NO_DIRECCION = re.compile(
@@ -161,7 +177,7 @@ def _direccion_valida(texto: str) -> bool:
     return bool(re.match(r"^\d", t))
 
 
-def _punto_geocodificado_valido(lat, lng, intentos_extra=10, paso_km=0.03, radio_max_km=0.3):
+def _punto_geocodificado_valido(lat, lng, intentos_extra=5, paso_km=0.05, radio_max_km=0.3):
     """Geocodifica un punto y, si no es una calle con número real, prueba
     puntos cercanos en espiral alrededor del MISMO punto original (nunca más
     lejos de radio_max_km, para que siga representando ese sitio del círculo
@@ -200,8 +216,12 @@ def reparar_direcciones_invalidas() -> dict:
             "UPDATE agregadores_direcciones SET lat=?, lng=?, direccion_text=? WHERE id=?",
             (lat, lng, texto, fila["id"]),
         )
+        # Commit por fila, no al final: cada punto tarda varios segundos en
+        # geocodificar (varios intentos a Nominatim), así que un commit único
+        # al final mantendría la escritura abierta -- y el archivo bloqueado
+        # para cualquier otra petición -- durante toda la duración del repaso.
+        conn.commit()
         reparadas.append({"id": fila["id"], "antes": fila["direccion_text"], "despues": texto})
-    conn.commit()
     conn.close()
     return {"reparadas": len(reparadas), "detalle": reparadas}
 
