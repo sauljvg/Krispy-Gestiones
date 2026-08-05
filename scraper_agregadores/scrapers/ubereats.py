@@ -102,13 +102,21 @@ class UberEatsScraper(BaseAggregatorScraper):
                 await modalidad.wait_for(state="attached", timeout=10000)
             except Exception:
                 pass
-            existe_delivery = await modalidad.count() > 0
 
+            # El toggle a veces queda "attached" sin que aria-checked/aria-disabled se
+            # hayan hidratado todavía (visto en pruebas: misma tienda, misma dirección,
+            # a veces resuelve al instante y a veces tarda unos segundos más) -- reintenta
+            # antes de darlo por no disponible para no confundir esto con un bloqueo real.
             disponible = False
-            if existe_delivery:
-                aria_checked = await modalidad.get_attribute("aria-checked")
-                aria_disabled = await modalidad.get_attribute("aria-disabled")
-                disponible = aria_disabled != "true" and aria_checked is not None
+            aria_checked = None
+            for _ in range(5):
+                if await modalidad.count() > 0:
+                    aria_checked = await modalidad.get_attribute("aria-checked")
+                    aria_disabled = await modalidad.get_attribute("aria-disabled")
+                    if aria_checked is not None:
+                        disponible = aria_disabled != "true"
+                        break
+                await page.wait_for_timeout(1000)
 
             texto_eta = ""
             try:
@@ -121,6 +129,14 @@ class UberEatsScraper(BaseAggregatorScraper):
             numeros = re.findall(r"\d+", texto_eta)
             if numeros:
                 tiempo_entrega_min = int(numeros[-1])
+
+            # Señal de refuerzo: si el toggle no resolvió a tiempo pero la tienda sí
+            # muestra un tiempo de entrega real en la página, hay reparto -- era un falso
+            # negativo del toggle, no falta de cobertura (confirmado con un caso real:
+            # Uber Eats mostraba "12 min" a mano en una dirección que el scraper marcó
+            # como no disponible).
+            if not disponible and tiempo_entrega_min is not None:
+                disponible = True
 
             return ResultadoChequeo(
                 disponible=disponible,
