@@ -3,7 +3,7 @@ import io
 import os
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -96,10 +96,13 @@ def direcciones_route(tienda: str, cercano: bool = False):
 
 
 @router.post("/direcciones/reparar", dependencies=[Depends(require_api_key)])
-def reparar_direcciones_route():
+def reparar_direcciones_route(background_tasks: BackgroundTasks):
     """Mantenimiento puntual: reubica los puntos ya guardados que cayeron en
-    autovía/M-45/etc (creados antes del filtro de _direccion_valida)."""
-    return agregadores_module.reparar_direcciones_invalidas()
+    autovía/M-45/etc (creados antes del filtro de _direccion_valida). Corre
+    en background porque son muchas llamadas seriadas a Nominatim -- puede
+    tardar varios minutos, más que el timeout del proxy de Railway."""
+    background_tasks.add_task(agregadores_module.reparar_direcciones_invalidas)
+    return {"ok": True, "mensaje": "Reparación lanzada en background, revisa /direcciones/{tienda} en unos minutos"}
 
 
 @router.post("/sesiones", dependencies=[Depends(require_api_key)])
