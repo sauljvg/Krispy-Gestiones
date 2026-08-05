@@ -162,7 +162,7 @@ def _geocodificar(lat, lng):
 
 
 _PATRON_VIA_NO_DIRECCION = re.compile(
-    r"^(Autov[ií]a|Autopista|Carretera|[AMN]-\d+\b)", re.IGNORECASE
+    r"^(Autov[ií]a|Autopista|Carretera|V[ií]a de servicio|[AMNR]-\d+\b)", re.IGNORECASE
 )
 
 
@@ -177,7 +177,7 @@ def _direccion_valida(texto: str) -> bool:
     return bool(re.match(r"^\d", t))
 
 
-def _punto_geocodificado_valido(lat, lng, intentos_extra=5, paso_km=0.05, radio_max_km=0.3):
+def _punto_geocodificado_valido(lat, lng, intentos_extra=7, paso_km=0.07, radio_max_km=0.5):
     """Geocodifica un punto y, si no es una calle con número real, prueba
     puntos cercanos en espiral alrededor del MISMO punto original (nunca más
     lejos de radio_max_km, para que siga representando ese sitio del círculo
