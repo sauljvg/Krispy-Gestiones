@@ -8,6 +8,7 @@ let agrMarkersPorId = {};
 let agrChart = null;
 let agrModoAnadir = false;
 let agrTiendaCentro = null;
+let agrCentrosPorTienda = {}; // slug -> {lat,lng}, usado en la vista "Todas"
 let agrFiltroAgregador = null; // null = todos los agregadores a la vez
 let agrEstadosOcultos = new Set();
 
@@ -87,11 +88,12 @@ function agrIconoTienda(tienda) {
   // tienda real -- de ahí el icono especial en negro para ese centro.
   const esHotNow = tienda === "parquesur";
   const src = esHotNow ? "assets/hotnow-icon-white.png" : "assets/shop-icon-white.png";
+  const tam = esHotNow ? 44 : 38;
   return L.divIcon({
     className: esHotNow ? "agr-marker-tienda agr-marker-tienda-hotnow" : "agr-marker-tienda",
     html: `<span><img src="${src}" alt=""></span>`,
-    iconSize: [38, 38],
-    iconAnchor: [19, 19],
+    iconSize: [tam, tam],
+    iconAnchor: [tam / 2, tam / 2],
   });
 }
 
@@ -190,9 +192,10 @@ function agrAgregarMarcador(dir, opts = {}) {
   marker._agrDir = dir;
 
   if (editable) {
+    const centro = (dir.tienda && agrCentrosPorTienda[dir.tienda]) || agrTiendaCentro;
     marker.on("drag", (e) => {
       const { lat, lng } = e.target.getLatLng();
-      const distKm = agrDistanciaKm(agrTiendaCentro.lat, agrTiendaCentro.lng, lat, lng);
+      const distKm = agrDistanciaKm(centro.lat, centro.lng, lat, lng);
       marker.setTooltipContent(`${distKm.toFixed(2)} km línea recta (objetivo ${dir.distancia_km.toFixed(2)} km)`);
       marker.openTooltip();
     });
@@ -298,6 +301,8 @@ function agrRenderMapaTodas(data) {
   const { tiendas, direcciones } = data;
   if (!tiendas || !tiendas.length) return;
   agrTiendaCentro = null;
+  agrCentrosPorTienda = {};
+  tiendas.forEach((t) => { agrCentrosPorTienda[t.tienda] = t; });
 
   const lat0 = tiendas.reduce((s, t) => s + t.lat, 0) / tiendas.length;
   const lng0 = tiendas.reduce((s, t) => s + t.lng, 0) / tiendas.length;
@@ -308,7 +313,7 @@ function agrRenderMapaTodas(data) {
   });
 
   agrLimpiarMapa();
-  direcciones.forEach((dir) => agrAgregarMarcador(dir, { editable: false }));
+  direcciones.forEach((dir) => agrAgregarMarcador(dir, { editable: true }));
 
   const bounds = L.latLngBounds(tiendas.map((t) => [t.lat, t.lng]));
   agrMap.fitBounds(bounds.pad(0.25));
