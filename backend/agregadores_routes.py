@@ -95,6 +95,13 @@ def direcciones_route(tienda: str, cercano: bool = False):
     return agregadores_module.get_o_crear_direcciones(tienda, radios)
 
 
+@router.post("/direcciones/reparar", dependencies=[Depends(require_api_key)])
+def reparar_direcciones_route():
+    """Mantenimiento puntual: reubica los puntos ya guardados que cayeron en
+    autovía/M-45/etc (creados antes del filtro de _direccion_valida)."""
+    return agregadores_module.reparar_direcciones_invalidas()
+
+
 @router.post("/sesiones", dependencies=[Depends(require_api_key)])
 def iniciar_sesion_route(body: SesionIniciarIn):
     return {"id": agregadores_module.iniciar_sesion(body.modo)}

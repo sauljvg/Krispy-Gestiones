@@ -5,6 +5,7 @@ para Uber Eats — ver scraper_agregadores/ en la raíz del repo) y llama a la
 API en vivo (POST /api/agregadores/chequeo) con cada resultado; aquí solo se
 guarda y se sirve. Nada de esto toca Selenium ni el scraper de Reseñas."""
 import math
+import re
 from datetime import datetime, timedelta, timezone
 
 from db import get_connection
@@ -144,6 +145,58 @@ def _geocodificar(lat, lng):
     return f"({lat:.4f}, {lng:.4f})"
 
 
+_PATRON_VIA_NO_DIRECCION = re.compile(
+    r"^(Autov[ií]a|Autopista|Carretera|[AMN]-\d+\b)", re.IGNORECASE
+)
+
+
+def _direccion_valida(texto: str) -> bool:
+    """Una autovía/M-45/M-30 no es una dirección a la que nadie pueda pedir --
+    probar ahí solo genera ruido de "no disponible" que no dice nada real
+    sobre cobertura. Fuera de eso no filtramos más: un polígono con calle
+    tiene tan poca cobertura real como cualquier otro sitio, y eso sí es
+    dato útil."""
+    return not _PATRON_VIA_NO_DIRECCION.match(texto.strip())
+
+
+def _punto_geocodificado_valido(lat, lng, intentos_extra=8, paso_km=0.05):
+    """Geocodifica un punto y, si cae en una vía sin contexto de reparto, lo
+    desplaza en pasos pequeños (ángulos dispersos para no quedar en la misma
+    autovía) hasta encontrar una calle real o agotar los intentos -- en ese
+    caso se queda con el último punto probado."""
+    texto = _geocodificar(lat, lng)
+    bearing = 0
+    for intento in range(1, intentos_extra + 1):
+        if _direccion_valida(texto):
+            break
+        bearing = (bearing + 47) % 360
+        lat, lng = _mover_punto(lat, lng, bearing, paso_km * intento)
+        texto = _geocodificar(lat, lng)
+    return lat, lng, texto
+
+
+def reparar_direcciones_invalidas() -> dict:
+    """Recorre los puntos ya guardados y reubica los que cayeron en una
+    autovía/M-45/etc (creados antes de que existiera este filtro). Actualiza
+    la misma fila (mismo id), así que los chequeos históricos ligados a ese
+    punto por direccion_id siguen apuntando al punto correcto, ya reubicado."""
+    conn = get_connection()
+    filas = conn.execute("SELECT * FROM agregadores_direcciones").fetchall()
+    reparadas = []
+    for fila in filas:
+        if _direccion_valida(fila["direccion_text"]):
+            continue
+        lat, lng, texto = _punto_geocodificado_valido(fila["lat"], fila["lng"])
+        conn.execute(
+            "UPDATE agregadores_direcciones SET lat=?, lng=?, direccion_text=? WHERE id=?",
+            (lat, lng, texto, fila["id"]),
+        )
+        reparadas.append({"id": fila["id"], "antes": fila["direccion_text"], "despues": texto})
+    conn.commit()
+    conn.close()
+    return {"reparadas": len(reparadas), "detalle": reparadas}
+
+
 def get_o_crear_direcciones(tienda: str, radios_km=None) -> list[dict]:
     """Genera (si hace falta) y devuelve el grid de puntos de test de una
     tienda. Determinista: mismos radios/ángulos siempre dan los mismos
@@ -167,7 +220,7 @@ def get_o_crear_direcciones(tienda: str, radios_km=None) -> list[dict]:
                 continue
 
             lat_dest, lng_dest = _mover_punto(info["lat"], info["lng"], angulo, radio)
-            direccion_text = _geocodificar(lat_dest, lng_dest)
+            lat_dest, lng_dest, direccion_text = _punto_geocodificado_valido(lat_dest, lng_dest)
             cur = conn.execute(
                 """INSERT INTO agregadores_direcciones
                    (tienda, lat, lng, distancia_km, angulo_grados, direccion_text)
