@@ -69,7 +69,7 @@ class DireccionNuevaIn(BaseModel):
     tienda: str
     lat: float
     lng: float
-    direccion_text: str
+    direccion_text: str | None = None
 
 
 # --- Endpoints del scraper (API key, sin cookie) --------------------------

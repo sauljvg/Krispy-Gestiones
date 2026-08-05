@@ -286,13 +286,18 @@ def eliminar_direccion(direccion_id: int) -> bool:
     return True
 
 
-def agregar_direccion_manual(tienda: str, lat: float, lng: float, direccion_text: str) -> dict | None:
+def agregar_direccion_manual(tienda: str, lat: float, lng: float, direccion_text: str = None) -> dict | None:
     """Punto añadido a mano en el mapa (no del grid de radios/ángulos fijo)
     -- útil para tiendas donde el grid estándar no encaja bien (ej. una zona
-    comercial concreta que interesa vigilar más de cerca)."""
+    comercial concreta que interesa vigilar más de cerca). Sin texto de
+    dirección, se geocodifica automáticamente (misma búsqueda en espiral que
+    usa el grid) en vez de pedirle a quien hace clic que la escriba a mano."""
     if tienda not in TIENDAS:
         return None
     info = TIENDAS[tienda]
+
+    if not direccion_text:
+        lat, lng, direccion_text = _punto_geocodificado_valido(lat, lng)
     distancia_km, angulo_grados = _distancia_y_angulo(info["lat"], info["lng"], lat, lng)
 
     conn = get_connection()

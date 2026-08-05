@@ -59,7 +59,6 @@ function agrPopupDireccion(dir) {
 }
 
 async function agrEliminarPunto(direccionId) {
-  if (!confirm("¿Quitar este punto de test? Ya no se comprobará más.")) return;
   try {
     const res = await fetch(`${AGR_API}/direcciones/${direccionId}`, { method: "DELETE", credentials: "include" });
     if (!res.ok) throw new Error("No se pudo eliminar");
@@ -75,21 +74,28 @@ async function agrEliminarPunto(direccionId) {
 }
 
 async function agrAnadirPunto(lat, lng) {
-  const texto = prompt("Dirección de este nuevo punto (mira el mapa/Google Maps si hace falta):", "");
-  if (texto === null || texto.trim() === "") return;
+  // Marcador provisional mientras el servidor geocodifica la dirección real
+  // del punto (puede tardar unos segundos, sobre todo si cae en una zona
+  // sin calle numerada cerca y hace falta buscar alrededor).
+  const provisional = L.marker([lat, lng], {
+    icon: L.divIcon({ className: "agr-marker-dot", html: `<span style="background:#898781;opacity:0.6;"></span>`, iconSize: [16, 16], iconAnchor: [8, 8] }),
+  }).addTo(agrMap).bindPopup("Buscando dirección…").openPopup();
+
   try {
     const res = await fetch(`${AGR_API}/direcciones`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tienda: agrTiendaActual, lat, lng, direccion_text: texto.trim() }),
+      body: JSON.stringify({ tienda: agrTiendaActual, lat, lng }),
       credentials: "include",
     });
     if (!res.ok) throw new Error("No se pudo añadir");
     const dir = await res.json();
     dir.detalle = {};
     dir.disponible_count = dir.no_disponible_count = dir.error_count = 0;
+    agrMap.removeLayer(provisional);
     agrAgregarMarcador(dir);
   } catch (e) {
+    agrMap.removeLayer(provisional);
     alert("No se pudo añadir el punto. Inténtalo de nuevo.");
   }
 }
