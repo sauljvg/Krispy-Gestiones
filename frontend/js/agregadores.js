@@ -114,14 +114,17 @@ function agrRenderCards(reporte) {
     .join("");
 }
 
+const AGR_COLOR_MARCA = { justeat: "#ff8000", glovo: "#ffc244", ubereats: "#06c167" };
+
 function agrRenderChart(reporte) {
   const ctx = document.getElementById("agr-chart");
   const labels = Object.keys(reporte.agregadores);
   const valores = labels.map((n) => reporte.agregadores[n].disponibilidad_pct);
+  const colores = labels.map((n) => AGR_COLOR_MARCA[n] || "#e07b00");
   if (agrChart) agrChart.destroy();
   agrChart = new Chart(ctx, {
     type: "bar",
-    data: { labels, datasets: [{ label: "% Disponibilidad (24h)", data: valores, backgroundColor: "#e07b00", borderRadius: 6 }] },
+    data: { labels, datasets: [{ label: "% Disponibilidad (24h)", data: valores, backgroundColor: colores, borderRadius: 6 }] },
     options: {
       responsive: true,
       scales: { y: { beginAtZero: true, max: 100 } },
