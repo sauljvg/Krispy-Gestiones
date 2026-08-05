@@ -263,7 +263,11 @@ def mover_direccion_manual(direccion_id: int, lat: float, lng: float, direccion_
         conn.close()
         return None
     if not direccion_text:
-        lat, lng, direccion_text = _punto_geocodificado_valido(lat, lng)
+        # Menos reintentos que el grid masivo: aquí hay una persona esperando
+        # delante de la pantalla, y si el resultado no convence puede volver
+        # a arrastrar -- no hace falta la misma insistencia que un proceso
+        # desatendido.
+        lat, lng, direccion_text = _punto_geocodificado_valido(lat, lng, intentos_extra=3, paso_km=0.15)
     conn.execute(
         "UPDATE agregadores_direcciones SET lat=?, lng=?, direccion_text=? WHERE id=?",
         (lat, lng, direccion_text, direccion_id),
@@ -300,7 +304,7 @@ def agregar_direccion_manual(tienda: str, lat: float, lng: float, direccion_text
     info = TIENDAS[tienda]
 
     if not direccion_text:
-        lat, lng, direccion_text = _punto_geocodificado_valido(lat, lng)
+        lat, lng, direccion_text = _punto_geocodificado_valido(lat, lng, intentos_extra=3, paso_km=0.15)
     distancia_km, angulo_grados = _distancia_y_angulo(info["lat"], info["lng"], lat, lng)
 
     conn = get_connection()
