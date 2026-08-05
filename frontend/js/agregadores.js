@@ -167,9 +167,13 @@ function agrRenderMapa(data) {
   agrTiendaCentro = tienda;
   agrInitMap(tienda.lat, tienda.lng);
 
-  L.circleMarker([tienda.lat, tienda.lng], {
-    radius: 12, fillColor: "#e07b00", fillOpacity: 1, color: "#a85800", weight: 2,
-  }).addTo(agrMap).bindPopup(`<b>${tienda.nombre}</b>`);
+  const iconoTienda = L.divIcon({
+    className: "agr-marker-tienda",
+    html: `<span><img src="assets/shop-icon-white.png" alt=""></span>`,
+    iconSize: [38, 38],
+    iconAnchor: [19, 19],
+  });
+  L.marker([tienda.lat, tienda.lng], { icon: iconoTienda }).addTo(agrMap).bindPopup(`<b>${tienda.nombre}</b>`);
 
   agrDireccionMarkers.forEach((m) => agrMap.removeLayer(m));
   agrDireccionMarkers = [];
