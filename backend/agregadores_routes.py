@@ -59,6 +59,19 @@ class AlertaIn(BaseModel):
     agregador: str | None = None
 
 
+class DireccionMoverIn(BaseModel):
+    lat: float
+    lng: float
+    direccion_text: str
+
+
+class DireccionNuevaIn(BaseModel):
+    tienda: str
+    lat: float
+    lng: float
+    direccion_text: str
+
+
 # --- Endpoints del scraper (API key, sin cookie) --------------------------
 
 
@@ -123,6 +136,35 @@ def crear_alerta_route(body: AlertaIn):
 
 
 # --- Endpoints del dashboard (cookie de usuario) ---------------------------
+
+
+@router.put("/direcciones/{direccion_id}")
+def mover_direccion_route(direccion_id: int, body: DireccionMoverIn, _user: dict = Depends(require_agregadores)):
+    """Reubicación manual desde el mapa: alguien arrastra el punto y confirma
+    la dirección real (ej. mirando Google Maps) cuando Nominatim no acertó."""
+    resultado = agregadores_module.mover_direccion_manual(direccion_id, body.lat, body.lng, body.direccion_text)
+    if resultado is None:
+        raise HTTPException(status_code=404, detail="Dirección no encontrada")
+    return resultado
+
+
+@router.delete("/direcciones/{direccion_id}")
+def eliminar_direccion_route(direccion_id: int, _user: dict = Depends(require_agregadores)):
+    """Quita un punto del grid (baja lógica) -- útil para tiendas donde no
+    hacen falta tantos puntos de test."""
+    if not agregadores_module.eliminar_direccion(direccion_id):
+        raise HTTPException(status_code=404, detail="Dirección no encontrada")
+    return {"ok": True}
+
+
+@router.post("/direcciones")
+def agregar_direccion_route(body: DireccionNuevaIn, _user: dict = Depends(require_agregadores)):
+    """Añade un punto de test a mano (clic en el mapa), fuera del grid fijo
+    de radios/ángulos -- para vigilar de cerca una zona concreta."""
+    resultado = agregadores_module.agregar_direccion_manual(body.tienda, body.lat, body.lng, body.direccion_text)
+    if resultado is None:
+        raise HTTPException(status_code=400, detail="Tienda no reconocida")
+    return resultado
 
 
 @router.get("/tiendas")

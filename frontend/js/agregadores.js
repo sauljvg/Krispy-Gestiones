@@ -3,7 +3,10 @@ let agrTiendaActual = null;
 let agrIntervalo = null;
 let agrMap = null;
 let agrDireccionMarkers = [];
+let agrMarkersPorId = {};
 let agrChart = null;
+let agrModoAnadir = false;
+let agrTiendaCentro = null;
 
 function agrColorParaDireccion(dir) {
   const validos = dir.disponible_count + dir.no_disponible_count;
@@ -21,9 +24,147 @@ function agrInitMap(lat, lng) {
   }).addTo(agrMap);
 }
 
+function agrDistanciaKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function agrIconoDireccion(dir) {
+  return L.divIcon({
+    className: "agr-marker-dot",
+    html: `<span style="background:${agrColorParaDireccion(dir)}"></span>`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+  });
+}
+
+function agrPopupDireccion(dir) {
+  const iconos = { disponible: "✅", no_disponible: "❌", error: "⚠️" };
+  const detalleHtml = Object.entries(dir.detalle || {})
+    .map(([nombre, info]) => {
+      const icono = iconos[info.estado] || "❔";
+      const tiempo = info.tiempo_entrega_min ? ` (${info.tiempo_entrega_min} min)` : "";
+      const nota = info.estado === "error" ? " — fallo del scraper" : "";
+      return `${icono} ${nombre}${tiempo}${nota}`;
+    })
+    .join("<br>");
+  return `<b>${dir.direccion_text || "Punto de test"}</b><br>${dir.distancia_km.toFixed(2)} km · ${dir.angulo_grados}°<br>${detalleHtml || "Sin datos aún"}<br>
+    <i style="color:var(--text-muted);font-size:11px;">Arrastra el punto para reubicarlo</i><br>
+    <button type="button" class="btn btn-ghost" style="margin-top:6px;font-size:12px;padding:3px 8px;" onclick="agrEliminarPunto(${dir.id})">🗑️ Eliminar punto</button>`;
+}
+
+async function agrEliminarPunto(direccionId) {
+  if (!confirm("¿Quitar este punto de test? Ya no se comprobará más.")) return;
+  try {
+    const res = await fetch(`${AGR_API}/direcciones/${direccionId}`, { method: "DELETE", credentials: "include" });
+    if (!res.ok) throw new Error("No se pudo eliminar");
+    const marker = agrMarkersPorId[direccionId];
+    if (marker) {
+      agrMap.removeLayer(marker);
+      delete agrMarkersPorId[direccionId];
+      agrDireccionMarkers = agrDireccionMarkers.filter((m) => m !== marker);
+    }
+  } catch (e) {
+    alert("No se pudo eliminar el punto. Inténtalo de nuevo.");
+  }
+}
+
+async function agrAnadirPunto(lat, lng) {
+  const texto = prompt("Dirección de este nuevo punto (mira el mapa/Google Maps si hace falta):", "");
+  if (texto === null || texto.trim() === "") return;
+  try {
+    const res = await fetch(`${AGR_API}/direcciones`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tienda: agrTiendaActual, lat, lng, direccion_text: texto.trim() }),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("No se pudo añadir");
+    const dir = await res.json();
+    dir.detalle = {};
+    dir.disponible_count = dir.no_disponible_count = dir.error_count = 0;
+    agrAgregarMarcador(dir);
+  } catch (e) {
+    alert("No se pudo añadir el punto. Inténtalo de nuevo.");
+  }
+}
+
+async function agrGuardarReubicacion(dir, marker, lat, lng) {
+  const actual = prompt(
+    `Nueva dirección para este punto (objetivo: ${dir.distancia_km} km del centro):`,
+    dir.direccion_text || ""
+  );
+  if (actual === null || actual.trim() === "") {
+    marker.setLatLng([dir.lat, dir.lng]); // canceló o dejó vacío: revertir
+    return;
+  }
+  try {
+    const res = await fetch(`${AGR_API}/direcciones/${dir.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lat, lng, direccion_text: actual.trim() }),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("No se pudo guardar");
+    const actualizado = await res.json();
+    dir.lat = actualizado.lat;
+    dir.lng = actualizado.lng;
+    dir.direccion_text = actualizado.direccion_text;
+    marker.setPopupContent(agrPopupDireccion(dir));
+  } catch (e) {
+    alert("No se pudo guardar la reubicación. Inténtalo de nuevo.");
+    marker.setLatLng([dir.lat, dir.lng]);
+  }
+}
+
+function agrAgregarMarcador(dir) {
+  const marker = L.marker([dir.lat, dir.lng], {
+    icon: agrIconoDireccion(dir),
+    draggable: true,
+  })
+    .addTo(agrMap)
+    .bindPopup(agrPopupDireccion(dir))
+    .bindTooltip("", { permanent: false, direction: "top", className: "agr-drag-tooltip" });
+
+  marker.on("drag", (e) => {
+    const { lat, lng } = e.target.getLatLng();
+    const distKm = agrDistanciaKm(agrTiendaCentro.lat, agrTiendaCentro.lng, lat, lng);
+    marker.setTooltipContent(`${distKm.toFixed(2)} km línea recta (objetivo ${dir.distancia_km.toFixed(2)} km)`);
+    marker.openTooltip();
+  });
+
+  marker.on("dragend", (e) => {
+    marker.closeTooltip();
+    const { lat, lng } = e.target.getLatLng();
+    agrGuardarReubicacion(dir, marker, lat, lng);
+  });
+
+  agrDireccionMarkers.push(marker);
+  agrMarkersPorId[dir.id] = marker;
+  return marker;
+}
+
+function agrToggleModoAnadir() {
+  agrModoAnadir = !agrModoAnadir;
+  const btn = document.getElementById("agr-btn-anadir");
+  if (btn) {
+    btn.classList.toggle("activo", agrModoAnadir);
+    btn.textContent = agrModoAnadir ? "✓ Clic en el mapa para añadir…" : "➕ Añadir punto";
+  }
+  if (agrMap) {
+    document.getElementById("agr-map").style.cursor = agrModoAnadir ? "crosshair" : "";
+  }
+}
+
 function agrRenderMapa(data) {
   const { tienda, direcciones } = data;
   if (!tienda) return;
+  agrTiendaCentro = tienda;
   agrInitMap(tienda.lat, tienda.lng);
 
   L.circleMarker([tienda.lat, tienda.lng], {
@@ -32,24 +173,13 @@ function agrRenderMapa(data) {
 
   agrDireccionMarkers.forEach((m) => agrMap.removeLayer(m));
   agrDireccionMarkers = [];
+  agrMarkersPorId = {};
 
-  const iconos = { disponible: "✅", no_disponible: "❌", error: "⚠️" };
-  direcciones.forEach((dir) => {
-    const detalleHtml = Object.entries(dir.detalle)
-      .map(([nombre, info]) => {
-        const icono = iconos[info.estado] || "❔";
-        const tiempo = info.tiempo_entrega_min ? ` (${info.tiempo_entrega_min} min)` : "";
-        const nota = info.estado === "error" ? " — fallo del scraper" : "";
-        return `${icono} ${nombre}${tiempo}${nota}`;
-      })
-      .join("<br>");
+  direcciones.forEach((dir) => agrAgregarMarcador(dir));
 
-    const marker = L.circleMarker([dir.lat, dir.lng], {
-      radius: 7, fillColor: agrColorParaDireccion(dir), fillOpacity: 0.9, color: "#111", weight: 1,
-    }).addTo(agrMap).bindPopup(
-      `<b>${dir.direccion_text || "Punto de test"}</b><br>${dir.distancia_km} km · ${dir.angulo_grados}°<br>${detalleHtml || "Sin datos aún"}`
-    );
-    agrDireccionMarkers.push(marker);
+  agrMap.on("click", (e) => {
+    if (!agrModoAnadir) return;
+    agrAnadirPunto(e.latlng.lat, e.latlng.lng);
   });
 }
 

@@ -74,6 +74,14 @@ def ensure_tables():
             UNIQUE(tienda, distancia_km, angulo_grados)
         )
     """)
+    # activo: puntos "eliminados" desde el mapa se marcan inactivos en vez de
+    # borrarse -- si se borrara la fila, get_o_crear_direcciones la volvería
+    # a crear en el siguiente chequeo (el hueco (tienda, distancia, angulo)
+    # vuelve a estar libre). Además así el histórico de chequeos con ese
+    # direccion_id sigue teniendo sentido.
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_direcciones)")}
+    if "activo" not in cols:
+        conn.execute("ALTER TABLE agregadores_direcciones ADD COLUMN activo INTEGER NOT NULL DEFAULT 1")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS agregadores_chequeos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -129,6 +137,24 @@ def _mover_punto(lat, lng, bearing_deg, distancia_km):
         math.cos(distancia_km / R) - math.sin(lat_rad) * math.sin(lat2_rad),
     )
     return math.degrees(lat2_rad), math.degrees(lng2_rad)
+
+
+def _distancia_y_angulo(lat_centro, lng_centro, lat, lng):
+    """Inverso de _mover_punto: dado un punto puesto a mano en el mapa,
+    calcula a qué distancia (línea recta) y ángulo queda del centro de la
+    tienda, para guardarlo con el mismo formato que los puntos del grid."""
+    R = 6371
+    lat1, lng1, lat2, lng2 = map(math.radians, (lat_centro, lng_centro, lat, lng))
+    dlat, dlng = lat2 - lat1, lng2 - lng1
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
+    distancia_km = R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    bearing = math.degrees(
+        math.atan2(
+            math.sin(dlng) * math.cos(lat2),
+            math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlng),
+        )
+    )
+    return distancia_km, (bearing + 360) % 360
 
 
 _NOMINATIM_LOCK = threading.Lock()
@@ -226,6 +252,62 @@ def reparar_direcciones_invalidas() -> dict:
     return {"reparadas": len(reparadas), "detalle": reparadas}
 
 
+def mover_direccion_manual(direccion_id: int, lat: float, lng: float, direccion_text: str) -> dict | None:
+    """Reubicación manual desde el mapa del dashboard -- alguien con ojo
+    humano (o Google Maps) corrige un punto que Nominatim no supo resolver
+    bien. No se re-geocodifica: el texto lo pone quien lo mueve."""
+    conn = get_connection()
+    fila = conn.execute("SELECT id FROM agregadores_direcciones WHERE id=?", (direccion_id,)).fetchone()
+    if not fila:
+        conn.close()
+        return None
+    conn.execute(
+        "UPDATE agregadores_direcciones SET lat=?, lng=?, direccion_text=? WHERE id=?",
+        (lat, lng, direccion_text, direccion_id),
+    )
+    conn.commit()
+    fila = conn.execute("SELECT * FROM agregadores_direcciones WHERE id=?", (direccion_id,)).fetchone()
+    conn.close()
+    return dict(fila)
+
+
+def eliminar_direccion(direccion_id: int) -> bool:
+    """Baja lógica (activo=0), no DELETE -- si se borrara la fila, el hueco
+    (tienda, distancia, angulo) quedaría libre y get_o_crear_direcciones lo
+    volvería a generar (y geocodificar) en el siguiente chequeo."""
+    conn = get_connection()
+    fila = conn.execute("SELECT id FROM agregadores_direcciones WHERE id=?", (direccion_id,)).fetchone()
+    if not fila:
+        conn.close()
+        return False
+    conn.execute("UPDATE agregadores_direcciones SET activo=0 WHERE id=?", (direccion_id,))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def agregar_direccion_manual(tienda: str, lat: float, lng: float, direccion_text: str) -> dict | None:
+    """Punto añadido a mano en el mapa (no del grid de radios/ángulos fijo)
+    -- útil para tiendas donde el grid estándar no encaja bien (ej. una zona
+    comercial concreta que interesa vigilar más de cerca)."""
+    if tienda not in TIENDAS:
+        return None
+    info = TIENDAS[tienda]
+    distancia_km, angulo_grados = _distancia_y_angulo(info["lat"], info["lng"], lat, lng)
+
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO agregadores_direcciones
+           (tienda, lat, lng, distancia_km, angulo_grados, direccion_text, activo)
+           VALUES (?, ?, ?, ?, ?, ?, 1)""",
+        (tienda, lat, lng, distancia_km, int(round(angulo_grados)), direccion_text),
+    )
+    conn.commit()
+    fila = conn.execute("SELECT * FROM agregadores_direcciones WHERE id=?", (cur.lastrowid,)).fetchone()
+    conn.close()
+    return dict(fila)
+
+
 def get_o_crear_direcciones(tienda: str, radios_km=None) -> list[dict]:
     """Genera (si hace falta) y devuelve el grid de puntos de test de una
     tienda. Determinista: mismos radios/ángulos siempre dan los mismos
@@ -245,7 +327,11 @@ def get_o_crear_direcciones(tienda: str, radios_km=None) -> list[dict]:
                 (tienda, radio, int(angulo)),
             ).fetchone()
             if fila:
-                resultado.append(dict(fila))
+                # Existe pero puede estar eliminado (activo=0) -- no se
+                # regenera (el hueco sigue "ocupado" por esa fila), solo no
+                # se devuelve para que el scraper no lo compruebe.
+                if fila["activo"]:
+                    resultado.append(dict(fila))
                 continue
 
             lat_dest, lng_dest = _mover_punto(info["lat"], info["lng"], angulo, radio)
@@ -268,6 +354,17 @@ def get_o_crear_direcciones(tienda: str, radios_km=None) -> list[dict]:
                     "direccion_text": direccion_text,
                 }
             )
+
+    # Puntos añadidos a mano desde el mapa (no encajan en el grid de radios
+    # fijos que se recorrió arriba) -- se incluyen igual si están activos.
+    ids_grid = {r["id"] for r in resultado}
+    extra = conn.execute(
+        "SELECT * FROM agregadores_direcciones WHERE tienda=? AND activo=1", (tienda,)
+    ).fetchall()
+    for fila in extra:
+        if fila["id"] not in ids_grid:
+            resultado.append(dict(fila))
+
     conn.close()
     return resultado
 
@@ -350,7 +447,7 @@ def get_ultimos(tienda: str, horas: int = 24):
 def get_mapa_datos(tienda: str):
     conn = get_connection()
     direcciones = conn.execute(
-        "SELECT * FROM agregadores_direcciones WHERE tienda=?", (tienda,)
+        "SELECT * FROM agregadores_direcciones WHERE tienda=? AND activo=1", (tienda,)
     ).fetchall()
 
     resultado = []
