@@ -64,10 +64,7 @@ class AlertaIn(BaseModel):
 
 @router.post("/chequeo", dependencies=[Depends(require_api_key)])
 def recibir_chequeo(body: ChequeoIn):
-    try:
-        agregadores_module.guardar_chequeo(body.model_dump())
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"DEBUG guardar_chequeo: {e!r}")
+    agregadores_module.guardar_chequeo(body.model_dump())
 
     if body.error_texto:
         recientes = agregadores_module.get_ultimos(body.tienda, horas=1)
@@ -95,10 +92,7 @@ def direcciones_route(tienda: str, cercano: bool = False):
     y geocodifica el grid server-side, así el geocoding se cachea una única
     vez para todo el mundo en vez de cada portátil/proceso repitiéndolo."""
     radios = agregadores_module.GRID_RADIOS_CERCANO_KM if cercano else agregadores_module.GRID_RADIOS_KM
-    try:
-        return agregadores_module.get_o_crear_direcciones(tienda, radios)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"DEBUG direcciones: {e!r}")
+    return agregadores_module.get_o_crear_direcciones(tienda, radios)
 
 
 @router.post("/sesiones", dependencies=[Depends(require_api_key)])
