@@ -77,7 +77,12 @@ class JustEatScraper(BaseAggregatorScraper):
 
     async def _buscar_tienda(self, page, tienda_nombre: str) -> bool:
         campo_readonly = page.locator(SEL_SEARCH_READONLY).first
-        await campo_readonly.wait_for(state="visible", timeout=15000)
+        # 6s en vez de 15s: cuando la dirección no corresponde a una zona con
+        # servicio JustEat (autovías, puntos sin número que usan coordenadas
+        # como texto de búsqueda), esta barra nunca aparece -- con 15s y 4
+        # intentos eso son ~90s tirados por punto; con 6s son ~25s. Un
+        # resultado real casi siempre carga bastante antes de eso.
+        await campo_readonly.wait_for(state="visible", timeout=6000)
         await campo_readonly.click(force=True)
 
         campo_busqueda = page.locator(SEL_SEARCH_INPUT).first
