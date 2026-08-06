@@ -13,7 +13,7 @@ SEL_ADDRESS_INPUT = "#location-typeahead-home-input"
 SEL_ADDRESS_SUGGESTION = '[id^="location-typeahead-home-item-"]'
 SEL_BUSCAR_COMIDA_BUTTON = 'button:has-text("Buscar comida")'
 
-SEL_SEARCH_BUTTON = '[data-testid="label-wrapper-query"]'
+SEL_SEARCH_BUTTON = '[data-testid="label-wrapper-query"]:visible'
 SEL_SEARCH_INPUT = 'input[placeholder*="Buscar en Uber"]'
 SEL_STORE_LINK = 'a[href*="/store/"]'
 
@@ -99,7 +99,11 @@ class UberEatsScraper(BaseAggregatorScraper):
         # aparezca el input real donde escribir.
         boton_busqueda = page.locator(SEL_SEARCH_BUTTON).first
         try:
-            await boton_busqueda.wait_for(state="visible", timeout=15000)
+            # 25s en vez de 15s: la captura de un fallo real (06/08 21:18) mostró
+            # el botón ya visible justo después de agotarse el timeout -- la
+            # página a veces tarda más en cargar del todo, no es que el selector
+            # esté cogiendo el elemento equivocado.
+            await boton_busqueda.wait_for(state="visible", timeout=25000)
             await boton_busqueda.click()
         except Exception:
             ruta = await self.screenshot_on_error(page, "sin_boton_buscador")
