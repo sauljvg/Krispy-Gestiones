@@ -1,9 +1,6 @@
-import logging
 import re
 
 from scrapers.base import BaseAggregatorScraper, ResultadoChequeo
-
-logger = logging.getLogger(__name__)
 
 BASE_URL = "https://glovoapp.com"
 
@@ -46,7 +43,14 @@ class GlovoScraper(BaseAggregatorScraper):
                 status_http=200,
             )
 
-        return await self._leer_disponibilidad(page)
+        # Glovo solo lista tiendas que reparten en la dirección buscada -- que la
+        # tarjeta de Krispy Kreme aparezca en los resultados de _buscar_tienda YA es
+        # la señal real de disponibilidad. La lectura de "cerrado"/ETA de la página
+        # de la tienda es poco fiable (texto de otras tiendas recomendadas, avisos
+        # genéricos, etc. producían falsos "no disponible" con la tienda repartiendo
+        # de verdad), así que ahora solo se usa para el dato informativo del tiempo
+        # de entrega, nunca para decidir disponible/no disponible.
+        return await self._leer_tiempo_entrega(page)
 
     async def _click_js(self, locator):
         """Click vía JS: el click sintético de Playwright no siempre dispara el handler
@@ -156,49 +160,28 @@ class GlovoScraper(BaseAggregatorScraper):
         await page.wait_for_load_state("domcontentloaded")
         return True
 
-    async def _leer_disponibilidad(self, page) -> ResultadoChequeo:
-        try:
-            # Igual que en Uber Eats: una sola lectura con timeout fijo daba falsos
-            # negativos cuando la página tardaba un poco más en pintar el ETA (la
-            # tienda estaba abierta de verdad, solo que el texto llegó tarde) --
-            # se reintenta unos segundos antes de concluir que no hay ETA.
-            texto_eta = ""
-            for _ in range(5):
-                try:
-                    texto_eta = await page.locator(SEL_STORE_ETA_TEXT).first.inner_text(timeout=2000)
-                    if texto_eta:
-                        break
-                except Exception:
-                    pass
-                await page.wait_for_timeout(1000)
+    async def _leer_tiempo_entrega(self, page) -> ResultadoChequeo:
+        # Llegar aquí ya significa disponible=True (ver comentario en _verificar:
+        # que la tarjeta apareciera en la búsqueda ya es la señal real). Un fallo
+        # leyendo el ETA es solo la pérdida de un dato informativo, nunca motivo
+        # para marcar la tienda como no disponible ni como error técnico.
+        texto_eta = ""
+        for _ in range(5):
+            try:
+                texto_eta = await page.locator(SEL_STORE_ETA_TEXT).first.inner_text(timeout=2000)
+                if texto_eta:
+                    break
+            except Exception:
+                pass
+            await page.wait_for_timeout(1000)
 
-            # Antes se buscaba "closed"/"cerrado" en TODO el texto de la página --
-            # bastaba con que apareciera en una tienda recomendada de al lado (o
-            # cualquier otro texto ajeno) para marcar Krispy Kreme como no disponible
-            # aunque su propio ETA se hubiera leído bien. Confirmado con casos reales
-            # donde la tienda sí repartía y el scraper la daba como cerrada. Ahora solo
-            # se mira el propio texto del ETA de esta tienda.
-            texto_eta_lower = texto_eta.lower()
-            cerrado = "closed" in texto_eta_lower or "cerrado" in texto_eta_lower
+        tiempo_entrega_min = None
+        numeros = re.findall(r"\d+", texto_eta)
+        if numeros:
+            tiempo_entrega_min = int(numeros[-1])
 
-            disponible = bool(texto_eta) and not cerrado
-
-            tiempo_entrega_min = None
-            numeros = re.findall(r"\d+", texto_eta)
-            if numeros:
-                tiempo_entrega_min = int(numeros[-1])
-
-            return ResultadoChequeo(
-                disponible=disponible,
-                tiempo_entrega_min=tiempo_entrega_min,
-                mensaje_bloqueo=None if disponible else "Tienda cerrada o sin ETA de entrega",
-                status_http=200,
-            )
-        except Exception as exc:
-            logger.error("Error leyendo disponibilidad Glovo: %s", exc)
-            screenshot = await self.screenshot_on_error(page, "error_lectura")
-            return ResultadoChequeo(
-                disponible=False,
-                error_texto=str(exc),
-                url_captura=screenshot,
-            )
+        return ResultadoChequeo(
+            disponible=True,
+            tiempo_entrega_min=tiempo_entrega_min,
+            status_http=200,
+        )
