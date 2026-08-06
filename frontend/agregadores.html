@@ -32,6 +32,11 @@
   .agr-panel-mapa { padding: 16px; }
   .agr-panel-mapa-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
   .agr-panel-mapa-header h2 { margin: 0; }
+  .agr-contador {
+    display: inline-block; margin-left: 8px; padding: 2px 9px; border-radius: 999px;
+    background: var(--surface-page); border: 1px solid var(--border);
+    color: var(--text-secondary); font-size: 12px; font-weight: 600; vertical-align: middle;
+  }
   #agr-map { height: 70vh; min-height: 480px; border-radius: 8px; overflow: hidden; }
 
   .agr-filtro-agregador { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -127,7 +132,7 @@
 
     <div class="agr-panel agr-panel-mapa">
       <div class="agr-panel-mapa-header">
-        <h2>Mapa de cobertura</h2>
+        <h2>Mapa de cobertura <span id="agr-contador-puntos" class="agr-contador"></span></h2>
         <div class="agr-filtro-agregador">
           <button type="button" class="agr-filtro-btn activo" data-agregador="">Todos</button>
           <button type="button" class="agr-filtro-btn" data-agregador="justeat">JustEat</button>

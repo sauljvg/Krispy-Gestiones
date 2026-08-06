@@ -137,6 +137,7 @@ async function agrEliminarPunto(direccionId) {
       agrMap.removeLayer(marker);
       delete agrMarkersPorId[direccionId];
       agrDireccionMarkers = agrDireccionMarkers.filter((m) => m !== marker);
+      agrRecalcularContador();
     }
   } catch (e) {
     alert("No se pudo eliminar el punto. Inténtalo de nuevo.");
@@ -164,6 +165,7 @@ async function agrAnadirPunto(lat, lng) {
     dir.disponible_count = dir.no_disponible_count = dir.error_count = 0;
     agrMap.removeLayer(provisional);
     agrAgregarMarcador(dir, { editable: true });
+    agrRecalcularContador();
   } catch (e) {
     agrMap.removeLayer(provisional);
     alert("No se pudo añadir el punto. Inténtalo de nuevo.");
@@ -292,6 +294,20 @@ function agrLimpiarMapa() {
   agrMarkersPorId = {};
 }
 
+function agrActualizarContador(texto) {
+  const el = document.getElementById("agr-contador-puntos");
+  if (el) el.textContent = texto;
+}
+
+function agrRecalcularContador() {
+  const n = agrDireccionMarkers.length;
+  if (agrTiendaActual === AGR_TODAS) {
+    agrActualizarContador(`${n} puntos en ${Object.keys(agrCentrosPorTienda).length} tiendas`);
+  } else {
+    agrActualizarContador(`${n} punto${n === 1 ? "" : "s"}`);
+  }
+}
+
 function agrRenderMapa(data) {
   const { tienda, direcciones } = data;
   if (!tienda) return;
@@ -308,6 +324,7 @@ function agrRenderMapa(data) {
     agrAnadirPunto(e.latlng.lat, e.latlng.lng);
   });
   agrActualizarLeyenda();
+  agrActualizarContador(`${direcciones.length} punto${direcciones.length === 1 ? "" : "s"}`);
 }
 
 function agrRenderMapaTodas(data) {
@@ -331,6 +348,7 @@ function agrRenderMapaTodas(data) {
   const bounds = L.latLngBounds(tiendas.map((t) => [t.lat, t.lng]));
   agrMap.fitBounds(bounds.pad(0.25));
   agrActualizarLeyenda();
+  agrActualizarContador(`${direcciones.length} puntos en ${tiendas.length} tiendas`);
 }
 
 function agrBadge(c) {
