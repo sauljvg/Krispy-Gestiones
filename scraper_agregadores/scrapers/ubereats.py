@@ -13,6 +13,7 @@ SEL_ADDRESS_INPUT = "#location-typeahead-home-input"
 SEL_ADDRESS_SUGGESTION = '[id^="location-typeahead-home-item-"]'
 SEL_BUSCAR_COMIDA_BUTTON = 'button:has-text("Buscar comida")'
 
+SEL_SEARCH_BUTTON = '[data-testid="label-wrapper-query"]'
 SEL_SEARCH_INPUT = 'input[placeholder*="Buscar en Uber"]'
 SEL_STORE_LINK = 'a[href*="/store/"]'
 
@@ -93,9 +94,25 @@ class UberEatsScraper(BaseAggregatorScraper):
                 raise
 
     async def _buscar_tienda(self, page) -> bool:
+        # La caja de búsqueda del feed es un botón/span de mentira (data-testid
+        # "label-wrapper-query"), no un <input> -- hay que pulsarlo para que
+        # aparezca el input real donde escribir.
+        boton_busqueda = page.locator(SEL_SEARCH_BUTTON).first
+        try:
+            await boton_busqueda.wait_for(state="visible", timeout=15000)
+            await boton_busqueda.click()
+        except Exception:
+            ruta = await self.screenshot_on_error(page, "sin_boton_buscador")
+            logger.warning("ubereats: sin botón de búsqueda, url=%s -- captura: %s", page.url, ruta)
+            raise
+
         campo_busqueda = page.locator(SEL_SEARCH_INPUT + ":visible").first
-        await campo_busqueda.wait_for(state="visible", timeout=15000)
-        await campo_busqueda.click()
+        try:
+            await campo_busqueda.wait_for(state="visible", timeout=15000)
+        except Exception:
+            ruta = await self.screenshot_on_error(page, "sin_buscador")
+            logger.warning("ubereats: sin campo de búsqueda tras pulsar botón, url=%s -- captura: %s", page.url, ruta)
+            raise
         await campo_busqueda.fill(MARCA_BUSQUEDA)
 
         enlace = page.locator(f'{SEL_STORE_LINK}:has-text("{MARCA_BUSQUEDA}")').first

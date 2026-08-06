@@ -8,7 +8,7 @@ load_dotenv()
 # este scraper solo necesita saber qué tiendas comprobar y a qué API hablarle. La lista de
 # tiendas/slugs es la misma que backend/agregadores.py; si se añade una tienda ahí, hay que
 # añadirla aquí también (o promover esto a un GET /api/agregadores/tiendas si se automatiza).
-TIENDAS_SCHEDULER = ["parquesur"]
+TIENDAS_SCHEDULER = ["parquesur", "princesa", "caleido", "granplaza2", "plenilunio", "lagavia"]
 
 AGREGADORES = ["justeat", "glovo", "ubereats"]
 
