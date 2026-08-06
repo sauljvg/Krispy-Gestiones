@@ -441,6 +441,22 @@ def get_o_crear_direcciones(tienda: str, radios_km=None) -> list[dict]:
         conn.close()
 
 
+def borrar_alertas_excepcion_vacia():
+    """Mantenimiento puntual: borra las alertas "excepción no controlada — "
+    con el mensaje vacío tras el guion (asyncio.TimeoutError y similares no
+    llevan texto) -- quedaron así de un blip de red real del 06/08 antes de
+    que scheduler.py empezara a loguear repr(exc) en vez de str(exc). No
+    toca ninguna otra alerta."""
+    conn = get_connection()
+    cur = conn.execute(
+        "DELETE FROM agregadores_alertas WHERE tipo='scraper_error' AND mensaje LIKE '%excepción no controlada — '"
+    )
+    conn.commit()
+    borradas = cur.rowcount
+    conn.close()
+    return {"alertas_borradas": borradas}
+
+
 def resetear_estadisticas():
     """Borra todo el historial de chequeos y alertas de los 3 agregadores
     (las 6 tiendas) -- deja los puntos del grid (agregadores_direcciones)

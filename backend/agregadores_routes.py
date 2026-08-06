@@ -171,6 +171,11 @@ def podar_direcciones_route():
     return agregadores_module.podar_grid_reducido()
 
 
+@router.post("/alertas/limpiar-excepcion-vacia", dependencies=[Depends(require_api_key)])
+def limpiar_alertas_excepcion_vacia_route():
+    return agregadores_module.borrar_alertas_excepcion_vacia()
+
+
 @router.post("/estadisticas/reset", dependencies=[Depends(require_api_key)])
 def resetear_estadisticas_route():
     """Mantenimiento puntual: borra el histórico de chequeos y alertas de los
