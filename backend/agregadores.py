@@ -53,9 +53,9 @@ TIENDAS = {
 
 AGREGADORES = ["justeat", "glovo", "ubereats"]
 
-GRID_RADIOS_KM = [1.0, 2.5, 5.0, 7.0]
+GRID_RADIOS_KM = [1.0, 2.5, 5.0]
 GRID_RADIOS_CERCANO_KM = [1.0]
-GRID_ANGULOS_COUNT = 12
+GRID_ANGULOS_COUNT = 8
 
 HORARIOS_APERTURA = [{"inicio": 9, "fin": 22}]
 FRECUENCIA_CHEQUEO_CERCANO_MIN = 10
@@ -294,6 +294,36 @@ def eliminar_direccion(direccion_id: int) -> bool:
     conn.execute("UPDATE agregadores_direcciones SET activo=0 WHERE id=?", (direccion_id,))
     conn.commit()
     conn.close()
+    return True
+
+
+def podar_grid_reducido() -> dict:
+    """Mantenimiento puntual: desactiva (activo=0) los puntos ya generados
+    con el grid viejo (4 radios x 12 ángulos) que ya no encajan en el grid
+    reducido actual (GRID_RADIOS_KM x GRID_ANGULOS_COUNT) -- radio 7km fuera,
+    y de 12 a 8 ángulos por radio. Los puntos añadidos a mano (fuera del
+    grid, con su propio distancia/angulo) no se tocan. Baja lógica, igual
+    que eliminar_direccion -- no vuelven a regenerarse solos."""
+    angulos_validos = {round((360 / GRID_ANGULOS_COUNT) * i) for i in range(GRID_ANGULOS_COUNT)}
+    radios_validos = set(GRID_RADIOS_KM)
+
+    conn = get_connection()
+    filas = conn.execute(
+        "SELECT id, distancia_km, angulo_grados FROM agregadores_direcciones WHERE activo=1"
+    ).fetchall()
+    podados = 0
+    for fila in filas:
+        # Solo puntos del grid original de 12 ángulos (múltiplos de 30) --
+        # así no se tocan puntos añadidos a mano con ángulos arbitrarios.
+        es_del_grid_original = fila["angulo_grados"] % 30 == 0
+        if not es_del_grid_original:
+            continue
+        if fila["distancia_km"] not in radios_validos or fila["angulo_grados"] not in angulos_validos:
+            conn.execute("UPDATE agregadores_direcciones SET activo=0 WHERE id=?", (fila["id"],))
+            podados += 1
+    conn.commit()
+    conn.close()
+    return {"podados": podados}
     return True
 
 

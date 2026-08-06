@@ -118,6 +118,14 @@ def reparar_direcciones_route(background_tasks: BackgroundTasks):
     return {"ok": True, "mensaje": "Reparación lanzada en background, revisa /direcciones/{tienda} en unos minutos"}
 
 
+@router.post("/direcciones/podar", dependencies=[Depends(require_api_key)])
+def podar_direcciones_route():
+    """Mantenimiento puntual: desactiva los puntos del grid viejo (4 radios x
+    12 ángulos) que sobran tras reducir a GRID_RADIOS_KM x GRID_ANGULOS_COUNT.
+    Solo son UPDATEs, sin llamadas a Nominatim -- rápido, responde al instante."""
+    return agregadores_module.podar_grid_reducido()
+
+
 @router.post("/sesiones", dependencies=[Depends(require_api_key)])
 def iniciar_sesion_route(body: SesionIniciarIn):
     return {"id": agregadores_module.iniciar_sesion(body.modo)}
