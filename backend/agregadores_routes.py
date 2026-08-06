@@ -206,6 +206,13 @@ def crear_alerta_route(body: AlertaIn):
     return {"ok": True}
 
 
+@router.get("/transiciones-consulta", dependencies=[Depends(require_api_key)])
+def transiciones_consulta_route(tienda: str | None = None, horas: int = 24):
+    """Misma consulta que GET /transiciones pero con API key en vez de cookie
+    -- para poder tirar de esto por curl/scripts sin sesión de dashboard."""
+    return agregadores_module.get_transiciones(tienda, horas)
+
+
 # --- Endpoints del dashboard (cookie de usuario) ---------------------------
 
 
