@@ -222,7 +222,7 @@ def estado_route(_user: dict = Depends(require_agregadores)):
 
 @router.get("/reportes/diario")
 def reporte_diario_route(
-    tienda: str,
+    tienda: str | None = None,
     fecha: str | None = Query(default=None),
     _user: dict = Depends(require_agregadores),
 ):

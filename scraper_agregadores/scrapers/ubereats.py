@@ -61,9 +61,14 @@ class UberEatsScraper(BaseAggregatorScraper):
         # exige que el elemento esté "estable" (sin animarse) antes de tiempo.
         await campo.fill(direccion)
 
-        sugerencia = page.locator(SEL_ADDRESS_SUGGESTION).first
-        await sugerencia.wait_for(state="visible", timeout=15000)
-        await sugerencia.click()
+        try:
+            sugerencia = page.locator(SEL_ADDRESS_SUGGESTION).first
+            await sugerencia.wait_for(state="visible", timeout=15000)
+            await sugerencia.click()
+        except Exception:
+            ruta = await self.screenshot_on_error(page, "direccion_sin_sugerencia")
+            logger.warning("ubereats: sin sugerencia de dirección para '%s' -- captura: %s", direccion, ruta)
+            raise
 
         # Tras seleccionar la sugerencia, a veces navega sola a /feed y a veces hay que
         # confirmar con "Buscar comida" (el campo geocodifica en segundo plano: pulsar el
@@ -77,7 +82,15 @@ class UberEatsScraper(BaseAggregatorScraper):
                     await boton_buscar.click(timeout=5000)
             except Exception:
                 pass
-            await page.wait_for_url(re.compile(r"/feed"), timeout=15000)
+            try:
+                await page.wait_for_url(re.compile(r"/feed"), timeout=15000)
+            except Exception:
+                # Diagnóstico: la sugerencia sí se seleccionó, pero nunca navegó a
+                # /feed -- puede ser que la dirección exista pero Uber Eats no
+                # reparte ahí (no hay redirección real) o un fallo de carga.
+                ruta = await self.screenshot_on_error(page, "sin_navegacion_feed")
+                logger.warning("ubereats: no navegó a /feed para '%s' -- captura: %s", direccion, ruta)
+                raise
 
     async def _buscar_tienda(self, page) -> bool:
         campo_busqueda = page.locator(SEL_SEARCH_INPUT + ":visible").first

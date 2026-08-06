@@ -83,11 +83,18 @@
   .agr-marker-tienda-hotnow img { width: 32px; height: 32px; }
 
   .agr-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
-  .agr-card { background: var(--surface-page); border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: center; }
-  .agr-card .valor { font-size: 1.4rem; font-weight: 700; color: var(--text-primary); }
-  .agr-card .etiqueta { font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; }
-  .agr-card .errores { margin-top: 6px; font-size: 0.7rem; color: var(--status-warning); }
-  .agr-card .meta { margin-top: 4px; font-size: 0.68rem; color: var(--text-muted); }
+  .agr-card { background: var(--surface-page); border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: left; }
+  .agr-card .etiqueta { font-size: 0.78rem; font-weight: 700; color: var(--text-primary); text-transform: uppercase; }
+  .agr-card-total { font-size: 0.68rem; color: var(--text-muted); margin: 2px 0 8px; }
+  .agr-card-desglose { display: flex; flex-direction: column; gap: 3px; }
+  .agr-card-fila { font-size: 0.72rem; color: var(--text-secondary); display: flex; align-items: baseline; gap: 4px; }
+  .agr-card-fila .agr-card-pct { font-weight: 700; font-size: 0.85rem; min-width: 42px; }
+  .agr-card-fila .agr-card-n { color: var(--text-muted); font-size: 0.65rem; }
+  .agr-card-fila.ok .agr-card-pct { color: var(--status-good); }
+  .agr-card-fila.no .agr-card-pct { color: var(--status-critical); }
+  .agr-card-fila.fallo .agr-card-pct { color: var(--status-warning); }
+  .agr-card-barra { display: flex; height: 6px; border-radius: 999px; overflow: hidden; margin-top: 8px; background: var(--border); }
+  .agr-card-barra span { height: 100%; }
   .agr-resumen-nota { font-size: 0.72rem; color: var(--text-muted); margin: -6px 0 12px; line-height: 1.4; }
 
   #agr-tabla-titulo { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
@@ -172,7 +179,7 @@
         <div class="agr-panel">
           <h2>Resumen (24h)</h2>
           <p class="agr-resumen-nota">
-            % = disponibilidad real (de los chequeos que sí se completaron). Debajo, si los hay: fallos técnicos del scraper (no pudo leer el resultado), sobre el total de intentos.
+            Los 3 porcentajes de cada agregador son sobre el mismo total de intentos y suman 100%: <b>disponible</b> (repartía), <b>no disponible</b> (respondió pero no reparte ahí — real, no es un fallo) y <b>fallo técnico</b> (nuestro scraper no consiguió leer el resultado).
           </p>
           <div id="agr-cards" class="agr-cards"></div>
           <canvas id="agr-chart"></canvas>
@@ -191,6 +198,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/agregadores.js?v=20260806a"></script>
+<script src="js/agregadores.js?v=20260806b"></script>
 </body>
 </html>

@@ -601,12 +601,25 @@ def get_alertas(tienda: str = None, horas: int = 24):
     return [dict(f) for f in filas]
 
 
-def get_reporte(tienda: str, desde: datetime, hasta: datetime):
+def get_reporte(tienda: str | None, desde: datetime, hasta: datetime):
+    """tienda=None agrega las 6 tiendas juntas (vista "Todas").
+
+    Los tres porcentajes (disponible/no_disponible/error) se calculan sobre
+    el MISMO total de intentos -- suman 100%, para que no haya ambigüedad
+    sobre a qué total se refiere cada uno (antes "disponibilidad_pct" se
+    calculaba solo sobre los intentos validos, distinto del total de la
+    tarjeta de al lado, lo que confundía más que aclaraba)."""
     conn = get_connection()
-    filas = conn.execute(
-        "SELECT * FROM agregadores_chequeos WHERE tienda=? AND timestamp>=? AND timestamp<?",
-        (tienda, desde.isoformat(), hasta.isoformat()),
-    ).fetchall()
+    if tienda:
+        filas = conn.execute(
+            "SELECT * FROM agregadores_chequeos WHERE tienda=? AND timestamp>=? AND timestamp<?",
+            (tienda, desde.isoformat(), hasta.isoformat()),
+        ).fetchall()
+    else:
+        filas = conn.execute(
+            "SELECT * FROM agregadores_chequeos WHERE timestamp>=? AND timestamp<?",
+            (desde.isoformat(), hasta.isoformat()),
+        ).fetchall()
     conn.close()
 
     por_agregador: dict[str, list] = {}
@@ -619,18 +632,19 @@ def get_reporte(tienda: str, desde: datetime, hasta: datetime):
         errores = [f for f in lista if f["error_texto"]]
         validos = [f for f in lista if not f["error_texto"]]
         disponibles = sum(1 for f in validos if f["disponible"])
-        pct = (disponibles / len(validos) * 100) if validos else 0.0
-        pct_errores = (len(errores) / total * 100) if total else 0.0
+        no_disponibles = len(validos) - disponibles
         tiempos = [f["tiempo_entrega_min"] for f in validos if f["tiempo_entrega_min"]]
         tiempo_medio = sum(tiempos) / len(tiempos) if tiempos else None
 
         reporte[nombre] = {
-            "disponibilidad_pct": round(pct, 1),
-            "tiempo_medio_entrega": round(tiempo_medio, 1) if tiempo_medio else None,
             "total_chequeos": total,
-            "chequeos_validos": len(validos),
+            "disponibles": disponibles,
+            "no_disponibles": no_disponibles,
             "errores": len(errores),
-            "errores_pct": round(pct_errores, 1),
+            "disponible_pct": round(disponibles / total * 100, 1) if total else 0.0,
+            "no_disponible_pct": round(no_disponibles / total * 100, 1) if total else 0.0,
+            "error_pct": round(len(errores) / total * 100, 1) if total else 0.0,
+            "tiempo_medio_entrega": round(tiempo_medio, 1) if tiempo_medio else None,
         }
 
     return {

@@ -69,9 +69,18 @@ class JustEatScraper(BaseAggregatorScraper):
         await campo.click(force=True)
         await campo.fill(direccion)
 
-        sugerencia = page.locator(SEL_ADDRESS_SUGGESTION).first
-        await sugerencia.wait_for(state="visible", timeout=15000)
-        await sugerencia.click(force=True)
+        try:
+            sugerencia = page.locator(SEL_ADDRESS_SUGGESTION).first
+            await sugerencia.wait_for(state="visible", timeout=15000)
+            await sugerencia.click(force=True)
+        except Exception:
+            # Diagnóstico: sin esto no hay forma de ver qué pasaba en pantalla
+            # cuando la sugerencia nunca aparece -- ¿la dirección de verdad no
+            # tiene cobertura, o es un fallo de carga real? La excepción sigue
+            # subiendo igual (no cambia el resultado), solo se deja constancia.
+            ruta = await self.screenshot_on_error(page, "direccion_sin_sugerencia")
+            logger.warning("justeat: sin sugerencia de dirección para '%s' -- captura: %s", direccion, ruta)
+            raise
 
         await page.wait_for_load_state("domcontentloaded")
 

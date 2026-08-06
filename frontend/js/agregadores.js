@@ -446,14 +446,18 @@ function agrRenderCards(reporte) {
   }
   cont.innerHTML = entradas
     .map(([nombre, datos]) => {
-      const aviso = datos.errores > 0
-        ? `<div class="errores">⚠️ ${datos.errores} fallo(s) técnico(s) (${datos.errores_pct}%)</div>` : "";
       const etiqueta = AGR_NOMBRE_AGREGADOR[nombre] || nombre;
       return `<div class="agr-card">
-        <div class="valor">${datos.disponibilidad_pct}%</div>
         <div class="etiqueta">${etiqueta}</div>
-        <div class="meta">${datos.chequeos_validos} de ${datos.total_chequeos} intentos</div>
-        ${aviso}
+        <div class="agr-card-total">${datos.total_chequeos} intentos en total</div>
+        <div class="agr-card-desglose">
+          <div class="agr-card-fila ok"><span class="agr-card-pct">${datos.disponible_pct}%</span> disponible <span class="agr-card-n">(${datos.disponibles})</span></div>
+          <div class="agr-card-fila no"><span class="agr-card-pct">${datos.no_disponible_pct}%</span> no disponible <span class="agr-card-n">(${datos.no_disponibles})</span></div>
+          <div class="agr-card-fila fallo"><span class="agr-card-pct">${datos.error_pct}%</span> fallo técnico <span class="agr-card-n">(${datos.errores})</span></div>
+        </div>
+        <div class="agr-card-barra">
+          <span style="width:${datos.disponible_pct}%;background:var(--status-good);"></span><span style="width:${datos.no_disponible_pct}%;background:var(--status-critical);"></span><span style="width:${datos.error_pct}%;background:var(--status-warning);"></span>
+        </div>
       </div>`;
     })
     .join("");
@@ -463,12 +467,12 @@ function agrRenderChart(reporte) {
   const ctx = document.getElementById("agr-chart");
   const claves = Object.keys(reporte.agregadores);
   const labels = claves.map((n) => AGR_NOMBRE_AGREGADOR[n] || n);
-  const valores = claves.map((n) => reporte.agregadores[n].disponibilidad_pct);
+  const valores = claves.map((n) => reporte.agregadores[n].disponible_pct);
   const colores = claves.map((n) => AGR_COLOR_MARCA[n] || "#e07b00");
   if (agrChart) agrChart.destroy();
   agrChart = new Chart(ctx, {
     type: "bar",
-    data: { labels, datasets: [{ label: "% Disponibilidad (24h)", data: valores, backgroundColor: colores, borderRadius: 6 }] },
+    data: { labels, datasets: [{ label: "% Disponible (24h, sobre el total de intentos)", data: valores, backgroundColor: colores, borderRadius: 6 }] },
     options: {
       responsive: true,
       scales: { y: { beginAtZero: true, max: 100 } },
@@ -479,12 +483,15 @@ function agrRenderChart(reporte) {
 
 async function agrCargarResumen() {
   const cont = document.getElementById("agr-cards");
-  if (!agrTiendaActual || agrTiendaActual === AGR_TODAS) {
+  if (!agrTiendaActual) {
     cont.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;grid-column:1/-1;">Selecciona una tienda para ver el resumen.</p>';
     if (agrChart) { agrChart.destroy(); agrChart = null; }
     return;
   }
-  const res = await fetch(`${AGR_API}/reportes/diario?tienda=${agrTiendaActual}`, { credentials: "include" });
+  const url = agrTiendaActual === AGR_TODAS
+    ? `${AGR_API}/reportes/diario`
+    : `${AGR_API}/reportes/diario?tienda=${agrTiendaActual}`;
+  const res = await fetch(url, { credentials: "include" });
   const reporte = await res.json();
   agrRenderCards(reporte);
   agrRenderChart(reporte);
