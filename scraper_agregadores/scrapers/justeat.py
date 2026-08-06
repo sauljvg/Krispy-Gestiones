@@ -14,6 +14,19 @@ SEL_ADDRESS_INPUT = '[data-qa^="location-panel-search-input-address-element"]'
 SEL_ADDRESS_CHANGE_BUTTON = '[data-qa="header-location"]'
 SEL_ADDRESS_SUGGESTION = '[data-qa="location-panel-results-item-element"]'
 
+# Cuando la dirección no tiene número de portal (una rotonda, una carretera, un
+# punto del grid sin dirección exacta), tras elegir la sugerencia JustEat mete un
+# segundo modal pidiendo el número de edificio antes de dejar seguir -- si no se
+# rellena, la barra de búsqueda normal nunca aparece y el chequeo revienta como
+# si fuera un fallo técnico cuando en realidad la zona sí tiene cobertura.
+SEL_BUILDING_INPUT = 'input[placeholder*="edificio"]'
+SEL_BUILDING_CONFIRM = 'button:has-text("Confirmar dirección")'
+
+# La página "de área" a la que redirige cuando se confirma sin portal exacto ya
+# trae el buscador como <input> visible directamente -- no pasa por la barra
+# "readonly" intermedia que sí usa la página de dirección exacta.
+SEL_SEARCH_INPUT_DIRECTO = '[data-qa^="restaurant-list-search-element"]:visible'
+
 SEL_SEARCH_READONLY = '[data-qa="aggregation-options-search-element-readonly"]'
 SEL_SEARCH_INPUT = '[data-qa^="restaurant-list-search-element"]'
 SEL_SEARCH_SUGGESTION = '[data-qa="search-autocomplete-list-list-item"]'
@@ -50,8 +63,8 @@ class JustEatScraper(BaseAggregatorScraper):
     async def _aceptar_cookies(self, page):
         try:
             boton = page.locator(SEL_COOKIE_ACCEPT_NECESSARY).first
-            if await boton.is_visible(timeout=5000):
-                await boton.click()
+            await boton.wait_for(state="visible", timeout=5000)
+            await boton.click()
         except Exception:
             pass
 
@@ -84,15 +97,45 @@ class JustEatScraper(BaseAggregatorScraper):
 
         await page.wait_for_load_state("domcontentloaded")
 
+        # Direcciones sin portal exacto (rotondas, carreteras, puntos del grid)
+        # disparan un segundo modal pidiendo el número de edificio antes de
+        # dejar avanzar. Cualquier valor sirve -- solo hace falta cerrar el
+        # modal para llegar a los resultados de la zona.
+        try:
+            campo_edificio = page.locator(SEL_BUILDING_INPUT).first
+            await campo_edificio.wait_for(state="visible", timeout=3000)
+        except Exception:
+            campo_edificio = None
+
+        if campo_edificio is not None:
+            # El banner de cookies a veces reaparece justo aquí y tapa el
+            # botón de confirmar -- hay que volver a cerrarlo antes de tocar
+            # el modal.
+            await self._aceptar_cookies(page)
+            try:
+                await campo_edificio.fill("1", force=True)
+                await page.locator(SEL_BUILDING_CONFIRM).first.click(force=True)
+                await page.wait_for_load_state("domcontentloaded")
+            except Exception as exc:
+                logger.warning("justeat: fallo rellenando modal de edificio: %s", exc)
+
     async def _buscar_tienda(self, page, tienda_nombre: str) -> bool:
-        campo_readonly = page.locator(SEL_SEARCH_READONLY).first
-        # 6s en vez de 15s: cuando la dirección no corresponde a una zona con
-        # servicio JustEat (autovías, puntos sin número que usan coordenadas
-        # como texto de búsqueda), esta barra nunca aparece -- con 15s y 4
-        # intentos eso son ~90s tirados por punto; con 6s son ~25s. Un
-        # resultado real casi siempre carga bastante antes de eso.
-        await campo_readonly.wait_for(state="visible", timeout=6000)
-        await campo_readonly.click(force=True)
+        # Hay dos layouts distintos según cómo se resolvió la dirección: la
+        # página de dirección exacta muestra una barra "readonly" que hay que
+        # pulsar para que aparezca el input de verdad; la página "de área"
+        # (direcciones sin portal, ver _establecer_direccion) ya trae el
+        # input de búsqueda visible directamente, sin barra intermedia.
+        campo_readonly = page.locator(SEL_SEARCH_READONLY)
+        campo_directo = page.locator(SEL_SEARCH_INPUT_DIRECTO)
+        try:
+            await campo_readonly.or_(campo_directo).first.wait_for(state="visible", timeout=8000)
+        except Exception:
+            ruta = await self.screenshot_on_error(page, "sin_buscador")
+            logger.warning("justeat: sin buscador de tienda, url=%s -- captura: %s", page.url, ruta)
+            raise
+
+        if await campo_readonly.first.is_visible():
+            await campo_readonly.first.click(force=True)
 
         campo_busqueda = page.locator(SEL_SEARCH_INPUT).first
         await campo_busqueda.fill(MARCA_BUSQUEDA)
