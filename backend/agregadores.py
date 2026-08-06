@@ -621,6 +621,10 @@ def get_reporte(tienda: str | None, desde: datetime, hasta: datetime):
             (desde.isoformat(), hasta.isoformat()),
         ).fetchall()
     conn.close()
+    import logging
+    logging.getLogger("agregadores").warning(
+        "DEBUG get_reporte tienda=%r desde=%s hasta=%s filas=%d", tienda, desde.isoformat(), hasta.isoformat(), len(filas)
+    )
 
     por_agregador: dict[str, list] = {}
     for f in filas:
