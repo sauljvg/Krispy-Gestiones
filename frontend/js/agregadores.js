@@ -554,6 +554,33 @@ async function agrCargarAlertas() {
     .join("");
 }
 
+async function agrCargarTransiciones() {
+  const lista = document.getElementById("agr-transiciones");
+  if (!lista) return;
+  const url = agrTiendaActual === AGR_TODAS
+    ? `${AGR_API}/transiciones?horas=24`
+    : `${AGR_API}/transiciones?tienda=${agrTiendaActual}&horas=24`;
+  if (!agrTiendaActual) return;
+  const res = await fetch(url, { credentials: "include" });
+  const transiciones = await res.json();
+
+  if (transiciones.length === 0) {
+    lista.innerHTML = '<li style="color:var(--text-muted);">Ningún punto ha pasado de disponible a no disponible en las últimas 24h.</li>';
+    return;
+  }
+  lista.innerHTML = transiciones
+    .map((t) => {
+      const hora = new Date(t.timestamp).toLocaleString("es-ES");
+      const nombre = AGR_NOMBRE_AGREGADOR[t.agregador] || t.agregador;
+      const direccion = t.direccion_text || `${t.lat?.toFixed(5)}, ${t.lng?.toFixed(5)}`;
+      const captura = t.tiene_captura
+        ? `<a href="${AGR_API}/capturas/${t.id}" target="_blank" rel="noopener">Ver captura</a>`
+        : '<span style="color:var(--text-muted);">Sin captura</span>';
+      return `<li><span class="hora">${hora}</span><span class="tipo">${nombre}</span>${direccion} — ${t.mensaje_bloqueo || "no disponible"} — ${captura}</li>`;
+    })
+    .join("");
+}
+
 async function agrCargarEstado() {
   const pill = document.getElementById("agr-estado");
   try {
@@ -578,7 +605,7 @@ async function agrCargarEstado() {
 }
 
 async function agrCargarTodo() {
-  await Promise.all([agrCargarMapa(), agrCargarTabla(), agrCargarResumen(), agrCargarAlertas(), agrCargarEstado()]);
+  await Promise.all([agrCargarMapa(), agrCargarTabla(), agrCargarResumen(), agrCargarAlertas(), agrCargarTransiciones(), agrCargarEstado()]);
   document.getElementById("agr-actualizado").textContent = "Actualizado: " + new Date().toLocaleTimeString("es-ES");
 }
 

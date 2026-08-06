@@ -26,11 +26,31 @@ async def obtener_direcciones(tienda: str, cercano: bool = False) -> list[dict]:
             return await resp.json()
 
 
-async def enviar_chequeo(data: dict):
+async def enviar_chequeo(data: dict) -> dict:
     url = f"{config.KG_API_BASE_URL}/api/agregadores/chequeo"
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=data, headers=_headers(), timeout=30) as resp:
             resp.raise_for_status()
+            return await resp.json()
+
+
+async def subir_captura(chequeo_id: int, ruta_local: str):
+    """Solo se llama cuando /chequeo respondió transicion=true -- sube la
+    captura que el scraper ya tenía guardada en local (ver base.py) para que
+    quede visible desde el dashboard, no solo en el portátil del scraper."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/capturas/{chequeo_id}"
+    try:
+        with open(ruta_local, "rb") as f:
+            contenido = f.read()
+        form = aiohttp.FormData()
+        form.add_field("archivo", contenido, filename="captura.png", content_type="image/png")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url, data=form, headers={"X-API-Key": config.KG_API_KEY}, timeout=30
+            ) as resp:
+                resp.raise_for_status()
+    except Exception as exc:
+        logger.error("No se pudo subir la captura de transición (chequeo %s): %s", chequeo_id, exc)
 
 
 async def iniciar_sesion(modo: str) -> int:

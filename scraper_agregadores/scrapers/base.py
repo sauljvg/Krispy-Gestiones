@@ -164,7 +164,15 @@ class BaseAggregatorScraper:
                 )
                 page = await context.new_page()
                 page.set_default_timeout(self.timeout_ms)
-                return await self._verificar(page, tienda_nombre, direccion)
+                resultado = await self._verificar(page, tienda_nombre, direccion)
+                # Captura también en un "no disponible" real (no solo en error) --
+                # todavía no sabemos si esto es una transición (el backend lo decide
+                # comparando con el chequeo anterior), pero para entonces la página ya
+                # estará cerrada. Se sube a KG solo si el backend confirma que lo es
+                # (ver main.py); si no, este archivo local simplemente no se usa.
+                if not resultado.disponible and not resultado.error_texto and not resultado.url_captura:
+                    resultado.url_captura = await self.screenshot_on_error(page, "no_disponible")
+                return resultado
             finally:
                 await browser.close()
 

@@ -5,6 +5,7 @@ para Uber Eats — ver scraper_agregadores/ en la raíz del repo) y llama a la
 API en vivo (POST /api/agregadores/chequeo) con cada resultado; aquí solo se
 guarda y se sirve. Nada de esto toca Selenium ni el scraper de Reseñas."""
 import math
+import os
 import re
 import sqlite3
 import threading
@@ -14,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 MADRID_TZ = ZoneInfo("Europe/Madrid")
 
-from db import get_connection
+from db import DATA_DIR, get_connection
 
 # Coordenadas fijas de las tiendas monitoreadas — mismos slugs que
 # scraper/status/*.json para que sea el mismo vocabulario de tienda en toda
@@ -99,6 +100,13 @@ def ensure_tables():
             error_texto TEXT
         )
     """)
+    # url_captura: solo se rellena cuando el chequeo resulta ser una transición
+    # real de disponible->no disponible (ver hubo_transicion_a_no_disponible) --
+    # no en cada chequeo, para no subir una captura por cada uno de los muchos
+    # puntos que simplemente están siempre fuera de cobertura.
+    cols_chequeos = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_chequeos)")}
+    if "url_captura" not in cols_chequeos:
+        conn.execute("ALTER TABLE agregadores_chequeos ADD COLUMN url_captura TEXT")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS agregadores_alertas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -450,12 +458,15 @@ def resetear_estadisticas():
     return borrados
 
 
-def guardar_chequeo(data: dict):
+def guardar_chequeo(data: dict) -> int:
     """`data` es el JSON que manda el scraper: tienda, agregador,
     direccion_id, disponible, tiempo_entrega_min, mensaje_bloqueo,
-    error_texto. `timestamp` es opcional (por defecto ahora)."""
+    error_texto. `timestamp` es opcional (por defecto ahora). Devuelve el id
+    insertado -- lo necesita el scraper para poder subir una captura ligada
+    a este chequeo concreto si resulta ser una transición (ver
+    hubo_transicion_a_no_disponible)."""
     conn = get_connection()
-    conn.execute(
+    cur = conn.execute(
         """INSERT INTO agregadores_chequeos
            (tienda, agregador, direccion_id, timestamp, disponible, tiempo_entrega_min,
             mensaje_bloqueo, error_texto)
@@ -472,7 +483,87 @@ def guardar_chequeo(data: dict):
         ),
     )
     conn.commit()
+    chequeo_id = cur.lastrowid
     conn.close()
+    return chequeo_id
+
+
+def hubo_transicion_a_no_disponible(direccion_id: int | None, agregador: str) -> bool:
+    """True si el chequeo anterior (real, sin error) de este punto+agregador
+    estaba disponible -- es decir, este chequeo es el momento exacto en que
+    un punto que sí repartía dejó de hacerlo. Se consulta ANTES de insertar
+    el chequeo actual, así que "el anterior" es simplemente el último que ya
+    existe en la tabla."""
+    if direccion_id is None:
+        return False
+    conn = get_connection()
+    fila = conn.execute(
+        """SELECT disponible FROM agregadores_chequeos
+           WHERE direccion_id=? AND agregador=? AND error_texto IS NULL
+           ORDER BY timestamp DESC LIMIT 1""",
+        (direccion_id, agregador),
+    ).fetchone()
+    conn.close()
+    return bool(fila and fila["disponible"])
+
+
+CAPTURAS_DIR = os.path.join(DATA_DIR, "uploads", "agregadores_capturas")
+
+
+def guardar_captura_chequeo(chequeo_id: int, contenido: bytes) -> str:
+    os.makedirs(CAPTURAS_DIR, exist_ok=True)
+    ruta = os.path.join(CAPTURAS_DIR, f"{chequeo_id}.png")
+    with open(ruta, "wb") as f:
+        f.write(contenido)
+    conn = get_connection()
+    conn.execute("UPDATE agregadores_chequeos SET url_captura=? WHERE id=?", (ruta, chequeo_id))
+    conn.commit()
+    conn.close()
+    return ruta
+
+
+def get_ruta_captura(chequeo_id: int) -> str | None:
+    conn = get_connection()
+    fila = conn.execute(
+        "SELECT url_captura FROM agregadores_chequeos WHERE id=?", (chequeo_id,)
+    ).fetchone()
+    conn.close()
+    if fila and fila["url_captura"] and os.path.isfile(fila["url_captura"]):
+        return fila["url_captura"]
+    return None
+
+
+def get_transiciones(tienda: str | None, horas: int = 24):
+    """Puntos que aparecían disponibles y, en el chequeo siguiente (real, sin
+    error), dejaron de estarlo -- usa LAG() para comparar cada chequeo con el
+    anterior del mismo punto+agregador sin tener que hacer un query por fila."""
+    desde = (datetime.now(timezone.utc) - timedelta(hours=horas)).isoformat()
+    conn = get_connection()
+    condicion_tienda = "AND c.tienda=?" if tienda else ""
+    params = (tienda, desde) if tienda else (desde,)
+    filas = conn.execute(
+        f"""
+        WITH ordenado AS (
+            SELECT c.id, c.tienda, c.agregador, c.direccion_id, c.timestamp,
+                   c.disponible, c.tiempo_entrega_min, c.mensaje_bloqueo,
+                   (c.url_captura IS NOT NULL) AS tiene_captura,
+                   d.direccion_text, d.lat, d.lng,
+                   LAG(c.disponible) OVER (
+                       PARTITION BY c.direccion_id, c.agregador ORDER BY c.timestamp
+                   ) AS disponible_anterior
+            FROM agregadores_chequeos c
+            LEFT JOIN agregadores_direcciones d ON d.id = c.direccion_id
+            WHERE c.error_texto IS NULL {condicion_tienda}
+        )
+        SELECT * FROM ordenado
+        WHERE disponible_anterior = 1 AND disponible = 0 AND timestamp >= ?
+        ORDER BY timestamp DESC
+        LIMIT 200
+        """,
+        params,
+    ).fetchall()
+    conn.close()
+    return [dict(f) for f in filas]
 
 
 def registrar_alerta(tipo: str, mensaje: str, tienda: str = None, agregador: str = None):

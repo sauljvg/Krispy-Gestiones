@@ -55,7 +55,7 @@ async def chequear_tienda(
         logger.info("Chequeando %s / %s @ %s", tienda, agregador_nombre, texto)
         resultado = await scraper.verificar_disponibilidad(tienda, consulta)
 
-        await api_client.enviar_chequeo(
+        respuesta = await api_client.enviar_chequeo(
             {
                 "tienda": tienda,
                 "agregador": agregador_nombre,
@@ -66,6 +66,14 @@ async def chequear_tienda(
                 "error_texto": resultado.error_texto,
             }
         )
+
+        if respuesta.get("transicion") and resultado.url_captura:
+            logger.warning(
+                "%s: %s dejó de estar disponible (era disponible en el chequeo anterior) -- subiendo captura",
+                agregador_nombre,
+                texto,
+            )
+            await api_client.subir_captura(respuesta["chequeo_id"], resultado.url_captura)
 
         logger.info("  -> disponible=%s tiempo=%s min", resultado.disponible, resultado.tiempo_entrega_min)
 

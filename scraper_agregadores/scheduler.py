@@ -36,10 +36,13 @@ async def _chequear_agregador_aislado(tienda: str, agregador_nombre: str, cercan
         )
         return True
     except Exception as exc:
-        logger.error("Fallo chequeando %s / %s: %s", tienda, agregador_nombre, exc)
+        # repr() en vez de str(): algunas excepciones (asyncio.TimeoutError,
+        # p.ej.) tienen str() vacío, y sin el nombre de la clase un fallo así
+        # queda indistinguible de cualquier otro en el log.
+        logger.error("Fallo chequeando %s / %s: %r", tienda, agregador_nombre, exc)
         await api_client.registrar_alerta(
             tipo="scraper_error",
-            mensaje=f"{agregador_nombre}: excepción no controlada — {exc}",
+            mensaje=f"{agregador_nombre}: excepción no controlada — {exc!r}",
             tienda=tienda,
         )
         return False

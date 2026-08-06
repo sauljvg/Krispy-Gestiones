@@ -3,8 +3,8 @@ import io
 import os
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 import agregadores as agregadores_module
@@ -77,7 +77,15 @@ class DireccionNuevaIn(BaseModel):
 
 @router.post("/chequeo", dependencies=[Depends(require_api_key)])
 def recibir_chequeo(body: ChequeoIn):
-    agregadores_module.guardar_chequeo(body.model_dump())
+    # Hay que mirar si el punto ESTABA disponible antes de insertar el chequeo
+    # actual -- una vez insertado, "el anterior" ya seríamos nosotros mismos.
+    transicion = False
+    if not body.error_texto and not body.disponible:
+        transicion = agregadores_module.hubo_transicion_a_no_disponible(
+            body.direccion_id, body.agregador
+        )
+
+    chequeo_id = agregadores_module.guardar_chequeo(body.model_dump())
 
     if body.error_texto:
         recientes = agregadores_module.get_ultimos(body.tienda, horas=1)
@@ -96,7 +104,44 @@ def recibir_chequeo(body: ChequeoIn):
                 tienda=body.tienda,
                 agregador=body.agregador,
             )
+
+    if transicion:
+        agregadores_module.registrar_alerta(
+            tipo="paso_a_no_disponible",
+            mensaje=(
+                f"{body.agregador}: un punto que estaba disponible en {body.tienda} "
+                f"dejó de estarlo. {body.mensaje_bloqueo or ''}".strip()
+            ),
+            tienda=body.tienda,
+            agregador=body.agregador,
+        )
+
+    return {"ok": True, "chequeo_id": chequeo_id, "transicion": transicion}
+
+
+@router.post("/capturas/{chequeo_id}", dependencies=[Depends(require_api_key)])
+async def subir_captura_route(chequeo_id: int, archivo: UploadFile = File(...)):
+    """El scraper solo llama esto cuando /chequeo respondió transicion=true --
+    evita subir una imagen por cada uno de los muchos puntos que simplemente
+    no tienen cobertura (eso no es una transición, es el estado normal)."""
+    contenido = await archivo.read()
+    agregadores_module.guardar_captura_chequeo(chequeo_id, contenido)
     return {"ok": True}
+
+
+@router.get("/capturas/{chequeo_id}")
+def ver_captura_route(chequeo_id: int, _user: dict = Depends(require_agregadores)):
+    ruta = agregadores_module.get_ruta_captura(chequeo_id)
+    if not ruta:
+        raise HTTPException(status_code=404, detail="Sin captura para este chequeo")
+    return FileResponse(ruta, media_type="image/png")
+
+
+@router.get("/transiciones")
+def transiciones_route(
+    tienda: str | None = None, horas: int = 24, _user: dict = Depends(require_agregadores)
+):
+    return agregadores_module.get_transiciones(tienda, horas)
 
 
 @router.get("/direcciones/{tienda}", dependencies=[Depends(require_api_key)])
