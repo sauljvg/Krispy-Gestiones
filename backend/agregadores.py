@@ -6,6 +6,7 @@ API en vivo (POST /api/agregadores/chequeo) con cada resultado; aquí solo se
 guarda y se sirve. Nada de esto toca Selenium ni el scraper de Reseñas."""
 import math
 import re
+import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -366,55 +367,70 @@ def get_o_crear_direcciones(tienda: str, radios_km=None) -> list[dict]:
     info = TIENDAS[tienda]
 
     conn = get_connection()
-    resultado = []
-    for radio in radios_km:
-        for i in range(GRID_ANGULOS_COUNT):
-            angulo = (360 / GRID_ANGULOS_COUNT) * i
-            fila = conn.execute(
-                "SELECT * FROM agregadores_direcciones WHERE tienda=? AND distancia_km=? AND angulo_grados=?",
-                (tienda, radio, int(angulo)),
-            ).fetchone()
-            if fila:
-                # Existe pero puede estar eliminado (activo=0) -- no se
-                # regenera (el hueco sigue "ocupado" por esa fila), solo no
-                # se devuelve para que el scraper no lo compruebe.
-                if fila["activo"]:
-                    resultado.append(dict(fila))
-                continue
+    try:
+        resultado = []
+        for radio in radios_km:
+            for i in range(GRID_ANGULOS_COUNT):
+                angulo = (360 / GRID_ANGULOS_COUNT) * i
+                fila = conn.execute(
+                    "SELECT * FROM agregadores_direcciones WHERE tienda=? AND distancia_km=? AND angulo_grados=?",
+                    (tienda, radio, int(angulo)),
+                ).fetchone()
+                if fila:
+                    # Existe pero puede estar eliminado (activo=0) -- no se
+                    # regenera (el hueco sigue "ocupado" por esa fila), solo no
+                    # se devuelve para que el scraper no lo compruebe.
+                    if fila["activo"]:
+                        resultado.append(dict(fila))
+                    continue
 
-            lat_dest, lng_dest = _mover_punto(info["lat"], info["lng"], angulo, radio)
-            lat_dest, lng_dest, direccion_text = _punto_geocodificado_valido(lat_dest, lng_dest)
-            cur = conn.execute(
-                """INSERT INTO agregadores_direcciones
-                   (tienda, lat, lng, distancia_km, angulo_grados, direccion_text)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (tienda, lat_dest, lng_dest, radio, int(angulo), direccion_text),
-            )
-            conn.commit()
-            resultado.append(
-                {
-                    "id": cur.lastrowid,
-                    "tienda": tienda,
-                    "lat": lat_dest,
-                    "lng": lng_dest,
-                    "distancia_km": radio,
-                    "angulo_grados": int(angulo),
-                    "direccion_text": direccion_text,
-                }
-            )
+                lat_dest, lng_dest = _mover_punto(info["lat"], info["lng"], angulo, radio)
+                lat_dest, lng_dest, direccion_text = _punto_geocodificado_valido(lat_dest, lng_dest)
+                try:
+                    cur = conn.execute(
+                        """INSERT INTO agregadores_direcciones
+                           (tienda, lat, lng, distancia_km, angulo_grados, direccion_text)
+                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        (tienda, lat_dest, lng_dest, radio, int(angulo), direccion_text),
+                    )
+                    conn.commit()
+                    resultado.append(
+                        {
+                            "id": cur.lastrowid,
+                            "tienda": tienda,
+                            "lat": lat_dest,
+                            "lng": lng_dest,
+                            "distancia_km": radio,
+                            "angulo_grados": int(angulo),
+                            "direccion_text": direccion_text,
+                        }
+                    )
+                except sqlite3.IntegrityError:
+                    # Los 3 agregadores piden el grid de la tienda en paralelo al
+                    # empezar un chequeo -- si el punto no existía, los tres lo ven
+                    # libre a la vez y solo uno gana la inserción. En vez de fallar
+                    # toda la petición, se recupera la fila que sí se creó.
+                    conn.rollback()
+                    fila = conn.execute(
+                        "SELECT * FROM agregadores_direcciones WHERE tienda=? AND distancia_km=? AND angulo_grados=?",
+                        (tienda, radio, int(angulo)),
+                    ).fetchone()
+                    if fila and fila["activo"]:
+                        resultado.append(dict(fila))
 
-    # Puntos añadidos a mano desde el mapa (no encajan en el grid de radios
-    # fijos que se recorrió arriba) -- se incluyen igual si están activos.
-    ids_grid = {r["id"] for r in resultado}
-    extra = conn.execute(
-        "SELECT * FROM agregadores_direcciones WHERE tienda=? AND activo=1", (tienda,)
-    ).fetchall()
-    for fila in extra:
-        if fila["id"] not in ids_grid:
-            resultado.append(dict(fila))
+        # Puntos añadidos a mano desde el mapa (no encajan en el grid de radios
+        # fijos que se recorrió arriba) -- se incluyen igual si están activos.
+        ids_grid = {r["id"] for r in resultado}
+        extra = conn.execute(
+            "SELECT * FROM agregadores_direcciones WHERE tienda=? AND activo=1", (tienda,)
+        ).fetchall()
+        for fila in extra:
+            if fila["id"] not in ids_grid:
+                resultado.append(dict(fila))
 
-    conn.close()
-    return resultado
+        return resultado
+    finally:
+        conn.close()
 
 
 def guardar_chequeo(data: dict):
