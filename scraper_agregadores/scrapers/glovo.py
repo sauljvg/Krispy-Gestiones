@@ -158,11 +158,19 @@ class GlovoScraper(BaseAggregatorScraper):
 
     async def _leer_disponibilidad(self, page) -> ResultadoChequeo:
         try:
+            # Igual que en Uber Eats: una sola lectura con timeout fijo daba falsos
+            # negativos cuando la página tardaba un poco más en pintar el ETA (la
+            # tienda estaba abierta de verdad, solo que el texto llegó tarde) --
+            # se reintenta unos segundos antes de concluir que no hay ETA.
             texto_eta = ""
-            try:
-                texto_eta = await page.locator(SEL_STORE_ETA_TEXT).first.inner_text(timeout=8000)
-            except Exception:
-                pass
+            for _ in range(5):
+                try:
+                    texto_eta = await page.locator(SEL_STORE_ETA_TEXT).first.inner_text(timeout=2000)
+                    if texto_eta:
+                        break
+                except Exception:
+                    pass
+                await page.wait_for_timeout(1000)
 
             cuerpo_texto = (await page.locator("body").inner_text()).lower()
             cerrado = "closed" in cuerpo_texto or "cerrado" in cuerpo_texto
