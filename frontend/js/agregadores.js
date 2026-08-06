@@ -285,6 +285,7 @@ function agrWireFiltroAgregador() {
       agrEstadosOcultos.clear(); // las categorías cambian de significado al cambiar de filtro
       agrActualizarLeyenda();
       agrActualizarMarcadores();
+      agrRecalcularContador();
     });
   });
 }
@@ -315,11 +316,23 @@ function agrActualizarContador(texto) {
 
 function agrRecalcularContador() {
   const n = agrDireccionMarkers.length;
-  if (agrTiendaActual === AGR_TODAS) {
-    agrActualizarContador(`${n} puntos en ${Object.keys(agrCentrosPorTienda).length} tiendas`);
-  } else {
-    agrActualizarContador(`${n} punto${n === 1 ? "" : "s"}`);
+  const base = agrTiendaActual === AGR_TODAS
+    ? `${n} puntos en ${Object.keys(agrCentrosPorTienda).length} tiendas`
+    : `${n} punto${n === 1 ? "" : "s"}`;
+
+  if (!agrFiltroAgregador) {
+    agrActualizarContador(base);
+    return;
   }
+
+  // Filtrado por un agregador concreto: de los N puntos totales, cuántos
+  // tienen dato real de ese agregador (disponible/no disponible/error) --
+  // "sin datos" no cuenta como un punto "que existe" para ese filtro.
+  const conDatos = agrDireccionMarkers.filter(
+    (m) => ((m._agrDir.detalle || {})[agrFiltroAgregador])
+  ).length;
+  const nombre = AGR_NOMBRE_AGREGADOR[agrFiltroAgregador] || agrFiltroAgregador;
+  agrActualizarContador(`${conDatos} de ${n} con dato de ${nombre}`);
 }
 
 function agrRenderMapa(data) {
