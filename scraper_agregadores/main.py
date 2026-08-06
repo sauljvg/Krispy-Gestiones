@@ -45,7 +45,12 @@ async def chequear_tienda(
         # caso (Google Places, que es lo que usan estos tres, las reconoce y apunta exacto).
         texto = direccion["direccion_text"]
         tiene_numero = bool(re.match(r"^\d", texto.strip()))
-        consulta = texto if tiene_numero else f'{direccion["lat"]:.6f}, {direccion["lng"]:.6f}'
+        # JustEat no reconoce coordenadas en bruto en su buscador de dirección
+        # (confirmado: nunca aparece ninguna sugerencia, siempre timeout) --
+        # a diferencia de Uber Eats/Glovo, que sí las resuelven bien. Para
+        # JustEat se manda siempre el texto, aunque sea una vía sin número.
+        usa_coordenadas = not tiene_numero and agregador_nombre != "justeat"
+        consulta = f'{direccion["lat"]:.6f}, {direccion["lng"]:.6f}' if usa_coordenadas else texto
 
         logger.info("Chequeando %s / %s @ %s", tienda, agregador_nombre, texto)
         resultado = await scraper.verificar_disponibilidad(tienda, consulta)
