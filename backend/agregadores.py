@@ -263,11 +263,12 @@ def mover_direccion_manual(direccion_id: int, lat: float, lng: float, direccion_
         conn.close()
         return None
     if not direccion_text:
-        # Menos reintentos que el grid masivo: aquí hay una persona esperando
-        # delante de la pantalla, y si el resultado no convence puede volver
-        # a arrastrar -- no hace falta la misma insistencia que un proceso
-        # desatendido.
-        lat, lng, direccion_text = _punto_geocodificado_valido(lat, lng, intentos_extra=3, paso_km=0.15)
+        # Aquí NO se usa la búsqueda en espiral: es una reubicación manual,
+        # el punto tiene que quedarse exactamente donde lo soltó quien lo
+        # arrastró -- solo se consulta la dirección de ESE punto para
+        # mostrarla, sin desplazarlo si no tiene número de portal cerca (eso
+        # sería ignorar la decisión de quien lo movió a propósito).
+        direccion_text = _geocodificar(lat, lng)
     conn.execute(
         "UPDATE agregadores_direcciones SET lat=?, lng=?, direccion_text=? WHERE id=?",
         (lat, lng, direccion_text, direccion_id),
@@ -304,7 +305,9 @@ def agregar_direccion_manual(tienda: str, lat: float, lng: float, direccion_text
     info = TIENDAS[tienda]
 
     if not direccion_text:
-        lat, lng, direccion_text = _punto_geocodificado_valido(lat, lng, intentos_extra=3, paso_km=0.15)
+        # Igual que en mover_direccion_manual: sin espiral, el punto se
+        # queda donde se hizo clic.
+        direccion_text = _geocodificar(lat, lng)
     distancia_km, angulo_grados = _distancia_y_angulo(info["lat"], info["lng"], lat, lng)
 
     conn = get_connection()

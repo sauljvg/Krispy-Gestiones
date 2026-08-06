@@ -14,6 +14,19 @@ let agrEstadosOcultos = new Set();
 
 const AGR_COLOR_MARCA = { justeat: "#ff8000", glovo: "#ffc244", ubereats: "#06c167" };
 
+async function agrFetchConTimeout(url, options = {}, ms = 15000) {
+  // Sin esto, un fetch que se queda colgado (proxy que corta la conexión sin
+  // devolver error, red caída a medias) deja "Buscando dirección..." para
+  // siempre -- con AbortController al menos falla y se puede reintentar.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const AGR_COLOR_CATEGORIA = {
   todos: "#0ca30c",
   disponible: "#0ca30c",
@@ -131,15 +144,15 @@ async function agrEliminarPunto(direccionId) {
 }
 
 async function agrAnadirPunto(lat, lng) {
-  // Marcador provisional mientras el servidor geocodifica la dirección real
-  // del punto (puede tardar unos segundos, sobre todo si cae en una zona
-  // sin calle numerada cerca y hace falta buscar alrededor).
+  // Marcador provisional mientras el servidor consulta la dirección de este
+  // punto exacto (una sola llamada, sin desplazarlo -- se queda donde se
+  // hizo clic aunque no tenga número de portal cerca).
   const provisional = L.marker([lat, lng], {
     icon: L.divIcon({ className: "agr-marker-dot", html: `<span style="background:#898781;opacity:0.6;"></span>`, iconSize: [16, 16], iconAnchor: [8, 8] }),
   }).addTo(agrMap).bindPopup("Buscando dirección…").openPopup();
 
   try {
-    const res = await fetch(`${AGR_API}/direcciones`, {
+    const res = await agrFetchConTimeout(`${AGR_API}/direcciones`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tienda: agrTiendaActual, lat, lng }),
@@ -160,7 +173,7 @@ async function agrAnadirPunto(lat, lng) {
 async function agrGuardarReubicacion(dir, marker, lat, lng) {
   marker.setPopupContent("Buscando dirección…").openPopup();
   try {
-    const res = await fetch(`${AGR_API}/direcciones/${dir.id}`, {
+    const res = await agrFetchConTimeout(`${AGR_API}/direcciones/${dir.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ lat, lng }),
