@@ -13,6 +13,8 @@ let agrFiltroAgregador = null; // null = todos los agregadores a la vez
 let agrEstadosOcultos = new Set();
 
 const AGR_COLOR_MARCA = { justeat: "#ff8000", glovo: "#ffc244", ubereats: "#06c167" };
+const AGR_NOMBRE_AGREGADOR = { justeat: "JustEat", glovo: "Glovo", ubereats: "Uber Eats" };
+let agrMostrarCorrectos = false;
 
 async function agrFetchConTimeout(url, options = {}, ms = 15000) {
   // Sin esto, un fetch que se queda colgado (proxy que corta la conexión sin
@@ -386,27 +388,53 @@ async function agrCargarMapa() {
   agrRenderMapa(await res.json());
 }
 
+function agrFilaTabla(c) {
+  const hora = new Date(c.timestamp).toLocaleString("es-ES");
+  const detalle = c.error_texto ? `⚠️ ${c.error_texto}` : c.mensaje_bloqueo || "-";
+  const filaClase = c.error_texto ? "agr-fila-error" : "agr-fila-correcta";
+  const nombre = AGR_NOMBRE_AGREGADOR[c.agregador] || c.agregador;
+  return `<tr class="${filaClase}">
+    <td>${hora}</td><td>${nombre}</td><td>${agrBadge(c)}</td>
+    <td>${c.tiempo_entrega_min ? c.tiempo_entrega_min + " min" : "-"}</td>
+    <td>${c.direccion_text || "-"}</td><td>${detalle}</td>
+  </tr>`;
+}
+
 async function agrCargarTabla() {
   const tbody = document.querySelector("#agr-tabla tbody");
+  const contador = document.getElementById("agr-tabla-contador");
+  const toggle = document.getElementById("agr-tabla-toggle");
   if (!agrTiendaActual || agrTiendaActual === AGR_TODAS) {
     tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-muted);">Selecciona una tienda para ver el detalle.</td></tr>';
+    contador.textContent = "";
+    toggle.hidden = true;
     return;
   }
   const res = await fetch(`${AGR_API}/ultimos?tienda=${agrTiendaActual}&horas=24`, { credentials: "include" });
   const chequeos = await res.json();
-  tbody.innerHTML = chequeos
-    .slice(0, 30)
-    .map((c) => {
-      const hora = new Date(c.timestamp).toLocaleString("es-ES");
-      const detalle = c.error_texto ? `⚠️ ${c.error_texto}` : c.mensaje_bloqueo || "-";
-      const filaClase = c.error_texto ? ' class="agr-fila-error"' : "";
-      return `<tr${filaClase}>
-        <td>${hora}</td><td>${c.agregador}</td><td>${agrBadge(c)}</td>
-        <td>${c.tiempo_entrega_min ? c.tiempo_entrega_min + " min" : "-"}</td>
-        <td>${c.direccion_text || "-"}</td><td>${detalle}</td>
-      </tr>`;
-    })
-    .join("");
+  const incorrectos = chequeos.filter((c) => c.error_texto);
+  const correctos = chequeos.filter((c) => !c.error_texto);
+
+  contador.textContent = `(${incorrectos.length} con fallo técnico / ${correctos.length} correctos)`;
+
+  if (incorrectos.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-muted);">Sin fallos técnicos en 24h. Todos los chequeos se completaron correctamente.</td></tr>';
+  } else {
+    tbody.innerHTML = incorrectos.slice(0, 30).map(agrFilaTabla).join("");
+  }
+
+  toggle.hidden = correctos.length === 0;
+  toggle.textContent = agrMostrarCorrectos
+    ? "Ocultar detalles correctos"
+    : `Mostrar detalles correctos (${correctos.length})`;
+  toggle.onclick = () => {
+    agrMostrarCorrectos = !agrMostrarCorrectos;
+    agrCargarTabla();
+  };
+
+  if (agrMostrarCorrectos && correctos.length > 0) {
+    tbody.innerHTML += correctos.slice(0, 30).map(agrFilaTabla).join("");
+  }
 }
 
 function agrRenderCards(reporte) {
@@ -419,17 +447,24 @@ function agrRenderCards(reporte) {
   cont.innerHTML = entradas
     .map(([nombre, datos]) => {
       const aviso = datos.errores > 0
-        ? `<div class="errores">⚠️ ${datos.errores} fallo(s) (${datos.errores_pct}%)</div>` : "";
-      return `<div class="agr-card"><div class="valor">${datos.disponibilidad_pct}%</div><div class="etiqueta">${nombre}</div>${aviso}</div>`;
+        ? `<div class="errores">⚠️ ${datos.errores} fallo(s) técnico(s) (${datos.errores_pct}%)</div>` : "";
+      const etiqueta = AGR_NOMBRE_AGREGADOR[nombre] || nombre;
+      return `<div class="agr-card">
+        <div class="valor">${datos.disponibilidad_pct}%</div>
+        <div class="etiqueta">${etiqueta}</div>
+        <div class="meta">${datos.chequeos_validos} de ${datos.total_chequeos} intentos</div>
+        ${aviso}
+      </div>`;
     })
     .join("");
 }
 
 function agrRenderChart(reporte) {
   const ctx = document.getElementById("agr-chart");
-  const labels = Object.keys(reporte.agregadores);
-  const valores = labels.map((n) => reporte.agregadores[n].disponibilidad_pct);
-  const colores = labels.map((n) => AGR_COLOR_MARCA[n] || "#e07b00");
+  const claves = Object.keys(reporte.agregadores);
+  const labels = claves.map((n) => AGR_NOMBRE_AGREGADOR[n] || n);
+  const valores = claves.map((n) => reporte.agregadores[n].disponibilidad_pct);
+  const colores = claves.map((n) => AGR_COLOR_MARCA[n] || "#e07b00");
   if (agrChart) agrChart.destroy();
   agrChart = new Chart(ctx, {
     type: "bar",
@@ -457,6 +492,7 @@ async function agrCargarResumen() {
 
 async function agrCargarAlertas() {
   const lista = document.getElementById("agr-alertas");
+  const resumen = document.getElementById("agr-alertas-resumen");
   if (agrTiendaActual === AGR_TODAS) {
     const res = await fetch(`${AGR_API}/alertas?horas=24`, { credentials: "include" });
     var alertas = await res.json();
@@ -465,6 +501,13 @@ async function agrCargarAlertas() {
     const res = await fetch(`${AGR_API}/alertas?tienda=${agrTiendaActual}&horas=24`, { credentials: "include" });
     var alertas = await res.json();
   }
+
+  const nuestras = alertas.filter((a) => a.tipo === "scraper_error").length;
+  const otras = alertas.length - nuestras;
+  resumen.textContent = alertas.length === 0
+    ? ""
+    : `${alertas.length} total — ${nuestras} nuestras (scraper) / ${otras} de agregadores`;
+
   if (alertas.length === 0) {
     lista.innerHTML = '<li style="color:var(--text-muted);">Sin alertas en 24h.</li>';
     return;
@@ -472,7 +515,9 @@ async function agrCargarAlertas() {
   lista.innerHTML = alertas
     .map((a) => {
       const hora = new Date(a.timestamp).toLocaleString("es-ES");
-      return `<li><span class="hora">${hora}</span><span class="tipo">${a.tipo}</span>${a.mensaje}</li>`;
+      const claseTipo = a.tipo === "scraper_error" ? "tipo nuestro" : "tipo";
+      const etiquetaTipo = a.tipo === "scraper_error" ? "Nuestro" : a.tipo;
+      return `<li><span class="hora">${hora}</span><span class="${claseTipo}">${etiquetaTipo}</span>${a.mensaje}</li>`;
     })
     .join("");
 }

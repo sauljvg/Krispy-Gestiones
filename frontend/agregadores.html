@@ -87,20 +87,29 @@
   .agr-card .valor { font-size: 1.4rem; font-weight: 700; color: var(--text-primary); }
   .agr-card .etiqueta { font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; }
   .agr-card .errores { margin-top: 6px; font-size: 0.7rem; color: var(--status-warning); }
+  .agr-card .meta { margin-top: 4px; font-size: 0.68rem; color: var(--text-muted); }
+  .agr-resumen-nota { font-size: 0.72rem; color: var(--text-muted); margin: -6px 0 12px; line-height: 1.4; }
 
+  #agr-tabla-titulo { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  #agr-tabla-toggle { font-size: 0.72rem; background: none; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; color: var(--text-secondary); cursor: pointer; }
+  #agr-tabla-toggle:hover { background: var(--surface-page); }
   #agr-tabla { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
   #agr-tabla th, #agr-tabla td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
   #agr-tabla th { color: var(--text-secondary); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; }
   tr.agr-fila-error { background: color-mix(in srgb, var(--status-warning) 8%, transparent); }
+  tr.agr-fila-correcta { opacity: 0.85; }
   .agr-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
   .agr-badge.si { background: color-mix(in srgb, var(--status-good) 15%, transparent); color: var(--status-good); }
   .agr-badge.no { background: color-mix(in srgb, var(--status-critical) 15%, transparent); color: var(--status-critical); }
   .agr-badge.error { background: color-mix(in srgb, var(--status-warning) 15%, transparent); color: var(--status-warning); }
 
+  #agr-alertas-titulo { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  #agr-alertas-resumen { font-size: 0.72rem; color: var(--text-muted); font-weight: 400; }
   #agr-alertas { list-style: none; margin: 0; padding: 0; max-height: 380px; overflow-y: auto; }
   #agr-alertas li { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
   #agr-alertas .hora { color: var(--text-muted); font-size: 0.72rem; display: block; }
   #agr-alertas .tipo { color: var(--acento-calido); font-weight: 600; margin-right: 6px; }
+  #agr-alertas .tipo.nuestro { color: var(--status-warning); }
 </style>
 </head>
 <body>
@@ -146,7 +155,10 @@
 
     <div class="agr-bottom-grid">
       <div class="agr-panel">
-        <h2>Últimos chequeos</h2>
+        <div id="agr-tabla-titulo">
+          <h2>Últimos chequeos <span id="agr-tabla-contador" style="color:var(--text-muted);font-weight:400;font-size:0.8rem;"></span></h2>
+          <button type="button" id="agr-tabla-toggle" hidden>Mostrar detalles correctos</button>
+        </div>
         <div style="overflow-x:auto;">
           <table id="agr-tabla">
             <thead>
@@ -159,11 +171,17 @@
       <div>
         <div class="agr-panel">
           <h2>Resumen (24h)</h2>
+          <p class="agr-resumen-nota">
+            % = disponibilidad real (de los chequeos que sí se completaron). Debajo, si los hay: fallos técnicos del scraper (no pudo leer el resultado), sobre el total de intentos.
+          </p>
           <div id="agr-cards" class="agr-cards"></div>
           <canvas id="agr-chart"></canvas>
         </div>
         <div class="agr-panel">
-          <h2>Alertas (24h)</h2>
+          <div id="agr-alertas-titulo">
+            <h2>Alertas (24h)</h2>
+            <span id="agr-alertas-resumen"></span>
+          </div>
           <ul id="agr-alertas"></ul>
         </div>
       </div>
@@ -173,6 +191,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/agregadores.js?v=20260805a"></script>
+<script src="js/agregadores.js?v=20260806a"></script>
 </body>
 </html>
