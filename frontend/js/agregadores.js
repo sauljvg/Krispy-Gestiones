@@ -119,7 +119,11 @@ function agrPopupDireccion(dir, editable) {
       const icono = iconos[info.estado] || "❔";
       const tiempo = info.tiempo_entrega_min ? ` (${info.tiempo_entrega_min} min)` : "";
       const nota = info.estado === "error" ? " — fallo del scraper" : "";
-      return `${icono} ${nombre}${tiempo}${nota}`;
+      const nombreMostrar = AGR_NOMBRE_AGREGADOR[nombre] || nombre;
+      const hora = info.timestamp
+        ? ` <span style="color:var(--text-muted);font-size:11px;">(${new Date(info.timestamp).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })})</span>`
+        : "";
+      return `${icono} ${nombreMostrar}${tiempo}${nota}${hora}`;
     })
     .join("<br>");
   const tiendaLinea = dir.tienda_nombre ? `<b>${dir.tienda_nombre}</b><br>` : "";
