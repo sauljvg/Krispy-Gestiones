@@ -9,6 +9,9 @@ import re
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+MADRID_TZ = ZoneInfo("Europe/Madrid")
 
 from db import get_connection
 
@@ -593,7 +596,10 @@ def get_reporte(tienda: str, desde: datetime, hasta: datetime):
 
 
 def es_horario_apertura(ahora: datetime = None) -> bool:
-    ahora = ahora or datetime.now()
+    # datetime.now() sin zona da la hora del sistema del servidor -- en
+    # Railway corre en UTC, así que a las 10:05 de Madrid (CEST, UTC+2)
+    # marcaba "fuera de horario" porque para el servidor eran las 08:05.
+    ahora = ahora or datetime.now(MADRID_TZ)
     return any(r["inicio"] <= ahora.hour < r["fin"] for r in HORARIOS_APERTURA)
 
 
