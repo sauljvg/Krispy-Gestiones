@@ -457,6 +457,22 @@ def borrar_alertas_excepcion_vacia():
     return {"alertas_borradas": borradas}
 
 
+def borrar_chequeos_error_texto():
+    """Mantenimiento puntual: borra los chequeos marcados como fallo técnico
+    (error_texto IS NOT NULL) -- no toca los chequeos con resultado real
+    (disponible/no disponible), solo el ruido de bugs de scraper ya
+    corregidos (p.ej. el selector sin :visible de Uber Eats del 06/08).
+    También borra las alertas scraper_error asociadas, para no dejar
+    alertas huérfanas de chequeos que ya no existen."""
+    conn = get_connection()
+    cur_chequeos = conn.execute("DELETE FROM agregadores_chequeos WHERE error_texto IS NOT NULL")
+    cur_alertas = conn.execute("DELETE FROM agregadores_alertas WHERE tipo='scraper_error'")
+    conn.commit()
+    borrados = {"chequeos": cur_chequeos.rowcount, "alertas": cur_alertas.rowcount}
+    conn.close()
+    return borrados
+
+
 def resetear_estadisticas():
     """Borra todo el historial de chequeos y alertas de los 3 agregadores
     (las 6 tiendas) -- deja los puntos del grid (agregadores_direcciones)
