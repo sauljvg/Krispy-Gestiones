@@ -245,11 +245,19 @@ function agrActualizarLeyenda() {
   const items = agrFiltroAgregador ? AGR_LEYENDA_AGREGADOR : AGR_LEYENDA_AGREGADO;
   const cont = document.getElementById("agr-leyenda");
   if (!cont) return;
+
+  const conteos = {};
+  agrDireccionMarkers.forEach((m) => {
+    const cat = agrCategoriaDireccion(m._agrDir);
+    conteos[cat] = (conteos[cat] || 0) + 1;
+  });
+
   cont.innerHTML = items
     .map((it) => {
       const oculto = agrEstadosOcultos.has(it.cat);
+      const n = conteos[it.cat] || 0;
       return `<span class="agr-leyenda-item${oculto ? " oculto" : ""}" data-cat="${it.cat}" title="Clic para ${oculto ? "mostrar" : "ocultar"}">
-        <i class="agr-dot" style="background:${AGR_COLOR_CATEGORIA[it.cat]}"></i> ${it.label}
+        <i class="agr-dot" style="background:${AGR_COLOR_CATEGORIA[it.cat]}"></i> ${it.label} <b class="agr-leyenda-n">${n}</b>
       </span>`;
     })
     .join("");

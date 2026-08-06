@@ -172,8 +172,14 @@ class GlovoScraper(BaseAggregatorScraper):
                     pass
                 await page.wait_for_timeout(1000)
 
-            cuerpo_texto = (await page.locator("body").inner_text()).lower()
-            cerrado = "closed" in cuerpo_texto or "cerrado" in cuerpo_texto
+            # Antes se buscaba "closed"/"cerrado" en TODO el texto de la página --
+            # bastaba con que apareciera en una tienda recomendada de al lado (o
+            # cualquier otro texto ajeno) para marcar Krispy Kreme como no disponible
+            # aunque su propio ETA se hubiera leído bien. Confirmado con casos reales
+            # donde la tienda sí repartía y el scraper la daba como cerrada. Ahora solo
+            # se mira el propio texto del ETA de esta tienda.
+            texto_eta_lower = texto_eta.lower()
+            cerrado = "closed" in texto_eta_lower or "cerrado" in texto_eta_lower
 
             disponible = bool(texto_eta) and not cerrado
 
