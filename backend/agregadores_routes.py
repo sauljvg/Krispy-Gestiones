@@ -126,6 +126,14 @@ def podar_direcciones_route():
     return agregadores_module.podar_grid_reducido()
 
 
+@router.post("/estadisticas/reset", dependencies=[Depends(require_api_key)])
+def resetear_estadisticas_route():
+    """Mantenimiento puntual: borra el histórico de chequeos y alertas de los
+    3 agregadores (deja el grid de puntos intacto) -- para limpiar
+    estadísticas contaminadas por un bug de lectura ya corregido."""
+    return agregadores_module.resetear_estadisticas()
+
+
 @router.post("/sesiones", dependencies=[Depends(require_api_key)])
 def iniciar_sesion_route(body: SesionIniciarIn):
     return {"id": agregadores_module.iniciar_sesion(body.modo)}

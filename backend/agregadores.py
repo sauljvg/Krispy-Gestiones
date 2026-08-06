@@ -433,6 +433,23 @@ def get_o_crear_direcciones(tienda: str, radios_km=None) -> list[dict]:
         conn.close()
 
 
+def resetear_estadisticas():
+    """Borra todo el historial de chequeos y alertas de los 3 agregadores
+    (las 6 tiendas) -- deja los puntos del grid (agregadores_direcciones)
+    intactos, solo limpia el histórico de resultados. Uso puntual: varios
+    bugs de lectura (Glovo marcaba "cerrado" mirando toda la página, JustEat
+    recibía coordenadas en bruto, timeouts demasiado cortos) contaminaron el
+    historial de hoy antes de arreglarse -- sin esto, las estadísticas
+    tardarían días en "diluir" los datos incorrectos ya guardados."""
+    conn = get_connection()
+    cur_chequeos = conn.execute("DELETE FROM agregadores_chequeos")
+    cur_alertas = conn.execute("DELETE FROM agregadores_alertas")
+    conn.commit()
+    borrados = {"chequeos": cur_chequeos.rowcount, "alertas": cur_alertas.rowcount}
+    conn.close()
+    return borrados
+
+
 def guardar_chequeo(data: dict):
     """`data` es el JSON que manda el scraper: tienda, agregador,
     direccion_id, disponible, tiempo_entrega_min, mensaje_bloqueo,
