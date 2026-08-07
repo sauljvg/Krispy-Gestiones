@@ -128,6 +128,7 @@
   .agr-drill-close { background: none; border: none; font-size: 20px; line-height: 1; cursor: pointer; color: var(--text-muted); padding: 4px; }
   .agr-drill-close:hover { color: var(--text-primary); }
   .agr-drill-nota { font-size: 0.72rem; color: var(--text-muted); margin: 0 0 12px; }
+  .agr-drill-hora { color: var(--text-muted); font-size: 0.72rem; }
   .agr-drill-lista { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
   .agr-drill-lista li {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -170,9 +171,10 @@
   #agr-tabla-titulo { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   #agr-tabla-toggle { font-size: 0.72rem; background: none; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; color: var(--text-secondary); cursor: pointer; }
   #agr-tabla-toggle:hover { background: var(--surface-page); }
+  #agr-tabla-scroll { max-height: 520px; overflow-y: auto; overflow-x: auto; }
   #agr-tabla { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
   #agr-tabla th, #agr-tabla td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-  #agr-tabla th { color: var(--text-secondary); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; }
+  #agr-tabla th { color: var(--text-secondary); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; position: sticky; top: 0; background: var(--surface-1); }
   tr.agr-fila-error { background: color-mix(in srgb, var(--status-warning) 8%, transparent); }
   tr.agr-fila-correcta { opacity: 0.85; }
   .agr-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
@@ -256,7 +258,7 @@
           <h2>Últimos chequeos <span id="agr-tabla-contador" style="color:var(--text-muted);font-weight:400;font-size:0.8rem;"></span></h2>
           <button type="button" id="agr-tabla-toggle" hidden>Mostrar detalles correctos</button>
         </div>
-        <div style="overflow-x:auto;">
+        <div id="agr-tabla-scroll">
           <table id="agr-tabla">
             <thead>
               <tr><th>Hora</th><th>Agregador</th><th>Disponible</th><th>Tiempo</th><th>Dirección</th><th>Detalle</th></tr>
@@ -330,6 +332,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/agregadores.js?v=20260807d"></script>
+<script src="js/agregadores.js?v=20260807e"></script>
 </body>
 </html>

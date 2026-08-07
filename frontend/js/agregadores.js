@@ -137,7 +137,7 @@ function agrPopupDireccion(dir, editable) {
       const nota = info.estado === "error" ? " — fallo del scraper" : "";
       const nombreMostrar = AGR_NOMBRE_AGREGADOR[nombre] || nombre;
       const hora = info.timestamp
-        ? ` <span style="color:var(--text-muted);font-size:11px;">(${new Date(info.timestamp).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })})</span>`
+        ? ` <span style="color:var(--text-muted);font-size:11px;">(${new Date(info.timestamp).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" })})</span>`
         : "";
       return `${icono} ${nombreMostrar}${tiempo}${nota}${hora}`;
     })
@@ -430,7 +430,7 @@ async function agrCargarMapa() {
 }
 
 function agrFilaTabla(c) {
-  const hora = new Date(c.timestamp).toLocaleString("es-ES");
+  const hora = new Date(c.timestamp).toLocaleString("es-ES", { timeZone: "Europe/Madrid" });
   const detalle = c.error_texto ? `⚠️ ${c.error_texto}` : c.mensaje_bloqueo || "-";
   const filaClase = c.error_texto ? "agr-fila-error" : "agr-fila-correcta";
   const nombre = AGR_NOMBRE_AGREGADOR[c.agregador] || c.agregador;
@@ -490,7 +490,7 @@ function agrRenderCards(reporte) {
     .map(([nombre, datos]) => {
       const etiqueta = AGR_NOMBRE_AGREGADOR[nombre] || nombre;
       const notaReinicio = datos.reiniciado_desde
-        ? ` <span class="agr-card-reinicio">· contador reiniciado ${new Date(datos.reiniciado_desde).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}</span>`
+        ? ` <span class="agr-card-reinicio">· contador reiniciado ${new Date(datos.reiniciado_desde).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" })}</span>`
         : "";
       return `<div class="agr-card">
         <div class="etiqueta">${etiqueta}</div>
@@ -498,7 +498,7 @@ function agrRenderCards(reporte) {
         <div class="agr-card-desglose">
           <div class="agr-card-fila ok agr-clicable" onclick="agrMostrarDrill('${nombre}', 'disponible')"><span class="agr-card-pct">${datos.disponible_pct}%</span> disponible <span class="agr-card-n">(${datos.disponibles})</span></div>
           <div class="agr-card-fila no agr-clicable" onclick="agrMostrarDrill('${nombre}', 'no_disponible')"><span class="agr-card-pct">${datos.no_disponible_pct}%</span> no disponible <span class="agr-card-n">(${datos.no_disponibles})</span></div>
-          <div class="agr-card-fila fallo"><span class="agr-card-pct">${datos.error_pct}%</span> fallo técnico <span class="agr-card-n">(${datos.errores})</span></div>
+          <div class="agr-card-fila fallo agr-clicable" onclick="agrMostrarDrill('${nombre}', 'error')"><span class="agr-card-pct">${datos.error_pct}%</span> fallo técnico <span class="agr-card-n">(${datos.errores})</span></div>
         </div>
         <div class="agr-card-barra">
           <span style="width:${datos.disponible_pct}%;background:var(--status-good);"></span><span style="width:${datos.no_disponible_pct}%;background:var(--status-critical);"></span><span style="width:${datos.error_pct}%;background:var(--status-warning);"></span>
@@ -512,7 +512,7 @@ async function agrMostrarDrill(agregador, estado) {
   const overlay = document.getElementById("agr-drill-overlay");
   const titulo = document.getElementById("agr-drill-titulo");
   const lista = document.getElementById("agr-drill-lista");
-  const etiquetaEstado = estado === "disponible" ? "Disponibles" : "No disponibles";
+  const etiquetaEstado = estado === "disponible" ? "Disponibles" : estado === "error" ? "Fallo técnico" : "No disponibles";
 
   titulo.textContent = `${AGR_NOMBRE_AGREGADOR[agregador] || agregador} — ${etiquetaEstado}`;
   lista.innerHTML = '<li style="color:var(--text-muted);">Cargando...</li>';
@@ -554,6 +554,16 @@ async function agrMostrarDrill(agregador, estado) {
       span.appendChild(tag);
     }
     span.appendChild(document.createTextNode(texto));
+
+    const info = d.detalle[agregador];
+    if (info?.timestamp) {
+      const hora = document.createElement("span");
+      hora.className = "agr-drill-hora";
+      hora.textContent = ` (${new Date(info.timestamp).toLocaleString("es-ES", {
+        day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid",
+      })})`;
+      span.appendChild(hora);
+    }
 
     const boton = document.createElement("button");
     boton.type = "button";
@@ -709,7 +719,7 @@ async function agrCargarAlertas() {
   }
   lista.innerHTML = alertas
     .map((a) => {
-      const hora = new Date(a.timestamp).toLocaleString("es-ES");
+      const hora = new Date(a.timestamp).toLocaleString("es-ES", { timeZone: "Europe/Madrid" });
       const claseTipo = a.tipo === "scraper_error" ? "tipo nuestro" : "tipo";
       const etiquetaTipo = a.tipo === "scraper_error" ? "Nuestro" : a.tipo;
       return `<li><span class="hora">${hora}</span><span class="${claseTipo}">${etiquetaTipo}</span>${a.mensaje}</li>`;
@@ -734,7 +744,7 @@ async function agrCargarTransiciones() {
   lista.innerHTML = transiciones
     .map((t) => {
       const hora = new Date(t.timestamp).toLocaleString("es-ES", {
-        day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+        day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid",
       });
       const nombre = AGR_NOMBRE_AGREGADOR[t.agregador] || t.agregador;
       const direccion = t.direccion_text || `${t.lat?.toFixed(5)}, ${t.lng?.toFixed(5)}`;
@@ -901,7 +911,7 @@ async function agrCargarTodo() {
   // que agrCargarMapaCobertura() usa para centrar su propio mapa la primera vez.
   await agrCargarMapa();
   await Promise.all([agrCargarTabla(), agrCargarResumen(), agrCargarAlertas(), agrCargarTransiciones(), agrCargarMapaCobertura(), agrCargarEstado()]);
-  document.getElementById("agr-actualizado").textContent = "Actualizado: " + new Date().toLocaleTimeString("es-ES");
+  document.getElementById("agr-actualizado").textContent = "Actualizado: " + new Date().toLocaleTimeString("es-ES", { timeZone: "Europe/Madrid" });
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
