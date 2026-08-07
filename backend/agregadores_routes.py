@@ -208,12 +208,14 @@ def reparar_direcciones_route(background_tasks: BackgroundTasks):
 
 
 @router.post("/direcciones/reformatear", dependencies=[Depends(require_api_key)])
-def reformatear_direcciones_route():
-    """Mantenimiento puntual: reordena 'número, calle' -> 'calle número' en
-    los puntos ya guardados con el formato viejo de Nominatim (ver
-    _formatear_direccion). Solo UPDATEs de texto, sin Nominatim -- rápido,
-    responde al instante, no toca chequeos."""
-    return agregadores_module.reformatear_direcciones()
+def reformatear_direcciones_route(background_tasks: BackgroundTasks):
+    """Mantenimiento puntual: pasa los puntos ya guardados al formato nuevo
+    'Calle número, Ciudad, CP' (ver _construir_direccion). Re-geocodifica
+    cada punto para leer sus componentes -- corre en background porque son
+    varias llamadas seriadas a Nominatim, más que el timeout del proxy de
+    Railway."""
+    background_tasks.add_task(agregadores_module.reformatear_direcciones)
+    return {"ok": True, "mensaje": "Reformateo lanzado en background, revisa /direcciones/{tienda} en un minuto"}
 
 
 @router.post("/direcciones/podar", dependencies=[Depends(require_api_key)])
