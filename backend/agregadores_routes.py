@@ -294,6 +294,34 @@ def eliminar_direccion_route(direccion_id: int, _user: dict = Depends(require_ag
     return {"ok": True}
 
 
+class DireccionCalculadaIn(BaseModel):
+    tienda: str
+    distancia_km: float
+    angulo_grados: float
+
+
+@router.post("/admin/direcciones/calculada", dependencies=[Depends(require_api_key)])
+def crear_direccion_calculada_route(body: DireccionCalculadaIn):
+    """Para el script de búsqueda adaptativa del límite de cobertura (API
+    key, no cookie -- lo llama el scraper, no el dashboard). Crea un punto a
+    la distancia/ángulo pedidos, geocodificado con la misma búsqueda en
+    espiral del grid fijo."""
+    resultado = agregadores_module.crear_punto_calculado(body.tienda, body.distancia_km, body.angulo_grados)
+    if resultado is None:
+        raise HTTPException(status_code=400, detail="Tienda no reconocida")
+    return resultado
+
+
+@router.delete("/admin/direccion/{direccion_id}", dependencies=[Depends(require_api_key)])
+def admin_eliminar_direccion_route(direccion_id: int):
+    """Igual que eliminar_direccion_route pero con API key -- para que el
+    script de búsqueda de límite pueda dar de baja los puntos del anillo de
+    1km (ya sabemos que ahí siempre hay cobertura, no aportan nada)."""
+    if not agregadores_module.eliminar_direccion(direccion_id):
+        raise HTTPException(status_code=404, detail="Dirección no encontrada")
+    return {"ok": True}
+
+
 @router.post("/direcciones")
 def agregar_direccion_route(body: DireccionNuevaIn, _user: dict = Depends(require_agregadores)):
     """Añade un punto de test a mano (clic en el mapa), fuera del grid fijo

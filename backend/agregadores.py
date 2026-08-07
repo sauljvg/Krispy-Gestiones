@@ -366,6 +366,34 @@ def podar_grid_reducido() -> dict:
     return True
 
 
+def crear_punto_calculado(tienda: str, distancia_km: float, angulo_grados: float) -> dict | None:
+    """Como el grid fijo, pero para una distancia/ángulo CUALQUIERA (no solo
+    GRID_RADIOS_KM) -- para la búsqueda adaptativa del límite real de
+    cobertura (un punto por iteración del binary search, en la dirección que
+    toque). Usa la misma búsqueda en espiral que el grid (evita autovías/
+    puntos sin número de portal), así que el punto final puede quedar hasta
+    0.5km desdesplazado del pedido -- por eso se devuelve la distancia/
+    ángulo REALES del punto ya geocodificado, no los pedidos."""
+    if tienda not in TIENDAS:
+        return None
+    info = TIENDAS[tienda]
+    lat_dest, lng_dest = _mover_punto(info["lat"], info["lng"], angulo_grados, distancia_km)
+    lat_final, lng_final, direccion_text = _punto_geocodificado_valido(lat_dest, lng_dest)
+    distancia_real, angulo_real = _distancia_y_angulo(info["lat"], info["lng"], lat_final, lng_final)
+
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO agregadores_direcciones
+           (tienda, lat, lng, distancia_km, angulo_grados, direccion_text, activo)
+           VALUES (?, ?, ?, ?, ?, ?, 1)""",
+        (tienda, lat_final, lng_final, round(distancia_real, 3), int(round(angulo_real)), direccion_text),
+    )
+    conn.commit()
+    fila = conn.execute("SELECT * FROM agregadores_direcciones WHERE id=?", (cur.lastrowid,)).fetchone()
+    conn.close()
+    return dict(fila)
+
+
 def agregar_direccion_manual(tienda: str, lat: float, lng: float, direccion_text: str = None) -> dict | None:
     """Punto añadido a mano en el mapa (no del grid de radios/ángulos fijo)
     -- útil para tiendas donde el grid estándar no encaja bien (ej. una zona
