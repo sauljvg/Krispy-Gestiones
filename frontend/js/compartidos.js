@@ -794,6 +794,90 @@ async function crearCandidatosMultiples() {
   await loadCandidatos();
 }
 
+// Para el caso de "subí un PDF con 50 CVs, creé las 50 fichas desde la
+// revisión múltiple, pero el PDF en sí nunca quedó adjunto a ninguna" (ver
+// renderRevisionMultiple más arriba). Sube el PDF una vez para previsualizar
+// contra qué ficha existente coincide cada nombre, y solo al confirmar
+// vuelve a mandar ESE MISMO archivo (ya en memoria, sin pedirlo dos veces)
+// al endpoint normal de adjuntar archivo -- una vez por cada coincidencia
+// encontrada. Nunca crea candidatos nuevos.
+let loteArchivoPendiente = null;
+
+function abrirAdjuntarLote() {
+  const wrap = document.getElementById("adjuntar-lote-wrap");
+  if (wrap.innerHTML.trim()) {
+    wrap.innerHTML = "";
+    return;
+  }
+  loteArchivoPendiente = null;
+  wrap.innerHTML = `
+    <div class="candidato-form">
+      <h3>Adjuntar PDF a fichas existentes</h3>
+      <p class="staff-hint">
+        Para cuando ya creaste varias fichas desde un PDF con varios CVs juntos, pero el PDF nunca quedó
+        adjunto a ninguna. Sube aquí ese mismo PDF: se busca por nombre exacto entre tus candidatos ya
+        creados y se adjunta a cada uno que coincida — no se crea ninguna ficha nueva.
+      </p>
+      <div class="subir-cv-row">
+        <input type="file" id="input-lote-pdf" accept=".pdf">
+        <button type="button" id="btn-previsualizar-lote" class="btn btn-ghost">Comprobar coincidencias</button>
+      </div>
+      <div id="lote-resultado-wrap"></div>
+    </div>`;
+  document.getElementById("btn-previsualizar-lote").addEventListener("click", previsualizarLote);
+}
+
+async function previsualizarLote() {
+  const input = document.getElementById("input-lote-pdf");
+  const resultadoWrap = document.getElementById("lote-resultado-wrap");
+  if (!input.files.length) {
+    resultadoWrap.innerHTML = `<p class="extraccion-aviso local">Selecciona primero el PDF.</p>`;
+    return;
+  }
+  loteArchivoPendiente = input.files[0];
+  resultadoWrap.innerHTML = `<p class="staff-hint">Leyendo el PDF y buscando coincidencias...</p>`;
+  const formData = new FormData();
+  formData.append("file", loteArchivoPendiente);
+  const resp = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/adjuntar-pdf-lote?empresa=${EMPRESA}`, { method: "POST", body: formData });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    resultadoWrap.innerHTML = `<p class="extraccion-aviso local">${escapeHTML(err.detail || "No se pudo leer el PDF.")}</p>`;
+    return;
+  }
+  const data = await resp.json();
+  const items = data.candidatos || [];
+  const encontrados = items.filter((it) => it.candidato_id);
+  const noEncontrados = items.length - encontrados.length;
+  resultadoWrap.innerHTML = `
+    ${avisoExtraccionHTML(data.metodo, items.length)}
+    <p class="staff-hint">${encontrados.length} coincidencia${encontrados.length === 1 ? "" : "s"} encontrada${encontrados.length === 1 ? "" : "s"} de ${items.length}${noEncontrados ? ` (${noEncontrados} sin ficha con ese nombre exacto -- no se les adjunta nada)` : ""}.</p>
+    <ul class="lote-lista">
+      ${items.map((it) => `<li class="${it.candidato_id ? "lote-ok" : "lote-sin-match"}">${it.candidato_id ? "✓" : "✗"} ${escapeHTML(it.nombre)}</li>`).join("")}
+    </ul>
+    ${encontrados.length ? `<button type="button" id="btn-confirmar-lote" class="btn btn-primary">Adjuntar PDF a las ${encontrados.length} fichas encontradas</button>` : ""}
+    <div id="lote-progreso"></div>`;
+  if (encontrados.length) {
+    document.getElementById("btn-confirmar-lote").addEventListener("click", () => confirmarAdjuntarLote(encontrados));
+  }
+}
+
+async function confirmarAdjuntarLote(encontrados) {
+  const btn = document.getElementById("btn-confirmar-lote");
+  const progreso = document.getElementById("lote-progreso");
+  btn.disabled = true;
+  let hechos = 0;
+  for (const it of encontrados) {
+    const formData = new FormData();
+    formData.append("file", loteArchivoPendiente);
+    await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${it.candidato_id}/archivos`, { method: "POST", body: formData }).catch(() => {});
+    hechos++;
+    progreso.textContent = `Adjuntando... ${hechos} de ${encontrados.length}`;
+  }
+  progreso.textContent = `Listo: PDF adjuntado a ${hechos} fichas. Ya puedes usar "🔄 Re-extraer con IA" en cada una si hace falta.`;
+  btn.remove();
+  await loadCandidatos();
+}
+
 async function extraerCvYRellenar() {
   const input = document.getElementById("input-cv-nuevo");
   const avisoWrap = document.getElementById("extraccion-aviso-wrap");
@@ -844,6 +928,10 @@ async function reextraerCv(archivoId) {
   const data = await resp.json();
   avisoWrap.innerHTML = avisoExtraccionHTML(data.metodo, 1);
   rellenarFormConCandidato(data.candidato);
+  // Si el PDF adjunto es un lote con varias personas, la foto de la
+  // "página 1" no tiene por qué ser la de esta ficha -- no se intenta sacar
+  // ninguna en ese caso, mejor sin foto que con la de otro candidato.
+  if (data.de_lote) return;
   // Aprovecha que ya estamos releyendo este PDF para intentar sacar también
   // la foto, por si el candidato no tenía (ej. ficha antigua sin foto).
   const fotoResp = await fetch(
@@ -1198,6 +1286,7 @@ async function initBaseCandidatos(user) {
   wrap.hidden = false;
   document.getElementById("btn-nuevo-candidato").addEventListener("click", abrirNuevoCandidato);
   document.getElementById("btn-revincular-tests").addEventListener("click", revincularTests);
+  document.getElementById("btn-adjuntar-lote").addEventListener("click", abrirAdjuntarLote);
   document.getElementById("btn-nueva-vacante").addEventListener("click", abrirNuevaVacante);
   document.getElementById("btn-modo-seleccion").addEventListener("click", toggleModoSeleccion);
   document.getElementById("btn-seleccionar-todos-candidatos").addEventListener("click", seleccionarTodosCandidatos);

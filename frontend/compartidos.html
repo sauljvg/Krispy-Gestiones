@@ -137,6 +137,10 @@
   .archivos-lista { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px; }
   .archivos-lista a { font-size: 13px; }
   .archivo-item-fila { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .lote-lista { list-style: none; padding: 0; margin: 10px 0; max-height: 260px; overflow-y: auto; font-size: 13px; }
+  .lote-lista li { padding: 4px 0; }
+  .lote-lista .lote-ok { color: var(--status-good); }
+  .lote-lista .lote-sin-match { color: var(--text-muted); }
 
   .badge-vacante-estado { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
   .badge-abierta { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
@@ -212,8 +216,10 @@
         </select>
         <button id="btn-modo-seleccion" class="btn btn-ghost" type="button">☑ Selección múltiple</button>
         <button id="btn-revincular-tests" class="btn btn-ghost" type="button" title="Busca de nuevo entre las respuestas de test ya enviadas por si alguna coincide con un candidato que no tenía enlace">🔗 Buscar tests ya respondidos</button>
+        <button id="btn-adjuntar-lote" class="btn btn-ghost" type="button" title="Para un PDF con varios CVs juntos que ya usaste para crear estas fichas -- adjunta el PDF a cada ficha existente por nombre, sin duplicar a nadie">🗂️ Adjuntar PDF a fichas existentes</button>
         <button id="btn-nuevo-candidato" class="btn btn-primary" type="button">＋ Nuevo candidato</button>
       </div>
+      <div id="adjuntar-lote-wrap"></div>
       <div id="candidatos-seleccion-bar" class="candidatos-seleccion-bar" hidden>
         <span id="candidatos-seleccion-contador" class="staff-hint"></span>
         <button id="btn-seleccionar-todos-candidatos" class="btn btn-ghost" type="button">Seleccionar todos</button>

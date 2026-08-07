@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import unicodedata
 
 from db import DATA_DIR, get_connection
 
@@ -405,6 +406,33 @@ def list_candidatos(empresa=None, estado=None, q=None, vacante_id=None, sin_vaca
     """, params).fetchall()
     conn.close()
     return [_row_to_dict(r) for r in rows]
+
+
+def normalizar_nombre(s):
+    s = unicodedata.normalize("NFD", s or "")
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return " ".join(s.lower().split())
+
+
+def buscar_candidato_por_nombre(empresa, nombre):
+    """Busca una ficha YA EXISTENTE por nombre completo (normalizado, sin
+    acentos/mayúsculas/espacios de más) -- se usa para adjuntar
+    retroactivamente un PDF por lotes a las fichas que ya se crearon a
+    partir de ese mismo PDF (ver /candidatos/adjuntar-pdf-lote), sin volver
+    a crear a nadie. Coincidencia exacta a propósito: un match aproximado
+    podría adjuntar el CV de una persona a la ficha de otra."""
+    objetivo = normalizar_nombre(nombre)
+    if not objetivo:
+        return None
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT id, nombre_completo FROM candidatos WHERE empresa = ?", (empresa,)
+    ).fetchall()
+    conn.close()
+    for row in rows:
+        if row["nombre_completo"] and normalizar_nombre(row["nombre_completo"]) == objetivo:
+            return row["id"]
+    return None
 
 
 def crear_candidato(campos: dict, empresa="kk", origen="manual", respuesta_id=None, creado_por=None, vacante_id=None):
