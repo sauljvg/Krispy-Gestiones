@@ -111,8 +111,12 @@
   .agr-card-barra span { height: 100%; }
 
   .agr-drill-overlay {
+    /* z-index alto a propósito: Leaflet usa z-index internos de hasta 1000
+       para sus propias capas/controles (tiles, marcadores, popups) -- con
+       z-index:200 el mapa se colaba por encima del modal en vez de quedar
+       debajo del fondo oscuro. */
     position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none;
-    align-items: center; justify-content: center; z-index: 200;
+    align-items: center; justify-content: center; z-index: 5000;
   }
   .agr-drill-overlay.visible { display: flex; }
   .agr-drill-box {
