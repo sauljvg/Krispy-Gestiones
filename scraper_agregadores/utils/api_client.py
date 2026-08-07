@@ -21,10 +21,13 @@ async def crear_direccion_calculada(tienda: str, distancia_km: float, angulo_gra
     crea un punto de test a la distancia/ángulo pedidos, geocodificado igual que el grid
     fijo (evita autovías/puntos sin número). Devuelve el punto con la distancia/ángulo
     REALES (puede desplazarse hasta 0.5km al buscar una dirección válida cercana)."""
+    # Timeout generoso: el backend puede necesitar hasta ~8 llamadas seguidas
+    # a Nominatim (búsqueda en espiral, ritmo limitado a 1/seg) para encontrar
+    # una dirección válida -- con red lenta eso solo ya se acerca a 30s.
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direcciones/calculada"
     body = {"tienda": tienda, "distancia_km": distancia_km, "angulo_grados": angulo_grados}
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=body, headers=_headers(), timeout=30) as resp:
+        async with session.post(url, json=body, headers=_headers(), timeout=90) as resp:
             resp.raise_for_status()
             return await resp.json()
 

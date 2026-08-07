@@ -40,13 +40,27 @@ MAX_REINTENTOS_TECNICO = 2
 JITTERS_ANGULO = [0, 4, -4, 8, -8]
 
 
+async def _crear_direccion_con_reintento(tienda, distancia_km, angulo_grados, intentos=3):
+    """Un timeout o corte de red puntual no debería tirar un proceso de
+    horas por la borda -- reintenta unas pocas veces con pausa antes de
+    dejar que el error suba de verdad."""
+    for intento in range(intentos):
+        try:
+            return await api_client.crear_direccion_calculada(tienda, distancia_km, angulo_grados)
+        except Exception as exc:
+            if intento == intentos - 1:
+                raise
+            logger.warning("  fallo de red creando punto (intento %d/%d): %r -- reintentando", intento + 1, intentos, exc)
+            await asyncio.sleep(5)
+
+
 async def crear_punto_valido(tienda: str, distancia_km: float, angulo_grados: float):
     """Como api_client.crear_direccion_calculada, pero reintenta con pequeños
     empujones de ángulo si el punto cae en una autovía/zona sin direcciones
     reales (ver JITTERS_ANGULO). Devuelve None si ni con eso se encuentra
     nada válido -- ese paso se salta, no cuenta como dato real."""
     for jitter in JITTERS_ANGULO:
-        punto = await api_client.crear_direccion_calculada(tienda, distancia_km, (angulo_grados + jitter) % 360)
+        punto = await _crear_direccion_con_reintento(tienda, distancia_km, (angulo_grados + jitter) % 360)
         if punto.get("direccion_valida", True):
             return punto
         logger.warning(
@@ -167,7 +181,14 @@ async def main():
     for agregador in args.agregadores:
         resultados[agregador] = []
         for angulo in args.angulos:
-            r = await buscar_limite_direccion(args.tienda, angulo, agregador)
+            # Un fallo puntual (red, sitio caído un momento) en UNA dirección
+            # no debe tirar por la borda las horas de progreso en el resto --
+            # se registra como fallo y se sigue con la siguiente.
+            try:
+                r = await buscar_limite_direccion(args.tienda, angulo, agregador)
+            except Exception as exc:
+                logger.error("[%s/%s/%s°] fallo irrecuperable, se salta esta dirección: %r", args.tienda, agregador, angulo, exc)
+                r = {"angulo": angulo, "limite_km": None, "nota": f"fallo del script: {exc!r}"}
             resultados[agregador].append(r)
             logger.info("RESULTADO %s / %s / %s°: %s", args.tienda, agregador, angulo, r)
 
