@@ -381,15 +381,35 @@ def crear_punto_calculado(tienda: str, distancia_km: float, angulo_grados: float
     lat_final, lng_final, direccion_text = _punto_geocodificado_valido(lat_dest, lng_dest)
     distancia_real, angulo_real = _distancia_y_angulo(info["lat"], info["lng"], lat_final, lng_final)
 
+    distancia_guardar = round(distancia_real, 3)
+    angulo_guardar = int(round(angulo_real))
+
     conn = get_connection()
-    cur = conn.execute(
-        """INSERT INTO agregadores_direcciones
-           (tienda, lat, lng, distancia_km, angulo_grados, direccion_text, activo)
-           VALUES (?, ?, ?, ?, ?, ?, 1)""",
-        (tienda, lat_final, lng_final, round(distancia_real, 3), int(round(angulo_real)), direccion_text),
-    )
-    conn.commit()
-    fila = conn.execute("SELECT * FROM agregadores_direcciones WHERE id=?", (cur.lastrowid,)).fetchone()
+    try:
+        cur = conn.execute(
+            """INSERT INTO agregadores_direcciones
+               (tienda, lat, lng, distancia_km, angulo_grados, direccion_text, activo)
+               VALUES (?, ?, ?, ?, ?, ?, 1)""",
+            (tienda, lat_final, lng_final, distancia_guardar, angulo_guardar, direccion_text),
+        )
+        conn.commit()
+        fila = conn.execute("SELECT * FROM agregadores_direcciones WHERE id=?", (cur.lastrowid,)).fetchone()
+    except sqlite3.IntegrityError:
+        # Dos peticiones distintas (dos pasos del binary search, o dos
+        # empujones de ángulo) pueden geocodificar al MISMO punto real más
+        # cercano si están a menos de la distancia de redondeo -- choca con
+        # el índice único (tienda, distancia_km, angulo_grados) del grid fijo.
+        # No es un fallo: simplemente ya existe ese punto exacto, se reusa
+        # (mismo patrón que get_o_crear_direcciones para el grid normal).
+        conn.rollback()
+        fila = conn.execute(
+            "SELECT * FROM agregadores_direcciones WHERE tienda=? AND distancia_km=? AND angulo_grados=?",
+            (tienda, distancia_guardar, angulo_guardar),
+        ).fetchone()
+        if fila and not fila["activo"]:
+            conn.execute("UPDATE agregadores_direcciones SET activo=1 WHERE id=?", (fila["id"],))
+            conn.commit()
+            fila = conn.execute("SELECT * FROM agregadores_direcciones WHERE id=?", (fila["id"],)).fetchone()
     conn.close()
     resultado = dict(fila)
     # La búsqueda en espiral puede agotar los intentos sin encontrar nada
