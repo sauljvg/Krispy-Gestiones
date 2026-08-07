@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -312,13 +313,25 @@ def estado_route(_user: dict = Depends(require_agregadores)):
 def reporte_diario_route(
     tienda: str | None = None,
     fecha: str | None = Query(default=None),
+    resets: str | None = Query(
+        default=None,
+        description='JSON {"agregador": "iso_timestamp"} -- recalcula ese agregador solo '
+        "con chequeos posteriores al timestamp (ver botón 'Reiniciar contador' del dashboard, "
+        "solo cambia lo que se lee, no borra nada).",
+    ),
     _user: dict = Depends(require_agregadores),
 ):
     if fecha:
         dia = datetime.strptime(fecha, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     else:
         dia = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    return agregadores_module.get_reporte(tienda, dia, dia + timedelta(days=1))
+    resets_dict = None
+    if resets:
+        try:
+            resets_dict = json.loads(resets)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="resets debe ser JSON válido")
+    return agregadores_module.get_reporte(tienda, dia, dia + timedelta(days=1), resets_dict)
 
 
 @router.get("/reportes/semanal")

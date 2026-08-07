@@ -141,9 +141,17 @@
     background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0,0,0,0.15); padding: 8px;
   }
-  .agr-borrar-menu-item { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font-size: 0.8rem; color: var(--text-primary); cursor: pointer; }
+  .agr-borrar-menu-fila { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .agr-borrar-menu-item { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font-size: 0.8rem; color: var(--text-primary); cursor: pointer; flex: 1; min-width: 0; }
   .agr-borrar-menu-item:hover { background: var(--surface-page); border-radius: 4px; }
+  .agr-borrar-menu-reset {
+    flex-shrink: 0; background: none; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 0.66rem; padding: 3px 6px; cursor: pointer; color: var(--text-muted); white-space: nowrap;
+  }
+  .agr-borrar-menu-reset:hover { background: var(--surface-page); color: var(--text-primary); }
+  .agr-borrar-menu-reset.activo { color: var(--status-warning); border-color: var(--status-warning); }
   .agr-borrar-menu-nota { font-size: 0.68rem; color: var(--text-muted); padding: 4px 4px 2px; border-top: 1px solid var(--border); margin-top: 4px; }
+  .agr-card-reinicio { color: var(--status-warning); }
 
   #agr-tabla-titulo { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   #agr-tabla-toggle { font-size: 0.72rem; background: none; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; color: var(--text-secondary); cursor: pointer; }
@@ -310,6 +318,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/agregadores.js?v=20260807c"></script>
+<script src="js/agregadores.js?v=20260807d"></script>
 </body>
 </html>

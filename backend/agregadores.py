@@ -875,14 +875,20 @@ def get_alertas(tienda: str = None, horas: int = 24):
     return [dict(f) for f in filas]
 
 
-def get_reporte(tienda: str | None, desde: datetime, hasta: datetime):
+def get_reporte(tienda: str | None, desde: datetime, hasta: datetime, resets: dict[str, str] | None = None):
     """tienda=None agrega las 6 tiendas juntas (vista "Todas").
 
     Los tres porcentajes (disponible/no_disponible/error) se calculan sobre
     el MISMO total de intentos -- suman 100%, para que no haya ambigüedad
     sobre a qué total se refiere cada uno (antes "disponibilidad_pct" se
     calculaba solo sobre los intentos validos, distinto del total de la
-    tarjeta de al lado, lo que confundía más que aclaraba)."""
+    tarjeta de al lado, lo que confundía más que aclaraba).
+
+    `resets` (opcional): {agregador: iso_timestamp} -- para ese agregador,
+    ignora los chequeos anteriores al timestamp al calcular sus %. Es un
+    filtro de lectura nada más (no borra ni modifica filas) para poder ver
+    "cómo va desde que reinicié el contador" sin que los fallos de antes de
+    un fix sigan contaminando el % del día."""
     conn = get_connection()
     if tienda:
         filas = conn.execute(
@@ -902,6 +908,10 @@ def get_reporte(tienda: str | None, desde: datetime, hasta: datetime):
 
     reporte = {}
     for nombre, lista in por_agregador.items():
+        reset_ts = resets.get(nombre) if resets else None
+        if reset_ts:
+            lista = [f for f in lista if f["timestamp"] >= reset_ts]
+
         total = len(lista)
         errores = [f for f in lista if f["error_texto"]]
         validos = [f for f in lista if not f["error_texto"]]
@@ -919,6 +929,7 @@ def get_reporte(tienda: str | None, desde: datetime, hasta: datetime):
             "no_disponible_pct": round(no_disponibles / total * 100, 1) if total else 0.0,
             "error_pct": round(len(errores) / total * 100, 1) if total else 0.0,
             "tiempo_medio_entrega": round(tiempo_medio, 1) if tiempo_medio else None,
+            "reiniciado_desde": reset_ts,
         }
 
     return {

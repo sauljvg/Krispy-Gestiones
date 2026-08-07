@@ -21,6 +21,13 @@ const AGR_TARJETAS_OCULTAS_KEY = "agr_tarjetas_ocultas";
 let agrTarjetasOcultas = new Set(JSON.parse(localStorage.getItem(AGR_TARJETAS_OCULTAS_KEY) || "[]"));
 let agrUltimoReporte = null;
 
+// Reinicios de contador por agregador (ver agrReiniciarContador) -- {agregador: iso_timestamp}.
+// Solo cambia qué le pedimos al backend que cuente (chequeos posteriores al timestamp), nunca
+// borra chequeos reales -- permite ver "cómo va desde que apliqué este fix" sin que los fallos
+// de antes sigan mezclados en el % del día. Persiste en localStorage, solo en este navegador.
+const AGR_REINICIOS_KEY = "agr_reinicios_contador";
+let agrReinicios = JSON.parse(localStorage.getItem(AGR_REINICIOS_KEY) || "{}");
+
 const AGR_COLOR_MARCA = { justeat: "#ff8000", glovo: "#ffc244", ubereats: "#06c167" };
 const AGR_NOMBRE_AGREGADOR = { justeat: "JustEat", glovo: "Glovo", ubereats: "Uber Eats" };
 let agrMostrarCorrectos = false;
@@ -482,9 +489,12 @@ function agrRenderCards(reporte) {
   cont.innerHTML = entradas
     .map(([nombre, datos]) => {
       const etiqueta = AGR_NOMBRE_AGREGADOR[nombre] || nombre;
+      const notaReinicio = datos.reiniciado_desde
+        ? ` <span class="agr-card-reinicio">· contador reiniciado ${new Date(datos.reiniciado_desde).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}</span>`
+        : "";
       return `<div class="agr-card">
         <div class="etiqueta">${etiqueta}</div>
-        <div class="agr-card-total">${datos.total_chequeos} intentos en total</div>
+        <div class="agr-card-total">${datos.total_chequeos} intentos en total${notaReinicio}</div>
         <div class="agr-card-desglose">
           <div class="agr-card-fila ok agr-clicable" onclick="agrMostrarDrill('${nombre}', 'disponible')"><span class="agr-card-pct">${datos.disponible_pct}%</span> disponible <span class="agr-card-n">(${datos.disponibles})</span></div>
           <div class="agr-card-fila no agr-clicable" onclick="agrMostrarDrill('${nombre}', 'no_disponible')"><span class="agr-card-pct">${datos.no_disponible_pct}%</span> no disponible <span class="agr-card-n">(${datos.no_disponibles})</span></div>
@@ -598,9 +608,10 @@ async function agrCargarResumen() {
     if (agrChart) { agrChart.destroy(); agrChart = null; }
     return;
   }
-  const url = agrTiendaActual === AGR_TODAS
-    ? `${AGR_API}/reportes/diario`
-    : `${AGR_API}/reportes/diario?tienda=${agrTiendaActual}`;
+  const params = new URLSearchParams();
+  if (agrTiendaActual !== AGR_TODAS) params.set("tienda", agrTiendaActual);
+  if (Object.keys(agrReinicios).length > 0) params.set("resets", JSON.stringify(agrReinicios));
+  const url = `${AGR_API}/reportes/diario${params.toString() ? "?" + params.toString() : ""}`;
   const res = await fetch(url, { credentials: "include" });
   const reporte = await res.json();
   agrUltimoReporte = reporte;
@@ -612,19 +623,41 @@ function agrGuardarTarjetasOcultas() {
   localStorage.setItem(AGR_TARJETAS_OCULTAS_KEY, JSON.stringify([...agrTarjetasOcultas]));
 }
 
+function agrGuardarReinicios() {
+  localStorage.setItem(AGR_REINICIOS_KEY, JSON.stringify(agrReinicios));
+}
+
 function agrPoblarMenuBorrar() {
   const menu = document.getElementById("agr-borrar-menu");
   const disponibles = agrUltimoReporte ? Object.keys(agrUltimoReporte.agregadores) : Object.keys(AGR_NOMBRE_AGREGADOR);
   const items = disponibles
     .map((nombre) => {
       const oculta = agrTarjetasOcultas.has(nombre);
-      return `<label class="agr-borrar-menu-item">
-        <input type="checkbox" data-agregador="${nombre}" ${oculta ? "checked" : ""} onchange="agrToggleTarjetaOculta('${nombre}', this.checked)">
-        Ocultar ${AGR_NOMBRE_AGREGADOR[nombre] || nombre}
-      </label>`;
+      const reiniciado = !!agrReinicios[nombre];
+      const tituloReset = reiniciado
+        ? "El % de este agregador solo cuenta desde el reinicio -- clic para volver a contar todo el día"
+        : "Recalcula el % de este agregador solo con chequeos a partir de ahora (no borra nada)";
+      return `<div class="agr-borrar-menu-fila">
+        <label class="agr-borrar-menu-item">
+          <input type="checkbox" data-agregador="${nombre}" ${oculta ? "checked" : ""} onchange="agrToggleTarjetaOculta('${nombre}', this.checked)">
+          Ocultar ${AGR_NOMBRE_AGREGADOR[nombre] || nombre}
+        </label>
+        <button type="button" class="agr-borrar-menu-reset${reiniciado ? " activo" : ""}" onclick="agrToggleReinicioContador('${nombre}')" title="${tituloReset}">${reiniciado ? "✕ Quitar reinicio" : "↺ Reiniciar"}</button>
+      </div>`;
     })
     .join("");
-  menu.innerHTML = items + '<div class="agr-borrar-menu-nota">Solo en este navegador -- no borra nada en el servidor.</div>';
+  menu.innerHTML = items + '<div class="agr-borrar-menu-nota">Solo en este navegador -- no borra nada en el servidor ni en la base de datos.</div>';
+}
+
+function agrToggleReinicioContador(agregador) {
+  if (agrReinicios[agregador]) {
+    delete agrReinicios[agregador];
+  } else {
+    agrReinicios[agregador] = new Date().toISOString();
+  }
+  agrGuardarReinicios();
+  agrPoblarMenuBorrar();
+  agrCargarResumen();
 }
 
 function agrToggleMenuBorrar(evt) {
