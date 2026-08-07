@@ -4,6 +4,11 @@ function escapeHTML(str) {
   return div.innerHTML;
 }
 
+// Iconos de marca en vez de emoji (💬/✉) -- se ven más cuidados y más
+// compactos, para que la barra de selección quepa en una sola línea.
+const ICONO_WHATSAPP = `<svg width="15" height="15" viewBox="0 0 32 32" fill="#25D366"><path d="M16.001 3C9.373 3 4 8.373 4 15c0 2.386.697 4.61 1.902 6.484L4 29l7.716-1.862A11.94 11.94 0 0 0 16.001 27C22.628 27 28 21.627 28 15S22.628 3 16.001 3zm6.586 16.2c-.28.784-1.62 1.5-2.24 1.58-.573.074-1.29.104-2.084-.13-.48-.14-1.098-.35-1.89-.686-3.33-1.437-5.5-4.79-5.67-5.014-.166-.224-1.354-1.8-1.354-3.432s.857-2.438 1.16-2.772c.303-.334.66-.418.88-.418.22 0 .44.002.632.012.203.01.475-.077.744.568.28.66.95 2.29 1.034 2.456.084.166.14.36.028.584-.112.224-.168.362-.334.556-.166.194-.35.434-.5.582-.166.166-.34.346-.146.68.194.334.862 1.42 1.85 2.3 1.272 1.132 2.344 1.484 2.678 1.65.334.166.53.14.726-.084.196-.224.836-.976 1.06-1.31.224-.334.448-.278.756-.166.308.112 1.958.924 2.294 1.092.336.168.56.252.644.392.084.14.084.812-.196 1.596z"/></svg>`;
+const ICONO_MAILTO = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg>`;
+
 const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" ? "saona" : "kk";
 
 function aplicarBrandingEmpresa() {
@@ -205,7 +210,7 @@ async function actualizarCandidatoInline(candidatoId, campos) {
   });
 }
 
-function candidatoCardHTML(item) {
+function candidatoCardHTML(item, permitirDejarDeCompartir) {
   const entries = Object.entries(item.datos).filter(([k]) => k.toLowerCase() !== "nombre");
   const cvBtn = item.tiene_cv
     ? `<a href="${AUTH_API_BASE}/informes/respuestas/${item.respuesta_id}/cv" target="_blank" rel="noopener" class="btn btn-primary">📄 Ver CV</a>`
@@ -221,6 +226,18 @@ function candidatoCardHTML(item) {
   const fichaBtn = candId
     ? `<button type="button" class="btn btn-ghost candidato-abrir-ficha" data-candidato-id="${candId}">📋 Ver ficha completa</button>`
     : "";
+  // Solo tiene sentido en "Compartidos por ti" -- deja de compartir ESTE
+  // candidato con ESTE destinatario en concreto (no borra el candidato ni
+  // afecta a otros a los que se lo hayas compartido). El origen del share
+  // determina el endpoint: uno viene de Informes (informe_compartidos,
+  // compartido_id numérico) y otro es un "compartir directo" desde
+  // Reclutamiento (candidato_compartidos, compartido_id "candidato-N").
+  const dejarDeCompartirBtn = permitirDejarDeCompartir
+    ? `<button type="button" class="btn btn-ghost btn-dejar-compartir"
+         data-directo="${String(item.compartido_id).startsWith("candidato-") ? "1" : "0"}"
+         data-candidato-id="${candId}" data-respuesta-id="${item.respuesta_id ?? ""}"
+         data-destinatario-id="${item.destinatario_id ?? ""}">✕ Dejar de compartir</button>`
+    : "";
   const metaTxt = item.hoja ? `${item.tipo_nombre} · hoja "${item.hoja}"` : item.tipo_nombre;
   return `
     <div class="candidato-card">
@@ -229,7 +246,7 @@ function candidatoCardHTML(item) {
       <div class="candidato-datos">
         ${entries.map(([k, v]) => `<div><div class="campo-nombre">${escapeHTML(k)}</div><div>${escapeHTML(v)}</div></div>`).join("")}
       </div>
-      <div class="candidato-acciones">${fichaBtn}${cvBtn}${whatsappBtn}</div>
+      <div class="candidato-acciones">${fichaBtn}${cvBtn}${whatsappBtn}${dejarDeCompartirBtn}</div>
       ${notasHTML}
     </div>`;
 }
@@ -237,7 +254,7 @@ function candidatoCardHTML(item) {
 // Cada tanda es un <details> desplegable. `etiquetaOtro` describe la relación
 // ("Compartido por" / "Compartido con") y `abierta` deja la más reciente
 // abierta por defecto para que no haya que hacer clic para ver lo último.
-function grupoHTML(grupo, etiquetaOtro, abierta) {
+function grupoHTML(grupo, etiquetaOtro, abierta, permitirDejarDeCompartir) {
   const n = grupo.items.length;
   return `
     <details class="tanda" ${abierta ? "open" : ""}>
@@ -246,17 +263,32 @@ function grupoHTML(grupo, etiquetaOtro, abierta) {
         <span class="tanda-meta">${n} candidato${n === 1 ? "" : "s"} · ${escapeHTML(etiquetaOtro)} <b>${escapeHTML(grupo.otro || "")}</b></span>
       </summary>
       <div class="tanda-body">
-        ${grupo.items.map(candidatoCardHTML).join("")}
+        ${grupo.items.map((it) => candidatoCardHTML(it, permitirDejarDeCompartir)).join("")}
       </div>
     </details>`;
 }
 
-function seccionHTML(titulo, grupos, etiquetaOtro, vacioMsg) {
+function seccionHTML(titulo, grupos, etiquetaOtro, vacioMsg, permitirDejarDeCompartir) {
   if (grupos.length === 0) {
     return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2><p class="staff-hint">${escapeHTML(vacioMsg)}</p>`;
   }
   return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2>` +
-    grupos.map((g, i) => grupoHTML(g, etiquetaOtro, i === 0)).join("");
+    grupos.map((g, i) => grupoHTML(g, etiquetaOtro, i === 0, permitirDejarDeCompartir)).join("");
+}
+
+async function dejarDeCompartirClick(btn) {
+  if (!confirm("¿Dejar de compartir este candidato? La persona ya no lo verá en su Reclutamiento.")) return;
+  const url = btn.dataset.directo === "1"
+    ? `${AUTH_API_BASE}/reclutamiento/candidatos/${btn.dataset.candidatoId}/compartir/${btn.dataset.destinatarioId}`
+    : `${AUTH_API_BASE}/informes/compartir/${btn.dataset.respuestaId}/${btn.dataset.destinatarioId}`;
+  btn.disabled = true;
+  const res = await fetch(url, { method: "DELETE" });
+  if (!res.ok) {
+    alert("No se pudo dejar de compartir. Inténtalo de nuevo.");
+    btn.disabled = false;
+    return;
+  }
+  await loadCompartidos();
 }
 
 function wireCompartidosInteractivos(wrap) {
@@ -268,6 +300,9 @@ function wireCompartidosInteractivos(wrap) {
   });
   wrap.querySelectorAll(".candidato-abrir-ficha").forEach((el) => {
     el.addEventListener("click", () => abrirEdicionCandidato(el.dataset.candidatoId));
+  });
+  wrap.querySelectorAll(".btn-dejar-compartir").forEach((el) => {
+    el.addEventListener("click", () => dejarDeCompartirClick(el));
   });
 }
 
@@ -285,13 +320,14 @@ async function loadCompartidos() {
     "Compartidos conmigo",
     gruposConmigo,
     "compartido por",
-    "Todavía no te han compartido ningún candidato."
+    "Todavía no te han compartido ningún candidato.",
+    false
   );
 
   // La sección "Compartidos por ti" solo tiene sentido enseñarla si esta
   // persona ha compartido algo alguna vez (a un gerente no le aparecerá).
   if (gruposPorMi.length > 0) {
-    html += seccionHTML("Compartidos por ti", gruposPorMi, "compartido con", "");
+    html += seccionHTML("Compartidos por ti", gruposPorMi, "compartido con", "", true);
   }
 
   wrap.innerHTML = html;
@@ -871,7 +907,10 @@ function candidatoMiniCardHTML(c) {
 function actualizarBotonWhatsappSeleccionados() {
   const barra = document.getElementById("candidatos-seleccion-bar");
   const btnWhatsapp = document.getElementById("btn-whatsapp-seleccionados");
+  const btnMailto = document.getElementById("btn-mailto-seleccionados");
   const btnCompartir = document.getElementById("btn-compartir-seleccionados");
+  const btnSeleccionarTodos = document.getElementById("btn-seleccionar-todos-candidatos");
+  const btnQuitarSeleccion = document.getElementById("btn-deseleccionar-todos-candidatos");
   const estadoMasivo = document.getElementById("candidatos-estado-masivo");
   const contador = document.getElementById("candidatos-seleccion-contador");
   const n = candidatosSeleccionadosIds.size;
@@ -880,9 +919,28 @@ function actualizarBotonWhatsappSeleccionados() {
   contador.textContent = `${n} candidato${n === 1 ? "" : "s"} seleccionado${n === 1 ? "" : "s"}`;
   const sinSeleccion = n === 0;
   btnWhatsapp.hidden = sinSeleccion;
-  btnWhatsapp.textContent = `💬 Mensaje por WhatsApp (${n})`;
+  btnWhatsapp.innerHTML = `${ICONO_WHATSAPP}WhatsApp (${n})`;
+  btnMailto.hidden = sinSeleccion;
+  btnMailto.innerHTML = `${ICONO_MAILTO}Email (${n})`;
   btnCompartir.disabled = sinSeleccion;
   estadoMasivo.disabled = sinSeleccion;
+  // "Seleccionar todos" toma TODOS los candidatos cargados actualmente en la
+  // pantalla (respetando el filtro de vacante/búsqueda aplicado), no solo
+  // los que ya se hubieran marcado a mano uno a uno.
+  btnSeleccionarTodos.hidden = n >= ultimosCandidatosCargados.length;
+  btnQuitarSeleccion.hidden = sinSeleccion;
+}
+
+function seleccionarTodosCandidatos() {
+  ultimosCandidatosCargados.forEach((c) => candidatosSeleccionadosIds.add(c.id));
+  actualizarBotonWhatsappSeleccionados();
+  renderCandidatosGrid();
+}
+
+function deseleccionarTodosCandidatos() {
+  candidatosSeleccionadosIds.clear();
+  actualizarBotonWhatsappSeleccionados();
+  renderCandidatosGrid();
 }
 
 function toggleModoSeleccion() {
@@ -998,6 +1056,28 @@ function abrirCampanaWhatsappSeleccionados() {
   abrirCampanaWhatsapp(candidatos);
 }
 
+// Igual que el recordatorio de Entrevista de Salida: nunca se envía nada
+// desde el servidor, se arma un enlace mailto: con todos los correos en
+// copia oculta (bcc) y se abre el cliente de correo del propio usuario, que
+// es quien de verdad manda el email desde su cuenta.
+function abrirMailtoSeleccionados() {
+  const candidatos = ultimosCandidatosCargados.filter((c) => candidatosSeleccionadosIds.has(c.id));
+  const conEmail = candidatos.filter((c) => c.email);
+  if (conEmail.length === 0) {
+    alert("Ninguno de los candidatos seleccionados tiene email guardado.");
+    return;
+  }
+  if (conEmail.length < candidatos.length) {
+    alert(`${candidatos.length - conEmail.length} de ${candidatos.length} candidatos no tienen email guardado y se quedarán fuera del correo.`);
+  }
+  const destinatarios = conEmail.map((c) => c.email).join(",");
+  const asunto = encodeURIComponent("Krispy Kreme España — sobre tu candidatura");
+  const cuerpo = encodeURIComponent(
+    `Hola,\n\nTe escribimos sobre tu candidatura. ¿Podrías confirmarnos tu disponibilidad para una entrevista?\n\nUn saludo,\nEquipo RRHH`
+  );
+  window.location.href = `mailto:?bcc=${encodeURIComponent(destinatarios)}&subject=${asunto}&body=${cuerpo}`;
+}
+
 async function abrirEdicionCandidato(candidatoId) {
   const candidato = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}`).then((r) => r.json());
   candidatoEditando = candidato;
@@ -1043,7 +1123,10 @@ async function initBaseCandidatos(user) {
   document.getElementById("btn-revincular-tests").addEventListener("click", revincularTests);
   document.getElementById("btn-nueva-vacante").addEventListener("click", abrirNuevaVacante);
   document.getElementById("btn-modo-seleccion").addEventListener("click", toggleModoSeleccion);
+  document.getElementById("btn-seleccionar-todos-candidatos").addEventListener("click", seleccionarTodosCandidatos);
+  document.getElementById("btn-deseleccionar-todos-candidatos").addEventListener("click", deseleccionarTodosCandidatos);
   document.getElementById("btn-whatsapp-seleccionados").addEventListener("click", abrirCampanaWhatsappSeleccionados);
+  document.getElementById("btn-mailto-seleccionados").addEventListener("click", abrirMailtoSeleccionados);
   document.getElementById("btn-compartir-seleccionados").addEventListener("click", abrirModalCompartirCandidatos);
   document.getElementById("btn-compartir-candidatos-cancelar").addEventListener("click", cerrarModalCompartirCandidatos);
   document.getElementById("btn-compartir-candidatos-confirmar").addEventListener("click", confirmarCompartirCandidatos);
