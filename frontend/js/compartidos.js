@@ -902,6 +902,7 @@ function candidatoMiniCardHTML(c) {
 function actualizarBotonWhatsappSeleccionados() {
   const barra = document.getElementById("candidatos-seleccion-bar");
   const btnWhatsapp = document.getElementById("btn-whatsapp-seleccionados");
+  const btnMailto = document.getElementById("btn-mailto-seleccionados");
   const btnCompartir = document.getElementById("btn-compartir-seleccionados");
   const btnSeleccionarTodos = document.getElementById("btn-seleccionar-todos-candidatos");
   const btnQuitarSeleccion = document.getElementById("btn-deseleccionar-todos-candidatos");
@@ -914,6 +915,8 @@ function actualizarBotonWhatsappSeleccionados() {
   const sinSeleccion = n === 0;
   btnWhatsapp.hidden = sinSeleccion;
   btnWhatsapp.textContent = `💬 Mensaje por WhatsApp (${n})`;
+  btnMailto.hidden = sinSeleccion;
+  btnMailto.textContent = `✉ Enviar email (${n})`;
   btnCompartir.disabled = sinSeleccion;
   estadoMasivo.disabled = sinSeleccion;
   // "Seleccionar todos" toma TODOS los candidatos cargados actualmente en la
@@ -1048,6 +1051,28 @@ function abrirCampanaWhatsappSeleccionados() {
   abrirCampanaWhatsapp(candidatos);
 }
 
+// Igual que el recordatorio de Entrevista de Salida: nunca se envía nada
+// desde el servidor, se arma un enlace mailto: con todos los correos en
+// copia oculta (bcc) y se abre el cliente de correo del propio usuario, que
+// es quien de verdad manda el email desde su cuenta.
+function abrirMailtoSeleccionados() {
+  const candidatos = ultimosCandidatosCargados.filter((c) => candidatosSeleccionadosIds.has(c.id));
+  const conEmail = candidatos.filter((c) => c.email);
+  if (conEmail.length === 0) {
+    alert("Ninguno de los candidatos seleccionados tiene email guardado.");
+    return;
+  }
+  if (conEmail.length < candidatos.length) {
+    alert(`${candidatos.length - conEmail.length} de ${candidatos.length} candidatos no tienen email guardado y se quedarán fuera del correo.`);
+  }
+  const destinatarios = conEmail.map((c) => c.email).join(",");
+  const asunto = encodeURIComponent("Krispy Kreme España — sobre tu candidatura");
+  const cuerpo = encodeURIComponent(
+    `Hola,\n\nTe escribimos sobre tu candidatura. ¿Podrías confirmarnos tu disponibilidad para una entrevista?\n\nUn saludo,\nEquipo RRHH`
+  );
+  window.location.href = `mailto:?bcc=${encodeURIComponent(destinatarios)}&subject=${asunto}&body=${cuerpo}`;
+}
+
 async function abrirEdicionCandidato(candidatoId) {
   const candidato = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}`).then((r) => r.json());
   candidatoEditando = candidato;
@@ -1096,6 +1121,7 @@ async function initBaseCandidatos(user) {
   document.getElementById("btn-seleccionar-todos-candidatos").addEventListener("click", seleccionarTodosCandidatos);
   document.getElementById("btn-deseleccionar-todos-candidatos").addEventListener("click", deseleccionarTodosCandidatos);
   document.getElementById("btn-whatsapp-seleccionados").addEventListener("click", abrirCampanaWhatsappSeleccionados);
+  document.getElementById("btn-mailto-seleccionados").addEventListener("click", abrirMailtoSeleccionados);
   document.getElementById("btn-compartir-seleccionados").addEventListener("click", abrirModalCompartirCandidatos);
   document.getElementById("btn-compartir-candidatos-cancelar").addEventListener("click", cerrarModalCompartirCandidatos);
   document.getElementById("btn-compartir-candidatos-confirmar").addEventListener("click", confirmarCompartirCandidatos);

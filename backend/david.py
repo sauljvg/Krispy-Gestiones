@@ -123,7 +123,10 @@ Seleccion multiple: boton "Seleccion multiple" activa el modo (clic en una ficha
 abrirla); aparece una barra con "Seleccionar todos" (marca TODOS los candidatos cargados en pantalla
 ahora mismo, respetando el filtro aplicado) y, si ya hay alguno marcado, "Quitar seleccion". Con
 candidatos marcados se puede: cambiar su estado en bloque (selector "Cambiar estado a..."), mandarles
-un mensaje de WhatsApp en grupo, o "Compartir con..." (elegir un usuario del portal y enviarselos).
+un mensaje de WhatsApp en grupo ("Mensaje por WhatsApp"), mandarles un correo a todos a la vez
+("Enviar email" -- abre el cliente de correo del propio usuario con todos los que tengan email
+guardado en copia oculta, igual que el recordatorio de Entrevista de Salida), o "Compartir con..."
+(elegir un usuario del portal y enviarselos).
 
 Seccion "Compartidos": tiene dos partes. "Compartidos conmigo" -- candidatos que otras personas le han
 compartido a este usuario. "Compartidos por ti" -- candidatos que este usuario ha compartido con
