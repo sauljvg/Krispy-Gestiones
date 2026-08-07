@@ -239,10 +239,14 @@ def _punto_geocodificado_valido(lat, lng, intentos_extra=7, paso_km=0.07, radio_
 
 
 def reparar_direcciones_invalidas() -> dict:
-    """Recorre los puntos ya guardados y reubica los que cayeron en una
-    autovía/M-45/etc (creados antes de que existiera este filtro). Actualiza
-    la misma fila (mismo id), así que los chequeos históricos ligados a ese
-    punto por direccion_id siguen apuntando al punto correcto, ya reubicado."""
+    """Recorre los puntos ya guardados y reubica los que no tienen número de
+    portal real (sin él, el autocompletado de los agregadores es ambiguo --
+    confirmado en vivo: pasa incluso mandando el texto tal cual, no es solo
+    un problema de coordenadas en bruto). Actualiza la misma fila (mismo id),
+    pero como el punto pasa a ser una dirección FÍSICA DISTINTA, los chequeos
+    que tenía guardados ya no dicen nada de la nueva -- se borran (no solo el
+    dato, el punto "pasa a sin datos otra vez") para que el scheduler lo
+    priorice en la próxima pasada (ver get_o_crear_direcciones/scheduler.py)."""
     conn = get_connection()
     filas = conn.execute("SELECT * FROM agregadores_direcciones").fetchall()
     reparadas = []
@@ -254,6 +258,7 @@ def reparar_direcciones_invalidas() -> dict:
             "UPDATE agregadores_direcciones SET lat=?, lng=?, direccion_text=? WHERE id=?",
             (lat, lng, texto, fila["id"]),
         )
+        conn.execute("DELETE FROM agregadores_chequeos WHERE direccion_id=?", (fila["id"],))
         # Commit por fila, no al final: cada punto tarda varios segundos en
         # geocodificar (varios intentos a Nominatim), así que un commit único
         # al final mantendría la escritura abierta -- y el archivo bloqueado
@@ -268,7 +273,12 @@ def mover_direccion_manual(direccion_id: int, lat: float, lng: float, direccion_
     """Reubicación manual desde el mapa del dashboard (arrastrar un punto).
     Sin texto de dirección, se geocodifica automáticamente la posición nueva
     -- si no, el texto quedaría desactualizado (el de antes de arrastrar, ya
-    no corresponde a dónde está el punto ahora)."""
+    no corresponde a dónde está el punto ahora).
+
+    Al ser ahora una dirección física distinta, los chequeos que tenía
+    guardados se borran -- el punto "pasa a sin datos" y el scheduler lo
+    prioriza en la siguiente pasada (mismo criterio que
+    reparar_direcciones_invalidas)."""
     conn = get_connection()
     fila = conn.execute("SELECT id FROM agregadores_direcciones WHERE id=?", (direccion_id,)).fetchone()
     if not fila:
@@ -285,6 +295,7 @@ def mover_direccion_manual(direccion_id: int, lat: float, lng: float, direccion_
         "UPDATE agregadores_direcciones SET lat=?, lng=?, direccion_text=? WHERE id=?",
         (lat, lng, direccion_text, direccion_id),
     )
+    conn.execute("DELETE FROM agregadores_chequeos WHERE direccion_id=?", (direccion_id,))
     conn.commit()
     fila = conn.execute("SELECT * FROM agregadores_direcciones WHERE id=?", (direccion_id,)).fetchone()
     conn.close()

@@ -567,7 +567,9 @@ async function agrMostrarDrill(agregador, estado) {
     return;
   }
 
-  const filtradas = direcciones.filter((d) => d.detalle[agregador]?.estado === estado);
+  const filtradas = direcciones
+    .filter((d) => d.detalle[agregador]?.estado === estado)
+    .sort((a, b) => new Date(b.detalle[agregador].timestamp) - new Date(a.detalle[agregador].timestamp));
   if (filtradas.length === 0) {
     lista.innerHTML = '<li style="color:var(--text-muted);">Sin puntos en este estado ahora mismo.</li>';
     return;
