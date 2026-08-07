@@ -18,7 +18,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 import config
-from main import SCRAPERS, chequear_tienda
+from main import chequear_tienda
 from utils import api_client
 
 logger = logging.getLogger("scheduler")
@@ -70,7 +70,7 @@ async def _chequeo(modo: str, cercano: bool):
             resultados = await asyncio.gather(
                 *(
                     _chequear_agregador_aislado(tienda, agregador_nombre, cercano)
-                    for agregador_nombre in SCRAPERS
+                    for agregador_nombre in config.AGREGADORES
                 )
             )
             exitosos += sum(1 for r in resultados if r)

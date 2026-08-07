@@ -1,6 +1,9 @@
+import logging
 import re
 
 from scrapers.base import BaseAggregatorScraper, ResultadoChequeo
+
+logger = logging.getLogger(__name__)
 
 BASE_URL = "https://glovoapp.com"
 
@@ -154,21 +157,20 @@ class GlovoScraper(BaseAggregatorScraper):
         try:
             await tarjeta.wait_for(state="visible", timeout=8000)
         except Exception:
-            # Último recurso antes de dar la tienda por no encontrada: puede
-            # que el selector no encaje con el layout actual aunque la
-            # tarjeta esté visible en pantalla. Se intenta solo aquí, tras
-            # agotar la espera normal.
-            from utils.ai_fallback import click_con_ia
-
-            clickeado = await click_con_ia(
-                page,
-                f'la tarjeta de resultado de tienda que menciona "{MARCA_BUSQUEDA}"',
-                self.nombre_agregador,
+            # IMPORTANTE: no devolver False aquí -- mismo motivo que en Uber Eats
+            # (ver scrapers/ubereats.py). Que el selector no encuentre la tarjeta
+            # en el tiempo dado no es lo mismo que "confirmado que no reparte
+            # ahí"; devolver False lo convertía en un "no disponible" con
+            # confianza total a la primera pasada, sin reintentos. Al lanzar,
+            # pasa por el mecanismo normal de reintentos (_verificar_con_retry) y
+            # solo si persiste se guarda como fallo técnico (error_texto).
+            ruta = await self.screenshot_on_error(page, "tienda_no_confirmada")
+            logger.warning(
+                "glovo: tienda no confirmada en resultados de búsqueda, url=%s -- captura: %s",
+                page.url,
+                ruta,
             )
-            if not clickeado:
-                return False
-            await page.wait_for_load_state("domcontentloaded")
-            return True
+            raise TimeoutError("glovo: tienda no confirmada en resultados de búsqueda (ver captura)")
 
         await self._click_js(tarjeta)
         await page.wait_for_load_state("domcontentloaded")

@@ -10,7 +10,14 @@ load_dotenv()
 # añadirla aquí también (o promover esto a un GET /api/agregadores/tiendas si se automatiza).
 TIENDAS_SCHEDULER = ["parquesur", "princesa", "caleido", "granplaza2", "plenilunio", "lagavia"]
 
-AGREGADORES = ["justeat", "glovo", "ubereats"]
+# Uber Eats desactivado en producción: el 07/08 se confirmó que el challenge
+# anti-bot del sitio bloquea el 100% de los intentos (ver
+# logs/catchup_20260807_111914_completo.log y las pruebas locales de la misma
+# fecha) -- no es un bug del scraper, es el sitio bloqueando de verdad. Sigue
+# probándose en local con run_ubereats_once.py (modo dry-run, no escribe en
+# producción). Añadir "ubereats" de vuelta aquí cuando funcione de forma
+# estable en local.
+AGREGADORES = ["justeat", "glovo"]
 
 # No queremos "datos en vivo": el objetivo es un informe de "a esta hora bloquearon en esta
 # zona", no un dashboard en tiempo real. Por eso dos velocidades:

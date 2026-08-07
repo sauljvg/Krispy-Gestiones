@@ -134,22 +134,10 @@ class UberEatsScraper(BaseAggregatorScraper):
             # simple retraso de red se leía como "no disponible" de verdad.
             await enlace.wait_for(state="visible", timeout=20000)
         except Exception:
-            # Último recurso antes de rendirse: puede que el selector no encaje
-            # con el layout actual aunque el resultado esté visible en pantalla.
-            from utils.ai_fallback import click_con_ia
-
-            clickeado = await click_con_ia(
-                page,
-                f'el resultado de búsqueda de tienda que menciona "{MARCA_BUSQUEDA}"',
-                self.nombre_agregador,
-            )
-            if clickeado:
-                await page.wait_for_load_state("domcontentloaded")
-                return True
-            # IMPORTANTE: no devolver False aquí. Que ni el selector ni la IA
-            # encuentren la tienda en el tiempo dado NO es lo mismo que "confirmado
-            # que no reparte ahí" -- devolver False lo convertía en un resultado
-            # "no disponible" con confianza total a la primera pasada, sin
+            # IMPORTANTE: no devolver False aquí. Que el selector no encuentre la
+            # tienda en el tiempo dado NO es lo mismo que "confirmado que no
+            # reparte ahí" -- devolver False lo convertía en un resultado "no
+            # disponible" con confianza total a la primera pasada, sin
             # reintentos, provocando transiciones DD->DND falsas por un simple
             # render lento. Al lanzar la excepción, pasa por el mecanismo normal
             # de reintentos (_verificar_con_retry, 3 intentos con backoff) y solo
@@ -157,7 +145,7 @@ class UberEatsScraper(BaseAggregatorScraper):
             # en vez de como "no disponible" real.
             ruta = await self.screenshot_on_error(page, "tienda_no_confirmada")
             logger.warning(
-                "ubereats: tienda no confirmada en resultados tras espera + IA, url=%s -- captura: %s",
+                "ubereats: tienda no confirmada en resultados tras espera, url=%s -- captura: %s",
                 page.url,
                 ruta,
             )

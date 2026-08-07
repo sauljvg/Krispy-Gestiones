@@ -476,8 +476,8 @@ function agrRenderCards(reporte) {
         <div class="etiqueta">${etiqueta}</div>
         <div class="agr-card-total">${datos.total_chequeos} intentos en total</div>
         <div class="agr-card-desglose">
-          <div class="agr-card-fila ok"><span class="agr-card-pct">${datos.disponible_pct}%</span> disponible <span class="agr-card-n">(${datos.disponibles})</span></div>
-          <div class="agr-card-fila no"><span class="agr-card-pct">${datos.no_disponible_pct}%</span> no disponible <span class="agr-card-n">(${datos.no_disponibles})</span></div>
+          <div class="agr-card-fila ok agr-clicable" onclick="agrMostrarDrill('${nombre}', 'disponible')"><span class="agr-card-pct">${datos.disponible_pct}%</span> disponible <span class="agr-card-n">(${datos.disponibles})</span></div>
+          <div class="agr-card-fila no agr-clicable" onclick="agrMostrarDrill('${nombre}', 'no_disponible')"><span class="agr-card-pct">${datos.no_disponible_pct}%</span> no disponible <span class="agr-card-n">(${datos.no_disponibles})</span></div>
           <div class="agr-card-fila fallo"><span class="agr-card-pct">${datos.error_pct}%</span> fallo técnico <span class="agr-card-n">(${datos.errores})</span></div>
         </div>
         <div class="agr-card-barra">
@@ -486,6 +486,81 @@ function agrRenderCards(reporte) {
       </div>`;
     })
     .join("");
+}
+
+async function agrMostrarDrill(agregador, estado) {
+  const overlay = document.getElementById("agr-drill-overlay");
+  const titulo = document.getElementById("agr-drill-titulo");
+  const lista = document.getElementById("agr-drill-lista");
+  const etiquetaEstado = estado === "disponible" ? "Disponibles" : "No disponibles";
+
+  titulo.textContent = `${AGR_NOMBRE_AGREGADOR[agregador] || agregador} — ${etiquetaEstado}`;
+  lista.innerHTML = '<li style="color:var(--text-muted);">Cargando...</li>';
+  overlay.classList.add("visible");
+
+  let direcciones;
+  try {
+    const url = agrTiendaActual === AGR_TODAS
+      ? `${AGR_API}/mapa-datos-todas`
+      : `${AGR_API}/mapa-datos?tienda=${agrTiendaActual}`;
+    const res = await agrFetchConTimeout(url, { credentials: "include" });
+    direcciones = (await res.json()).direcciones;
+  } catch (err) {
+    lista.innerHTML = '<li style="color:var(--status-critical);">No se pudo cargar. Inténtalo de nuevo.</li>';
+    return;
+  }
+
+  const filtradas = direcciones.filter((d) => d.detalle[agregador]?.estado === estado);
+  if (filtradas.length === 0) {
+    lista.innerHTML = '<li style="color:var(--text-muted);">Sin puntos en este estado ahora mismo.</li>';
+    return;
+  }
+
+  // Construcción vía DOM (no innerHTML con interpolación) porque el texto de
+  // dirección viene de geocoding externo (Nominatim) -- así no hace falta
+  // escapar nada a mano para que sea seguro meterlo en el atributo/HTML.
+  lista.innerHTML = "";
+  for (const d of filtradas) {
+    const texto = d.direccion_text || `${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}`;
+    const li = document.createElement("li");
+
+    const span = document.createElement("span");
+    span.className = "agr-drill-direccion";
+    if (d.tienda) {
+      const tag = document.createElement("span");
+      tag.style.color = "var(--text-muted)";
+      tag.style.fontSize = "0.68rem";
+      tag.textContent = `[${d.tienda}] `;
+      span.appendChild(tag);
+    }
+    span.appendChild(document.createTextNode(texto));
+
+    const boton = document.createElement("button");
+    boton.type = "button";
+    boton.className = "agr-drill-copiar";
+    boton.textContent = "📋 Copiar";
+    boton.onclick = () => agrCopiarDireccionDrill(boton, texto);
+
+    li.appendChild(span);
+    li.appendChild(boton);
+    lista.appendChild(li);
+  }
+}
+
+function agrCerrarDrill() {
+  document.getElementById("agr-drill-overlay").classList.remove("visible");
+}
+
+async function agrCopiarDireccionDrill(boton, texto) {
+  try {
+    await navigator.clipboard.writeText(texto);
+    const original = boton.textContent;
+    boton.textContent = "✓ Copiado";
+    setTimeout(() => { boton.textContent = original; }, 1500);
+  } catch (err) {
+    // Clipboard API puede fallar sin HTTPS/permisos -- el texto sigue
+    // siendo seleccionable a mano (user-select:text en .agr-drill-direccion).
+  }
 }
 
 function agrRenderChart(reporte) {

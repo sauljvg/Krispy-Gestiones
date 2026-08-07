@@ -95,8 +95,37 @@
   .agr-card-fila.ok .agr-card-pct { color: var(--status-good); }
   .agr-card-fila.no .agr-card-pct { color: var(--status-critical); }
   .agr-card-fila.fallo .agr-card-pct { color: var(--status-warning); }
+  .agr-card-fila.agr-clicable { cursor: pointer; border-radius: 4px; }
+  .agr-card-fila.agr-clicable:hover { background: color-mix(in srgb, var(--text-primary) 6%, transparent); }
   .agr-card-barra { display: flex; height: 6px; border-radius: 999px; overflow: hidden; margin-top: 8px; background: var(--border); }
   .agr-card-barra span { height: 100%; }
+
+  .agr-drill-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none;
+    align-items: center; justify-content: center; z-index: 200;
+  }
+  .agr-drill-overlay.visible { display: flex; }
+  .agr-drill-box {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px; width: 100%; max-width: 480px; max-height: 70vh; display: flex; flex-direction: column;
+  }
+  .agr-drill-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+  .agr-drill-header h3 { margin: 0; font-size: 15px; }
+  .agr-drill-close { background: none; border: none; font-size: 20px; line-height: 1; cursor: pointer; color: var(--text-muted); padding: 4px; }
+  .agr-drill-close:hover { color: var(--text-primary); }
+  .agr-drill-nota { font-size: 0.72rem; color: var(--text-muted); margin: 0 0 12px; }
+  .agr-drill-lista { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+  .agr-drill-lista li {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem;
+  }
+  .agr-drill-lista li:last-child { border-bottom: none; }
+  .agr-drill-direccion { color: var(--text-primary); user-select: text; }
+  .agr-drill-copiar {
+    flex-shrink: 0; background: none; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 0.72rem; padding: 3px 8px; cursor: pointer; color: var(--text-secondary);
+  }
+  .agr-drill-copiar:hover { background: var(--surface-page); }
   .agr-resumen-nota { font-size: 0.72rem; color: var(--text-muted); margin: -6px 0 12px; line-height: 1.4; }
 
   #agr-tabla-titulo { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
@@ -242,9 +271,20 @@
     </div>
   </div>
 </div>
+
+<div class="agr-drill-overlay" id="agr-drill-overlay">
+  <div class="agr-drill-box">
+    <div class="agr-drill-header">
+      <h3 id="agr-drill-titulo">Direcciones</h3>
+      <button type="button" class="agr-drill-close" onclick="agrCerrarDrill()" aria-label="Cerrar">✕</button>
+    </div>
+    <p class="agr-drill-nota">Estado actual (último chequeo conocido de cada punto) — puede no coincidir exactamente con el recuento de 24h de la tarjeta si algún punto cambió de estado en ese tiempo.</p>
+    <ul class="agr-drill-lista" id="agr-drill-lista"></ul>
+  </div>
+</div>
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/agregadores.js?v=20260807a"></script>
+<script src="js/agregadores.js?v=20260807b"></script>
 </body>
 </html>
