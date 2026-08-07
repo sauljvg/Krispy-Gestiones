@@ -203,13 +203,26 @@ class BaseAggregatorScraper:
                 page = await context.new_page()
                 page.set_default_timeout(self.timeout_ms)
                 resultado = await self._verificar(page, tienda_nombre, direccion)
-                # Captura también en un "no disponible" real (no solo en error) --
-                # todavía no sabemos si esto es una transición (el backend lo decide
-                # comparando con el chequeo anterior), pero para entonces la página ya
-                # estará cerrada. Se sube a KG solo si el backend confirma que lo es
-                # (ver main.py); si no, este archivo local simplemente no se usa.
-                if not resultado.disponible and not resultado.error_texto and not resultado.url_captura:
-                    resultado.url_captura = await self.screenshot_on_error(page, "no_disponible")
+                if not resultado.disponible and not resultado.error_texto:
+                    # Antes de aceptar un "no disponible" como dato real: el chequeo de
+                    # challenge (_comprobar_challenge) solo se hace una vez, justo al
+                    # cargar la página inicial -- si el sitio muestra un reCAPTCHA más
+                    # adelante en el flujo (tras poner la dirección o buscar), no se
+                    # detecta ahí, y el resto del código puede malinterpretar esa
+                    # pantalla como "tienda no encontrada". Caso real confirmado: la
+                    # captura subida como "evidencia" de una transición DD->DND era un
+                    # reCAPTCHA de Uber Eats, no la página de resultados. Se vuelve a
+                    # comprobar aquí, justo antes de dar el resultado por bueno -- si
+                    # hay challenge, esto lanza ChallengeDetectedError y pasa por el
+                    # mecanismo normal de reintento en vez de guardarse como dato real.
+                    await self._comprobar_challenge(page)
+                    # Captura también en un "no disponible" real (no solo en error) --
+                    # todavía no sabemos si esto es una transición (el backend lo decide
+                    # comparando con el chequeo anterior), pero para entonces la página ya
+                    # estará cerrada. Se sube a KG solo si el backend confirma que lo es
+                    # (ver main.py); si no, este archivo local simplemente no se usa.
+                    if not resultado.url_captura:
+                        resultado.url_captura = await self.screenshot_on_error(page, "no_disponible")
                 return resultado
             finally:
                 await browser.close()
