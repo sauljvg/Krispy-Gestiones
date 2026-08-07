@@ -65,12 +65,18 @@ async def chequear_tienda(
             }
         )
 
-        if respuesta.get("transicion") and resultado.url_captura:
-            logger.warning(
-                "%s: %s dejó de estar disponible (era disponible en el chequeo anterior) -- subiendo captura",
-                agregador_nombre,
-                texto,
-            )
+        # Se sube la captura de CADA chequeo, no solo de las transiciones --
+        # confirmado un caso real donde un resultado se dio con confianza
+        # total pero sobre la dirección equivocada (bug de coordenadas en
+        # bruto ya arreglado arriba); sin poder ver la captura desde el
+        # dashboard no había forma de detectarlo.
+        if resultado.url_captura:
+            if respuesta.get("transicion"):
+                logger.warning(
+                    "%s: %s dejó de estar disponible (era disponible en el chequeo anterior) -- subiendo captura",
+                    agregador_nombre,
+                    texto,
+                )
             await api_client.subir_captura(respuesta["chequeo_id"], resultado.url_captura)
 
         logger.info("  -> disponible=%s tiempo=%s min", resultado.disponible, resultado.tiempo_entrega_min)

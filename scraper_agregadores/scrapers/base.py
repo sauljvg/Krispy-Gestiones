@@ -188,7 +188,12 @@ class BaseAggregatorScraper:
                 # No necesitamos ver nada: solo leemos texto/atributos del DOM. Bloquear
                 # imágenes, fuentes y vídeo reduce el peso de cada página bastante (promos,
                 # carruseles, iconos) sin tocar el HTML/CSS que el scraper sí necesita leer.
-                await context.route("**/*", _bloquear_recursos_pesados)
+                # EXCEPCIÓN: en modo resolución manual la ventana es justo para que un
+                # humano vea y resuelva un challenge anti-bot -- si se bloquean sus
+                # recursos, el propio widget del captcha no puede pintarse (confirmado
+                # visualmente: salía un rectángulo de color liso en vez del reto real).
+                if not self._modo_resolucion_manual:
+                    await context.route("**/*", _bloquear_recursos_pesados)
                 # Estos sitios tienen carruseles/banners promocionales en autoplay. Playwright
                 # espera a que un elemento esté "estable" (que deje de moverse) antes de hacer
                 # click/fill, así que una animación de fondo lo hace reintentar con scroll una
@@ -224,13 +229,20 @@ class BaseAggregatorScraper:
                     # hay challenge, esto lanza ChallengeDetectedError y pasa por el
                     # mecanismo normal de reintento en vez de guardarse como dato real.
                     await self._comprobar_challenge(page)
-                    # Captura también en un "no disponible" real (no solo en error) --
-                    # todavía no sabemos si esto es una transición (el backend lo decide
-                    # comparando con el chequeo anterior), pero para entonces la página ya
-                    # estará cerrada. Se sube a KG solo si el backend confirma que lo es
-                    # (ver main.py); si no, este archivo local simplemente no se usa.
-                    if not resultado.url_captura:
-                        resultado.url_captura = await self.screenshot_on_error(page, "no_disponible")
+                # Captura de CADA chequeo (disponible, no disponible o error), no
+                # solo los "interesantes" -- confirmado un caso real donde Glovo dio
+                # un resultado con confianza total pero sobre la DIRECCIÓN
+                # EQUIVOCADA (bug de coordenadas en bruto, ver main.py); sin la
+                # captura no había forma de detectarlo desde el dashboard. Se sube
+                # a KG siempre (ver main.py), no solo cuando el backend confirma
+                # que es una transición.
+                if not resultado.url_captura:
+                    contexto = (
+                        "disponible" if resultado.disponible
+                        else "error" if resultado.error_texto
+                        else "no_disponible"
+                    )
+                    resultado.url_captura = await self.screenshot_on_error(page, contexto)
                 return resultado
             finally:
                 await browser.close()
@@ -306,4 +318,21 @@ class BaseAggregatorScraper:
             return str(path)
         except Exception as exc:
             logger.warning("No se pudo capturar screenshot: %s", exc)
+            return None
+
+    async def guardar_html_debug(self, page, contexto: str) -> Optional[str]:
+        """Como screenshot_on_error pero con el HTML real en vez de una imagen --
+        las capturas no sirven para diagnosticar fallos de selector porque
+        _bloquear_recursos_pesados bloquea las fuentes (rinden como texto
+        ilegible), y de todos modos una imagen no deja inspeccionar el DOM.
+        Solo se usa en fallos ya reintentados varias veces sin explicación
+        clara (ver 'tienda no confirmada' en justeat.py/glovo.py)."""
+        try:
+            filename = f"{self.nombre_agregador}_{contexto}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+            path = SCREENSHOTS_DIR / filename
+            contenido = await page.content()
+            path.write_text(contenido, encoding="utf-8")
+            return str(path)
+        except Exception as exc:
+            logger.warning("No se pudo guardar HTML de diagnóstico: %s", exc)
             return None
