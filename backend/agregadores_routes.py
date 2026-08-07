@@ -213,6 +213,14 @@ def transiciones_consulta_route(tienda: str | None = None, horas: int = 24):
     return agregadores_module.get_transiciones(tienda, horas)
 
 
+@router.get("/cobertura")
+def cobertura_route(tienda: str | None = None, agregador: str | None = None, _user: dict = Depends(require_agregadores)):
+    """Último estado conocido de cada punto (disponible o no), para dibujar
+    mapas de cobertura con polígonos convex/concave. Devuelve puntos verdes
+    (DD) y amarillos (DND) agrupados por agregador."""
+    return agregadores_module.get_cobertura_mapa(tienda, agregador)
+
+
 # --- Endpoints del dashboard (cookie de usuario) ---------------------------
 
 

@@ -123,11 +123,36 @@ class UberEatsScraper(BaseAggregatorScraper):
         try:
             await enlace.wait_for(state="visible", timeout=8000)
         except Exception:
-            return False
+            # Último recurso antes de dar la tienda por no encontrada: puede
+            # que el selector no encaje con el layout actual aunque el
+            # resultado esté visible en pantalla. Se intenta solo aquí, tras
+            # agotar la espera normal.
+            from utils.ai_fallback import click_con_ia
+
+            clickeado = await click_con_ia(
+                page,
+                f'el resultado de búsqueda de tienda que menciona "{MARCA_BUSQUEDA}"',
+                self.nombre_agregador,
+            )
+            if not clickeado:
+                return False
+            await page.wait_for_load_state("domcontentloaded")
+            return True
 
         await enlace.click()
         await page.wait_for_load_state("domcontentloaded")
         return True
+
+    async def _detectar_cerrado_por_horario(self, page) -> str:
+        """Busca el aviso de "Cerrado" con horario que Uber Eats muestra en la
+        propia página de la tienda (p.ej. "Cerrado · Disponible los Viernes a
+        las 8:00"). Devuelve el texto del aviso, o cadena vacía si no aparece."""
+        try:
+            aviso = page.locator("text=/Cerrado/i").first
+            texto = await aviso.inner_text(timeout=3000)
+            return texto.strip()
+        except Exception:
+            return ""
 
     async def _leer_disponibilidad(self, page) -> ResultadoChequeo:
         try:
@@ -172,10 +197,23 @@ class UberEatsScraper(BaseAggregatorScraper):
             if not disponible and tiempo_entrega_min is not None:
                 disponible = True
 
+            mensaje_bloqueo = None
+            if not disponible:
+                mensaje_bloqueo = "Entrega no disponible para esta dirección"
+                # A diferencia de Glovo/JustEat (donde la tienda cerrada simplemente
+                # no aparece en la búsqueda), Uber Eats sí muestra la tienda cerrada
+                # con un aviso de horario (p.ej. "Cerrado · Disponible los Viernes a
+                # las 8:00"). Esto es una señal distinta de "sin cobertura de
+                # reparto en esta zona" -- se distingue en el mensaje para que el
+                # reporte de transiciones no las trate como lo mismo.
+                texto_cerrado = await self._detectar_cerrado_por_horario(page)
+                if texto_cerrado:
+                    mensaje_bloqueo = f"Tienda cerrada por horario (no es falta de cobertura): {texto_cerrado}"
+
             return ResultadoChequeo(
                 disponible=disponible,
                 tiempo_entrega_min=tiempo_entrega_min if disponible else None,
-                mensaje_bloqueo=None if disponible else "Entrega no disponible para esta dirección",
+                mensaje_bloqueo=mensaje_bloqueo,
                 status_http=200,
             )
         except Exception as exc:

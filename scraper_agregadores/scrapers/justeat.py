@@ -144,7 +144,22 @@ class JustEatScraper(BaseAggregatorScraper):
         try:
             await sugerencia.wait_for(state="visible", timeout=8000)
         except Exception:
-            return False
+            # Último recurso antes de dar la tienda por no encontrada: puede
+            # que el selector no encaje con el layout actual aunque la
+            # sugerencia esté visible en pantalla. Se intenta solo aquí, tras
+            # agotar la espera normal.
+            from utils.ai_fallback import click_con_ia
+
+            clickeado = await click_con_ia(
+                page,
+                f'la sugerencia de resultado de búsqueda que menciona "{MARCA_BUSQUEDA}" '
+                f"en la lista desplegable de autocompletado",
+                self.nombre_agregador,
+            )
+            if not clickeado:
+                return False
+            await page.wait_for_load_state("domcontentloaded")
+            return True
 
         await sugerencia.click()
         await page.wait_for_load_state("domcontentloaded")

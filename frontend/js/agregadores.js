@@ -570,15 +570,114 @@ async function agrCargarTransiciones() {
   }
   lista.innerHTML = transiciones
     .map((t) => {
-      const hora = new Date(t.timestamp).toLocaleString("es-ES");
+      const hora = new Date(t.timestamp).toLocaleString("es-ES", {
+        day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+      });
       const nombre = AGR_NOMBRE_AGREGADOR[t.agregador] || t.agregador;
       const direccion = t.direccion_text || `${t.lat?.toFixed(5)}, ${t.lng?.toFixed(5)}`;
+      const tiendaLinea = agrTiendaActual === AGR_TODAS && t.nombre_tienda ? `${t.nombre_tienda} — ` : "";
+      const duracionHtml = t.duracion_disponible
+        ? `<div class="agr-trans-duracion">⏱ Estuvo disponible ${t.duracion_disponible}</div>`
+        : "";
       const captura = t.tiene_captura
-        ? `<a href="${AGR_API}/capturas/${t.id}" target="_blank" rel="noopener">Ver captura</a>`
-        : '<span style="color:var(--text-muted);">Sin captura</span>';
-      return `<li><span class="hora">${hora}</span><span class="tipo">${nombre}</span>${direccion} — ${t.mensaje_bloqueo || "no disponible"} — ${captura}</li>`;
+        ? `<a href="${AGR_API}/capturas/${t.id}" target="_blank" rel="noopener" class="agr-trans-link">📷 Ver captura</a>`
+        : '<span style="color:var(--text-muted);font-size:0.72rem;">Sin captura</span>';
+      return `<li>
+        <div class="agr-trans-meta">
+          <span class="agr-trans-hora">${hora}</span>
+          <span class="agr-trans-agregador ${t.agregador}">${nombre}</span>
+        </div>
+        <div>
+          <div class="agr-trans-direccion">${tiendaLinea}${direccion}</div>
+          <div class="agr-trans-bloqueo">${t.mensaje_bloqueo || "No disponible"}</div>
+          ${duracionHtml}
+        </div>
+        <div class="agr-trans-acciones">${captura}</div>
+      </li>`;
     })
     .join("");
+}
+
+let agrMapaCobertura = null;
+let agrCoberturaPoligono = null;
+let agrCoberturaMarkers = [];
+
+function agrInitMapaCobertura(lat, lng) {
+  if (agrMapaCobertura) agrMapaCobertura.remove();
+  agrMapaCobertura = L.map("agr-mapa-cobertura").setView([lat, lng], 12);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap",
+  }).addTo(agrMapaCobertura);
+}
+
+async function agrCargarMapaCobertura() {
+  const cont = document.getElementById("agr-mapa-cobertura");
+  const contador = document.getElementById("agr-cobertura-contador");
+  if (!cont || !agrTiendaActual || agrTiendaActual === AGR_TODAS) {
+    if (contador) contador.textContent = "El mapa de cobertura no está disponible en la vista \"Todas\" — selecciona una tienda.";
+    if (agrMapaCobertura) {
+      agrMapaCobertura.remove();
+      agrMapaCobertura = null;
+      agrCoberturaMarkers = [];
+      agrCoberturaPoligono = null;
+    }
+    return;
+  }
+  const select = document.getElementById("agr-cobertura-agregador");
+  const agregador = select ? select.value : "justeat";
+
+  const url = `${AGR_API}/cobertura?tienda=${agrTiendaActual}&agregador=${agregador}`;
+  const res = await fetch(url, { credentials: "include" });
+  const puntos = await res.json();
+
+  if (!agrMapaCobertura) {
+    const centro = (agrCentrosPorTienda[agrTiendaActual] || agrTiendaCentro) || { lat: 40.4168, lng: -3.7038 };
+    agrInitMapaCobertura(centro.lat, centro.lng);
+  }
+
+  agrCoberturaMarkers.forEach((m) => agrMapaCobertura.removeLayer(m));
+  agrCoberturaMarkers = [];
+  if (agrCoberturaPoligono) {
+    agrMapaCobertura.removeLayer(agrCoberturaPoligono);
+    agrCoberturaPoligono = null;
+  }
+
+  const validos = puntos.filter((p) => p.lat != null && p.lng != null);
+  const verdes = validos.filter((p) => p.disponible);
+  const amarillos = validos.filter((p) => !p.disponible);
+
+  validos.forEach((p) => {
+    const color = p.disponible ? "#0ca30c" : "#fab219";
+    const marker = L.circleMarker([p.lat, p.lng], {
+      radius: 7, color, fillColor: color, fillOpacity: 0.85, weight: 2,
+    })
+      .bindPopup(`<b>${p.direccion_text || "Punto"}</b><br>${p.disponible ? "✅ Disponible" : "❌ No disponible"}`)
+      .addTo(agrMapaCobertura);
+    agrCoberturaMarkers.push(marker);
+  });
+
+  // Polígono de cobertura real: envolvente de los puntos donde SÍ reparte.
+  // Con menos de 3 puntos no hay superficie que dibujar (turf.convex exige
+  // al menos un triángulo).
+  if (verdes.length >= 3 && typeof turf !== "undefined") {
+    try {
+      const fc = turf.featureCollection(verdes.map((p) => turf.point([p.lng, p.lat])));
+      const hull = turf.convex(fc);
+      if (hull) {
+        const latlngs = hull.geometry.coordinates[0].map(([lng, lat]) => [lat, lng]);
+        agrCoberturaPoligono = L.polygon(latlngs, {
+          color: "#0ca30c", weight: 2, fillColor: "#0ca30c", fillOpacity: 0.12,
+        }).addTo(agrMapaCobertura);
+      }
+    } catch (e) {
+      // Puntos colineales u otro caso degenerado: se queda solo con los marcadores.
+    }
+  }
+
+  const nombre = AGR_NOMBRE_AGREGADOR[agregador] || agregador;
+  if (contador) {
+    contador.textContent = `${verdes.length} con cobertura / ${amarillos.length} sin cobertura (${nombre})`;
+  }
 }
 
 async function agrCargarEstado() {
@@ -605,7 +704,10 @@ async function agrCargarEstado() {
 }
 
 async function agrCargarTodo() {
-  await Promise.all([agrCargarMapa(), agrCargarTabla(), agrCargarResumen(), agrCargarAlertas(), agrCargarTransiciones(), agrCargarEstado()]);
+  // agrCargarMapa() debe ir primero: fija agrTiendaCentro/agrCentrosPorTienda,
+  // que agrCargarMapaCobertura() usa para centrar su propio mapa la primera vez.
+  await agrCargarMapa();
+  await Promise.all([agrCargarTabla(), agrCargarResumen(), agrCargarAlertas(), agrCargarTransiciones(), agrCargarMapaCobertura(), agrCargarEstado()]);
   document.getElementById("agr-actualizado").textContent = "Actualizado: " + new Date().toLocaleTimeString("es-ES");
 }
 
@@ -618,6 +720,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   wireUserBar(user);
   agrWireFiltroAgregador();
+
+  const selectCobertura = document.getElementById("agr-cobertura-agregador");
+  if (selectCobertura) selectCobertura.addEventListener("change", agrCargarMapaCobertura);
 
   await agrCargarTiendas();
   await agrCargarTodo();

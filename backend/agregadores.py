@@ -567,30 +567,107 @@ def get_ruta_captura(chequeo_id: int) -> str | None:
 
 def get_transiciones(tienda: str | None, horas: int = 24):
     """Puntos que aparecían disponibles y, en el chequeo siguiente (real, sin
-    error), dejaron de estarlo -- usa LAG() para comparar cada chequeo con el
-    anterior del mismo punto+agregador sin tener que hacer un query por fila."""
+    error), dejaron de estarlo. Amplía el resultado con timestamp del cambio,
+    duración en disponible, y detalles de por qué se bloqueó."""
     desde = (datetime.now(timezone.utc) - timedelta(hours=horas)).isoformat()
     conn = get_connection()
     condicion_tienda = "AND c.tienda=?" if tienda else ""
     params = (tienda, desde) if tienda else (desde,)
+
+    # Consulta principal: detecta transiciones DD→DND
     filas = conn.execute(
         f"""
-        WITH ordenado AS (
+        WITH chequeos_ordenados AS (
             SELECT c.id, c.tienda, c.agregador, c.direccion_id, c.timestamp,
                    c.disponible, c.tiempo_entrega_min, c.mensaje_bloqueo,
                    (c.url_captura IS NOT NULL) AS tiene_captura,
                    d.direccion_text, d.lat, d.lng,
                    LAG(c.disponible) OVER (
                        PARTITION BY c.direccion_id, c.agregador ORDER BY c.timestamp
-                   ) AS disponible_anterior
+                   ) AS disponible_anterior,
+                   LAG(c.timestamp) OVER (
+                       PARTITION BY c.direccion_id, c.agregador ORDER BY c.timestamp
+                   ) AS timestamp_anterior
             FROM agregadores_chequeos c
             LEFT JOIN agregadores_direcciones d ON d.id = c.direccion_id
             WHERE c.error_texto IS NULL {condicion_tienda}
         )
-        SELECT * FROM ordenado
+        SELECT id, tienda, agregador, direccion_id, timestamp, timestamp_anterior,
+               disponible, tiempo_entrega_min, mensaje_bloqueo,
+               tiene_captura, direccion_text, lat, lng
+        FROM chequeos_ordenados
         WHERE disponible_anterior = 1 AND disponible = 0 AND timestamp >= ?
         ORDER BY timestamp DESC
         LIMIT 200
+        """,
+        params,
+    ).fetchall()
+
+    # Post-procesamiento: calcula duración en disponible y nombre de tienda
+    resultado = []
+    for fila in filas:
+        fila_dict = dict(fila)
+        # Calcula cuánto tiempo estuvo disponible (desde timestamp_anterior hasta timestamp)
+        if fila_dict["timestamp_anterior"]:
+            try:
+                ts_ant = datetime.fromisoformat(fila_dict["timestamp_anterior"])
+                ts_act = datetime.fromisoformat(fila_dict["timestamp"])
+                duracion = ts_act - ts_ant
+                # Expresa como "X min" o "X h Y min"
+                total_seg = int(duracion.total_seconds())
+                horas, resto = divmod(total_seg, 3600)
+                minutos = resto // 60
+                if horas > 0:
+                    fila_dict["duracion_disponible"] = f"{horas}h {minutos}m"
+                else:
+                    fila_dict["duracion_disponible"] = f"{minutos}m"
+            except Exception:
+                fila_dict["duracion_disponible"] = None
+        else:
+            fila_dict["duracion_disponible"] = None
+
+        # Nombre de la tienda desde TIENDAS
+        fila_dict["nombre_tienda"] = TIENDAS.get(fila_dict["tienda"], {}).get("nombre", fila_dict["tienda"])
+
+        # Limpia timestamp_anterior (no necesario en frontend)
+        del fila_dict["timestamp_anterior"]
+        resultado.append(fila_dict)
+
+    conn.close()
+    return resultado
+
+
+def get_cobertura_mapa(tienda: str | None = None, agregador: str | None = None):
+    """Obtiene último estado conocido de cada dirección para dibujar mapas
+    de cobertura. Devuelve puntos verdes (disponible) y amarillos (no disponible).
+    Útil para polígono convex de cobertura real."""
+    conn = get_connection()
+    condicion_tienda = "AND c.tienda=?" if tienda else ""
+    condicion_agregador = "AND c.agregador=?" if agregador else ""
+    params = []
+    if tienda:
+        params.append(tienda)
+    if agregador:
+        params.append(agregador)
+
+    # Últimos chequeos (sin error) de cada punto
+    filas = conn.execute(
+        f"""
+        WITH ultimo_por_punto AS (
+            SELECT c.direccion_id, c.tienda, c.agregador, c.disponible,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY c.direccion_id, c.tienda, c.agregador
+                       ORDER BY c.timestamp DESC
+                   ) AS rn
+            FROM agregadores_chequeos c
+            WHERE c.error_texto IS NULL {condicion_tienda} {condicion_agregador}
+        )
+        SELECT d.id, d.tienda, d.lat, d.lng, d.direccion_text,
+               u.agregador, u.disponible
+        FROM ultimo_por_punto u
+        LEFT JOIN agregadores_direcciones d ON d.id = u.direccion_id
+        WHERE u.rn = 1 AND d.activo = 1
+        ORDER BY u.tienda, u.agregador, d.id
         """,
         params,
     ).fetchall()

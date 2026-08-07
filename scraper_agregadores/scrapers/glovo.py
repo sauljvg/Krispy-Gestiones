@@ -154,7 +154,21 @@ class GlovoScraper(BaseAggregatorScraper):
         try:
             await tarjeta.wait_for(state="visible", timeout=8000)
         except Exception:
-            return False
+            # Último recurso antes de dar la tienda por no encontrada: puede
+            # que el selector no encaje con el layout actual aunque la
+            # tarjeta esté visible en pantalla. Se intenta solo aquí, tras
+            # agotar la espera normal.
+            from utils.ai_fallback import click_con_ia
+
+            clickeado = await click_con_ia(
+                page,
+                f'la tarjeta de resultado de tienda que menciona "{MARCA_BUSQUEDA}"',
+                self.nombre_agregador,
+            )
+            if not clickeado:
+                return False
+            await page.wait_for_load_state("domcontentloaded")
+            return True
 
         await self._click_js(tarjeta)
         await page.wait_for_load_state("domcontentloaded")

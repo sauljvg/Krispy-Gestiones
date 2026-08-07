@@ -3,3 +3,4 @@ playwright-stealth
 apscheduler
 python-dotenv
 aiohttp
+anthropic
