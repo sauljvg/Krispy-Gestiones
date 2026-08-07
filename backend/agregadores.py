@@ -202,17 +202,48 @@ def _geocodificar(lat, lng):
 _PATRON_VIA_NO_DIRECCION = re.compile(
     r"^(Autov[ií]a|Autopista|Carretera|V[ií]a de servicio|[AMNR]-\d+\b)", re.IGNORECASE
 )
+_PATRON_NUMERO_LIMPIO = re.compile(r"^\d+[a-zA-Z]?$")
 
 
 def _direccion_valida(texto: str) -> bool:
     """Tiene que ser una calle real CON número de portal -- una autovía/M-45,
     un polígono sin número o cualquier vía sin número no es una dirección a
     la que nadie pueda pedir de verdad. Probar ahí solo genera ruido de "no
-    disponible" que no dice nada sobre cobertura real."""
+    disponible" que no dice nada sobre cobertura real. Acepta tanto el
+    formato crudo de Nominatim ("74, Calle X, ...") como el ya reordenado
+    por _formatear_direccion ("Calle X 74, ...")."""
     t = texto.strip()
     if _PATRON_VIA_NO_DIRECCION.match(t):
         return False
-    return bool(re.match(r"^\d", t))
+    segmentos = [s.strip() for s in t.split(",", 2)]
+    primero = segmentos[0] if segmentos else ""
+    if _PATRON_NUMERO_LIMPIO.match(primero):
+        # Portal compuesto tipo "74,76, Calle X" -- Nominatim lo junta en un
+        # único campo y el siguiente trozo también empieza por dígitos
+        # porque en realidad es la segunda mitad del mismo número, no la
+        # calle. El buscador de los agregadores no sabe resolver esto de
+        # forma fiable, así que no cuenta como dirección válida.
+        siguiente = segmentos[1] if len(segmentos) > 1 else ""
+        return not re.match(r"^\d", siguiente)
+    ultima_palabra = primero.rsplit(" ", 1)[-1] if primero else ""
+    return bool(_PATRON_NUMERO_LIMPIO.match(ultima_palabra)) and " " in primero
+
+
+def _formatear_direccion(texto: str) -> str:
+    """Nominatim devuelve 'número, calle, resto' (orden genérico) -- en
+    España se escribe 'calle número', que es como de verdad busca la gente
+    y lo que mejor reconoce el autocompletado de Glovo/JustEat/Uber Eats.
+    Solo reordena si el primer trozo es un número de portal limpio; si no
+    (autovías, portales compuestos, direcciones ya reordenadas...), se deja
+    tal cual."""
+    segmentos = texto.split(",", 2)
+    if len(segmentos) < 2:
+        return texto
+    numero, calle = segmentos[0].strip(), segmentos[1].strip()
+    if not _PATRON_NUMERO_LIMPIO.match(numero) or re.match(r"^\d", calle):
+        return texto
+    cola = f", {segmentos[2].strip()}" if len(segmentos) > 2 else ""
+    return f"{calle} {numero}{cola}"
 
 
 def _punto_geocodificado_valido(lat, lng, intentos_extra=7, paso_km=0.07, radio_max_km=0.5):
@@ -224,7 +255,7 @@ def _punto_geocodificado_valido(lat, lng, intentos_extra=7, paso_km=0.07, radio_
     lat0, lng0 = lat, lng
     texto = _geocodificar(lat, lng)
     if _direccion_valida(texto):
-        return lat, lng, texto
+        return lat, lng, _formatear_direccion(texto)
 
     mejor = (lat, lng, texto)
     for intento in range(1, intentos_extra + 1):
@@ -234,8 +265,9 @@ def _punto_geocodificado_valido(lat, lng, intentos_extra=7, paso_km=0.07, radio_
         texto_i = _geocodificar(lat_i, lng_i)
         mejor = (lat_i, lng_i, texto_i)
         if _direccion_valida(texto_i):
-            return mejor
-    return mejor
+            return mejor[0], mejor[1], _formatear_direccion(mejor[2])
+    lat_f, lng_f, texto_f = mejor
+    return lat_f, lng_f, _formatear_direccion(texto_f)
 
 
 def reparar_direcciones_invalidas() -> dict:
@@ -267,6 +299,25 @@ def reparar_direcciones_invalidas() -> dict:
         reparadas.append({"id": fila["id"], "antes": fila["direccion_text"], "despues": texto})
     conn.close()
     return {"reparadas": len(reparadas), "detalle": reparadas}
+
+
+def reformatear_direcciones() -> dict:
+    """Pasada única para reordenar 'número, calle' -> 'calle número' (ver
+    _formatear_direccion) en los puntos ya guardados ANTES de este cambio.
+    A diferencia de reparar_direcciones_invalidas, esto no re-geocodifica ni
+    mueve el punto -- es solo texto, así que no toca ni borra los chequeos
+    que ya tenía."""
+    conn = get_connection()
+    filas = conn.execute("SELECT id, direccion_text FROM agregadores_direcciones WHERE activo=1").fetchall()
+    cambiadas = []
+    for fila in filas:
+        nuevo = _formatear_direccion(fila["direccion_text"])
+        if nuevo != fila["direccion_text"]:
+            conn.execute("UPDATE agregadores_direcciones SET direccion_text=? WHERE id=?", (nuevo, fila["id"]))
+            cambiadas.append({"id": fila["id"], "antes": fila["direccion_text"], "despues": nuevo})
+    conn.commit()
+    conn.close()
+    return {"cambiadas": len(cambiadas), "detalle": cambiadas}
 
 
 def mover_direccion_manual(direccion_id: int, lat: float, lng: float, direccion_text: str = None) -> dict | None:
