@@ -126,12 +126,16 @@ class UberEatsScraper(BaseAggregatorScraper):
 
         enlace = page.locator(f'{SEL_STORE_LINK}:has-text("{MARCA_BUSQUEDA}")').first
         try:
-            await enlace.wait_for(state="visible", timeout=8000)
+            # 20s en vez de 8s: un caso real (07/08 11:02, dirección "8, Calle de
+            # Miguel Català") tardó ~58s en total entre el fill() y que el
+            # resultado apareciera -- con 3 navegadores compitiendo por CPU, 8s
+            # no siempre alcanza aunque la tienda sí esté ahí (confirmado a mano:
+            # aparecía la primera en los resultados). 8s era tan corto que un
+            # simple retraso de red se leía como "no disponible" de verdad.
+            await enlace.wait_for(state="visible", timeout=20000)
         except Exception:
-            # Último recurso antes de dar la tienda por no encontrada: puede
-            # que el selector no encaje con el layout actual aunque el
-            # resultado esté visible en pantalla. Se intenta solo aquí, tras
-            # agotar la espera normal.
+            # Último recurso antes de rendirse: puede que el selector no encaje
+            # con el layout actual aunque el resultado esté visible en pantalla.
             from utils.ai_fallback import click_con_ia
 
             clickeado = await click_con_ia(
@@ -139,10 +143,25 @@ class UberEatsScraper(BaseAggregatorScraper):
                 f'el resultado de búsqueda de tienda que menciona "{MARCA_BUSQUEDA}"',
                 self.nombre_agregador,
             )
-            if not clickeado:
-                return False
-            await page.wait_for_load_state("domcontentloaded")
-            return True
+            if clickeado:
+                await page.wait_for_load_state("domcontentloaded")
+                return True
+            # IMPORTANTE: no devolver False aquí. Que ni el selector ni la IA
+            # encuentren la tienda en el tiempo dado NO es lo mismo que "confirmado
+            # que no reparte ahí" -- devolver False lo convertía en un resultado
+            # "no disponible" con confianza total a la primera pasada, sin
+            # reintentos, provocando transiciones DD->DND falsas por un simple
+            # render lento. Al lanzar la excepción, pasa por el mecanismo normal
+            # de reintentos (_verificar_con_retry, 3 intentos con backoff) y solo
+            # si persiste tras agotarlos se guarda como fallo técnico (error_texto)
+            # en vez de como "no disponible" real.
+            ruta = await self.screenshot_on_error(page, "tienda_no_confirmada")
+            logger.warning(
+                "ubereats: tienda no confirmada en resultados tras espera + IA, url=%s -- captura: %s",
+                page.url,
+                ruta,
+            )
+            raise TimeoutError("ubereats: tienda no confirmada en resultados de búsqueda (ver captura)")
 
         # Click vía JS en vez de enlace.click(): la cabecera sticky de Uber Eats
         # (buscador + pills de categoría) se superpone visualmente a la parte de

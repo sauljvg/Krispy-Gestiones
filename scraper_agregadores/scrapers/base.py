@@ -20,6 +20,14 @@ CHALLENGE_KEYWORDS = (
     "cloudflare",
     "please verify you are a human",
     "sorry, you have been blocked",
+    # Añadidos tras un reCAPTCHA real de Uber Eats (07/08) con texto distinto al
+    # resto ("Un paso más" / recaptcha), que la lista anterior no reconocía --
+    # el scraper seguía buscando selectores normales sobre la pantalla del
+    # challenge en vez de tratarlo como un bloqueo anti-bot.
+    "un paso más",
+    "comprobación de seguridad automatizada",
+    "no soy un robot",
+    "recaptcha",
 )
 
 _STEALTH = Stealth()
