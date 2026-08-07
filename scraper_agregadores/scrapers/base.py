@@ -33,7 +33,11 @@ CHALLENGE_KEYWORDS = (
 
 _STEALTH = Stealth()
 
-_RECURSOS_BLOQUEADOS = ("image", "media", "font")
+# Las fuentes se dejan pasar a propósito: bloquearlas ahorra algo de peso por
+# página, pero deja las capturas de pantalla ilegibles ("word word word" en
+# vez del texto real) -- y ahora se sube una captura de CADA chequeo para
+# poder auditarlo, así que necesitan poder leerse.
+_RECURSOS_BLOQUEADOS = ("image", "media")
 
 
 async def _bloquear_recursos_pesados(route):

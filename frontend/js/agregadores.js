@@ -40,6 +40,10 @@ let agrTablaLimpiadaHasta = localStorage.getItem(AGR_TABLA_LIMPIADA_KEY) || null
 const AGR_TABLA_COLAPSADA_KEY = "agr_tabla_colapsada";
 let agrTablaColapsada = localStorage.getItem(AGR_TABLA_COLAPSADA_KEY) === "1";
 
+// Mismo patrón, para "Dejaron de estar disponibles".
+const AGR_TRANSICIONES_LIMPIADAS_KEY = "agr_transiciones_limpiadas_hasta";
+let agrTransicionesLimpiadasHasta = localStorage.getItem(AGR_TRANSICIONES_LIMPIADAS_KEY) || null;
+
 const AGR_COLOR_MARCA = { justeat: "#ff8000", glovo: "#ffc244", ubereats: "#06c167" };
 const AGR_NOMBRE_AGREGADOR = { justeat: "JustEat", glovo: "Glovo", ubereats: "Uber Eats" };
 let agrMostrarCorrectos = false;
@@ -780,18 +784,38 @@ async function agrCargarAlertas() {
     .join("");
 }
 
+function agrLimpiarTransiciones() {
+  agrTransicionesLimpiadasHasta = new Date().toISOString();
+  localStorage.setItem(AGR_TRANSICIONES_LIMPIADAS_KEY, agrTransicionesLimpiadasHasta);
+  agrCargarTransiciones();
+}
+
 async function agrCargarTransiciones() {
   const lista = document.getElementById("agr-transiciones");
+  const resumen = document.getElementById("agr-transiciones-resumen");
   if (!lista) return;
   const url = agrTiendaActual === AGR_TODAS
     ? `${AGR_API}/transiciones?horas=24`
     : `${AGR_API}/transiciones?tienda=${agrTiendaActual}&horas=24`;
   if (!agrTiendaActual) return;
   const res = await fetch(url, { credentials: "include" });
-  const transiciones = await res.json();
+  let transiciones = await res.json();
+
+  const totalSinLimpiar = transiciones.length;
+  if (agrTransicionesLimpiadasHasta) {
+    transiciones = transiciones.filter((t) => t.timestamp > agrTransicionesLimpiadasHasta);
+  }
+  if (resumen) {
+    resumen.textContent = totalSinLimpiar > transiciones.length
+      ? `(${totalSinLimpiar - transiciones.length} ocultas)`
+      : "";
+  }
 
   if (transiciones.length === 0) {
-    lista.innerHTML = '<li style="color:var(--text-muted);">Ningún punto ha pasado de disponible a no disponible en las últimas 24h.</li>';
+    const motivo = totalSinLimpiar > 0
+      ? "Sin transiciones nuevas desde que limpiaste."
+      : "Ningún punto ha pasado de disponible a no disponible en las últimas 24h.";
+    lista.innerHTML = `<li style="color:var(--text-muted);">${motivo}</li>`;
     return;
   }
   lista.innerHTML = transiciones

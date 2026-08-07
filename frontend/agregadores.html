@@ -308,7 +308,12 @@
           <ul id="agr-alertas"></ul>
         </div>
         <div class="agr-panel">
-          <h2>Dejaron de estar disponibles (24h)</h2>
+          <div id="agr-transiciones-titulo" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <h2>Dejaron de estar disponibles (24h) <span id="agr-transiciones-resumen" style="color:var(--text-muted);font-weight:400;font-size:0.72rem;"></span></h2>
+            <button type="button" id="agr-transiciones-limpiar" class="agr-icon-btn" title="Ocultar las transiciones actuales (solo en este navegador, no borra nada)" aria-label="Limpiar dejaron de estar disponibles" onclick="agrLimpiarTransiciones()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>
+          </div>
           <p class="agr-resumen-nota">
             Puntos que en el chequeo anterior aparecían disponibles y en el siguiente ya no — con dirección, hora exacta y captura de pantalla del momento en que se detectó, para poder verificar a simple vista si es real.
           </p>
@@ -348,6 +353,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/agregadores.js?v=20260807f"></script>
+<script src="js/agregadores.js?v=20260807g"></script>
 </body>
 </html>
