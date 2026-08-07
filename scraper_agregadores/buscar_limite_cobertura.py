@@ -25,6 +25,12 @@ logger = logging.getLogger("limite")
 SCRAPERS = {"glovo": GlovoScraper, "justeat": JustEatScraper}
 PRECISION_KM = 0.5
 DISTANCIAS_EXPANSION = [2.5, 5.0, 7.0, 9.0]
+# Si ni el primer punto de la expansión (2.5km) tiene cobertura, se prueban
+# estas distancias (de más cerca a menos) como extremo "seguro" para afinar
+# el límite hacia dentro en vez de quedarnos solo con "< 2.5km" -- una tienda
+# grande (centro comercial) puede tener solo rondas/avenidas sin número justo
+# alrededor, así que hace falta más de un intento.
+BASELINE_CERCANO_ESCALERA_KM = [0.3, 0.6, 1.0]
 MAX_REINTENTOS_TECNICO = 2
 # Si la línea recta de un ángulo cae en una autovía/polígono sin direcciones
 # reales, la búsqueda en espiral (radio máx 0.5km) puede agotarse sin
@@ -104,7 +110,27 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
         nota = f">= {lo}km (no se encontró el borde dentro del rango probado)" if lo else "sin datos (todo falló)"
         return {"angulo": angulo, "limite_km": None, "nota": nota}
     if lo is None:
-        return {"angulo": angulo, "limite_km": None, "nota": f"< {hi}km (no cubre ni el punto más cercano probado)"}
+        # Ni el primer punto probado (el más cercano de la expansión) tenía
+        # cobertura -- en vez de conformarnos con "< X", afinamos hacia
+        # dentro igual que la binaria normal, partiendo de un punto muy
+        # cercano a la tienda (BASELINE_CERCANO) que casi seguro sí tiene
+        # cobertura real (si ni eso, no hay límite que buscar en esta
+        # dirección: se marca aparte).
+        punto_base = None
+        for baseline in BASELINE_CERCANO_ESCALERA_KM:
+            punto_base = await crear_punto_valido(tienda, baseline, angulo)
+            if punto_base is not None:
+                break
+        if punto_base is None:
+            return {"angulo": angulo, "limite_km": None, "nota": f"< {hi}km (sin dirección real cerca de la tienda en esta dirección, ni hasta {BASELINE_CERCANO_ESCALERA_KM[-1]}km)"}
+        resultado_base = await chequear_punto(scraper, tienda, punto_base["id"], punto_base["direccion_text"], agregador)
+        await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
+        if resultado_base != "disponible":
+            return {
+                "angulo": angulo, "limite_km": None,
+                "nota": f"no disponible incluso a {punto_base['distancia_km']}km de la tienda -- puede que esta dirección esté fuera de zona por completo",
+            }
+        lo = punto_base["distancia_km"]
 
     while (hi - lo) > PRECISION_KM:
         mid = round((lo + hi) / 2, 2)
