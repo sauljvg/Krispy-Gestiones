@@ -4,6 +4,11 @@ function escapeHTML(str) {
   return div.innerHTML;
 }
 
+// Iconos de marca en vez de emoji (💬/✉) -- se ven más cuidados y más
+// compactos, para que la barra de selección quepa en una sola línea.
+const ICONO_WHATSAPP = `<svg width="15" height="15" viewBox="0 0 32 32" fill="#25D366"><path d="M16.001 3C9.373 3 4 8.373 4 15c0 2.386.697 4.61 1.902 6.484L4 29l7.716-1.862A11.94 11.94 0 0 0 16.001 27C22.628 27 28 21.627 28 15S22.628 3 16.001 3zm6.586 16.2c-.28.784-1.62 1.5-2.24 1.58-.573.074-1.29.104-2.084-.13-.48-.14-1.098-.35-1.89-.686-3.33-1.437-5.5-4.79-5.67-5.014-.166-.224-1.354-1.8-1.354-3.432s.857-2.438 1.16-2.772c.303-.334.66-.418.88-.418.22 0 .44.002.632.012.203.01.475-.077.744.568.28.66.95 2.29 1.034 2.456.084.166.14.36.028.584-.112.224-.168.362-.334.556-.166.194-.35.434-.5.582-.166.166-.34.346-.146.68.194.334.862 1.42 1.85 2.3 1.272 1.132 2.344 1.484 2.678 1.65.334.166.53.14.726-.084.196-.224.836-.976 1.06-1.31.224-.334.448-.278.756-.166.308.112 1.958.924 2.294 1.092.336.168.56.252.644.392.084.14.084.812-.196 1.596z"/></svg>`;
+const ICONO_MAILTO = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg>`;
+
 const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" ? "saona" : "kk";
 
 function aplicarBrandingEmpresa() {
@@ -914,9 +919,9 @@ function actualizarBotonWhatsappSeleccionados() {
   contador.textContent = `${n} candidato${n === 1 ? "" : "s"} seleccionado${n === 1 ? "" : "s"}`;
   const sinSeleccion = n === 0;
   btnWhatsapp.hidden = sinSeleccion;
-  btnWhatsapp.textContent = `💬 Mensaje por WhatsApp (${n})`;
+  btnWhatsapp.innerHTML = `${ICONO_WHATSAPP}WhatsApp (${n})`;
   btnMailto.hidden = sinSeleccion;
-  btnMailto.textContent = `✉ Enviar email (${n})`;
+  btnMailto.innerHTML = `${ICONO_MAILTO}Email (${n})`;
   btnCompartir.disabled = sinSeleccion;
   estadoMasivo.disabled = sinSeleccion;
   // "Seleccionar todos" toma TODOS los candidatos cargados actualmente en la

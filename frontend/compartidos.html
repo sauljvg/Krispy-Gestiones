@@ -66,7 +66,11 @@
     background: color-mix(in srgb, currentColor 18%, transparent); border-radius: 999px;
     padding: 1px 7px; font-size: 11px;
   }
-  .candidatos-seleccion-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .candidatos-seleccion-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .candidatos-seleccion-bar .btn { padding: 7px 12px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .btn-whatsapp svg { flex-shrink: 0; }
+  .btn-whatsapp:hover { border-color: #25D366; background: color-mix(in srgb, #25D366 10%, transparent); }
+  .btn-mailto svg { flex-shrink: 0; }
 
   .modal-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none;
@@ -209,8 +213,8 @@
           <option value="descartado">Descartado</option>
         </select>
         <button id="btn-compartir-seleccionados" class="btn btn-ghost" type="button">Compartir con...</button>
-        <button id="btn-whatsapp-seleccionados" class="btn btn-ghost" type="button" hidden>💬 Mensaje por WhatsApp</button>
-        <button id="btn-mailto-seleccionados" class="btn btn-ghost" type="button" hidden>✉ Enviar email</button>
+        <button id="btn-whatsapp-seleccionados" class="btn btn-ghost btn-whatsapp" type="button" hidden></button>
+        <button id="btn-mailto-seleccionados" class="btn btn-ghost btn-mailto" type="button" hidden></button>
       </div>
       <div id="candidatos-grid" class="candidatos-grid"></div>
       <div id="form-wrap"></div>
