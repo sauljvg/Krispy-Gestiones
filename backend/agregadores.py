@@ -179,7 +179,13 @@ def _geocodificar(lat, lng):
     _punto_geocodificado_valido ya no es "una vez por punto" -- puede haber
     varios intentos seguidos, así que aquí sí hace falta espaciar las
     llamadas o Nominatim empieza a bloquear/ralentizar el IP entero (nos
-    pasó: cada llamada tardaba 5-6s y fallaba tras machacarlo sin pausas)."""
+    pasó: cada llamada tardaba 5-6s y fallaba tras machacarlo sin pausas).
+
+    Devuelve (texto_plano, componentes): el texto plano es el display_name
+    genérico de Nominatim (fallback si no hay calle+número reales), y
+    componentes es el dict estructurado (road, house_number, city,
+    postcode...) -- de ahí se construye el formato español real, más fiable
+    que adivinar por posición de comas en el texto plano."""
     global _nominatim_ultima_llamada
     with _NOMINATIM_LOCK:
         espera = _NOMINATIM_INTERVALO_MIN_SEG - (time.monotonic() - _nominatim_ultima_llamada)
@@ -191,28 +197,63 @@ def _geocodificar(lat, lng):
             from geopy.geocoders import Nominatim
 
             geocoder = Nominatim(user_agent="krispy-monitor-kg")
-            location = geocoder.reverse(f"{lat}, {lng}", timeout=6)
+            location = geocoder.reverse(f"{lat}, {lng}", timeout=6, addressdetails=True)
             if location:
-                return location.address
+                return location.address, (location.raw.get("address") or {})
         except Exception:
             pass
-        return f"({lat:.4f}, {lng:.4f})"
+        return f"({lat:.4f}, {lng:.4f})", {}
 
 
 _PATRON_VIA_NO_DIRECCION = re.compile(
     r"^(Autov[ií]a|Autopista|Carretera|V[ií]a de servicio|[AMNR]-\d+\b)", re.IGNORECASE
 )
+_PATRON_NUMERO_LIMPIO = re.compile(r"^\d+[a-zA-Z]?$")
+
+
+def _construir_direccion(componentes: dict) -> str | None:
+    """'Calle número, Ciudad, CP' a partir de los componentes estructurados
+    de Nominatim -- el formato real con el que se busca en España (calle
+    primero), sin el barrio/distrito de en medio que solo confunde al
+    autocompletado, y con el código postal para no ambiguar entre calles
+    con el mismo nombre en zonas distintas. None si no hay una calle CON
+    número de portal real: autovía/polígono sin número, o portal compuesto
+    tipo "74,76" (Nominatim lo junta en un único campo house_number que ni
+    el propio buscador de los agregadores sabe resolver de forma fiable)."""
+    calle = (componentes.get("road") or "").strip()
+    numero = (componentes.get("house_number") or "").strip()
+    if not calle or not numero or not _PATRON_NUMERO_LIMPIO.match(numero):
+        return None
+    if _PATRON_VIA_NO_DIRECCION.match(calle):
+        return None
+    ciudad = (
+        componentes.get("city") or componentes.get("town")
+        or componentes.get("village") or componentes.get("municipality") or ""
+    ).strip()
+    cp = (componentes.get("postcode") or "").strip()
+    return ", ".join([f"{calle} {numero}"] + [p for p in (ciudad, cp) if p])
 
 
 def _direccion_valida(texto: str) -> bool:
-    """Tiene que ser una calle real CON número de portal -- una autovía/M-45,
-    un polígono sin número o cualquier vía sin número no es una dirección a
-    la que nadie pueda pedir de verdad. Probar ahí solo genera ruido de "no
-    disponible" que no dice nada sobre cobertura real."""
+    """Valida un direccion_text YA GUARDADO en la base -- para repasar filas
+    existentes, que pueden venir tanto en el formato nuevo ("Calle X 20,
+    Alcorcón, 28923") como en el crudo de Nominatim de antes de este cambio
+    ("20, Calle X, Barrio, ..."). Para geocodificar puntos nuevos se usa
+    _construir_direccion, que es más fiable porque parte de los componentes
+    estructurados en vez de adivinar por comas."""
     t = texto.strip()
-    if _PATRON_VIA_NO_DIRECCION.match(t):
+    primer_segmento = t.split(",", 1)[0].strip()
+    if _PATRON_VIA_NO_DIRECCION.match(primer_segmento):
         return False
-    return bool(re.match(r"^\d", t))
+    if _PATRON_NUMERO_LIMPIO.match(primer_segmento):
+        # Formato crudo viejo "74, Calle X, ..." -- si el siguiente trozo
+        # también empieza por dígitos, en realidad es un portal compuesto
+        # tipo "74,76" partido por la coma, no una calle real.
+        resto = t.split(",", 2)
+        siguiente = resto[1].strip() if len(resto) > 1 else ""
+        return not re.match(r"^\d", siguiente)
+    ultima_palabra = primer_segmento.rsplit(" ", 1)[-1] if primer_segmento else ""
+    return bool(_PATRON_NUMERO_LIMPIO.match(ultima_palabra)) and " " in primer_segmento
 
 
 def _punto_geocodificado_valido(lat, lng, intentos_extra=7, paso_km=0.07, radio_max_km=0.5):
@@ -220,21 +261,24 @@ def _punto_geocodificado_valido(lat, lng, intentos_extra=7, paso_km=0.07, radio_
     puntos cercanos en espiral alrededor del MISMO punto original (nunca más
     lejos de radio_max_km, para que siga representando ese sitio del círculo
     y no se desplace de zona) hasta encontrar una dirección numerada válida.
-    Si agota los intentos, se queda con el último probado."""
+    Si agota los intentos, se queda con el último probado (texto plano, para
+    que quede algo legible aunque no sea una dirección válida)."""
     lat0, lng0 = lat, lng
-    texto = _geocodificar(lat, lng)
-    if _direccion_valida(texto):
+    texto_plano, componentes = _geocodificar(lat, lng)
+    texto = _construir_direccion(componentes)
+    if texto:
         return lat, lng, texto
 
-    mejor = (lat, lng, texto)
+    mejor = (lat, lng, texto_plano)
     for intento in range(1, intentos_extra + 1):
         radio = min(paso_km * intento, radio_max_km)
         bearing = (intento * 137) % 360  # ángulo dorado: cubre el círculo sin repetir dirección
         lat_i, lng_i = _mover_punto(lat0, lng0, bearing, radio)
-        texto_i = _geocodificar(lat_i, lng_i)
-        mejor = (lat_i, lng_i, texto_i)
-        if _direccion_valida(texto_i):
-            return mejor
+        texto_plano_i, componentes_i = _geocodificar(lat_i, lng_i)
+        texto_i = _construir_direccion(componentes_i)
+        mejor = (lat_i, lng_i, texto_i or texto_plano_i)
+        if texto_i:
+            return lat_i, lng_i, texto_i
     return mejor
 
 
@@ -267,6 +311,29 @@ def reparar_direcciones_invalidas() -> dict:
         reparadas.append({"id": fila["id"], "antes": fila["direccion_text"], "despues": texto})
     conn.close()
     return {"reparadas": len(reparadas), "detalle": reparadas}
+
+
+def reformatear_direcciones() -> dict:
+    """Pasada única para pasar los puntos ya guardados ANTES de este cambio
+    al formato nuevo 'Calle número, Ciudad, CP' (ver _construir_direccion).
+    Re-geocodifica el mismo lat/lng exacto que ya tenían (no busca uno
+    nuevo) solo para leer los componentes estructurados -- el resultado
+    debería ser la misma calle de siempre, así que NO se tocan los chequeos
+    que ya tenía la fila (a diferencia de reparar_direcciones_invalidas,
+    que si reubica de verdad el punto). Si por lo que sea la nueva lectura
+    no da una dirección válida, se deja el texto de antes tal cual."""
+    conn = get_connection()
+    filas = conn.execute("SELECT id, lat, lng, direccion_text FROM agregadores_direcciones WHERE activo=1").fetchall()
+    cambiadas = []
+    for fila in filas:
+        _, componentes = _geocodificar(fila["lat"], fila["lng"])
+        nuevo = _construir_direccion(componentes)
+        if nuevo and nuevo != fila["direccion_text"]:
+            conn.execute("UPDATE agregadores_direcciones SET direccion_text=? WHERE id=?", (nuevo, fila["id"]))
+            cambiadas.append({"id": fila["id"], "antes": fila["direccion_text"], "despues": nuevo})
+        conn.commit()
+    conn.close()
+    return {"cambiadas": len(cambiadas), "detalle": cambiadas}
 
 
 def mover_direccion_manual(direccion_id: int, lat: float, lng: float, direccion_text: str = None) -> dict | None:

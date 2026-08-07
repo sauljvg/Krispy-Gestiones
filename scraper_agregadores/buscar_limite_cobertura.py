@@ -64,9 +64,13 @@ async def crear_punto_valido(tienda: str, distancia_km: float, angulo_grados: fl
         if punto.get("direccion_valida", True):
             return punto
         logger.warning(
-            "  punto inválido (%.2fkm, %.0f° con empuje %+d): %s -- probando otro empuje",
+            "  punto inválido (%.2fkm, %.0f° con empuje %+d): %s -- borrando y probando otro empuje",
             punto["distancia_km"], angulo_grados, jitter, punto["direccion_text"],
         )
+        try:
+            await api_client.eliminar_direccion(punto["id"])
+        except Exception as exc:
+            logger.warning("  no se pudo dar de baja el punto inválido %s: %r", punto["id"], exc)
     return None
 
 
