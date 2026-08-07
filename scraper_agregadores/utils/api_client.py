@@ -27,6 +27,13 @@ async def obtener_direcciones(tienda: str, cercano: bool = False) -> list[dict]:
 
 
 async def enviar_chequeo(data: dict) -> dict:
+    if config.MODO_LOCAL:
+        logger.info(
+            "[MODO_LOCAL] chequeo no enviado a KG: %s/%s @ dir=%s disponible=%s",
+            data.get("tienda"), data.get("agregador"), data.get("direccion_id"), data.get("disponible"),
+        )
+        return {"chequeo_id": -1, "transicion": False}
+
     url = f"{config.KG_API_BASE_URL}/api/agregadores/chequeo"
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=data, headers=_headers(), timeout=30) as resp:
@@ -38,6 +45,10 @@ async def subir_captura(chequeo_id: int, ruta_local: str):
     """Solo se llama cuando /chequeo respondió transicion=true -- sube la
     captura que el scraper ya tenía guardada en local (ver base.py) para que
     quede visible desde el dashboard, no solo en el portátil del scraper."""
+    if config.MODO_LOCAL:
+        logger.info("[MODO_LOCAL] captura no subida a KG (chequeo %s): %s", chequeo_id, ruta_local)
+        return
+
     url = f"{config.KG_API_BASE_URL}/api/agregadores/capturas/{chequeo_id}"
     try:
         with open(ruta_local, "rb") as f:
@@ -54,6 +65,10 @@ async def subir_captura(chequeo_id: int, ruta_local: str):
 
 
 async def iniciar_sesion(modo: str) -> int:
+    if config.MODO_LOCAL:
+        logger.info("[MODO_LOCAL] sesión no iniciada en KG (modo=%s)", modo)
+        return -1
+
     url = f"{config.KG_API_BASE_URL}/api/agregadores/sesiones"
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json={"modo": modo}, headers=_headers(), timeout=15) as resp:
@@ -63,6 +78,13 @@ async def iniciar_sesion(modo: str) -> int:
 
 
 async def cerrar_sesion(sesion_id: int, estado: str, exitosos: int, fallidos: int):
+    if config.MODO_LOCAL:
+        logger.info(
+            "[MODO_LOCAL] sesión no cerrada en KG: estado=%s exitosos=%d fallidos=%d",
+            estado, exitosos, fallidos,
+        )
+        return
+
     url = f"{config.KG_API_BASE_URL}/api/agregadores/sesiones/{sesion_id}"
     body = {"estado": estado, "chequeos_exitosos": exitosos, "chequeos_fallidos": fallidos}
     async with aiohttp.ClientSession() as session:
@@ -71,6 +93,10 @@ async def cerrar_sesion(sesion_id: int, estado: str, exitosos: int, fallidos: in
 
 
 async def registrar_alerta(tipo: str, mensaje: str, tienda: str = None, agregador: str = None):
+    if config.MODO_LOCAL:
+        logger.info("[MODO_LOCAL] alerta no registrada en KG: [%s] %s", tipo, mensaje)
+        return
+
     url = f"{config.KG_API_BASE_URL}/api/agregadores/alertas"
     body = {"tipo": tipo, "mensaje": mensaje, "tienda": tienda, "agregador": agregador}
     try:

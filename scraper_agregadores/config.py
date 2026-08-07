@@ -33,3 +33,12 @@ SCRAPER_RETRY_MAX = int(os.getenv("SCRAPER_RETRY_MAX", "3"))
 
 KG_API_BASE_URL = os.getenv("KG_API_BASE_URL", "http://localhost:8000")
 KG_API_KEY = os.getenv("KG_API_KEY", "")
+
+# Modo pruebas: mientras se está estabilizando un scraper (ver Uber Eats,
+# agosto 2026), correr contra producción de verdad escribe datos rotos que
+# hay que andar limpiando a mano (agregadores_chequeos/alertas). Con esto en
+# True, el scraper sigue navegando y leyendo los sitios reales -- solo deja
+# de mandar los resultados a la API de KG (ver utils/api_client.py). Sigue
+# leyendo el grid de direcciones real (no escribe nada, no hace falta
+# aislarlo). Volver a "False" cuando se confirme que el scraper es estable.
+MODO_LOCAL = os.getenv("SCRAPER_MODO_LOCAL", "False") == "True"

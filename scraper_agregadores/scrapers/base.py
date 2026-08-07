@@ -85,7 +85,6 @@ class BaseAggregatorScraper:
     def __init__(self, timeout_seg: int = 30, retry_max: int = 3):
         self.timeout_ms = timeout_seg * 1000
         self.retry_max = retry_max
-        self._modo_headless = self.iniciar_headless
         # True solo cuando la ventana visible es para que un humano resuelva un
         # challenge a mano -- ahí SÍ debe verse en pantalla. El resto de veces que se
         # corre sin headless (p.ej. Uber Eats de forma rutinaria) es solo para no
@@ -119,7 +118,16 @@ class BaseAggregatorScraper:
                 return await self._run_once(tienda_nombre, direccion, headless=headless)
             except ChallengeDetectedError as exc:
                 last_exc = exc
-                if self.permitir_resolucion_manual and headless:
+                # OJO: antes esto comprobaba "and headless", pensado solo para
+                # scrapers que arrancan headless (JustEat/Glovo). Uber Eats arranca
+                # ya con headless=False (lo necesita para no toparse con
+                # Cloudflare), así que esa condición nunca era cierta para él y
+                # nunca pasaba a modo visible-de-verdad -- seguía reintentando con
+                # la ventana oculta fuera de pantalla (ver _run_once) para
+                # siempre, sin que un humano pudiera ver ni resolver el challenge.
+                # Lo que importa no es si es headless, es si ya se le dio una
+                # oportunidad con ventana genuinamente visible.
+                if self.permitir_resolucion_manual and not self._modo_resolucion_manual:
                     logger.warning(
                         "%s: challenge anti-bot detectado. Reintentando con ventana visible "
                         "para resolverlo manualmente...",
@@ -152,7 +160,6 @@ class BaseAggregatorScraper:
         raise last_exc
 
     async def _run_once(self, tienda_nombre: str, direccion: str, headless: bool) -> ResultadoChequeo:
-        self._modo_headless = headless
         args = ["--disable-blink-features=AutomationControlled"]
         if not headless and not self._modo_resolucion_manual:
             # Uber Eats necesita una ventana "real" (no headless) para no toparse con
@@ -253,7 +260,12 @@ class BaseAggregatorScraper:
         except Exception:
             hay_terminal = False
 
-        if self._modo_headless or not hay_terminal:
+        # No basta con "no headless": Uber Eats arranca siempre así (lo necesita
+        # para no toparse con Cloudflare) pero esa ventana normalmente está fuera
+        # de pantalla (ver _run_once) porque nadie la está mirando. El chequeo
+        # correcto es _modo_resolucion_manual -- solo True cuando la ventana está
+        # realmente colocada en pantalla para que un humano la vea.
+        if not self._modo_resolucion_manual or not hay_terminal:
             raise ChallengeDetectedError(f"{self.nombre_agregador}: challenge anti-bot detectado")
 
         print(
