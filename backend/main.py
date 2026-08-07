@@ -26,6 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+import agregadores as agregadores_module
 import auth as auth_module
 import backups as backups_module
 import db as db_module
@@ -33,6 +34,7 @@ import encuestas as encuestas_module
 import scrape_jobs
 from auth_routes import COOKIE_NAME, require_admin, require_resenas
 from auth_routes import router as auth_router
+from agregadores_routes import router as agregadores_router
 from boletines_routes import router as boletines_router
 from boletines_routes import router_publico as boletines_router_publico
 from clima_routes import router as clima_router
@@ -117,12 +119,14 @@ app.include_router(encuestas_router_publico, prefix="/api/public/encuestas")
 app.include_router(disc_router, prefix="/api/disc")
 app.include_router(disc_router_publico, prefix="/api/public/disc")
 app.include_router(david_router, prefix="/api/david")
+app.include_router(agregadores_router, prefix="/api/agregadores")
 app.include_router(router, prefix="/api", dependencies=[Depends(require_resenas)])
 
 
 @app.on_event("startup")
 def _start_db_backups():
     backups_module.start_scheduler()
+    agregadores_module.start_scheduler_limpieza_capturas()
 
 
 @app.on_event("shutdown")

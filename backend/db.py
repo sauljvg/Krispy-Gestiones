@@ -13,8 +13,17 @@ DB_PATH = os.path.join(DATA_DIR, "krispy_kreme.db")
 
 
 def get_connection():
+    # WAL en vez del modo por defecto (rollback journal): permite lecturas
+    # mientras hay una escritura en curso, en vez de bloquearlas -- sin esto,
+    # una ráfaga de escrituras concurrentes (ej. el scraper de Agregadores
+    # generando muchos puntos a la vez) puede dejar "database is locked"
+    # hasta en peticiones que no tienen nada que ver, como el login. El
+    # busy_timeout (más generoso que el timeout= de connect) hace que SQLite
+    # reintente en vez de fallar de inmediato si aun así hay contención.
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=15000")
     return conn
 
 
