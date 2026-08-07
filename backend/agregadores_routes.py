@@ -164,6 +164,18 @@ def admin_eliminar_chequeo_route(chequeo_id: int):
     return {"ok": True}
 
 
+@router.delete("/chequeo/{chequeo_id}")
+def eliminar_chequeo_route(chequeo_id: int, _user: dict = Depends(require_agregadores)):
+    """Igual que admin_eliminar_chequeo_route pero con sesión de usuario en
+    vez de API key -- para el botón de borrar en "Dejaron de estar
+    disponibles" del propio dashboard (confirmar un falso positivo, p.ej. el
+    bug de coordenadas o el de fuentes bloqueadas en la captura, ya
+    corregidos, pero el registro viejo se queda hasta que alguien lo borre)."""
+    if not agregadores_module.eliminar_chequeo(chequeo_id):
+        raise HTTPException(status_code=404, detail="Chequeo no encontrado")
+    return {"ok": True}
+
+
 @router.get("/transiciones")
 def transiciones_route(
     tienda: str | None = None, horas: int = 24, _user: dict = Depends(require_agregadores)

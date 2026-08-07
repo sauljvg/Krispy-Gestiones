@@ -784,6 +784,23 @@ async function agrCargarAlertas() {
     .join("");
 }
 
+async function agrEliminarTransicion(chequeoId, boton) {
+  if (!confirm("¿Borrar este registro? Es para casos confirmados como error (p.ej. dirección o captura equivocada) -- no se puede deshacer.")) {
+    return;
+  }
+  boton.disabled = true;
+  boton.textContent = "Borrando...";
+  try {
+    const res = await fetch(`${AGR_API}/chequeo/${chequeoId}`, { method: "DELETE", credentials: "include" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    boton.closest("li").remove();
+  } catch (err) {
+    boton.disabled = false;
+    boton.textContent = "🗑 Es un error, borrar";
+    alert("No se pudo borrar. Inténtalo de nuevo.");
+  }
+}
+
 function agrLimpiarTransiciones() {
   agrTransicionesLimpiadasHasta = new Date().toISOString();
   localStorage.setItem(AGR_TRANSICIONES_LIMPIADAS_KEY, agrTransicionesLimpiadasHasta);
@@ -844,7 +861,10 @@ async function agrCargarTransiciones() {
           <div class="agr-trans-bloqueo">${t.mensaje_bloqueo || "No disponible"}</div>
           ${duracionHtml}
         </div>
-        <div class="agr-trans-acciones">${captura}</div>
+        <div class="agr-trans-acciones">
+          ${captura}
+          <button type="button" class="agr-trans-link agr-trans-borrar" onclick="agrEliminarTransicion(${t.id}, this)">🗑 Es un error, borrar</button>
+        </div>
       </li>`;
     })
     .join("");
