@@ -51,6 +51,16 @@
   .agr-filtro-btn.activo[data-agregador="glovo"] { background: #ffc244; color: #4a3300; border-color: #ffc244; }
   .agr-filtro-btn.activo[data-agregador="ubereats"] { background: #06c167; color: #fff; border-color: #06c167; }
 
+  .agr-filtro-btn-cobertura {
+    padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-secondary); font-size: 12px;
+    font-weight: 600; cursor: pointer;
+  }
+  .agr-filtro-btn-cobertura.activo[data-agregador=""] { background: var(--acento-calido); color: #fff; border-color: var(--acento-calido); }
+  .agr-filtro-btn-cobertura.activo[data-agregador="justeat"] { background: #ff8000; color: #fff; border-color: #ff8000; }
+  .agr-filtro-btn-cobertura.activo[data-agregador="glovo"] { background: #ffc244; color: #4a3300; border-color: #ffc244; }
+  .agr-filtro-btn-cobertura.activo[data-agregador="ubereats"] { background: #06c167; color: #fff; border-color: #06c167; }
+
   .agr-bottom-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; }
   @media (max-width: 900px) { .agr-bottom-grid { grid-template-columns: 1fr; } }
   .agr-leyenda { display: flex; gap: 16px; margin-top: 10px; font-size: 12px; color: var(--text-secondary); flex-wrap: wrap; }
@@ -288,16 +298,14 @@
     <div class="agr-panel">
       <div class="agr-panel-mapa-header">
         <h2>Superficie de cobertura real <span id="agr-cobertura-contador" class="agr-contador"></span></h2>
-        <div class="agr-filtro-agregador">
-          <label for="agr-cobertura-agregador" style="color:var(--text-muted);font-size:0.8rem;margin-right:4px;">Agregador:</label>
-          <select id="agr-cobertura-agregador">
-            <option value="justeat">JustEat</option>
-            <option value="glovo">Glovo</option>
-            <option value="ubereats">Uber Eats</option>
-          </select>
+        <div class="agr-filtro-agregador" id="agr-filtro-cobertura">
+          <button type="button" class="agr-filtro-btn-cobertura activo" data-agregador="">Todos</button>
+          <button type="button" class="agr-filtro-btn-cobertura" data-agregador="justeat">JustEat</button>
+          <button type="button" class="agr-filtro-btn-cobertura" data-agregador="glovo">Glovo</button>
+          <button type="button" class="agr-filtro-btn-cobertura" data-agregador="ubereats">Uber Eats</button>
         </div>
       </div>
-      <p class="agr-resumen-nota">
+      <p class="agr-resumen-nota" id="agr-cobertura-nota">
         Polígono que une los puntos más alejados donde el agregador SÍ reparte (verde) — la superficie de cobertura real, frente a los puntos donde no reparte (amarillo). Usa el último estado conocido de cada punto, no solo las últimas 24h.
       </p>
       <div id="agr-mapa-cobertura"></div>

@@ -762,7 +762,7 @@ async function agrCargarTransiciones() {
 }
 
 let agrMapaCobertura = null;
-let agrCoberturaPoligono = null;
+let agrCoberturaPoligono = []; // uno o varios (vista "Todos": uno por agregador)
 let agrCoberturaMarkers = [];
 
 function agrInitMapaCobertura(lat, lng) {
@@ -771,6 +771,46 @@ function agrInitMapaCobertura(lat, lng) {
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap",
   }).addTo(agrMapaCobertura);
+}
+
+function agrDibujarCapaCobertura(puntos, colorDisponible, colorNoDisponible, dibujarMarcadores) {
+  // Dibuja marcadores (opcional) + polígono de cobertura real (envolvente de
+  // los puntos donde SÍ reparte) para un único agregador, y devuelve
+  // {verdes, amarillos} para el contador. Con menos de 3 puntos disponibles
+  // no hay superficie que dibujar (turf.convex exige al menos un triángulo).
+  const validos = puntos.filter((p) => p.lat != null && p.lng != null);
+  const verdes = validos.filter((p) => p.disponible);
+  const amarillos = validos.filter((p) => !p.disponible);
+
+  if (dibujarMarcadores) {
+    validos.forEach((p) => {
+      const color = p.disponible ? colorDisponible : colorNoDisponible;
+      const marker = L.circleMarker([p.lat, p.lng], {
+        radius: 7, color, fillColor: color, fillOpacity: 0.85, weight: 2,
+      })
+        .bindPopup(`<b>${p.direccion_text || "Punto"}</b><br>${p.disponible ? "✅ Disponible" : "❌ No disponible"}`)
+        .addTo(agrMapaCobertura);
+      agrCoberturaMarkers.push(marker);
+    });
+  }
+
+  if (verdes.length >= 3 && typeof turf !== "undefined") {
+    try {
+      const fc = turf.featureCollection(verdes.map((p) => turf.point([p.lng, p.lat])));
+      const hull = turf.convex(fc);
+      if (hull) {
+        const latlngs = hull.geometry.coordinates[0].map(([lng, lat]) => [lat, lng]);
+        const poligono = L.polygon(latlngs, {
+          color: colorDisponible, weight: 2, fillColor: colorDisponible, fillOpacity: 0.1,
+        }).addTo(agrMapaCobertura);
+        agrCoberturaPoligono.push(poligono);
+      }
+    } catch (e) {
+      // Puntos colineales u otro caso degenerado: se queda solo con los marcadores.
+    }
+  }
+
+  return { verdes, amarillos };
 }
 
 async function agrCargarMapaCobertura() {
@@ -782,14 +822,16 @@ async function agrCargarMapaCobertura() {
       agrMapaCobertura.remove();
       agrMapaCobertura = null;
       agrCoberturaMarkers = [];
-      agrCoberturaPoligono = null;
+      agrCoberturaPoligono = [];
     }
     return;
   }
-  const select = document.getElementById("agr-cobertura-agregador");
-  const agregador = select ? select.value : "justeat";
+  const btnActivo = document.querySelector("#agr-filtro-cobertura .agr-filtro-btn-cobertura.activo");
+  const agregador = btnActivo ? btnActivo.dataset.agregador : "";
 
-  const url = `${AGR_API}/cobertura?tienda=${agrTiendaActual}&agregador=${agregador}`;
+  const url = agregador
+    ? `${AGR_API}/cobertura?tienda=${agrTiendaActual}&agregador=${agregador}`
+    : `${AGR_API}/cobertura?tienda=${agrTiendaActual}`;
   const res = await fetch(url, { credentials: "include" });
   const puntos = await res.json();
 
@@ -800,46 +842,34 @@ async function agrCargarMapaCobertura() {
 
   agrCoberturaMarkers.forEach((m) => agrMapaCobertura.removeLayer(m));
   agrCoberturaMarkers = [];
-  if (agrCoberturaPoligono) {
-    agrMapaCobertura.removeLayer(agrCoberturaPoligono);
-    agrCoberturaPoligono = null;
-  }
+  (agrCoberturaPoligono || []).forEach((p) => agrMapaCobertura.removeLayer(p));
+  agrCoberturaPoligono = [];
 
-  const validos = puntos.filter((p) => p.lat != null && p.lng != null);
-  const verdes = validos.filter((p) => p.disponible);
-  const amarillos = validos.filter((p) => !p.disponible);
+  const nota = document.getElementById("agr-cobertura-nota");
 
-  validos.forEach((p) => {
-    const color = p.disponible ? "#0ca30c" : "#fab219";
-    const marker = L.circleMarker([p.lat, p.lng], {
-      radius: 7, color, fillColor: color, fillOpacity: 0.85, weight: 2,
-    })
-      .bindPopup(`<b>${p.direccion_text || "Punto"}</b><br>${p.disponible ? "✅ Disponible" : "❌ No disponible"}`)
-      .addTo(agrMapaCobertura);
-    agrCoberturaMarkers.push(marker);
-  });
-
-  // Polígono de cobertura real: envolvente de los puntos donde SÍ reparte.
-  // Con menos de 3 puntos no hay superficie que dibujar (turf.convex exige
-  // al menos un triángulo).
-  if (verdes.length >= 3 && typeof turf !== "undefined") {
-    try {
-      const fc = turf.featureCollection(verdes.map((p) => turf.point([p.lng, p.lat])));
-      const hull = turf.convex(fc);
-      if (hull) {
-        const latlngs = hull.geometry.coordinates[0].map(([lng, lat]) => [lat, lng]);
-        agrCoberturaPoligono = L.polygon(latlngs, {
-          color: "#0ca30c", weight: 2, fillColor: "#0ca30c", fillOpacity: 0.12,
-        }).addTo(agrMapaCobertura);
-      }
-    } catch (e) {
-      // Puntos colineales u otro caso degenerado: se queda solo con los marcadores.
+  if (!agregador) {
+    // "Todos": un polígono por agregador, cada uno con su color de marca, sin
+    // marcadores individuales (con 3 agregadores solapados se saturaría el mapa).
+    const resumenes = [];
+    for (const nombre of Object.keys(AGR_NOMBRE_AGREGADOR)) {
+      const puntosAgregador = puntos.filter((p) => p.agregador === nombre);
+      const color = AGR_COLOR_MARCA[nombre] || "#888";
+      const { verdes } = agrDibujarCapaCobertura(puntosAgregador, color, color, false);
+      resumenes.push(`${AGR_NOMBRE_AGREGADOR[nombre]}: ${verdes.length}`);
     }
-  }
-
-  const nombre = AGR_NOMBRE_AGREGADOR[agregador] || agregador;
-  if (contador) {
-    contador.textContent = `${verdes.length} con cobertura / ${amarillos.length} sin cobertura (${nombre})`;
+    if (contador) contador.textContent = `Con cobertura -- ${resumenes.join(" · ")}`;
+    if (nota) {
+      nota.textContent = "Un polígono por agregador (JustEat naranja, Glovo amarillo, Uber Eats verde) uniendo los puntos donde SÍ reparte cada uno. Usa el último estado conocido de cada punto, no solo las últimas 24h.";
+    }
+  } else {
+    const { verdes, amarillos } = agrDibujarCapaCobertura(puntos, "#0ca30c", "#fab219", true);
+    const nombre = AGR_NOMBRE_AGREGADOR[agregador] || agregador;
+    if (contador) {
+      contador.textContent = `${verdes.length} con cobertura / ${amarillos.length} sin cobertura (${nombre})`;
+    }
+    if (nota) {
+      nota.textContent = "Polígono que une los puntos más alejados donde el agregador SÍ reparte (verde) — la superficie de cobertura real, frente a los puntos donde no reparte (amarillo). Usa el último estado conocido de cada punto, no solo las últimas 24h.";
+    }
   }
 }
 
@@ -884,8 +914,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   wireUserBar(user);
   agrWireFiltroAgregador();
 
-  const selectCobertura = document.getElementById("agr-cobertura-agregador");
-  if (selectCobertura) selectCobertura.addEventListener("change", agrCargarMapaCobertura);
+  document.querySelectorAll("#agr-filtro-cobertura .agr-filtro-btn-cobertura").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#agr-filtro-cobertura .agr-filtro-btn-cobertura").forEach((b) => b.classList.remove("activo"));
+      btn.classList.add("activo");
+      agrCargarMapaCobertura();
+    });
+  });
 
   await agrCargarTiendas();
   await agrCargarTodo();
