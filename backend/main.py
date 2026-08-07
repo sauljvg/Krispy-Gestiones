@@ -26,6 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+import agregadores as agregadores_module
 import auth as auth_module
 import backups as backups_module
 import db as db_module
@@ -125,6 +126,7 @@ app.include_router(router, prefix="/api", dependencies=[Depends(require_resenas)
 @app.on_event("startup")
 def _start_db_backups():
     backups_module.start_scheduler()
+    agregadores_module.start_scheduler_limpieza_capturas()
 
 
 @app.on_event("shutdown")

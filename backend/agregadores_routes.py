@@ -122,9 +122,9 @@ def recibir_chequeo(body: ChequeoIn):
 
 @router.post("/capturas/{chequeo_id}", dependencies=[Depends(require_api_key)])
 async def subir_captura_route(chequeo_id: int, archivo: UploadFile = File(...)):
-    """El scraper solo llama esto cuando /chequeo respondió transicion=true --
-    evita subir una imagen por cada uno de los muchos puntos que simplemente
-    no tienen cobertura (eso no es una transición, es el estado normal)."""
+    """El scraper sube la captura de CADA chequeo (no solo transiciones) --
+    se borran solas a los pocos días (ver agregadores.limpiar_capturas_viejas)
+    en vez de limitar de antemano cuáles se suben."""
     contenido = await archivo.read()
     agregadores_module.guardar_captura_chequeo(chequeo_id, contenido)
     return {"ok": True}
@@ -136,6 +136,32 @@ def ver_captura_route(chequeo_id: int, _user: dict = Depends(require_agregadores
     if not ruta:
         raise HTTPException(status_code=404, detail="Sin captura para este chequeo")
     return FileResponse(ruta, media_type="image/png")
+
+
+@router.get("/admin/chequeos", dependencies=[Depends(require_api_key)])
+def admin_listar_chequeos_route(
+    tienda: str,
+    agregador: str | None = None,
+    horas: int = 24,
+    contiene: str | None = Query(default=None, description="Filtra por texto contenido en la dirección"),
+):
+    """Solo para corregir a mano un dato puntual confirmado como erróneo (ver
+    admin_eliminar_chequeo_route) -- no pensado para uso normal del dashboard."""
+    chequeos = agregadores_module.get_ultimos(tienda, horas=horas)
+    if agregador:
+        chequeos = [c for c in chequeos if c["agregador"] == agregador]
+    if contiene:
+        chequeos = [c for c in chequeos if contiene.lower() in (c.get("direccion_text") or "").lower()]
+    return chequeos
+
+
+@router.delete("/admin/chequeo/{chequeo_id}", dependencies=[Depends(require_api_key)])
+def admin_eliminar_chequeo_route(chequeo_id: int):
+    """Borra un chequeo puntual (y su captura) -- para corregir un dato
+    confirmado como erróneo, no para limpiar en bloque."""
+    if not agregadores_module.eliminar_chequeo(chequeo_id):
+        raise HTTPException(status_code=404, detail="Chequeo no encontrado")
+    return {"ok": True}
 
 
 @router.get("/transiciones")

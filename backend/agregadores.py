@@ -622,6 +622,78 @@ def get_ruta_captura(chequeo_id: int) -> str | None:
     return None
 
 
+CAPTURAS_DIAS_A_CONSERVAR = 3
+
+
+def limpiar_capturas_viejas() -> int:
+    """Borra los ARCHIVOS de captura de más de CAPTURAS_DIAS_A_CONSERVAR días
+    (no la fila del chequeo ni el resto de sus datos -- get_ruta_captura ya
+    devuelve None si el archivo no existe, así que "Ver captura" simplemente
+    deja de ofrecerse para esos chequeos viejos). Pensado para correr
+    periódicamente (ver start_scheduler_limpieza) y no dejar crecer sin
+    límite el volumen de uploads."""
+    if not os.path.isdir(CAPTURAS_DIR):
+        return 0
+    limite = time.time() - CAPTURAS_DIAS_A_CONSERVAR * 86400
+    borrados = 0
+    for nombre in os.listdir(CAPTURAS_DIR):
+        ruta = os.path.join(CAPTURAS_DIR, nombre)
+        try:
+            if os.path.isfile(ruta) and os.path.getmtime(ruta) < limite:
+                os.remove(ruta)
+                borrados += 1
+        except OSError:
+            pass
+    return borrados
+
+
+_limpieza_capturas_iniciada = False
+
+
+def start_scheduler_limpieza_capturas():
+    """Hilo en segundo plano (mismo patrón que backups.start_scheduler) que
+    borra capturas de más de 3 días una vez al día."""
+    global _limpieza_capturas_iniciada
+    if _limpieza_capturas_iniciada:
+        return
+    _limpieza_capturas_iniciada = True
+
+    def _loop():
+        while True:
+            try:
+                borrados = limpiar_capturas_viejas()
+                if borrados:
+                    print(f"[agregadores] Limpieza de capturas: {borrados} archivos de más de {CAPTURAS_DIAS_A_CONSERVAR} días borrados.", flush=True)
+            except Exception as e:
+                print(f"[agregadores] Fallo en limpieza de capturas: {e}", flush=True)
+            time.sleep(24 * 3600)
+
+    threading.Thread(target=_loop, daemon=True).start()
+
+
+def eliminar_chequeo(chequeo_id: int) -> bool:
+    """Borra un chequeo puntual y su captura si tiene -- para corregir un
+    dato confirmado como erróneo (p.ej. el bug de coordenadas en bruto que
+    comprobó una dirección distinta a la real, ver main.py del scraper), no
+    para limpiar en bloque. Uso puntual vía /admin/chequeo/{id}."""
+    conn = get_connection()
+    fila = conn.execute(
+        "SELECT url_captura FROM agregadores_chequeos WHERE id=?", (chequeo_id,)
+    ).fetchone()
+    if not fila:
+        conn.close()
+        return False
+    if fila["url_captura"] and os.path.isfile(fila["url_captura"]):
+        try:
+            os.remove(fila["url_captura"])
+        except OSError:
+            pass
+    conn.execute("DELETE FROM agregadores_chequeos WHERE id=?", (chequeo_id,))
+    conn.commit()
+    conn.close()
+    return True
+
+
 def get_transiciones(tienda: str | None, horas: int = 24):
     """Puntos que aparecían disponibles y, en el chequeo siguiente (real, sin
     error), dejaron de estarlo. Amplía el resultado con timestamp del cambio,
