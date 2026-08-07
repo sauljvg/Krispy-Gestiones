@@ -1,4 +1,5 @@
 import mimetypes
+import os
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -247,6 +248,70 @@ async def agregar_archivo_route(candidato_id: int, file: UploadFile = File(...),
     contenido = await file.read()
     archivo_id = reclutamiento_module.agregar_archivo(candidato_id, file.filename, contenido)
     return {"ok": True, "id": archivo_id}
+
+
+def _leer_archivo_pdf(candidato_id: int, archivo_id: int) -> bytes:
+    candidato = reclutamiento_module.get_candidato(candidato_id)
+    if candidato is None or archivo_id not in {a["id"] for a in candidato["archivos"]}:
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    archivo = reclutamiento_module.get_archivo(archivo_id)
+    if archivo is None or not archivo["nombre_original"].lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Este archivo no es un PDF")
+    if not archivo["ruta"] or not os.path.exists(archivo["ruta"]):
+        raise HTTPException(status_code=404, detail="El archivo ya no está disponible en el servidor")
+    with open(archivo["ruta"], "rb") as f:
+        return f.read()
+
+
+@router.post("/candidatos/{candidato_id}/archivos/{archivo_id}/reextraer")
+def reextraer_archivo_route(candidato_id: int, archivo_id: int, _user: dict = Depends(require_acceso_candidato)):
+    """Vuelve a leer un PDF que YA está adjunto a esta ficha -- pensado para
+    candidatos cuyo CV se extrajo con el metodo "local" (sin IA, mas propenso
+    a mezclar columnas) antes de que GEMINI_API_KEY estuviera configurada, o
+    cuando Gemini fallo puntualmente en su momento. No sobreescribe nada por
+    su cuenta: el frontend rellena el formulario con el resultado para que
+    el reclutador lo revise antes de guardar, igual que al subir un CV
+    nuevo."""
+    contenido = _leer_archivo_pdf(candidato_id, archivo_id)
+    try:
+        candidatos, metodo = cv_extraction.extraer_cv(contenido)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    if not candidatos:
+        raise HTTPException(status_code=422, detail="No se reconoció ningún candidato en este PDF")
+    return {"ok": True, "metodo": metodo, "candidato": candidatos[0]}
+
+
+@router.post("/candidatos/{candidato_id}/archivos/{archivo_id}/extraer-foto")
+def extraer_foto_route(candidato_id: int, archivo_id: int, _user: dict = Depends(require_acceso_candidato)):
+    """Busca la foto de perfil dentro de un PDF ya adjunto y, si encuentra
+    una, la guarda como foto del candidato -- se llama automáticamente justo
+    después de subir/re-leer un CV (ver compartidos.js), nunca hace falta
+    pedirla aparte."""
+    contenido = _leer_archivo_pdf(candidato_id, archivo_id)
+    foto = cv_extraction.extraer_foto(contenido)
+    if foto is None:
+        return {"ok": True, "foto_encontrada": False}
+    datos, ext = foto
+    reclutamiento_module.guardar_foto(candidato_id, datos, ext)
+    return {"ok": True, "foto_encontrada": True}
+
+
+@router.get("/candidatos/{candidato_id}/foto")
+def foto_candidato_route(candidato_id: int, _user: dict = Depends(require_acceso_candidato)):
+    ruta = reclutamiento_module.get_foto_ruta(candidato_id)
+    if not ruta or not os.path.exists(ruta):
+        raise HTTPException(status_code=404, detail="Este candidato no tiene foto")
+    media_type = mimetypes.guess_type(ruta)[0] or "image/jpeg"
+    return FileResponse(ruta, media_type=media_type)
+
+
+@router.delete("/candidatos/{candidato_id}/foto")
+def quitar_foto_route(candidato_id: int, _user: dict = Depends(require_acceso_candidato)):
+    if reclutamiento_module.get_candidato(candidato_id) is None:
+        raise HTTPException(status_code=404, detail="Candidato no encontrado")
+    reclutamiento_module.quitar_foto(candidato_id)
+    return {"ok": True}
 
 
 @router.get("/candidatos/{candidato_id}/archivos/{archivo_id}")

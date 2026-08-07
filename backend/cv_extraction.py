@@ -57,10 +57,28 @@ def _extraer_con_gemini(pdf_bytes: bytes) -> list[dict]:
         "[\n  {\n"
         + ",\n".join(f'    "{f}": "string o vacío"' for f in EXTRACTION_FIELDS)
         + ',\n    "extra": { "nombre_del_campo": "valor" }\n  }\n]\n'
-        "Usa \"extra\" para cualquier dato relevante del CV que no encaje en los campos anteriores "
-        "(idiomas, carnet de conducir, vehículo propio, redes sociales, certificaciones, etc.). "
-        "No inventes datos que no aparezcan en el CV: si no encuentras un dato, deja el campo como cadena vacía. "
-        "Si solo hay un candidato, devuelve igualmente un array con un único elemento."
+        "Usa \"extra\" para cualquier dato relevante del CV que no encaje en los campos anteriores. "
+        "Muchos CVs vienen de portales de empleo (InfoJobs y similares) con secciones estructuradas -- "
+        "captura estas SIEMPRE que aparezcan, cada una como un único campo de texto en \"extra\" (no las "
+        "descartes ni las mezcles con los campos fijos de arriba):\n"
+        "- \"Idiomas\": cada idioma con su nivel, separados por \" · \" (ej. \"Español: Nativo · Inglés: Intermedio\").\n"
+        "- \"Conocimientos\": la lista de habilidades/etiquetas, separadas por \", \".\n"
+        "- \"Situación laboral\": si está trabajando y si busca empleo activamente.\n"
+        "- \"Preferencias laborales\": puesto(s) deseado(s), modalidad, provincia, tipo de contrato, jornada y "
+        "salario mínimo, todo en una frase.\n"
+        "- \"Disponibilidad para viajar\" y \"Disponibilidad para cambiar de residencia\": si aparecen como datos "
+        "separados (aparte del campo general de disponibilidad).\n"
+        "- \"Estudios\": título, centro y fechas de cada formación reglada, separados por \" · \".\n"
+        "- \"Preguntas de selección\": si el documento trae un cuestionario tipo \"pregunta | puntuación | "
+        "respuesta\", únelas TODAS en un solo texto, una por línea con \" — \" entre pregunta, puntuación y "
+        "respuesta (ej. \"¿Disponibilidad inmediata? — 10/10 — Sí, inmediata\"), y añade al final la nota total "
+        "si aparece (ej. \"Nota: 50/50\").\n"
+        "Además, cualquier otro dato suelto que no encaje en nada de lo anterior (carnet de conducir, si es "
+        "autónomo, vehículo propio, redes sociales, certificaciones, etc.) también va en \"extra\", cada uno "
+        "con su propia clave.\n"
+        "No inventes datos que no aparezcan en el CV: si no encuentras un dato, deja el campo como cadena vacía "
+        "o no lo incluyas en \"extra\". Si solo hay un candidato, devuelve igualmente un array con un único "
+        "elemento."
     )
 
     body = {
@@ -273,6 +291,45 @@ def _segmentar_paginas_por_candidato(reader) -> list[str]:
     if actual:
         segmentos.append("\n".join(actual))
     return segmentos
+
+
+def extraer_foto(pdf_bytes: bytes) -> tuple[bytes, str] | None:
+    """Busca una foto de candidato en la PRIMERA página del PDF -- los CVs de
+    portales de empleo (InfoJobs, LinkedIn...) casi siempre la ponen ahí. Se
+    queda con la imagen más grande que tenga proporciones de retrato
+    razonables (ni una franja apaisada tipo banner, ni rarísima) -- no es
+    infalible (podría coger un logo grande en vez de la cara), pero evita
+    los casos más obvios de foto equivocada. Solo tiene sentido llamarla
+    cuando el PDF trae UN SOLO candidato (ver extraer_cv) -- en un PDF por
+    lotes no hay forma fiable de saber de qué página es la foto de quién."""
+    from pypdf import PdfReader
+
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        if not reader.pages:
+            return None
+        mejor = None
+        mejor_area = 0
+        for img in reader.pages[0].images:
+            try:
+                ancho, alto = img.image.size
+            except Exception:
+                continue
+            if ancho < 80 or alto < 80:
+                continue
+            ratio = ancho / alto
+            if ratio < 0.55 or ratio > 1.8:
+                continue
+            area = ancho * alto
+            if area > mejor_area:
+                ext = os.path.splitext(img.name)[1].lower() or ".jpg"
+                if ext not in (".jpg", ".jpeg", ".png"):
+                    ext = ".jpg"
+                mejor_area = area
+                mejor = (img.data, ext)
+        return mejor
+    except Exception:
+        return None
 
 
 def _extraer_local(pdf_bytes: bytes) -> list[dict]:

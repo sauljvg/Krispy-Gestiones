@@ -594,6 +594,10 @@ function renderForm() {
     <div id="extraccion-aviso-wrap"></div>
     <div id="revision-multiple-wrap"></div>`;
 
+  const fotoFormHTML = esEdicion
+    ? `<div id="candidato-foto-wrap-cont">${candidatoEditando.tiene_foto ? fotoPreviewHTML(candidatoEditando.id) : ""}</div>`
+    : "";
+
   const resultadoTestHTML = esEdicion && candidatoEditando.informe_tipo_clave
     ? (() => {
         const params = new URLSearchParams({
@@ -606,9 +610,13 @@ function renderForm() {
     : "";
 
   const archivosHTML = esEdicion && candidatoEditando.archivos.length
-    ? `<div class="archivos-lista">${candidatoEditando.archivos.map((a) =>
-        `<a href="${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}/archivos/${a.id}" target="_blank" rel="noopener">📄 ${escapeHTML(a.nombre_original)}</a>`
-      ).join("")}</div>`
+    ? `<div class="archivos-lista">${candidatoEditando.archivos.map((a) => `
+        <div class="archivo-item-fila">
+          <a href="${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}/archivos/${a.id}" target="_blank" rel="noopener">📄 ${escapeHTML(a.nombre_original)}</a>
+          ${a.nombre_original.toLowerCase().endsWith(".pdf") ? `<button type="button" class="btn-mini btn-reextraer-cv" data-archivo-id="${a.id}">🔄 Re-extraer con IA</button>` : ""}
+        </div>`
+      ).join("")}</div>
+      <div id="extraccion-aviso-wrap-edicion"></div>`
     : "";
 
   const agregarArchivoHTML = esEdicion ? `
@@ -620,6 +628,7 @@ function renderForm() {
   wrap.innerHTML = `
     <div class="candidato-form">
       <h3>${esEdicion ? "Editar candidato" : "Nuevo candidato"}</h3>
+      ${fotoFormHTML}
       ${resultadoTestHTML}
       ${subirCvHTML}
       <div id="single-candidato-wrap">
@@ -669,6 +678,11 @@ function renderForm() {
   document.getElementById("btn-guardar-candidato").addEventListener("click", guardarCandidato);
   if (esEdicion) {
     document.getElementById("btn-eliminar-candidato").addEventListener("click", eliminarCandidatoActual);
+    wrap.querySelectorAll(".btn-reextraer-cv").forEach((btn) => {
+      btn.addEventListener("click", () => reextraerCv(Number(btn.dataset.archivoId)));
+    });
+    const btnQuitarFoto = wrap.querySelector(".btn-quitar-foto");
+    if (btnQuitarFoto) btnQuitarFoto.addEventListener("click", () => quitarFotoCandidato(candidatoEditando.id));
   } else {
     document.getElementById("btn-extraer-cv").addEventListener("click", extraerCvYRellenar);
   }
@@ -810,6 +824,55 @@ async function extraerCvYRellenar() {
   }
 }
 
+// Re-lee un PDF que YA está adjunto a esta ficha con el extractor actual
+// (Gemini si hay clave configurada) -- pensado para candidatos cuyo CV se
+// procesó con el método local antes de tener Gemini disponible, o cuando
+// falló puntualmente en su momento. Rellena el formulario para revisar,
+// igual que al subir un CV nuevo -- no guarda nada por su cuenta.
+async function reextraerCv(archivoId) {
+  const avisoWrap = document.getElementById("extraccion-aviso-wrap-edicion");
+  avisoWrap.innerHTML = `<p class="staff-hint">Volviendo a leer el CV...</p>`;
+  const resp = await fetch(
+    `${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}/archivos/${archivoId}/reextraer`,
+    { method: "POST" }
+  );
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    avisoWrap.innerHTML = `<p class="extraccion-aviso local">${escapeHTML(err.detail || "No se pudo volver a leer el CV.")}</p>`;
+    return;
+  }
+  const data = await resp.json();
+  avisoWrap.innerHTML = avisoExtraccionHTML(data.metodo, 1);
+  rellenarFormConCandidato(data.candidato);
+  // Aprovecha que ya estamos releyendo este PDF para intentar sacar también
+  // la foto, por si el candidato no tenía (ej. ficha antigua sin foto).
+  const fotoResp = await fetch(
+    `${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}/archivos/${archivoId}/extraer-foto`,
+    { method: "POST" }
+  ).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (fotoResp?.foto_encontrada) mostrarFotoForm(candidatoEditando.id);
+}
+
+function fotoPreviewHTML(candidatoId) {
+  return `<div class="candidato-foto-preview-wrap">
+    <img src="${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}/foto?t=${Date.now()}" alt="Foto del candidato" class="candidato-foto-preview">
+    <button type="button" class="btn-mini btn-quitar-foto" data-candidato-id="${candidatoId}">🗑 Quitar foto</button>
+  </div>`;
+}
+
+function mostrarFotoForm(candidatoId) {
+  const wrap = document.getElementById("candidato-foto-wrap-cont");
+  if (!wrap) return;
+  wrap.innerHTML = fotoPreviewHTML(candidatoId);
+  wrap.querySelector(".btn-quitar-foto").addEventListener("click", () => quitarFotoCandidato(candidatoId));
+}
+
+async function quitarFotoCandidato(candidatoId) {
+  await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}/foto`, { method: "DELETE" });
+  const wrap = document.getElementById("candidato-foto-wrap-cont");
+  if (wrap) wrap.innerHTML = "";
+}
+
 async function guardarCandidato() {
   const campos = {};
   document.querySelectorAll(".candidato-input").forEach((el) => {
@@ -848,7 +911,13 @@ async function guardarCandidato() {
     if (inputCv && inputCv.files.length) {
       const formData = new FormData();
       formData.append("file", inputCv.files[0]);
-      await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}/archivos`, { method: "POST", body: formData });
+      const archivoResp = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}/archivos`, { method: "POST", body: formData })
+        .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      // Intenta sacar la foto de perfil del mismo PDF -- si no encuentra
+      // ninguna razonable, sencillamente no pasa nada (queda sin foto).
+      if (archivoResp?.id) {
+        await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}/archivos/${archivoResp.id}/extraer-foto`, { method: "POST" }).catch(() => {});
+      }
     }
   }
   cerrarForm();
@@ -895,12 +964,20 @@ function candidatoMiniCardHTML(c) {
   const vacanteTxt = vacante ? `📁 ${vacante.puesto}${vacante.centro ? ` · ${vacante.centro}` : ""}` : "Sin vacante asignada";
   const seleccionada = modoSeleccionCandidatos && candidatosSeleccionadosIds.has(c.id);
   const checkbox = modoSeleccionCandidatos ? `<input type="checkbox" ${seleccionada ? "checked" : ""} style="margin-right:4px;">` : "";
+  const fotoHTML = c.tiene_foto
+    ? `<img class="candidato-mini-foto" src="${AUTH_API_BASE}/reclutamiento/candidatos/${c.id}/foto" alt="">`
+    : `<span class="candidato-mini-foto candidato-mini-foto-vacia">${escapeHTML((c.nombre_completo || "?").trim()[0] || "?")}</span>`;
   return `
     <div class="candidato-mini-card ${seleccionada ? "seleccionada" : ""}" data-candidato-id="${c.id}">
-      <h4>${checkbox}${escapeHTML(c.nombre_completo || "(sin nombre)")} ${estadoBadgeHTML(c.estado)} ${resultadoBadgeHTML(c.test_resultado)}</h4>
-      <p>${escapeHTML(c.puesto_solicitado || "")}</p>
-      <p>${escapeHTML(linea2)}</p>
-      <p style="color:var(--text-muted);">${escapeHTML(vacanteTxt)}</p>
+      <div class="candidato-mini-card-fila">
+        ${fotoHTML}
+        <div class="candidato-mini-card-info">
+          <h4>${checkbox}${escapeHTML(c.nombre_completo || "(sin nombre)")} ${estadoBadgeHTML(c.estado)} ${resultadoBadgeHTML(c.test_resultado)}</h4>
+          <p>${escapeHTML(c.puesto_solicitado || "")}</p>
+          <p>${escapeHTML(linea2)}</p>
+          <p style="color:var(--text-muted);">${escapeHTML(vacanteTxt)}</p>
+        </div>
+      </div>
     </div>`;
 }
 

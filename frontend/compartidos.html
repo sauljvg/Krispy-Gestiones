@@ -101,6 +101,18 @@
   .candidato-mini-card h4 { margin: 0 0 4px; font-size: 14px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .candidato-mini-card p { margin: 2px 0; font-size: 12px; color: var(--text-secondary); }
   .candidato-mini-card.seleccionada { border-color: var(--acento); box-shadow: 0 0 0 2px color-mix(in srgb, var(--acento) 20%, transparent); }
+  .candidato-mini-card-fila { display: flex; gap: 10px; align-items: flex-start; }
+  .candidato-mini-card-info { flex: 1; min-width: 0; }
+  .candidato-mini-foto {
+    width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+    background: var(--surface-1); border: 1px solid var(--border);
+  }
+  .candidato-mini-foto-vacia {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;
+  }
+  .candidato-foto-preview-wrap { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .candidato-foto-preview { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; border: 1px solid var(--border); }
   .candidato-whatsapp-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; cursor: default; }
   .candidato-whatsapp-row h4 { margin: 0; }
   .candidato-whatsapp-row p { margin: 2px 0 0; }
@@ -124,6 +136,7 @@
   .extra-editor-row input { flex: 1; }
   .archivos-lista { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px; }
   .archivos-lista a { font-size: 13px; }
+  .archivo-item-fila { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
   .badge-vacante-estado { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
   .badge-abierta { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
