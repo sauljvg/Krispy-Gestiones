@@ -109,9 +109,8 @@ def recibir_chequeo(body: ChequeoIn):
     if transicion:
         agregadores_module.registrar_alerta(
             tipo="paso_a_no_disponible",
-            mensaje=(
-                f"{body.agregador}: un punto que estaba disponible en {body.tienda} "
-                f"dejó de estarlo. {body.mensaje_bloqueo or ''}".strip()
+            mensaje=agregadores_module.formatear_alerta_transicion(
+                body.agregador, body.tienda, body.direccion_id, body.mensaje_bloqueo
             ),
             tienda=body.tienda,
             agregador=body.agregador,

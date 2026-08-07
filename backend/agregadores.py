@@ -302,6 +302,25 @@ def mover_direccion_manual(direccion_id: int, lat: float, lng: float, direccion_
     return dict(fila)
 
 
+def formatear_alerta_transicion(agregador: str, tienda: str, direccion_id: int | None, mensaje_bloqueo: str | None) -> str:
+    """Mensaje de la alerta 'paso_a_no_disponible' -- antes solo llevaba el
+    slug interno de la tienda ("granplaza2") sin decir QUÉ punto exacto dejó
+    de estar disponible, aunque el dato ya está guardado y "Dejaron de estar
+    disponibles" sí lo muestra para el mismo evento. Se usa el nombre real de
+    la tienda y, si hay direccion_id, la dirección completa de ese punto."""
+    nombre_tienda = TIENDAS.get(tienda, {}).get("nombre", tienda)
+    direccion_text = None
+    if direccion_id:
+        conn = get_connection()
+        fila = conn.execute(
+            "SELECT direccion_text FROM agregadores_direcciones WHERE id=?", (direccion_id,)
+        ).fetchone()
+        conn.close()
+        direccion_text = fila["direccion_text"] if fila else None
+    ubicacion = direccion_text or f"tienda {nombre_tienda}"
+    return f"{agregador}: {ubicacion} dejó de estar disponible. {mensaje_bloqueo or ''}".strip()
+
+
 def eliminar_direccion(direccion_id: int) -> bool:
     """Baja lógica (activo=0), no DELETE -- si se borrara la fila, el hueco
     (tienda, distancia, angulo) quedaría libre y get_o_crear_direcciones lo
