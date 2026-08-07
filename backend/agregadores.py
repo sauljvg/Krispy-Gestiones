@@ -391,7 +391,13 @@ def crear_punto_calculado(tienda: str, distancia_km: float, angulo_grados: float
     conn.commit()
     fila = conn.execute("SELECT * FROM agregadores_direcciones WHERE id=?", (cur.lastrowid,)).fetchone()
     conn.close()
-    return dict(fila)
+    resultado = dict(fila)
+    # La búsqueda en espiral puede agotar los intentos sin encontrar nada
+    # válido (p.ej. cae en plena M-40) y quedarse con el último probado --
+    # sigue siendo inválido. El que llama (script de límite de cobertura)
+    # necesita saberlo para no tratar ese chequeo como un dato real.
+    resultado["direccion_valida"] = _direccion_valida(direccion_text)
+    return resultado
 
 
 def agregar_direccion_manual(tienda: str, lat: float, lng: float, direccion_text: str = None) -> dict | None:

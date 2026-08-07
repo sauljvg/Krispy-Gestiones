@@ -16,6 +16,26 @@ def _headers():
     return {"X-API-Key": config.KG_API_KEY, "Content-Type": "application/json"}
 
 
+async def crear_direccion_calculada(tienda: str, distancia_km: float, angulo_grados: float) -> dict:
+    """Para el script de búsqueda del límite de cobertura (investigar_limite_cobertura.py):
+    crea un punto de test a la distancia/ángulo pedidos, geocodificado igual que el grid
+    fijo (evita autovías/puntos sin número). Devuelve el punto con la distancia/ángulo
+    REALES (puede desplazarse hasta 0.5km al buscar una dirección válida cercana)."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direcciones/calculada"
+    body = {"tienda": tienda, "distancia_km": distancia_km, "angulo_grados": angulo_grados}
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=body, headers=_headers(), timeout=30) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+
+async def eliminar_direccion(direccion_id: int):
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direccion/{direccion_id}"
+    async with aiohttp.ClientSession() as session:
+        async with session.delete(url, headers=_headers(), timeout=15) as resp:
+            resp.raise_for_status()
+
+
 async def obtener_direcciones(
     tienda: str, cercano: bool = False, agregador: str = None, solo_sin_datos: bool = False
 ) -> list[dict]:
