@@ -34,6 +34,12 @@ let agrReinicios = JSON.parse(localStorage.getItem(AGR_REINICIOS_KEY) || "{}");
 const AGR_ALERTAS_LIMPIADAS_KEY = "agr_alertas_limpiadas_hasta";
 let agrAlertasLimpiadasHasta = localStorage.getItem(AGR_ALERTAS_LIMPIADAS_KEY) || null;
 
+// Mismo patrón que las alertas, para "Últimos chequeos".
+const AGR_TABLA_LIMPIADA_KEY = "agr_tabla_limpiada_hasta";
+let agrTablaLimpiadaHasta = localStorage.getItem(AGR_TABLA_LIMPIADA_KEY) || null;
+const AGR_TABLA_COLAPSADA_KEY = "agr_tabla_colapsada";
+let agrTablaColapsada = localStorage.getItem(AGR_TABLA_COLAPSADA_KEY) === "1";
+
 const AGR_COLOR_MARCA = { justeat: "#ff8000", glovo: "#ffc244", ubereats: "#06c167" };
 const AGR_NOMBRE_AGREGADOR = { justeat: "JustEat", glovo: "Glovo", ubereats: "Uber Eats" };
 let agrMostrarCorrectos = false;
@@ -435,6 +441,23 @@ async function agrCargarMapa() {
   agrRenderMapa(await res.json());
 }
 
+function agrLimpiarTabla() {
+  agrTablaLimpiadaHasta = new Date().toISOString();
+  localStorage.setItem(AGR_TABLA_LIMPIADA_KEY, agrTablaLimpiadaHasta);
+  agrCargarTabla();
+}
+
+function agrColapsarTabla() {
+  agrTablaColapsada = !agrTablaColapsada;
+  localStorage.setItem(AGR_TABLA_COLAPSADA_KEY, agrTablaColapsada ? "1" : "0");
+  agrAplicarColapsoTabla();
+}
+
+function agrAplicarColapsoTabla() {
+  document.getElementById("agr-tabla-scroll").classList.toggle("agr-colapsado", agrTablaColapsada);
+  document.getElementById("agr-tabla-colapsar-icono").classList.toggle("agr-colapsado", agrTablaColapsada);
+}
+
 function agrFilaTabla(c) {
   const hora = new Date(c.timestamp).toLocaleString("es-ES", { timeZone: "Europe/Madrid" });
   const detalle = c.error_texto ? `⚠️ ${c.error_texto}` : c.mensaje_bloqueo || "-";
@@ -458,14 +481,22 @@ async function agrCargarTabla() {
     return;
   }
   const res = await fetch(`${AGR_API}/ultimos?tienda=${agrTiendaActual}&horas=24`, { credentials: "include" });
-  const chequeos = await res.json();
+  let chequeos = await res.json();
+  const totalSinLimpiar = chequeos.length;
+  if (agrTablaLimpiadaHasta) {
+    chequeos = chequeos.filter((c) => c.timestamp > agrTablaLimpiadaHasta);
+  }
   const incorrectos = chequeos.filter((c) => c.error_texto);
   const correctos = chequeos.filter((c) => !c.error_texto);
+  const notaLimpiados = totalSinLimpiar > chequeos.length ? ` -- ${totalSinLimpiar - chequeos.length} ocultos` : "";
 
-  contador.textContent = `(${incorrectos.length} con fallo técnico / ${correctos.length} correctos)`;
+  contador.textContent = `(${incorrectos.length} con fallo técnico / ${correctos.length} correctos${notaLimpiados})`;
 
   if (incorrectos.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-muted);">Sin fallos técnicos en 24h. Todos los chequeos se completaron correctamente.</td></tr>';
+    const motivo = totalSinLimpiar > 0 && chequeos.length === 0
+      ? "Sin chequeos nuevos desde que limpiaste."
+      : "Sin fallos técnicos en 24h. Todos los chequeos se completaron correctamente.";
+    tbody.innerHTML = `<tr><td colspan="6" style="color:var(--text-muted);">${motivo}</td></tr>`;
   } else {
     tbody.innerHTML = incorrectos.slice(0, 30).map(agrFilaTabla).join("");
   }
@@ -945,6 +976,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   wireUserBar(user);
   agrWireFiltroAgregador();
+  agrAplicarColapsoTabla();
 
   document.querySelectorAll("#agr-filtro-cobertura .agr-filtro-btn-cobertura").forEach((btn) => {
     btn.addEventListener("click", () => {

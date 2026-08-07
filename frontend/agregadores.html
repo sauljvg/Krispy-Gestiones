@@ -172,6 +172,9 @@
   #agr-tabla-toggle { font-size: 0.72rem; background: none; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; color: var(--text-secondary); cursor: pointer; }
   #agr-tabla-toggle:hover { background: var(--surface-page); }
   #agr-tabla-scroll { max-height: 520px; overflow-y: auto; overflow-x: auto; }
+  #agr-tabla-scroll.agr-colapsado { display: none; }
+  #agr-tabla-colapsar-icono { transition: transform 0.15s; }
+  #agr-tabla-colapsar-icono.agr-colapsado { transform: rotate(-90deg); }
   #agr-tabla { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
   #agr-tabla th, #agr-tabla td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
   #agr-tabla th { color: var(--text-secondary); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; position: sticky; top: 0; background: var(--surface-1); }
@@ -256,7 +259,15 @@
       <div class="agr-panel">
         <div id="agr-tabla-titulo">
           <h2>Últimos chequeos <span id="agr-tabla-contador" style="color:var(--text-muted);font-weight:400;font-size:0.8rem;"></span></h2>
-          <button type="button" id="agr-tabla-toggle" hidden>Mostrar detalles correctos</button>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button type="button" id="agr-tabla-toggle" hidden>Mostrar detalles correctos</button>
+            <button type="button" id="agr-tabla-limpiar" class="agr-icon-btn" title="Ocultar los chequeos actuales (solo en este navegador, no borra nada)" aria-label="Limpiar últimos chequeos" onclick="agrLimpiarTabla()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>
+            <button type="button" id="agr-tabla-colapsar" class="agr-icon-btn" title="Colapsar/expandir" aria-label="Colapsar últimos chequeos" onclick="agrColapsarTabla()">
+              <svg id="agr-tabla-colapsar-icono" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+          </div>
         </div>
         <div id="agr-tabla-scroll">
           <table id="agr-tabla">
@@ -337,6 +348,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/agregadores.js?v=20260807e"></script>
+<script src="js/agregadores.js?v=20260807f"></script>
 </body>
 </html>

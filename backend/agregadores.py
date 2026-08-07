@@ -365,21 +365,15 @@ def agregar_direccion_manual(tienda: str, lat: float, lng: float, direccion_text
     return dict(fila)
 
 
-def _priorizar_sin_datos(conn, resultado: list[dict], agregador: str) -> list[dict]:
-    """Reordena para que las direcciones sin ningún chequeo real (sin contar
+def _con_datos_reales(conn, resultado: list[dict], agregador: str) -> set:
+    """IDs de direcciones que ya tienen al menos un chequeo real (sin contar
     fallos técnicos, que no dicen nada sobre si reparte o no) de este
-    agregador vayan primero. Se aplica en CADA tienda por igual -- como el
-    scheduler recorre las 6 tiendas en cada pasada (ver scheduler.py), esto
-    ya prioriza "los puntos sin datos" en conjunto sin tener que tocar el
-    scheduler ni conocer el resto de tiendas: si una pasada se corta a medias
-    (ha pasado de verdad -- ver logs/catchup_20260807_111914_completo.log),
-    lo que sí se llegó a comprobar son los puntos que más falta hacía cubrir,
-    en vez de repetir de nuevo los primeros de la lista."""
+    agregador."""
     if not resultado:
-        return resultado
+        return set()
     ids = [r["id"] for r in resultado]
     marcadores = ",".join("?" * len(ids))
-    con_datos = {
+    return {
         row["direccion_id"]
         for row in conn.execute(
             f"""SELECT DISTINCT direccion_id FROM agregadores_chequeos
@@ -387,19 +381,43 @@ def _priorizar_sin_datos(conn, resultado: list[dict], agregador: str) -> list[di
             (agregador, *ids),
         ).fetchall()
     }
+
+
+def _priorizar_sin_datos(conn, resultado: list[dict], agregador: str) -> list[dict]:
+    """Reordena para que las direcciones sin datos reales de este agregador
+    vayan primero (ver _con_datos_reales). Se aplica en CADA tienda por
+    igual -- como el scheduler recorre las 6 tiendas en cada pasada (ver
+    scheduler.py), esto ya prioriza "los puntos sin datos" en conjunto sin
+    tener que tocar el scheduler ni conocer el resto de tiendas: si una
+    pasada se corta a medias (ha pasado de verdad -- ver
+    logs/catchup_20260807_111914_completo.log), lo que sí se llegó a
+    comprobar son los puntos que más falta hacía cubrir, en vez de repetir
+    de nuevo los primeros de la lista."""
+    if not resultado:
+        return resultado
+    con_datos = _con_datos_reales(conn, resultado, agregador)
     sin_datos = [r for r in resultado if r["id"] not in con_datos]
     con_datos_lista = [r for r in resultado if r["id"] in con_datos]
     return sin_datos + con_datos_lista
 
 
-def get_o_crear_direcciones(tienda: str, radios_km=None, agregador: str | None = None) -> list[dict]:
+def get_o_crear_direcciones(
+    tienda: str, radios_km=None, agregador: str | None = None, solo_sin_datos: bool = False
+) -> list[dict]:
     """Genera (si hace falta) y devuelve el grid de puntos de test de una
     tienda. Determinista: mismos radios/ángulos siempre dan los mismos
     puntos, así se puede comparar disponibilidad de un punto en el tiempo.
 
     `agregador`, si se pasa, prioriza al principio de la lista los puntos que
     ese agregador concreto todavía no ha comprobado nunca de verdad (ver
-    _priorizar_sin_datos) -- el orden base del grid no cambia para nada más."""
+    _priorizar_sin_datos) -- el orden base del grid no cambia para nada más.
+
+    `solo_sin_datos=True` (requiere `agregador`) va más allá de solo
+    reordenar: DEVUELVE únicamente esos puntos sin datos, para que el
+    scheduler pueda hacer una pasada previa "solo huecos" cruzando las 6
+    tiendas antes de empezar la pasada completa normal por tienda (ver
+    scheduler.py) -- así el hueco se cubre esté donde esté, no solo dentro de
+    la tienda que le toque primero por orden."""
     if tienda not in TIENDAS:
         return []
     radios_km = radios_km or GRID_RADIOS_KM
@@ -467,7 +485,10 @@ def get_o_crear_direcciones(tienda: str, radios_km=None, agregador: str | None =
             if fila["id"] not in ids_grid:
                 resultado.append(dict(fila))
 
-        if agregador:
+        if agregador and solo_sin_datos:
+            con_datos = _con_datos_reales(conn, resultado, agregador)
+            resultado = [r for r in resultado if r["id"] not in con_datos]
+        elif agregador:
             resultado = _priorizar_sin_datos(conn, resultado, agregador)
 
         return resultado

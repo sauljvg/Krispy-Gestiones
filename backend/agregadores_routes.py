@@ -172,15 +172,18 @@ def transiciones_route(
 
 
 @router.get("/direcciones/{tienda}", dependencies=[Depends(require_api_key)])
-def direcciones_route(tienda: str, cercano: bool = False, agregador: str | None = None):
+def direcciones_route(
+    tienda: str, cercano: bool = False, agregador: str | None = None, solo_sin_datos: bool = False
+):
     """El scraper llama esto al empezar una pasada: genera (si hace falta)
     y geocodifica el grid server-side, así el geocoding se cachea una única
     vez para todo el mundo en vez de cada portátil/proceso repitiéndolo.
 
     `agregador`, si se manda, prioriza los puntos que ese agregador nunca ha
-    comprobado de verdad -- ver get_o_crear_direcciones."""
+    comprobado de verdad. `solo_sin_datos=True` va más allá y devuelve SOLO
+    esos -- ver get_o_crear_direcciones."""
     radios = agregadores_module.GRID_RADIOS_CERCANO_KM if cercano else agregadores_module.GRID_RADIOS_KM
-    return agregadores_module.get_o_crear_direcciones(tienda, radios, agregador)
+    return agregadores_module.get_o_crear_direcciones(tienda, radios, agregador, solo_sin_datos)
 
 
 @router.post("/direcciones/reparar", dependencies=[Depends(require_api_key)])

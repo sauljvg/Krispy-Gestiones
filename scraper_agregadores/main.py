@@ -25,8 +25,11 @@ async def chequear_tienda(
     cercano: bool = False,
     max_direcciones: int = None,
     delay_seg: int = 0,
+    solo_sin_datos: bool = False,
 ):
-    direcciones = await api_client.obtener_direcciones(tienda, cercano=cercano, agregador=agregador_nombre)
+    direcciones = await api_client.obtener_direcciones(
+        tienda, cercano=cercano, agregador=agregador_nombre, solo_sin_datos=solo_sin_datos
+    )
     if max_direcciones:
         direcciones = direcciones[:max_direcciones]
 
@@ -46,7 +49,7 @@ async def chequear_tienda(
         # coordenadas devolvían de forma consistente y repetible una
         # sugerencia de otro sitio ("Puente Castilla, 1054", a varios km),
         # mientras que el mismo texto sin número resolvía perfecto. Se manda
-        # siempre el texto, tenga número o no (ver investigar_glovo_direccion.py).
+        # siempre el texto, tenga número o no.
         texto = direccion["direccion_text"]
         consulta = texto
 

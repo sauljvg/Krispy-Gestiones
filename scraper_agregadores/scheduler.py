@@ -4,11 +4,16 @@ No buscamos datos "en vivo" sino un informe de cuándo y dónde nos bloquean:
   - CERCANO (pocos puntos, 1 km): cada 10 min, reacción rápida a un bloqueo total real.
   - COMPLETO (48 puntos): cada 60 min, mapea la zona de cobertura sin machacar los sitios.
 
-Los 3 agregadores de una misma pasada corren en paralelo (sitios distintos, sin
+Los agregadores de una misma pasada corren en paralelo (sitios distintos, sin
 rate-limit cruzado); dentro de cada agregador las direcciones van secuenciales con pausa.
 Cada llamada a la API (POST /chequeo, etc.) usa su propia sesión HTTP — no hay estado
 compartido entre tareas paralelas, así que aquí no hay nada equivalente a los líos de
 concurrencia de SQLite que tuvimos cuando esto escribía a una DB local.
+
+Cada pasada (cercano o completo) va en DOS fases: primero cubre los puntos SIN
+DATOS de las 6 tiendas (crucen tienda o no), y solo después arranca el
+recorrido completo normal tienda por tienda -- así un hueco se cubre esté
+donde esté, sin depender de que le toque pronto por orden.
 """
 import asyncio
 import logging
@@ -29,10 +34,16 @@ def es_horario_apertura(ahora: datetime = None) -> bool:
     return any(rango["inicio"] <= ahora.hour < rango["fin"] for rango in config.HORARIOS_APERTURA)
 
 
-async def _chequear_agregador_aislado(tienda: str, agregador_nombre: str, cercano: bool) -> bool:
+async def _chequear_agregador_aislado(
+    tienda: str, agregador_nombre: str, cercano: bool, solo_sin_datos: bool = False
+) -> bool:
     try:
         await chequear_tienda(
-            tienda, agregador_nombre, cercano=cercano, delay_seg=config.DELAY_ENTRE_CHEQUEOS_SEG
+            tienda,
+            agregador_nombre,
+            cercano=cercano,
+            delay_seg=config.DELAY_ENTRE_CHEQUEOS_SEG,
+            solo_sin_datos=solo_sin_datos,
         )
         return True
     except Exception as exc:
@@ -66,6 +77,24 @@ async def _chequeo(modo: str, cercano: bool):
     estado_final = "completado"
 
     try:
+        # Fase 1: cubrir primero los puntos SIN DATOS de cualquier tienda,
+        # cruzando las 6 -- antes esto solo se priorizaba dentro de cada
+        # tienda (los huecos de la última tienda del recorrido podían tardar
+        # pasadas enteras en cubrirse si las anteriores iban bien). Ahora un
+        # hueco se cubre esté donde esté antes de empezar el recorrido
+        # completo normal. Con la cobertura ya completa esta fase no añade
+        # apenas nada (0 direcciones por tienda, chequear_tienda no hace nada).
+        for tienda in config.TIENDAS_SCHEDULER:
+            resultados = await asyncio.gather(
+                *(
+                    _chequear_agregador_aislado(tienda, agregador_nombre, cercano, solo_sin_datos=True)
+                    for agregador_nombre in config.AGREGADORES
+                )
+            )
+            exitosos += sum(1 for r in resultados if r)
+            fallidos += sum(1 for r in resultados if not r)
+
+        # Fase 2: recorrido completo normal, tienda por tienda.
         for tienda in config.TIENDAS_SCHEDULER:
             resultados = await asyncio.gather(
                 *(
