@@ -24,6 +24,15 @@ CHALLENGE_KEYWORDS = (
 
 _STEALTH = Stealth()
 
+_RECURSOS_BLOQUEADOS = ("image", "media", "font")
+
+
+async def _bloquear_recursos_pesados(route):
+    if route.request.resource_type in _RECURSOS_BLOQUEADOS:
+        await route.abort()
+    else:
+        await route.continue_()
+
 
 class ChallengeDetectedError(Exception):
     """El sitio ha mostrado un challenge anti-bot (Cloudflare u otro WAF)."""
@@ -68,6 +77,12 @@ class BaseAggregatorScraper:
         self.timeout_ms = timeout_seg * 1000
         self.retry_max = retry_max
         self._modo_headless = self.iniciar_headless
+        # True solo cuando la ventana visible es para que un humano resuelva un
+        # challenge a mano -- ahí SÍ debe verse en pantalla. El resto de veces que se
+        # corre sin headless (p.ej. Uber Eats de forma rutinaria) es solo para no
+        # parecer un bot, sin nadie mirando, así que esa ventana se manda fuera de
+        # pantalla en vez de interrumpir al usuario mientras trabaja.
+        self._modo_resolucion_manual = False
         SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
     async def verificar_disponibilidad(
@@ -102,6 +117,7 @@ class BaseAggregatorScraper:
                         self.nombre_agregador,
                     )
                     headless = False
+                    self._modo_resolucion_manual = True
                 else:
                     logger.warning(
                         "%s: challenge anti-bot persiste (intento %d/%d).",
@@ -112,6 +128,7 @@ class BaseAggregatorScraper:
             except Exception as exc:
                 last_exc = exc
                 headless = self.iniciar_headless
+                self._modo_resolucion_manual = False
                 logger.warning(
                     "%s falló (intento %d/%d): %s",
                     self.nombre_agregador,
@@ -127,10 +144,19 @@ class BaseAggregatorScraper:
 
     async def _run_once(self, tienda_nombre: str, direccion: str, headless: bool) -> ResultadoChequeo:
         self._modo_headless = headless
+        args = ["--disable-blink-features=AutomationControlled"]
+        if not headless and not self._modo_resolucion_manual:
+            # Uber Eats necesita una ventana "real" (no headless) para no toparse con
+            # Cloudflare, pero eso no significa que tenga que taparte la pantalla mientras
+            # trabajas: se coloca fuera del área visible. Sigue siendo una ventana normal
+            # a ojos del sitio (misma huella que una visible), solo que no la ves. Si la
+            # ventana visible es para que la resuelva un humano (challenge anti-bot), se
+            # deja donde se ve -- ocultarla ahí rompería la resolución manual.
+            args.append("--window-position=-32000,-32000")
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(
                 headless=headless,
-                args=["--disable-blink-features=AutomationControlled"],
+                args=args,
             )
             try:
                 context = await browser.new_context(
@@ -143,6 +169,10 @@ class BaseAggregatorScraper:
                     locale="es-ES",
                 )
                 await _STEALTH.apply_stealth_async(context)
+                # No necesitamos ver nada: solo leemos texto/atributos del DOM. Bloquear
+                # imágenes, fuentes y vídeo reduce el peso de cada página bastante (promos,
+                # carruseles, iconos) sin tocar el HTML/CSS que el scraper sí necesita leer.
+                await context.route("**/*", _bloquear_recursos_pesados)
                 # Estos sitios tienen carruseles/banners promocionales en autoplay. Playwright
                 # espera a que un elemento esté "estable" (que deje de moverse) antes de hacer
                 # click/fill, así que una animación de fondo lo hace reintentar con scroll una

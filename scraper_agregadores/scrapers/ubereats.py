@@ -94,21 +94,26 @@ class UberEatsScraper(BaseAggregatorScraper):
                 raise
 
     async def _buscar_tienda(self, page) -> bool:
-        # La caja de búsqueda del feed es un botón/span de mentira (data-testid
-        # "label-wrapper-query"), no un <input> -- hay que pulsarlo para que
-        # aparezca el input real donde escribir.
+        # Layout viejo: la caja de búsqueda del feed era un botón/span de mentira
+        # (data-testid "label-wrapper-query") que había que pulsar para que
+        # apareciera el input real. Desde el 07/08 se ve que Uber Eats a veces ya
+        # muestra el <input> de verdad directamente, sin ese paso intermedio
+        # (capturas de fallo mostraban la barra de búsqueda ya rellenable en
+        # pantalla, con el botón viejo inexistente). Se intenta el botón primero
+        # con timeout corto y, si no aparece, se comprueba si el input ya está
+        # visible sin necesidad de pulsar nada antes de darlo por fallo real.
         boton_busqueda = page.locator(SEL_SEARCH_BUTTON).first
         try:
-            # 25s en vez de 15s: la captura de un fallo real (06/08 21:18) mostró
-            # el botón ya visible justo después de agotarse el timeout -- la
-            # página a veces tarda más en cargar del todo, no es que el selector
-            # esté cogiendo el elemento equivocado.
-            await boton_busqueda.wait_for(state="visible", timeout=25000)
+            await boton_busqueda.wait_for(state="visible", timeout=8000)
             await boton_busqueda.click()
         except Exception:
-            ruta = await self.screenshot_on_error(page, "sin_boton_buscador")
-            logger.warning("ubereats: sin botón de búsqueda, url=%s -- captura: %s", page.url, ruta)
-            raise
+            campo_directo = page.locator(SEL_SEARCH_INPUT + ":visible").first
+            try:
+                await campo_directo.wait_for(state="visible", timeout=15000)
+            except Exception:
+                ruta = await self.screenshot_on_error(page, "sin_boton_buscador")
+                logger.warning("ubereats: sin botón ni input de búsqueda, url=%s -- captura: %s", page.url, ruta)
+                raise
 
         campo_busqueda = page.locator(SEL_SEARCH_INPUT + ":visible").first
         try:
@@ -139,7 +144,16 @@ class UberEatsScraper(BaseAggregatorScraper):
             await page.wait_for_load_state("domcontentloaded")
             return True
 
-        await enlace.click()
+        # Click vía JS en vez de enlace.click(): la cabecera sticky de Uber Eats
+        # (buscador + pills de categoría) se superpone visualmente a la parte de
+        # arriba de los resultados. Playwright ve la tarjeta como "visible" pero
+        # su chequeo de "recibe eventos de puntero" falla porque un <div> de la
+        # cabecera está por encima en ese punto exacto -- reintenta con scroll
+        # una y otra vez durante 30s (visible como scroll infinito) hasta
+        # rendirse. El elemento SÍ es el correcto (confirmado en logs: resuelve
+        # bien la tarjeta de Krispy Kreme); disparar el evento click directamente
+        # en el DOM se salta ese chequeo de superposición y no falla nunca.
+        await enlace.evaluate("e => e.click()")
         await page.wait_for_load_state("domcontentloaded")
         return True
 

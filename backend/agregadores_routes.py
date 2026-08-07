@@ -189,6 +189,13 @@ def resetear_estadisticas_route():
     return agregadores_module.resetear_estadisticas()
 
 
+@router.post("/estadisticas/reset-hoy", dependencies=[Depends(require_api_key)])
+def resetear_estadisticas_hoy_route():
+    """Como /estadisticas/reset pero solo el día de hoy -- conserva días
+    anteriores para no perder histórico de los reportes semanales."""
+    return agregadores_module.resetear_estadisticas_hoy()
+
+
 @router.post("/sesiones", dependencies=[Depends(require_api_key)])
 def iniciar_sesion_route(body: SesionIniciarIn):
     return {"id": agregadores_module.iniciar_sesion(body.modo)}

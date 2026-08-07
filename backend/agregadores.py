@@ -490,6 +490,29 @@ def resetear_estadisticas():
     return borrados
 
 
+def resetear_estadisticas_hoy():
+    """Como resetear_estadisticas() pero solo borra el día de hoy (hora de
+    Madrid), conservando días anteriores intactos para no perder histórico de
+    los reportes semanales. El corte usa el inicio del día en Europe/Madrid
+    convertido a UTC, porque los timestamps se guardan en UTC."""
+    inicio_hoy_madrid = datetime.now(ZoneInfo("Europe/Madrid")).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    inicio_hoy_utc = inicio_hoy_madrid.astimezone(timezone.utc).isoformat()
+
+    conn = get_connection()
+    cur_chequeos = conn.execute(
+        "DELETE FROM agregadores_chequeos WHERE timestamp >= ?", (inicio_hoy_utc,)
+    )
+    cur_alertas = conn.execute(
+        "DELETE FROM agregadores_alertas WHERE timestamp >= ?", (inicio_hoy_utc,)
+    )
+    conn.commit()
+    borrados = {"chequeos": cur_chequeos.rowcount, "alertas": cur_alertas.rowcount}
+    conn.close()
+    return borrados
+
+
 def guardar_chequeo(data: dict) -> int:
     """`data` es el JSON que manda el scraper: tienda, agregador,
     direccion_id, disponible, tiempo_entrega_min, mensaje_bloqueo,
