@@ -31,6 +31,22 @@ SEL_SEARCH_READONLY = '[data-qa="aggregation-options-search-element-readonly"]'
 SEL_SEARCH_INPUT = '[data-qa^="restaurant-list-search-element"]'
 SEL_SEARCH_SUGGESTION = '[data-qa="search-autocomplete-list-list-item"]'
 
+# JustEat dejó de ofrecer casi siempre una sugerencia directa con el nombre de
+# la marca (SEL_SEARCH_SUGGESTION de arriba, que ahora está desactualizado --
+# confirmado con logs/screenshots/*_tienda_no_confirmada_*.html: solo aparecía
+# este botón genérico). Hay que pulsarlo para llegar a una página de
+# resultados de verdad, donde SÍ aparece la tarjeta real de la tienda
+# (confirmado con investigar_justeat.py).
+SEL_SEE_ALL_BUTTON = 'button:has-text("Ver todas las opciones")'
+SEL_RESULT_CARD_NAME = '[data-qa="restaurant-info-name"]'
+
+# Estado "sin resultados" explícito y definitivo de JustEat (mensaje "No hemos
+# encontrado 'Krispy Kreme'") -- aparece cuando la búsqueda SÍ se ejecutó pero
+# no hay ningún restaurante que encaje, sin necesidad de que además haya otras
+# tarjetas visibles (confirmado con capturas reales: esto se estaba tratando
+# como fallo técnico y reintentando 4 veces en vano).
+SEL_SIN_RESULTADOS = '[data-qa="restaurant-list-empty"]'
+
 SEL_DELIVERY_INPUT = 'input[value="delivery"][data-qa^="service-type-switcher-item-element"]'
 SEL_DELIVERY_TEXT = '[data-qa="service-type-switcher-delivery-availability-text"]'
 
@@ -50,7 +66,15 @@ class JustEatScraper(BaseAggregatorScraper):
         await self._aceptar_cookies(page)
         await self._establecer_direccion(page, direccion)
 
-        encontrado = await self._buscar_tienda(page, tienda_nombre)
+        # El banner de cookies puede tardar en aparecer (analítica/consentimiento
+        # cargando en diferido) y no estar listo todavía en el primer intento de
+        # _aceptar_cookies -- si aparece justo después, se queda tapando la lista
+        # de sugerencias de _buscar_tienda y el selector nunca la ve (confirmado
+        # con capturas: banner de cookies visible en el fallo, resultados vacíos
+        # debajo). Se repite aquí, justo antes de buscar, por si acaba de aparecer.
+        await self._aceptar_cookies(page, timeout_ms=2500)
+
+        encontrado = await self._buscar_tienda(page)
         if not encontrado:
             return ResultadoChequeo(
                 disponible=False,
@@ -60,10 +84,10 @@ class JustEatScraper(BaseAggregatorScraper):
 
         return await self._leer_disponibilidad(page)
 
-    async def _aceptar_cookies(self, page):
+    async def _aceptar_cookies(self, page, timeout_ms: int = 5000):
         try:
             boton = page.locator(SEL_COOKIE_ACCEPT_NECESSARY).first
-            await boton.wait_for(state="visible", timeout=5000)
+            await boton.wait_for(state="visible", timeout=timeout_ms)
             await boton.click()
         except Exception:
             pass
@@ -119,7 +143,7 @@ class JustEatScraper(BaseAggregatorScraper):
             except Exception as exc:
                 logger.warning("justeat: fallo rellenando modal de edificio: %s", exc)
 
-    async def _buscar_tienda(self, page, tienda_nombre: str) -> bool:
+    async def _buscar_tienda(self, page) -> bool:
         # Hay dos layouts distintos según cómo se resolvió la dirección: la
         # página de dirección exacta muestra una barra "readonly" que hay que
         # pulsar para que aparezca el input de verdad; la página "de área"
@@ -143,23 +167,81 @@ class JustEatScraper(BaseAggregatorScraper):
         sugerencia = page.locator(f'{SEL_SEARCH_SUGGESTION}:has-text("{MARCA_BUSQUEDA}")').first
         try:
             await sugerencia.wait_for(state="visible", timeout=8000)
+            await sugerencia.click()
+            await page.wait_for_load_state("domcontentloaded")
+            return True
         except Exception:
-            # IMPORTANTE: no devolver False aquí -- mismo motivo que en Uber Eats
-            # (ver scrapers/ubereats.py). Que el selector no encuentre la
-            # sugerencia en el tiempo dado no es lo mismo que "confirmado que no
-            # reparte ahí"; devolver False lo convertía en un "no disponible" con
-            # confianza total a la primera pasada, sin reintentos. Al lanzar,
-            # pasa por el mecanismo normal de reintentos (_verificar_con_retry) y
-            # solo si persiste se guarda como fallo técnico (error_texto).
+            pass  # sigue abajo con el camino "ver todas las opciones"
+
+        # Casi nunca aparece ya la sugerencia directa de arriba -- en su lugar
+        # sale un botón genérico "Ver todas las opciones" que lleva a una
+        # página de resultados de verdad, con tarjetas de restaurante reales.
+        boton_ver_todas = page.locator(SEL_SEE_ALL_BUTTON).first
+        try:
+            await boton_ver_todas.wait_for(state="visible", timeout=3000)
+            await boton_ver_todas.click()
+            await page.wait_for_load_state("domcontentloaded")
+        except Exception:
             ruta = await self.screenshot_on_error(page, "tienda_no_confirmada")
+            ruta_html = await self.guardar_html_debug(page, "tienda_no_confirmada")
             logger.warning(
-                "justeat: tienda no confirmada en resultados de búsqueda, url=%s -- captura: %s",
+                "justeat: sin sugerencia ni botón 'ver todas', url=%s -- captura: %s -- html: %s",
                 page.url,
                 ruta,
+                ruta_html,
             )
             raise TimeoutError("justeat: tienda no confirmada en resultados de búsqueda (ver captura)")
 
-        await sugerencia.click()
+        return await self._confirmar_tarjeta(page)
+
+    async def _confirmar_tarjeta(self, page) -> bool:
+        # Busca la tarjeta real de Krispy Kreme (tras pulsar 'ver todas las
+        # opciones') y la pulsa. Igual que en Glovo (ver scrapers/glovo.py):
+        # si no aparece pero SÍ hay otras tarjetas de restaurante (la
+        # búsqueda funcionó de verdad), es una señal fiable de que no
+        # reparte ahí -- no un fallo técnico. Solo se trata como fallo
+        # técnico si no hay ninguna tarjeta en absoluto NI el mensaje
+        # explícito de "sin resultados" (ver más abajo).
+        tarjeta = page.locator(f'{SEL_RESULT_CARD_NAME}:has-text("{MARCA_BUSQUEDA}")').first
+        try:
+            await tarjeta.wait_for(state="visible", timeout=8000)
+        except Exception:
+            total_tarjetas = await page.locator(SEL_RESULT_CARD_NAME).count()
+            if total_tarjetas > 0:
+                logger.info(
+                    "justeat: Krispy Kreme no aparece entre %d resultados en %s -- no reparte aquí.",
+                    total_tarjetas,
+                    page.url,
+                )
+                return False
+
+            # JustEat también puede confirmar "sin resultados" con un mensaje
+            # explícito ("No hemos encontrado 'Krispy Kreme'") sin mostrar
+            # ninguna otra tarjeta -- confirmado con capturas reales: esto se
+            # trataba como fallo técnico y se reintentaba 4 veces en vano
+            # cuando en realidad JustEat ya había respondido con seguridad.
+            try:
+                sin_resultados = page.locator(SEL_SIN_RESULTADOS).first
+                if await sin_resultados.is_visible(timeout=2000):
+                    logger.info(
+                        "justeat: JustEat confirma 'sin resultados' para esta búsqueda en %s -- no reparte aquí.",
+                        page.url,
+                    )
+                    return False
+            except Exception:
+                pass
+
+            ruta = await self.screenshot_on_error(page, "tienda_no_confirmada")
+            ruta_html = await self.guardar_html_debug(page, "tienda_no_confirmada")
+            logger.warning(
+                "justeat: tienda no confirmada (sin ninguna tarjeta), url=%s -- captura: %s -- html: %s",
+                page.url,
+                ruta,
+                ruta_html,
+            )
+            raise TimeoutError("justeat: tienda no confirmada en resultados de búsqueda (ver captura)")
+
+        await tarjeta.click()
         await page.wait_for_load_state("domcontentloaded")
         return True
 

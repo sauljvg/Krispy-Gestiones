@@ -157,18 +157,30 @@ class GlovoScraper(BaseAggregatorScraper):
         try:
             await tarjeta.wait_for(state="visible", timeout=8000)
         except Exception:
-            # IMPORTANTE: no devolver False aquí -- mismo motivo que en Uber Eats
-            # (ver scrapers/ubereats.py). Que el selector no encuentre la tarjeta
-            # en el tiempo dado no es lo mismo que "confirmado que no reparte
-            # ahí"; devolver False lo convertía en un "no disponible" con
-            # confianza total a la primera pasada, sin reintentos. Al lanzar,
-            # pasa por el mecanismo normal de reintentos (_verificar_con_retry) y
-            # solo si persiste se guarda como fallo técnico (error_texto).
+            # Antes de asumir fallo técnico: si SÍ hay otras tiendas listadas, la
+            # búsqueda funcionó de verdad (página cargada, resultados reales) y
+            # Krispy Kreme simplemente no está entre ellas -- confirmado con un
+            # HTML de diagnóstico real (14 tarjetas de otras tiendas, ninguna de
+            # Krispy Kreme). Ahí sí es un "no disponible" fiable, no ambiguo.
+            # Solo se trata como fallo técnico (con reintentos, ver
+            # _verificar_con_retry) cuando no hay NINGUNA tarjeta -- eso sí puede
+            # ser una carga rota/a medias, mismo motivo que en Uber Eats.
+            total_tarjetas = await page.locator(SEL_STORE_CARD).count()
+            if total_tarjetas > 0:
+                logger.info(
+                    "glovo: Krispy Kreme no aparece entre %d tiendas listadas en %s -- no reparte aquí.",
+                    total_tarjetas,
+                    page.url,
+                )
+                return False
+
             ruta = await self.screenshot_on_error(page, "tienda_no_confirmada")
+            ruta_html = await self.guardar_html_debug(page, "tienda_no_confirmada")
             logger.warning(
-                "glovo: tienda no confirmada en resultados de búsqueda, url=%s -- captura: %s",
+                "glovo: tienda no confirmada en resultados de búsqueda (sin ninguna tarjeta), url=%s -- captura: %s -- html: %s",
                 page.url,
                 ruta,
+                ruta_html,
             )
             raise TimeoutError("glovo: tienda no confirmada en resultados de búsqueda (ver captura)")
 
