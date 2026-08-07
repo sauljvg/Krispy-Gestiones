@@ -128,6 +128,23 @@
   .agr-drill-copiar:hover { background: var(--surface-page); }
   .agr-resumen-nota { font-size: 0.72rem; color: var(--text-muted); margin: -6px 0 12px; line-height: 1.4; }
 
+  #agr-resumen-titulo { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #agr-resumen-titulo h2 { margin: 0; }
+  .agr-borrar-wrap { position: relative; }
+  .agr-icon-btn {
+    background: none; border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px;
+    color: var(--text-muted); cursor: pointer; display: flex; align-items: center;
+  }
+  .agr-icon-btn:hover { color: var(--status-critical); border-color: var(--status-critical); }
+  .agr-borrar-menu {
+    position: absolute; right: 0; top: calc(100% + 6px); z-index: 50; min-width: 190px;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15); padding: 8px;
+  }
+  .agr-borrar-menu-item { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font-size: 0.8rem; color: var(--text-primary); cursor: pointer; }
+  .agr-borrar-menu-item:hover { background: var(--surface-page); border-radius: 4px; }
+  .agr-borrar-menu-nota { font-size: 0.68rem; color: var(--text-muted); padding: 4px 4px 2px; border-top: 1px solid var(--border); margin-top: 4px; }
+
   #agr-tabla-titulo { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   #agr-tabla-toggle { font-size: 0.72rem; background: none; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; color: var(--text-secondary); cursor: pointer; }
   #agr-tabla-toggle:hover { background: var(--surface-page); }
@@ -228,7 +245,15 @@
       </div>
       <div>
         <div class="agr-panel">
-          <h2>Resumen (24h)</h2>
+          <div id="agr-resumen-titulo">
+            <h2>Resumen (24h)</h2>
+            <div class="agr-borrar-wrap">
+              <button type="button" id="agr-btn-borrar-stats" class="agr-icon-btn" title="Ocultar tarjetas del resumen (solo en este navegador)" aria-label="Ocultar tarjetas del resumen" onclick="agrToggleMenuBorrar(event)">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              </button>
+              <div class="agr-borrar-menu" id="agr-borrar-menu" hidden></div>
+            </div>
+          </div>
           <p class="agr-resumen-nota">
             Los 3 porcentajes de cada agregador son sobre el mismo total de intentos y suman 100%: <b>disponible</b> (repartía), <b>no disponible</b> (respondió pero no reparte ahí — real, no es un fallo) y <b>fallo técnico</b> (nuestro scraper no consiguió leer el resultado).
           </p>
@@ -285,6 +310,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/agregadores.js?v=20260807b"></script>
+<script src="js/agregadores.js?v=20260807c"></script>
 </body>
 </html>

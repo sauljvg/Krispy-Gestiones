@@ -27,7 +27,7 @@ async def chequear_tienda(
     max_direcciones: int = None,
     delay_seg: int = 0,
 ):
-    direcciones = await api_client.obtener_direcciones(tienda, cercano=cercano)
+    direcciones = await api_client.obtener_direcciones(tienda, cercano=cercano, agregador=agregador_nombre)
     if max_direcciones:
         direcciones = direcciones[:max_direcciones]
 

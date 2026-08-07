@@ -16,12 +16,17 @@ def _headers():
     return {"X-API-Key": config.KG_API_KEY, "Content-Type": "application/json"}
 
 
-async def obtener_direcciones(tienda: str, cercano: bool = False) -> list[dict]:
+async def obtener_direcciones(tienda: str, cercano: bool = False, agregador: str = None) -> list[dict]:
+    """`agregador`, si se pasa, hace que el backend devuelva primero los
+    puntos que ese agregador todavía no ha comprobado nunca de verdad (ver
+    get_o_crear_direcciones en backend/agregadores.py) -- así una pasada que
+    se corta a medias cubre puntos nuevos antes que repetir los de siempre."""
     url = f"{config.KG_API_BASE_URL}/api/agregadores/direcciones/{tienda}"
+    params = {"cercano": str(cercano).lower()}
+    if agregador:
+        params["agregador"] = agregador
     async with aiohttp.ClientSession() as session:
-        async with session.get(
-            url, params={"cercano": str(cercano).lower()}, headers=_headers(), timeout=60
-        ) as resp:
+        async with session.get(url, params=params, headers=_headers(), timeout=60) as resp:
             resp.raise_for_status()
             return await resp.json()
 

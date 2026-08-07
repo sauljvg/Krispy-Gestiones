@@ -12,6 +12,15 @@ let agrCentrosPorTienda = {}; // slug -> {lat,lng}, usado en la vista "Todas"
 let agrFiltroAgregador = null; // null = todos los agregadores a la vez
 let agrEstadosOcultos = new Set();
 
+// Tarjetas del "Resumen (24h)" ocultas a mano desde este navegador (ver
+// agrToggleTarjetaOculta) -- solo afecta a lo que se pinta aquí, nunca se
+// manda al backend ni borra nada de la DB. persiste en localStorage (no en
+// memoria como agrEstadosOcultos) porque el objetivo es no volver a verlas
+// cada vez que se recarga el dashboard, no solo mientras dura la pestaña.
+const AGR_TARJETAS_OCULTAS_KEY = "agr_tarjetas_ocultas";
+let agrTarjetasOcultas = new Set(JSON.parse(localStorage.getItem(AGR_TARJETAS_OCULTAS_KEY) || "[]"));
+let agrUltimoReporte = null;
+
 const AGR_COLOR_MARCA = { justeat: "#ff8000", glovo: "#ffc244", ubereats: "#06c167" };
 const AGR_NOMBRE_AGREGADOR = { justeat: "JustEat", glovo: "Glovo", ubereats: "Uber Eats" };
 let agrMostrarCorrectos = false;
@@ -464,9 +473,10 @@ async function agrCargarTabla() {
 
 function agrRenderCards(reporte) {
   const cont = document.getElementById("agr-cards");
-  const entradas = Object.entries(reporte.agregadores);
+  const entradas = Object.entries(reporte.agregadores).filter(([nombre]) => !agrTarjetasOcultas.has(nombre));
   if (entradas.length === 0) {
-    cont.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;grid-column:1/-1;">Sin chequeos en 24h.</p>';
+    const motivo = Object.keys(reporte.agregadores).length === 0 ? "Sin chequeos en 24h." : "Todas las tarjetas están ocultas -- usa el icono 🗑 para volver a mostrarlas.";
+    cont.innerHTML = `<p style="color:var(--text-muted);font-size:0.85rem;grid-column:1/-1;">${motivo}</p>`;
     return;
   }
   cont.innerHTML = entradas
@@ -565,7 +575,7 @@ async function agrCopiarDireccionDrill(boton, texto) {
 
 function agrRenderChart(reporte) {
   const ctx = document.getElementById("agr-chart");
-  const claves = Object.keys(reporte.agregadores);
+  const claves = Object.keys(reporte.agregadores).filter((nombre) => !agrTarjetasOcultas.has(nombre));
   const labels = claves.map((n) => AGR_NOMBRE_AGREGADOR[n] || n);
   const valores = claves.map((n) => reporte.agregadores[n].disponible_pct);
   const colores = claves.map((n) => AGR_COLOR_MARCA[n] || "#e07b00");
@@ -593,9 +603,54 @@ async function agrCargarResumen() {
     : `${AGR_API}/reportes/diario?tienda=${agrTiendaActual}`;
   const res = await fetch(url, { credentials: "include" });
   const reporte = await res.json();
+  agrUltimoReporte = reporte;
   agrRenderCards(reporte);
   agrRenderChart(reporte);
 }
+
+function agrGuardarTarjetasOcultas() {
+  localStorage.setItem(AGR_TARJETAS_OCULTAS_KEY, JSON.stringify([...agrTarjetasOcultas]));
+}
+
+function agrPoblarMenuBorrar() {
+  const menu = document.getElementById("agr-borrar-menu");
+  const disponibles = agrUltimoReporte ? Object.keys(agrUltimoReporte.agregadores) : Object.keys(AGR_NOMBRE_AGREGADOR);
+  const items = disponibles
+    .map((nombre) => {
+      const oculta = agrTarjetasOcultas.has(nombre);
+      return `<label class="agr-borrar-menu-item">
+        <input type="checkbox" data-agregador="${nombre}" ${oculta ? "checked" : ""} onchange="agrToggleTarjetaOculta('${nombre}', this.checked)">
+        Ocultar ${AGR_NOMBRE_AGREGADOR[nombre] || nombre}
+      </label>`;
+    })
+    .join("");
+  menu.innerHTML = items + '<div class="agr-borrar-menu-nota">Solo en este navegador -- no borra nada en el servidor.</div>';
+}
+
+function agrToggleMenuBorrar(evt) {
+  evt.stopPropagation();
+  const menu = document.getElementById("agr-borrar-menu");
+  const abrir = menu.hidden;
+  if (abrir) agrPoblarMenuBorrar();
+  menu.hidden = !abrir;
+}
+
+function agrToggleTarjetaOculta(agregador, oculta) {
+  if (oculta) agrTarjetasOcultas.add(agregador);
+  else agrTarjetasOcultas.delete(agregador);
+  agrGuardarTarjetasOcultas();
+  if (agrUltimoReporte) {
+    agrRenderCards(agrUltimoReporte);
+    agrRenderChart(agrUltimoReporte);
+  }
+}
+
+document.addEventListener("click", (evt) => {
+  const menu = document.getElementById("agr-borrar-menu");
+  if (menu && !menu.hidden && !menu.contains(evt.target) && evt.target.id !== "agr-btn-borrar-stats") {
+    menu.hidden = true;
+  }
+});
 
 async function agrCargarAlertas() {
   const lista = document.getElementById("agr-alertas");
