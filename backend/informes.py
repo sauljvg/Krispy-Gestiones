@@ -783,6 +783,7 @@ def _candidato_directo_como_item(row, incluir_destinatario=False):
         "test_resultado": row["test_resultado"],
     }
     if incluir_destinatario:
+        item["destinatario_id"] = row["destinatario_id"]
         item["destinatario_nombre"] = row["destinatario_nombre"]
         item["destinatario_username"] = row["destinatario_username"]
     return item
@@ -848,6 +849,7 @@ def get_compartidos_por(username, empresa=None):
         params.append(empresa)
     rows = conn.execute(f"""
         SELECT c.id AS compartido_id, c.compartido_en, c.compartido_por, c.candidato_id,
+               c.usuario_id AS destinatario_id,
                u.nombre AS destinatario_nombre, u.username AS destinatario_username,
                r.id AS respuesta_id, r.datos_json, r.hoja, r.cv_ruta, r.cv_nombre_original,
                t.nombre AS tipo_nombre, t.clave AS tipo_clave,
@@ -868,6 +870,7 @@ def get_compartidos_por(username, empresa=None):
         resultado.append({
             "compartido_id": row["compartido_id"],
             "compartido_en": row["compartido_en"],
+            "destinatario_id": row["destinatario_id"],
             "destinatario_nombre": row["destinatario_nombre"],
             "destinatario_username": row["destinatario_username"],
             "respuesta_id": row["respuesta_id"],

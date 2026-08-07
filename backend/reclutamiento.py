@@ -564,6 +564,7 @@ def get_candidatos_compartidos_directo_por(username, empresa=None):
         params.append(empresa)
     rows = conn.execute(f"""
         SELECT cc.id AS compartido_id, cc.compartido_en, cc.compartido_por,
+               cc.usuario_id AS destinatario_id,
                u.nombre AS destinatario_nombre, u.username AS destinatario_username, c.*,
                json_extract(r.datos_json, '$.RESULTADO') AS test_resultado
         FROM candidato_compartidos cc

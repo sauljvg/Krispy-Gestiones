@@ -205,7 +205,7 @@ async function actualizarCandidatoInline(candidatoId, campos) {
   });
 }
 
-function candidatoCardHTML(item) {
+function candidatoCardHTML(item, permitirDejarDeCompartir) {
   const entries = Object.entries(item.datos).filter(([k]) => k.toLowerCase() !== "nombre");
   const cvBtn = item.tiene_cv
     ? `<a href="${AUTH_API_BASE}/informes/respuestas/${item.respuesta_id}/cv" target="_blank" rel="noopener" class="btn btn-primary">📄 Ver CV</a>`
@@ -221,6 +221,18 @@ function candidatoCardHTML(item) {
   const fichaBtn = candId
     ? `<button type="button" class="btn btn-ghost candidato-abrir-ficha" data-candidato-id="${candId}">📋 Ver ficha completa</button>`
     : "";
+  // Solo tiene sentido en "Compartidos por ti" -- deja de compartir ESTE
+  // candidato con ESTE destinatario en concreto (no borra el candidato ni
+  // afecta a otros a los que se lo hayas compartido). El origen del share
+  // determina el endpoint: uno viene de Informes (informe_compartidos,
+  // compartido_id numérico) y otro es un "compartir directo" desde
+  // Reclutamiento (candidato_compartidos, compartido_id "candidato-N").
+  const dejarDeCompartirBtn = permitirDejarDeCompartir
+    ? `<button type="button" class="btn btn-ghost btn-dejar-compartir"
+         data-directo="${String(item.compartido_id).startsWith("candidato-") ? "1" : "0"}"
+         data-candidato-id="${candId}" data-respuesta-id="${item.respuesta_id ?? ""}"
+         data-destinatario-id="${item.destinatario_id ?? ""}">✕ Dejar de compartir</button>`
+    : "";
   const metaTxt = item.hoja ? `${item.tipo_nombre} · hoja "${item.hoja}"` : item.tipo_nombre;
   return `
     <div class="candidato-card">
@@ -229,7 +241,7 @@ function candidatoCardHTML(item) {
       <div class="candidato-datos">
         ${entries.map(([k, v]) => `<div><div class="campo-nombre">${escapeHTML(k)}</div><div>${escapeHTML(v)}</div></div>`).join("")}
       </div>
-      <div class="candidato-acciones">${fichaBtn}${cvBtn}${whatsappBtn}</div>
+      <div class="candidato-acciones">${fichaBtn}${cvBtn}${whatsappBtn}${dejarDeCompartirBtn}</div>
       ${notasHTML}
     </div>`;
 }
@@ -237,7 +249,7 @@ function candidatoCardHTML(item) {
 // Cada tanda es un <details> desplegable. `etiquetaOtro` describe la relación
 // ("Compartido por" / "Compartido con") y `abierta` deja la más reciente
 // abierta por defecto para que no haya que hacer clic para ver lo último.
-function grupoHTML(grupo, etiquetaOtro, abierta) {
+function grupoHTML(grupo, etiquetaOtro, abierta, permitirDejarDeCompartir) {
   const n = grupo.items.length;
   return `
     <details class="tanda" ${abierta ? "open" : ""}>
@@ -246,17 +258,32 @@ function grupoHTML(grupo, etiquetaOtro, abierta) {
         <span class="tanda-meta">${n} candidato${n === 1 ? "" : "s"} · ${escapeHTML(etiquetaOtro)} <b>${escapeHTML(grupo.otro || "")}</b></span>
       </summary>
       <div class="tanda-body">
-        ${grupo.items.map(candidatoCardHTML).join("")}
+        ${grupo.items.map((it) => candidatoCardHTML(it, permitirDejarDeCompartir)).join("")}
       </div>
     </details>`;
 }
 
-function seccionHTML(titulo, grupos, etiquetaOtro, vacioMsg) {
+function seccionHTML(titulo, grupos, etiquetaOtro, vacioMsg, permitirDejarDeCompartir) {
   if (grupos.length === 0) {
     return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2><p class="staff-hint">${escapeHTML(vacioMsg)}</p>`;
   }
   return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2>` +
-    grupos.map((g, i) => grupoHTML(g, etiquetaOtro, i === 0)).join("");
+    grupos.map((g, i) => grupoHTML(g, etiquetaOtro, i === 0, permitirDejarDeCompartir)).join("");
+}
+
+async function dejarDeCompartirClick(btn) {
+  if (!confirm("¿Dejar de compartir este candidato? La persona ya no lo verá en su Reclutamiento.")) return;
+  const url = btn.dataset.directo === "1"
+    ? `${AUTH_API_BASE}/reclutamiento/candidatos/${btn.dataset.candidatoId}/compartir/${btn.dataset.destinatarioId}`
+    : `${AUTH_API_BASE}/informes/compartir/${btn.dataset.respuestaId}/${btn.dataset.destinatarioId}`;
+  btn.disabled = true;
+  const res = await fetch(url, { method: "DELETE" });
+  if (!res.ok) {
+    alert("No se pudo dejar de compartir. Inténtalo de nuevo.");
+    btn.disabled = false;
+    return;
+  }
+  await loadCompartidos();
 }
 
 function wireCompartidosInteractivos(wrap) {
@@ -268,6 +295,9 @@ function wireCompartidosInteractivos(wrap) {
   });
   wrap.querySelectorAll(".candidato-abrir-ficha").forEach((el) => {
     el.addEventListener("click", () => abrirEdicionCandidato(el.dataset.candidatoId));
+  });
+  wrap.querySelectorAll(".btn-dejar-compartir").forEach((el) => {
+    el.addEventListener("click", () => dejarDeCompartirClick(el));
   });
 }
 
@@ -285,13 +315,14 @@ async function loadCompartidos() {
     "Compartidos conmigo",
     gruposConmigo,
     "compartido por",
-    "Todavía no te han compartido ningún candidato."
+    "Todavía no te han compartido ningún candidato.",
+    false
   );
 
   // La sección "Compartidos por ti" solo tiene sentido enseñarla si esta
   // persona ha compartido algo alguna vez (a un gerente no le aparecerá).
   if (gruposPorMi.length > 0) {
-    html += seccionHTML("Compartidos por ti", gruposPorMi, "compartido con", "");
+    html += seccionHTML("Compartidos por ti", gruposPorMi, "compartido con", "", true);
   }
 
   wrap.innerHTML = html;
@@ -872,6 +903,8 @@ function actualizarBotonWhatsappSeleccionados() {
   const barra = document.getElementById("candidatos-seleccion-bar");
   const btnWhatsapp = document.getElementById("btn-whatsapp-seleccionados");
   const btnCompartir = document.getElementById("btn-compartir-seleccionados");
+  const btnSeleccionarTodos = document.getElementById("btn-seleccionar-todos-candidatos");
+  const btnQuitarSeleccion = document.getElementById("btn-deseleccionar-todos-candidatos");
   const estadoMasivo = document.getElementById("candidatos-estado-masivo");
   const contador = document.getElementById("candidatos-seleccion-contador");
   const n = candidatosSeleccionadosIds.size;
@@ -883,6 +916,23 @@ function actualizarBotonWhatsappSeleccionados() {
   btnWhatsapp.textContent = `💬 Mensaje por WhatsApp (${n})`;
   btnCompartir.disabled = sinSeleccion;
   estadoMasivo.disabled = sinSeleccion;
+  // "Seleccionar todos" toma TODOS los candidatos cargados actualmente en la
+  // pantalla (respetando el filtro de vacante/búsqueda aplicado), no solo
+  // los que ya se hubieran marcado a mano uno a uno.
+  btnSeleccionarTodos.hidden = n >= ultimosCandidatosCargados.length;
+  btnQuitarSeleccion.hidden = sinSeleccion;
+}
+
+function seleccionarTodosCandidatos() {
+  ultimosCandidatosCargados.forEach((c) => candidatosSeleccionadosIds.add(c.id));
+  actualizarBotonWhatsappSeleccionados();
+  renderCandidatosGrid();
+}
+
+function deseleccionarTodosCandidatos() {
+  candidatosSeleccionadosIds.clear();
+  actualizarBotonWhatsappSeleccionados();
+  renderCandidatosGrid();
 }
 
 function toggleModoSeleccion() {
@@ -1043,6 +1093,8 @@ async function initBaseCandidatos(user) {
   document.getElementById("btn-revincular-tests").addEventListener("click", revincularTests);
   document.getElementById("btn-nueva-vacante").addEventListener("click", abrirNuevaVacante);
   document.getElementById("btn-modo-seleccion").addEventListener("click", toggleModoSeleccion);
+  document.getElementById("btn-seleccionar-todos-candidatos").addEventListener("click", seleccionarTodosCandidatos);
+  document.getElementById("btn-deseleccionar-todos-candidatos").addEventListener("click", deseleccionarTodosCandidatos);
   document.getElementById("btn-whatsapp-seleccionados").addEventListener("click", abrirCampanaWhatsappSeleccionados);
   document.getElementById("btn-compartir-seleccionados").addEventListener("click", abrirModalCompartirCandidatos);
   document.getElementById("btn-compartir-candidatos-cancelar").addEventListener("click", cerrarModalCompartirCandidatos);
