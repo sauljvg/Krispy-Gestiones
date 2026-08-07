@@ -21,10 +21,11 @@ CHALLENGE_KEYWORDS = (
     "please verify you are a human",
     "sorry, you have been blocked",
     # Añadidos tras un reCAPTCHA real de Uber Eats (07/08) con texto distinto al
-    # resto ("Un paso más" / recaptcha), que la lista anterior no reconocía --
-    # el scraper seguía buscando selectores normales sobre la pantalla del
-    # challenge en vez de tratarlo como un bloqueo anti-bot.
-    "un paso más",
+    # resto, que la lista anterior no reconocía. OJO: "un paso más" (probado
+    # aquí mismo un rato después) resultó ser demasiado genérico -- daba falso
+    # positivo en páginas normales de Uber Eats y tumbaba el 100% de los
+    # chequeos con EOFError (ver _comprobar_challenge). Solo frases que no
+    # tienen sentido fuera de una pantalla de challenge real.
     "comprobación de seguridad automatizada",
     "no soy un robot",
     "recaptcha",
@@ -247,7 +248,12 @@ class BaseAggregatorScraper:
         if not any(palabra in texto for palabra in CHALLENGE_KEYWORDS):
             return
 
-        if self._modo_headless or not sys.stdin.isatty():
+        try:
+            hay_terminal = sys.stdin.isatty()
+        except Exception:
+            hay_terminal = False
+
+        if self._modo_headless or not hay_terminal:
             raise ChallengeDetectedError(f"{self.nombre_agregador}: challenge anti-bot detectado")
 
         print(
@@ -263,6 +269,17 @@ class BaseAggregatorScraper:
             raise ChallengeDetectedError(
                 f"{self.nombre_agregador}: challenge anti-bot sin resolver tras "
                 f"{self.timeout_resolucion_manual_seg}s de espera"
+            )
+        except (EOFError, OSError):
+            # isatty() puede devolver True aunque no haya nadie de verdad al otro
+            # lado (visto en el daemon lanzado por iniciar_daemon.bat via
+            # Start-Process: sin stdin real pero isatty() no lo detecta) --
+            # input() revienta con EOFError al instante en vez de esperar a que
+            # alguien escriba. Mismo desenlace que un timeout: no hay humano
+            # disponible, así que se falla de forma controlada en vez de dejar
+            # el EOFError sin capturar.
+            raise ChallengeDetectedError(
+                f"{self.nombre_agregador}: challenge anti-bot detectado sin terminal real disponible"
             )
 
         # Damos margen a que la página termine de cargar tras resolver el challenge.
