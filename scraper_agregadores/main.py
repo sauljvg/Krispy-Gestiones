@@ -2,7 +2,6 @@
 la API en vivo de KG. Sin DB local — ver utils/api_client.py."""
 import asyncio
 import logging
-import re
 
 import config
 from scrapers.glovo import GlovoScraper
@@ -38,19 +37,18 @@ async def chequear_tienda(
     fallos_consecutivos = 0
 
     for i, direccion in enumerate(direcciones):
-        # Muchos puntos del grid caen en autovías/polígonos donde Nominatim no devuelve
-        # número de portal (ej. "Calle Puerto de Pajares, Poligono..." en vez de "15, Calle
-        # ..."). Sin número, el autocompletado del agregador puede sugerir un punto distinto
-        # al que realmente queremos comprobar -- se usan las coordenadas directamente en ese
-        # caso (Google Places, que es lo que usan estos tres, las reconoce y apunta exacto).
+        # Antes se mandaban las coordenadas en bruto ("lat, lng") cuando la
+        # dirección no tenía número de portal, asumiendo que el autocompletado
+        # de Google Places las reconocía y apuntaba exacto. Confirmado que es
+        # falso: el autocompletado de Google Places busca por TEXTO (nombres
+        # de sitio/dirección), no geocodifica coordenadas -- probado en vivo
+        # con un punto real de Glovo ("Anillo Verde Ciclista"): las
+        # coordenadas devolvían de forma consistente y repetible una
+        # sugerencia de otro sitio ("Puente Castilla, 1054", a varios km),
+        # mientras que el mismo texto sin número resolvía perfecto. Se manda
+        # siempre el texto, tenga número o no (ver investigar_glovo_direccion.py).
         texto = direccion["direccion_text"]
-        tiene_numero = bool(re.match(r"^\d", texto.strip()))
-        # JustEat no reconoce coordenadas en bruto en su buscador de dirección
-        # (confirmado: nunca aparece ninguna sugerencia, siempre timeout) --
-        # a diferencia de Uber Eats/Glovo, que sí las resuelven bien. Para
-        # JustEat se manda siempre el texto, aunque sea una vía sin número.
-        usa_coordenadas = not tiene_numero and agregador_nombre != "justeat"
-        consulta = f'{direccion["lat"]:.6f}, {direccion["lng"]:.6f}' if usa_coordenadas else texto
+        consulta = texto
 
         logger.info("Chequeando %s / %s @ %s", tienda, agregador_nombre, texto)
         resultado = await scraper.verificar_disponibilidad(tienda, consulta)
