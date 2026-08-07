@@ -28,6 +28,12 @@ let agrUltimoReporte = null;
 const AGR_REINICIOS_KEY = "agr_reinicios_contador";
 let agrReinicios = JSON.parse(localStorage.getItem(AGR_REINICIOS_KEY) || "{}");
 
+// Corte de "limpiar alertas" (ver agrLimpiarAlertas) -- oculta las alertas
+// anteriores a este momento, solo en este navegador. No borra nada del
+// backend: una alerta nueva de verdad (posterior al corte) sigue apareciendo.
+const AGR_ALERTAS_LIMPIADAS_KEY = "agr_alertas_limpiadas_hasta";
+let agrAlertasLimpiadasHasta = localStorage.getItem(AGR_ALERTAS_LIMPIADAS_KEY) || null;
+
 const AGR_COLOR_MARCA = { justeat: "#ff8000", glovo: "#ffc244", ubereats: "#06c167" };
 const AGR_NOMBRE_AGREGADOR = { justeat: "JustEat", glovo: "Glovo", ubereats: "Uber Eats" };
 let agrMostrarCorrectos = false;
@@ -695,6 +701,12 @@ document.addEventListener("click", (evt) => {
   }
 });
 
+function agrLimpiarAlertas() {
+  agrAlertasLimpiadasHasta = new Date().toISOString();
+  localStorage.setItem(AGR_ALERTAS_LIMPIADAS_KEY, agrAlertasLimpiadasHasta);
+  agrCargarAlertas();
+}
+
 async function agrCargarAlertas() {
   const lista = document.getElementById("agr-alertas");
   const resumen = document.getElementById("agr-alertas-resumen");
@@ -707,14 +719,22 @@ async function agrCargarAlertas() {
     var alertas = await res.json();
   }
 
+  const totalSinLimpiar = alertas.length;
+  if (agrAlertasLimpiadasHasta) {
+    alertas = alertas.filter((a) => a.timestamp > agrAlertasLimpiadasHasta);
+  }
+
   const nuestras = alertas.filter((a) => a.tipo === "scraper_error").length;
   const otras = alertas.length - nuestras;
+  const notaLimpiadas = totalSinLimpiar > alertas.length
+    ? ` (${totalSinLimpiar - alertas.length} ocultas)`
+    : "";
   resumen.textContent = alertas.length === 0
-    ? ""
-    : `${alertas.length} total — ${nuestras} nuestras (scraper) / ${otras} de agregadores`;
+    ? (notaLimpiadas ? `Todo limpio${notaLimpiadas}` : "")
+    : `${alertas.length} total — ${nuestras} nuestras (scraper) / ${otras} de agregadores${notaLimpiadas}`;
 
   if (alertas.length === 0) {
-    lista.innerHTML = '<li style="color:var(--text-muted);">Sin alertas en 24h.</li>';
+    lista.innerHTML = `<li style="color:var(--text-muted);">Sin alertas nuevas${totalSinLimpiar > 0 ? " desde que limpiaste" : " en 24h"}.</li>`;
     return;
   }
   lista.innerHTML = alertas
@@ -743,14 +763,16 @@ async function agrCargarTransiciones() {
   }
   lista.innerHTML = transiciones
     .map((t) => {
-      const hora = new Date(t.timestamp).toLocaleString("es-ES", {
-        day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid",
-      });
+      const opcionesHora = { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" };
+      const hora = new Date(t.timestamp).toLocaleString("es-ES", opcionesHora);
       const nombre = AGR_NOMBRE_AGREGADOR[t.agregador] || t.agregador;
       const direccion = t.direccion_text || `${t.lat?.toFixed(5)}, ${t.lng?.toFixed(5)}`;
       const tiendaLinea = agrTiendaActual === AGR_TODAS && t.nombre_tienda ? `${t.nombre_tienda} — ` : "";
-      const duracionHtml = t.duracion_disponible
-        ? `<div class="agr-trans-duracion">⏱ Estuvo disponible ${t.duracion_disponible}</div>`
+      const horaAnterior = t.timestamp_anterior
+        ? new Date(t.timestamp_anterior).toLocaleString("es-ES", opcionesHora)
+        : null;
+      const duracionHtml = horaAnterior
+        ? `<div class="agr-trans-duracion">✅ Disponible hasta las ${horaAnterior} · ❌ ya no desde las ${hora}${t.duracion_disponible ? ` (${t.duracion_disponible})` : ""}</div>`
         : "";
       const captura = t.tiene_captura
         ? `<a href="${AGR_API}/capturas/${t.id}" target="_blank" rel="noopener" class="agr-trans-link">📷 Ver captura</a>`

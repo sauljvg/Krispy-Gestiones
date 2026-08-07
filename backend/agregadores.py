@@ -686,8 +686,9 @@ def get_transiciones(tienda: str | None, horas: int = 24):
         # Nombre de la tienda desde TIENDAS
         fila_dict["nombre_tienda"] = TIENDAS.get(fila_dict["tienda"], {}).get("nombre", fila_dict["tienda"])
 
-        # Limpia timestamp_anterior (no necesario en frontend)
-        del fila_dict["timestamp_anterior"]
+        # timestamp_anterior se deja tal cual (hora de la última vez que se
+        # vio disponible) -- el frontend lo muestra junto a "timestamp" (hora
+        # en que se detectó que ya no lo estaba), no solo la duración.
         resultado.append(fila_dict)
 
     conn.close()
