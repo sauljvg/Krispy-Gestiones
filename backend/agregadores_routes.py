@@ -226,6 +226,14 @@ def podar_direcciones_route():
     return agregadores_module.podar_grid_reducido()
 
 
+@router.get("/admin/almacenamiento/info", dependencies=[Depends(require_api_key)])
+def info_almacenamiento_route():
+    """Diagnóstico del volumen entero (DB + backups + todas las carpetas de
+    subida del backend, no solo agregadores) -- para saber qué se está
+    comiendo el espacio de verdad antes de borrar nada."""
+    return agregadores_module.info_almacenamiento()
+
+
 @router.get("/admin/capturas/info", dependencies=[Depends(require_api_key)])
 def info_capturas_route():
     """Diagnóstico: número de archivos y tamaño total en CAPTURAS_DIR."""

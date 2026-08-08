@@ -895,6 +895,43 @@ def limpiar_capturas_viejas() -> int:
     return borrados
 
 
+def _tamano_dir(ruta: str) -> dict:
+    if not os.path.isdir(ruta):
+        return {"archivos": 0, "bytes": 0}
+    total = 0
+    n = 0
+    for raiz, _, nombres in os.walk(ruta):
+        for nombre in nombres:
+            try:
+                total += os.path.getsize(os.path.join(raiz, nombre))
+                n += 1
+            except OSError:
+                pass
+    return {"archivos": n, "bytes": total}
+
+
+def info_almacenamiento() -> dict:
+    """Diagnóstico del volumen entero (no solo agregadores) -- para saber de
+    verdad qué se está comiendo el espacio antes de borrar nada a ciegas.
+    Todas las carpetas de subida del backend viven bajo el mismo DATA_DIR."""
+    from db import DB_PATH
+
+    carpetas = {
+        "db_principal": {"archivos": 1, "bytes": os.path.getsize(DB_PATH)} if os.path.isfile(DB_PATH) else {"archivos": 0, "bytes": 0},
+        "backups": _tamano_dir(os.path.join(DATA_DIR, "backups")),
+        "agregadores_capturas": _tamano_dir(CAPTURAS_DIR),
+        "reclutamiento_candidatos": _tamano_dir(os.path.join(DATA_DIR, "uploads", "candidatos")),
+        "informes_cv": _tamano_dir(os.path.join(DATA_DIR, "uploads", "cv")),
+        "boletines": _tamano_dir(os.path.join(DATA_DIR, "uploads", "boletines")),
+        "boletines_imagenes": _tamano_dir(os.path.join(DATA_DIR, "uploads", "boletines_imagenes")),
+        "encuestas_fondos": _tamano_dir(os.path.join(DATA_DIR, "uploads", "encuestas_fondos")),
+    }
+    total_bytes = sum(c["bytes"] for c in carpetas.values())
+    for c in carpetas.values():
+        c["mb"] = round(c["bytes"] / 1024 / 1024, 1)
+    return {"carpetas": carpetas, "total_mb": round(total_bytes / 1024 / 1024, 1)}
+
+
 def info_capturas() -> dict:
     """Diagnóstico: cuántos archivos hay en CAPTURAS_DIR y cuánto pesan en
     total, para saber si de verdad son las capturas las que se están comiendo
