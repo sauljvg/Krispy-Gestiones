@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import unicodedata
 
 from db import DATA_DIR, get_connection
 
@@ -107,6 +108,8 @@ def ensure_reclutamiento_tables():
     cols_candidatos = {row[1] for row in conn.execute("PRAGMA table_info(candidatos)")}
     if "vacante_id" not in cols_candidatos:
         conn.execute("ALTER TABLE candidatos ADD COLUMN vacante_id INTEGER REFERENCES vacantes(id)")
+    if "foto_ruta" not in cols_candidatos:
+        conn.execute("ALTER TABLE candidatos ADD COLUMN foto_ruta TEXT")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS candidato_archivos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -222,6 +225,10 @@ def eliminar_vacante(vacante_id):
 def _row_to_dict(row):
     d = dict(row)
     d["extra_fields"] = json.loads(d.get("extra_fields") or "{}")
+    # No se expone la ruta de disco tal cual (igual que cv_ruta en
+    # informes.py) -- solo si hay foto o no; la propia foto se sirve por su
+    # endpoint dedicado (GET /candidatos/{id}/foto).
+    d["tiene_foto"] = bool(d.pop("foto_ruta", None))
     return d
 
 
@@ -399,6 +406,33 @@ def list_candidatos(empresa=None, estado=None, q=None, vacante_id=None, sin_vaca
     """, params).fetchall()
     conn.close()
     return [_row_to_dict(r) for r in rows]
+
+
+def normalizar_nombre(s):
+    s = unicodedata.normalize("NFD", s or "")
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return " ".join(s.lower().split())
+
+
+def buscar_candidato_por_nombre(empresa, nombre):
+    """Busca una ficha YA EXISTENTE por nombre completo (normalizado, sin
+    acentos/mayúsculas/espacios de más) -- se usa para adjuntar
+    retroactivamente un PDF por lotes a las fichas que ya se crearon a
+    partir de ese mismo PDF (ver /candidatos/adjuntar-pdf-lote), sin volver
+    a crear a nadie. Coincidencia exacta a propósito: un match aproximado
+    podría adjuntar el CV de una persona a la ficha de otra."""
+    objetivo = normalizar_nombre(nombre)
+    if not objetivo:
+        return None
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT id, nombre_completo FROM candidatos WHERE empresa = ?", (empresa,)
+    ).fetchall()
+    conn.close()
+    for row in rows:
+        if row["nombre_completo"] and normalizar_nombre(row["nombre_completo"]) == objetivo:
+            return row["id"]
+    return None
 
 
 def crear_candidato(campos: dict, empresa="kk", origen="manual", respuesta_id=None, creado_por=None, vacante_id=None):
@@ -661,6 +695,41 @@ def agregar_archivo(candidato_id, nombre_original, contenido):
     conn.commit()
     conn.close()
     return archivo_id
+
+
+def get_foto_ruta(candidato_id):
+    conn = get_connection()
+    row = conn.execute("SELECT foto_ruta FROM candidatos WHERE id = ?", (candidato_id,)).fetchone()
+    conn.close()
+    return row["foto_ruta"] if row and row["foto_ruta"] else None
+
+
+def guardar_foto(candidato_id, contenido: bytes, ext: str):
+    ruta_anterior = get_foto_ruta(candidato_id)
+    carpeta = os.path.join(UPLOADS_DIR, str(candidato_id))
+    os.makedirs(carpeta, exist_ok=True)
+    ruta = os.path.join(carpeta, f"foto{ext}")
+    with open(ruta, "wb") as f:
+        f.write(contenido)
+    conn = get_connection()
+    conn.execute("UPDATE candidatos SET foto_ruta = ? WHERE id = ?", (ruta, candidato_id))
+    conn.commit()
+    conn.close()
+    # Si la extensión cambió respecto a la foto anterior (p.ej. era .png y
+    # ahora es .jpg), el archivo viejo se queda huérfano en disco -- se
+    # limpia para no acumular basura.
+    if ruta_anterior and ruta_anterior != ruta and os.path.exists(ruta_anterior):
+        os.remove(ruta_anterior)
+
+
+def quitar_foto(candidato_id):
+    ruta = get_foto_ruta(candidato_id)
+    if ruta and os.path.exists(ruta):
+        os.remove(ruta)
+    conn = get_connection()
+    conn.execute("UPDATE candidatos SET foto_ruta = NULL WHERE id = ?", (candidato_id,))
+    conn.commit()
+    conn.close()
 
 
 def registrar_archivo_existente(candidato_id, nombre_original, ruta):

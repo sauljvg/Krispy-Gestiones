@@ -7,5 +7,6 @@ selenium
 reportlab
 requests
 pypdf
+Pillow
 replit
 replit-object-storage
