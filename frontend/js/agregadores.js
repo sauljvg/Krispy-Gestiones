@@ -1014,7 +1014,7 @@ function agrDibujarPoligonoLimite(limites, centro, color) {
       if (!span || span.dataset.cargado) return;
       span.dataset.cargado = "1";
       try {
-        const res = await fetch(`${AGR_API}/geocodificar-inverso?lat=${latlng.lat}&lng=${latlng.lng}`, { credentials: "include" });
+        const res = await fetch(`${AGR_API}/geocodificar-inverso?lat=${latlng[0]}&lng=${latlng[1]}`, { credentials: "include" });
         const datos = res.ok ? await res.json() : null;
         span.textContent = datos?.direccion || "no disponible";
       } catch {
