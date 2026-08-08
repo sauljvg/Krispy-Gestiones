@@ -404,6 +404,14 @@ def get_limites_route(tienda: str, agregador: str | None = None, _user: dict = D
     return agregadores_module.get_limites(tienda, agregador)
 
 
+@router.get("/admin/limites/{tienda}", dependencies=[Depends(require_api_key)])
+def admin_get_limites_route(tienda: str, agregador: str | None = None):
+    """Igual que get_limites_route pero con API key -- para que
+    buscar_limite_cobertura.py pueda saltarse ángulos ya completados al
+    relanzar, en vez de rehacerlos desde cero cada vez."""
+    return agregadores_module.get_limites(tienda, agregador)
+
+
 @router.delete("/admin/direccion/{direccion_id}", dependencies=[Depends(require_api_key)])
 def admin_eliminar_direccion_route(direccion_id: int):
     """Igual que eliminar_direccion_route pero con API key -- para que el
