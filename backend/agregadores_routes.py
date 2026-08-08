@@ -323,6 +323,29 @@ def crear_direccion_calculada_route(body: DireccionCalculadaIn):
     return resultado
 
 
+class LimiteIn(BaseModel):
+    tienda: str
+    agregador: str
+    angulo_grados: float
+    limite_km: float | None = None
+    nota: str | None = None
+
+
+@router.post("/admin/limites", dependencies=[Depends(require_api_key)])
+def guardar_limite_route(body: LimiteIn):
+    """Guarda el límite real de cobertura de una dirección (buscar_limite_
+    cobertura.py llama esto al terminar cada ángulo) -- el dashboard lee
+    esto para dibujar el polígono real en forma de estrella."""
+    return agregadores_module.guardar_limite(body.tienda, body.agregador, body.angulo_grados, body.limite_km, body.nota)
+
+
+@router.get("/limites/{tienda}")
+def get_limites_route(tienda: str, agregador: str | None = None, _user: dict = Depends(require_agregadores)):
+    """Límites guardados de una tienda, ordenados por ángulo -- para
+    dibujar el polígono real de cobertura en el dashboard."""
+    return agregadores_module.get_limites(tienda, agregador)
+
+
 @router.delete("/admin/direccion/{direccion_id}", dependencies=[Depends(require_api_key)])
 def admin_eliminar_direccion_route(direccion_id: int):
     """Igual que eliminar_direccion_route pero con API key -- para que el

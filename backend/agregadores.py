@@ -131,6 +131,23 @@ def ensure_tables():
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_agr_chequeos_tienda_ts ON agregadores_chequeos(tienda, timestamp)"
     )
+    # Un límite real de cobertura por (tienda, agregador, ángulo) -- lo
+    # calcula buscar_limite_cobertura.py (búsqueda adaptativa) y lo guarda
+    # aquí para que el dashboard pueda dibujar el polígono real (forma de
+    # estrella, un vértice por ángulo) en vez de un envolvente convexo sobre
+    # los puntos sueltos, que no puede representar huecos de cobertura.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agregadores_limites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tienda TEXT NOT NULL,
+            agregador TEXT NOT NULL,
+            angulo_grados INTEGER NOT NULL,
+            limite_km REAL,
+            nota TEXT,
+            actualizado_en TEXT NOT NULL,
+            UNIQUE(tienda, agregador, angulo_grados)
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -484,7 +501,66 @@ def crear_punto_calculado(tienda: str, distancia_km: float, angulo_grados: float
     # sigue siendo inválido. El que llama (script de límite de cobertura)
     # necesita saberlo para no tratar ese chequeo como un dato real.
     resultado["direccion_valida"] = _direccion_valida(direccion_text)
+    # Con varias tiendas relativamente cerca (ej. Princesa y Caleido, a
+    # 6km), la búsqueda del límite real de UNA tienda puede acabar probando
+    # una dirección que en realidad está más cerca de OTRA sucursal -- si
+    # ahí sale "disponible", puede ser porque responde la otra tienda, no la
+    # que se está midiendo (el buscador de los agregadores solo busca por
+    # marca "Krispy Kreme", no distingue sucursal). El que llama necesita
+    # saber esto para no tratarlo como límite real de `tienda`.
+    resultado["tienda_mas_cercana"] = _tienda_mas_cercana(fila["lat"], fila["lng"])
     return resultado
+
+
+def _tienda_mas_cercana(lat: float, lng: float) -> str:
+    """De las 6 sucursales, cuál está geográficamente más cerca de este
+    punto -- para detectar cuándo un punto de test de una tienda cae en
+    realidad más cerca de otra (ver crear_punto_calculado)."""
+    mejor_tienda, mejor_distancia = None, None
+    for nombre, info in TIENDAS.items():
+        distancia, _ = _distancia_y_angulo(info["lat"], info["lng"], lat, lng)
+        if mejor_distancia is None or distancia < mejor_distancia:
+            mejor_tienda, mejor_distancia = nombre, distancia
+    return mejor_tienda
+
+
+def guardar_limite(tienda: str, agregador: str, angulo_grados: float, limite_km: float | None, nota: str | None) -> dict:
+    """Guarda (o actualiza) el límite real de cobertura calculado por
+    buscar_limite_cobertura.py para una dirección concreta -- lo llama el
+    script al terminar cada ángulo, así el dashboard puede dibujar el
+    polígono real (un vértice por ángulo) sin esperar a que termine toda la
+    tienda."""
+    angulo_guardar = int(round(angulo_grados))
+    conn = get_connection()
+    conn.execute(
+        """INSERT INTO agregadores_limites (tienda, agregador, angulo_grados, limite_km, nota, actualizado_en)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(tienda, agregador, angulo_grados)
+           DO UPDATE SET limite_km=excluded.limite_km, nota=excluded.nota, actualizado_en=excluded.actualizado_en""",
+        (tienda, agregador, angulo_guardar, limite_km, nota, datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    conn.close()
+    return {"tienda": tienda, "agregador": agregador, "angulo_grados": angulo_guardar, "limite_km": limite_km, "nota": nota}
+
+
+def get_limites(tienda: str, agregador: str = None) -> list[dict]:
+    """Límites guardados para una tienda -- ordenados por ángulo, para que
+    el frontend pueda conectar los vértices en orden sin tener que
+    ordenarlos él. Si se pasa agregador, filtra a ese solo."""
+    conn = get_connection()
+    if agregador:
+        filas = conn.execute(
+            "SELECT * FROM agregadores_limites WHERE tienda=? AND agregador=? ORDER BY angulo_grados",
+            (tienda, agregador),
+        ).fetchall()
+    else:
+        filas = conn.execute(
+            "SELECT * FROM agregadores_limites WHERE tienda=? ORDER BY agregador, angulo_grados",
+            (tienda,),
+        ).fetchall()
+    conn.close()
+    return [dict(f) for f in filas]
 
 
 def agregar_direccion_manual(tienda: str, lat: float, lng: float, direccion_text: str = None) -> dict | None:

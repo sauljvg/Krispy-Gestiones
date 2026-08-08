@@ -32,6 +32,17 @@ async def crear_direccion_calculada(tienda: str, distancia_km: float, angulo_gra
             return await resp.json()
 
 
+async def guardar_limite(tienda: str, agregador: str, angulo_grados: float, limite_km: float | None, nota: str | None):
+    """Guarda el resultado de buscar_limite_cobertura.py para una dirección
+    -- el dashboard lo lee para dibujar el polígono real de cobertura
+    (forma de estrella, un vértice por ángulo)."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/limites"
+    body = {"tienda": tienda, "agregador": agregador, "angulo_grados": angulo_grados, "limite_km": limite_km, "nota": nota}
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=body, headers=_headers(), timeout=15) as resp:
+            resp.raise_for_status()
+
+
 async def eliminar_direccion(direccion_id: int):
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direccion/{direccion_id}"
     async with aiohttp.ClientSession() as session:

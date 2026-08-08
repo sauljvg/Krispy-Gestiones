@@ -74,6 +74,24 @@ async def crear_punto_valido(tienda: str, distancia_km: float, angulo_grados: fl
     return None
 
 
+async def resultado_punto(scraper, tienda, punto, agregador, avisos: list) -> str:
+    """Como chequear_punto, pero además avisa (sin cortar la búsqueda) si el
+    punto cae más cerca de OTRA sucursal (ver crear_punto_calculado /
+    tienda_mas_cercana) -- con varias tiendas relativamente próximas (ej.
+    Princesa-Caleido a 6km), un "disponible" ahí PODRÍA deberse a que
+    responde la otra tienda, porque los agregadores solo buscan por marca
+    "Krispy Kreme" y no distinguen sucursal. Es solo información para
+    interpretar el resultado después, no se usa para decidir el límite."""
+    otra = punto.get("tienda_mas_cercana")
+    if otra and otra != tienda:
+        logger.warning(
+            "  aviso: %.2fkm cae más cerca de '%s' que de '%s' -- el resultado podría reflejar la otra sucursal",
+            punto["distancia_km"], otra, tienda,
+        )
+        avisos.append(punto["distancia_km"])
+    return await chequear_punto(scraper, tienda, punto["id"], punto["direccion_text"], agregador)
+
+
 async def chequear_punto(scraper, tienda, direccion_id, direccion_text, agregador) -> str:
     """Devuelve 'disponible', 'no_disponible' o 'error' (fallo técnico
     persistente tras reintentar) -- y sube cada intento a producción igual
@@ -104,6 +122,7 @@ async def chequear_punto(scraper, tienda, direccion_id, direccion_text, agregado
 async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) -> dict:
     scraper = SCRAPERS[agregador](timeout_seg=config.SCRAPER_TIMEOUT, retry_max=config.SCRAPER_RETRY_MAX)
     lo = hi = None
+    avisos_otra_tienda = []
 
     for d in DISTANCIAS_EXPANSION:
         punto = await crear_punto_valido(tienda, d, angulo)
@@ -111,7 +130,7 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
             logger.warning("[%s/%s/%.0f°] %.2fkm -- sin dirección real cerca (autovía/polígono), se salta este paso", tienda, agregador, angulo, d)
             await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
             continue
-        resultado = await chequear_punto(scraper, tienda, punto["id"], punto["direccion_text"], agregador)
+        resultado = await resultado_punto(scraper, tienda, punto, agregador, avisos_otra_tienda)
         d_real = punto["distancia_km"]
         logger.info(
             "[%s/%s/%.0f°] expansión %.2fkm -> %s (%s)",
@@ -124,9 +143,15 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
             break
         await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
 
+    def _con_aviso(resultado: dict) -> dict:
+        if avisos_otra_tienda:
+            aviso = f"ojo: desde ~{min(avisos_otra_tienda)}km en esta dirección hay puntos más cerca de otra sucursal (el 'disponible' ahí podría ser de esa tienda, no de {tienda})"
+            resultado["nota"] = f"{resultado['nota']} -- {aviso}" if resultado["nota"] else aviso
+        return resultado
+
     if hi is None:
         nota = f">= {lo}km (no se encontró el borde dentro del rango probado)" if lo else "sin datos (todo falló)"
-        return {"angulo": angulo, "limite_km": None, "nota": nota}
+        return _con_aviso({"angulo": angulo, "limite_km": None, "nota": nota})
     if lo is None:
         # Ni el primer punto probado (el más cercano de la expansión) tenía
         # cobertura -- en vez de conformarnos con "< X", afinamos hacia
@@ -140,14 +165,14 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
             if punto_base is not None:
                 break
         if punto_base is None:
-            return {"angulo": angulo, "limite_km": None, "nota": f"< {hi}km (sin dirección real cerca de la tienda en esta dirección, ni hasta {BASELINE_CERCANO_ESCALERA_KM[-1]}km)"}
-        resultado_base = await chequear_punto(scraper, tienda, punto_base["id"], punto_base["direccion_text"], agregador)
+            return _con_aviso({"angulo": angulo, "limite_km": None, "nota": f"< {hi}km (sin dirección real cerca de la tienda en esta dirección, ni hasta {BASELINE_CERCANO_ESCALERA_KM[-1]}km)"})
+        resultado_base = await resultado_punto(scraper, tienda, punto_base, agregador, avisos_otra_tienda)
         await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
         if resultado_base != "disponible":
-            return {
+            return _con_aviso({
                 "angulo": angulo, "limite_km": None,
                 "nota": f"no disponible incluso a {punto_base['distancia_km']}km de la tienda -- puede que esta dirección esté fuera de zona por completo",
-            }
+            })
         lo = punto_base["distancia_km"]
 
     while (hi - lo) > PRECISION_KM:
@@ -156,7 +181,7 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
         if punto is None:
             logger.warning("[%s/%s/%.0f°] %.2fkm -- sin dirección real cerca, se para la binaria aquí", tienda, agregador, angulo, mid)
             break
-        resultado = await chequear_punto(scraper, tienda, punto["id"], punto["direccion_text"], agregador)
+        resultado = await resultado_punto(scraper, tienda, punto, agregador, avisos_otra_tienda)
         d_real = punto["distancia_km"]
         logger.info(
             "[%s/%s/%.0f°] binaria %.2fkm -> %s (%s)",
@@ -171,7 +196,7 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
             break
         await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
 
-    return {"angulo": angulo, "limite_km": round((lo + hi) / 2, 2), "nota": None}
+    return _con_aviso({"angulo": angulo, "limite_km": round((lo + hi) / 2, 2), "nota": None})
 
 
 async def main():
@@ -195,6 +220,10 @@ async def main():
                 r = {"angulo": angulo, "limite_km": None, "nota": f"fallo del script: {exc!r}"}
             resultados[agregador].append(r)
             logger.info("RESULTADO %s / %s / %s°: %s", args.tienda, agregador, angulo, r)
+            try:
+                await api_client.guardar_limite(args.tienda, agregador, angulo, r["limite_km"], r["nota"])
+            except Exception as exc:
+                logger.warning("No se pudo guardar el límite en KG: %r", exc)
 
     logger.info("=== RESUMEN FINAL (%s) ===", args.tienda)
     for agregador, lista in resultados.items():
