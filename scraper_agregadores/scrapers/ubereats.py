@@ -13,6 +13,16 @@ SEL_ADDRESS_INPUT = "#location-typeahead-home-input"
 SEL_ADDRESS_SUGGESTION = '[id^="location-typeahead-home-item-"]'
 SEL_BUSCAR_COMIDA_BUTTON = 'button:has-text("Buscar comida")'
 
+# Flujo alternativo entrando directo por /feed en vez de la portada -- confirmado
+# a mano 08/08 (selectores reales sacados del DOM, no adivinados): evita cargar
+# toda la home con sus carruseles/promos. Solo aplica si /feed ya trae un chip
+# de ubicación (típico si el sitio resolvió algo por geolocalización/IP); si no,
+# se cae al flujo de portada de siempre (ver _establecer_direccion).
+SEL_EDIT_LOCATION_BUTTON = '[data-testid="edit-delivery-location-button"]'
+SEL_CHANGE_ADDRESS_BUTTON = '[data-testid="change-address-button"]'
+SEL_ADDRESS_INPUT_FEED = '[data-testid="location-typeahead-input"]'
+SEL_ADDRESS_SUGGESTION_FEED = '[id^="location-typeahead-location-manager-item-"]'
+
 SEL_SEARCH_BUTTON = '[data-testid="label-wrapper-query"]:visible'
 SEL_SEARCH_INPUT = 'input[placeholder*="Buscar en Uber"]'
 SEL_STORE_LINK = 'a[href*="/store/"]'
@@ -29,8 +39,19 @@ class UberEatsScraper(BaseAggregatorScraper):
     # Cloudflare bloquea Chromium headless en este sitio incluso con stealth aplicado,
     # pero deja pasar una ventana visible sin intervención humana.
     iniciar_headless = False
+    # Confirmado en vivo 08/08: no basta con "no headless" -- si la ventana se manda
+    # fuera de pantalla (comportamiento por defecto para no interrumpir al usuario),
+    # Uber Eats seguía bloqueando con challenge el 100% de las veces. Con la ventana
+    # genuinamente en pantalla, dejó de bloquear.
+    mantener_visible = True
 
     async def _verificar(self, page, tienda_nombre: str, direccion: str) -> ResultadoChequeo:
+        # Confirmado en vivo 08/08: /feed nunca trae chip de ubicación aquí porque
+        # cada chequeo lanza un navegador nuevo sin cookies/geolocalización previa
+        # (ver _run_once) -- el intento de /feed caía al fallback de portada el
+        # 100% de las veces, añadiendo ~10s perdidos por chequeo sin ganar nada.
+        # Se va directo a la portada, que es el único camino que de verdad funciona
+        # con este modelo de sesión nueva por chequeo.
         await page.goto(BASE_URL, wait_until="domcontentloaded")
         await self._comprobar_challenge(page)
 
@@ -55,12 +76,38 @@ class UberEatsScraper(BaseAggregatorScraper):
         except Exception:
             pass
 
+    async def _rellenar_sin_scroll(self, page, selector: str, valor: str):
+        """Rellena un input por JS puro, sin pasar por el fill()/scrollIntoView
+        de Playwright.
+
+        Confirmado en vivo 08/08 (viendo la ventana real en pantalla): la home
+        sigue cargando contenido de forma diferida por debajo (secciones de
+        "añade tu restaurante", "reparte con Uber Eats", "ciudades cerca de
+        ti"...) que la empuja a desplazarse sola durante ~30s. fill(force=True)
+        NO lo arregla -- se salta el chequeo de estabilidad pero sigue haciendo
+        scroll-into-view antes de escribir, y ese scroll choca con el que la
+        propia página dispara. La solución real es no tocar el scroll para
+        nada: se fija el value directamente vía el setter nativo (el mismo
+        truco confirmado a mano en el navegador esta sesión) y se dispara
+        'input' para que React lo detecte igual que si se hubiera escrito.
+        """
+        # OJO: document.querySelector no entiende ":visible" (eso es una extensión
+        # de Playwright, no CSS real) -- se filtra la visibilidad a mano en JS.
+        await page.evaluate(
+            """([selector, valor]) => {
+                const candidatos = Array.from(document.querySelectorAll(selector));
+                const el = candidatos.find(e => e.offsetParent !== null) || candidatos[0];
+                const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                setter.call(el, valor);
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+            }""",
+            [selector, valor],
+        )
+
     async def _establecer_direccion(self, page, direccion: str):
         campo = page.locator(SEL_ADDRESS_INPUT).first
         await campo.wait_for(state="visible", timeout=15000)
-        # fill() ya enfoca el campo por sí solo; un click() previo es un paso de más que
-        # exige que el elemento esté "estable" (sin animarse) antes de tiempo.
-        await campo.fill(direccion)
+        await self._rellenar_sin_scroll(page, SEL_ADDRESS_INPUT, direccion)
 
         try:
             sugerencia = page.locator(SEL_ADDRESS_SUGGESTION).first
@@ -122,7 +169,7 @@ class UberEatsScraper(BaseAggregatorScraper):
             ruta = await self.screenshot_on_error(page, "sin_buscador")
             logger.warning("ubereats: sin campo de búsqueda tras pulsar botón, url=%s -- captura: %s", page.url, ruta)
             raise
-        await campo_busqueda.fill(MARCA_BUSQUEDA)
+        await self._rellenar_sin_scroll(page, SEL_SEARCH_INPUT, MARCA_BUSQUEDA)
 
         enlace = page.locator(f'{SEL_STORE_LINK}:has-text("{MARCA_BUSQUEDA}")').first
         try:
@@ -134,6 +181,23 @@ class UberEatsScraper(BaseAggregatorScraper):
             # simple retraso de red se leía como "no disponible" de verdad.
             await enlace.wait_for(state="visible", timeout=20000)
         except Exception:
+            # Confirmado en vivo 08/08 (viendo un punto real atascado 15+ min en
+            # reintentos): el desplegable en vivo (lo de arriba) puede no mostrar
+            # la tienda a tiempo aunque SÍ exista -- probado a mano que pulsar
+            # Enter (página de resultados completa) encuentra coincidencias que
+            # el desplegable no llegó a mostrar. Último intento antes de darlo
+            # por "no confirmada" de verdad.
+            try:
+                await campo_busqueda.press("Enter")
+                await enlace.wait_for(state="visible", timeout=10000)
+                logger.info("ubereats: tienda encontrada tras pulsar Enter (el desplegable no la mostró a tiempo)")
+            except Exception:
+                pass
+            else:
+                await enlace.evaluate("e => e.click()")
+                await page.wait_for_load_state("domcontentloaded")
+                return True
+
             # Confirmado en vivo 08/08: el reCAPTCHA real de Uber Eats no sale
             # siempre al cargar la página -- a veces aparece justo aquí, a mitad
             # del flujo, tras escribir la búsqueda. Sin este chequeo, ese caso se
@@ -186,6 +250,29 @@ class UberEatsScraper(BaseAggregatorScraper):
 
     async def _leer_disponibilidad(self, page) -> ResultadoChequeo:
         try:
+            # Confirmado en vivo 08/08: cuando la tienda está cerrada por horario,
+            # Uber Eats muestra un modal de "Programar la entrega" y el toggle de
+            # modalidad NO lleva aria-disabled="true" -- el atributo simplemente
+            # no existe (aria-disabled=None), y el código de abajo interpretaba
+            # "no es 'true'" como "disponible". Se comprueba "Cerrado" primero,
+            # ANTES de fiarse del toggle, porque el toggle no es señal fiable en
+            # este estado (el modal lo tapa/desactiva de otra forma).
+            #
+            # IMPORTANTE (aclarado por el usuario 08/08): lo que buscamos aquí es
+            # ZONA de reparto, no si la tienda está abierta ahora mismo. Que Uber
+            # Eats ofrezca PROGRAMAR la entrega para cuando reabra es en sí mismo
+            # la prueba de que esta dirección SÍ está dentro de su zona de reparto
+            # -- si no lo estuviera, no dejaría programar nada. Así que "cerrado
+            # con opción de programar" cuenta como disponible=True (señal positiva
+            # de cobertura), no como un dato a descartar ni como "no disponible".
+            texto_cerrado_temprano = await self._detectar_cerrado_por_horario(page)
+            if texto_cerrado_temprano:
+                return ResultadoChequeo(
+                    disponible=True,
+                    mensaje_bloqueo=f"Cerrado ahora, pero permite programar entrega -- confirma zona de reparto: {texto_cerrado_temprano}",
+                    status_http=200,
+                )
+
             modalidad = page.locator(SEL_MODALITY_DELIVERY).first
             try:
                 await modalidad.wait_for(state="attached", timeout=10000)

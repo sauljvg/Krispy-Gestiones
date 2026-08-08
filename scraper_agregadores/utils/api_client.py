@@ -43,6 +43,18 @@ async def guardar_limite(tienda: str, agregador: str, angulo_grados: float, limi
             resp.raise_for_status()
 
 
+async def obtener_limites(tienda: str, agregador: str) -> list[dict]:
+    """Ángulos ya completados para tienda/agregador -- para que
+    buscar_limite_cobertura.py pueda saltárselos al relanzar en vez de
+    rehacerlos desde cero cada vez (confirmado en vivo 08/08: cada relanzamiento
+    por un fix repetía 0° de parquesur entero, sin avanzar nunca al resto)."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/limites/{tienda}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params={"agregador": agregador}, headers=_headers(), timeout=15) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+
 async def eliminar_direccion(direccion_id: int):
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direccion/{direccion_id}"
     async with aiohttp.ClientSession() as session:

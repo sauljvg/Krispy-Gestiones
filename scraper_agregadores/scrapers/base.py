@@ -129,6 +129,20 @@ class BaseAggregatorScraper:
     # con stealth aplicado, pero dejan pasar una ventana visible sin intervención humana.
     iniciar_headless: bool = True
 
+    # Confirmado en vivo 08/08: con iniciar_headless=False pero la ventana mandada fuera
+    # de pantalla (ver _run_once), Uber Eats seguía bloqueando con challenge el 100% de
+    # las veces -- "no headless" no basta, hace falta que la ventana esté genuinamente
+    # en pantalla (misma huella que un usuario real). En cuanto se dejó en pantalla de
+    # verdad, dejó de bloquear. Así que para este sitio la ventana se queda siempre
+    # visible, no solo durante una resolución manual.
+    mantener_visible: bool = False
+
+    # Setup del usuario (08/08): pantalla principal 1920x1080 a la izquierda (x=0),
+    # segunda pantalla 1920x1080 a la derecha (x=1920) -- ahí quiere la ventana visible,
+    # junto a la ventana de Claude, en vez de tapando la pantalla principal.
+    posicion_ventana_visible: str = "1930,40"
+    tamano_ventana_visible: str = "900,1000"
+
     def __init__(self, timeout_seg: int = 30, retry_max: int = 3):
         self.timeout_ms = timeout_seg * 1000
         self.retry_max = retry_max
@@ -208,14 +222,18 @@ class BaseAggregatorScraper:
 
     async def _run_once(self, tienda_nombre: str, direccion: str, headless: bool) -> ResultadoChequeo:
         args = ["--disable-blink-features=AutomationControlled"]
-        if not headless and not self._modo_resolucion_manual:
-            # Uber Eats necesita una ventana "real" (no headless) para no toparse con
-            # Cloudflare, pero eso no significa que tenga que taparte la pantalla mientras
-            # trabajas: se coloca fuera del área visible. Sigue siendo una ventana normal
-            # a ojos del sitio (misma huella que una visible), solo que no la ves. Si la
-            # ventana visible es para que la resuelva un humano (challenge anti-bot), se
-            # deja donde se ve -- ocultarla ahí rompería la resolución manual.
-            args.append("--window-position=-32000,-32000")
+        if not headless:
+            if self._modo_resolucion_manual or self.mantener_visible:
+                # Ventana genuinamente en pantalla, en la segunda pantalla (derecha),
+                # junto a la ventana de Claude -- ni tapa la pantalla principal ni
+                # queda fuera de vista (que es lo que hacía que Uber Eats la bloqueara).
+                args.append(f"--window-position={self.posicion_ventana_visible}")
+                args.append(f"--window-size={self.tamano_ventana_visible}")
+            else:
+                # Se manda fuera del área visible para no taparte la pantalla mientras
+                # trabajas -- solo vale para sitios donde de verdad no importa que la
+                # ventana esté fuera de pantalla (Uber Eats no entra aquí, ver arriba).
+                args.append("--window-position=-32000,-32000")
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(
                 headless=headless,
@@ -235,11 +253,15 @@ class BaseAggregatorScraper:
                 # No necesitamos ver nada: solo leemos texto/atributos del DOM. Bloquear
                 # imágenes, fuentes y vídeo reduce el peso de cada página bastante (promos,
                 # carruseles, iconos) sin tocar el HTML/CSS que el scraper sí necesita leer.
-                # EXCEPCIÓN: en modo resolución manual la ventana es justo para que un
-                # humano vea y resuelva un challenge anti-bot -- si se bloquean sus
-                # recursos, el propio widget del captcha no puede pintarse (confirmado
-                # visualmente: salía un rectángulo de color liso en vez del reto real).
-                if not self._modo_resolucion_manual:
+                # EXCEPCIÓN: en modo resolución manual (o mantener_visible, p.ej. Uber
+                # Eats) la ventana es justo para que un humano pueda ver un challenge
+                # anti-bot si aparece -- si se bloquean sus recursos, el propio widget
+                # del captcha no puede pintarse. Confirmado en vivo 08/08: con
+                # mantener_visible=True pero esta excepción atada solo a
+                # _modo_resolucion_manual, el captcha seguía saliendo con las imágenes
+                # rotas en el primer intento (antes de que _modo_resolucion_manual se
+                # active, que solo pasa en el REINTENTO tras un ChallengeDetectedError).
+                if not self._modo_resolucion_manual and not self.mantener_visible:
                     await context.route("**/*", _bloquear_recursos_pesados)
                 # Estos sitios tienen carruseles/banners promocionales en autoplay. Playwright
                 # espera a que un elemento esté "estable" (que deje de moverse) antes de hacer

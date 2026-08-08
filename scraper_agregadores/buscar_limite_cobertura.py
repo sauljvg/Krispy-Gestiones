@@ -9,6 +9,7 @@ visible en el mapa de cobertura del dashboard, no es una simulación aparte.
 import argparse
 import asyncio
 import logging
+from datetime import datetime
 
 import config
 from scrapers.glovo import GlovoScraper
@@ -99,12 +100,30 @@ async def resultado_punto(scraper, tienda, punto, agregador, avisos: list) -> st
     return await chequear_punto(scraper, tienda, punto["id"], punto["direccion_text"], agregador)
 
 
+# Frase EXACTA (idéntica en glovo.py, justeat.py y ubereats.py) que se lanza
+# cuando la búsqueda de la tienda se completó de verdad (sin challenge, sin
+# fallo de red) pero Krispy Kreme sencillamente no salió en los resultados.
+# Confirmado a mano por el usuario 09/08 (comprobación manual real en Uber
+# Eats): esto NO es un fallo técnico nuestro -- es una búsqueda válida que
+# no encontró la tienda, exactamente la misma señal que "no disponible".
+MARCADOR_TIENDA_NO_CONFIRMADA = "tienda no confirmada en resultados de búsqueda"
+
+
 async def chequear_punto(scraper, tienda, direccion_id, direccion_text, agregador) -> str:
     """Devuelve 'disponible', 'no_disponible' o 'error' (fallo técnico
     persistente tras reintentar) -- y sube cada intento a producción igual
-    que el flujo normal del daemon."""
+    que el flujo normal del daemon.
+
+    Nota (aclarado por el usuario 08/08): cuando Uber Eats muestra la tienda
+    cerrada pero permite PROGRAMAR la entrega, el propio scraper
+    (ubereats.py::_leer_disponibilidad) ya lo traduce a disponible=True --
+    eso en sí es la prueba de que la dirección está dentro de la zona de
+    reparto, aunque la tienda no esté operando ahora mismo. No hace falta
+    tratarlo aparte aquí."""
+    ultimo_resultado = None
     for intento in range(MAX_REINTENTOS_TECNICO + 1):
         resultado = await scraper.verificar_disponibilidad(tienda, direccion_text)
+        ultimo_resultado = resultado
         try:
             await api_client.enviar_chequeo(
                 {
@@ -123,6 +142,13 @@ async def chequear_punto(scraper, tienda, direccion_id, direccion_text, agregado
             logger.warning("  fallo técnico (intento %d/%d): %s", intento + 1, MAX_REINTENTOS_TECNICO + 1, resultado.error_texto)
             continue
         return "disponible" if resultado.disponible else "no_disponible"
+
+    if ultimo_resultado and ultimo_resultado.error_texto and MARCADOR_TIENDA_NO_CONFIRMADA in ultimo_resultado.error_texto:
+        # Reintentado el máximo de veces y SIEMPRE la misma búsqueda válida
+        # sin encontrar la tienda -- se acepta como "no disponible" real en
+        # vez de dejarlo como fallo técnico inconcluso.
+        logger.info("  tienda no confirmada de forma persistente -- se acepta como no_disponible real, no como fallo técnico")
+        return "no_disponible"
     return "error"
 
 
@@ -223,17 +249,62 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
     return _con_aviso({"angulo": angulo, "limite_km": round((lo + hi) / 2, 2), "nota": None})
 
 
+def _tienda_cerrada(tienda: str) -> bool:
+    cierre = config.HORARIOS_CIERRE_TIENDAS.get(tienda)
+    if cierre is None:
+        return False
+    ahora = datetime.now()
+    hora_decimal = ahora.hour + ahora.minute / 60
+    return hora_decimal >= cierre
+
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tienda", default="parquesur")
     parser.add_argument("--agregadores", nargs="+", default=["glovo", "justeat"])
     parser.add_argument("--angulos", nargs="+", type=float, default=[0, 45, 90, 135, 180, 225, 270, 315])
+    parser.add_argument(
+        "--avisar-challenge", action="store_true",
+        help="Notificación + navegador visible SOLO cuando se detecte un challenge anti-bot real (90s para resolverlo a mano); silencioso el resto del tiempo.",
+    )
+    parser.add_argument(
+        "--reintentar-completados", action="store_true",
+        help="Rehacer también los ángulos que ya tienen un resultado guardado (por defecto se saltan).",
+    )
     args = parser.parse_args()
+
+    if args.avisar_challenge:
+        for scraper_cls in SCRAPERS.values():
+            scraper_cls.permitir_resolucion_manual = True
 
     resultados = {}
     for agregador in args.agregadores:
         resultados[agregador] = []
+
+        # Confirmado en vivo 08/08: cada vez que se relanza el script (p.ej. tras
+        # un fix), volvía a empezar desde el primer ángulo, rehaciendo minutos
+        # de trabajo ya hecho -- se consulta qué ángulos ya tienen un resultado
+        # guardado y se saltan, a menos que se pida explícitamente rehacerlos.
+        angulos_completados = set()
+        if not args.reintentar_completados:
+            try:
+                guardados = await api_client.obtener_limites(args.tienda, agregador)
+                angulos_completados = {round(float(fila["angulo_grados"]), 2) for fila in guardados}
+            except Exception as exc:
+                logger.warning("No se pudo consultar ángulos ya completados (se procesan todos): %r", exc)
+
         for angulo in args.angulos:
+            if round(float(angulo), 2) in angulos_completados:
+                logger.info("[%s/%s/%s°] ya tiene resultado guardado -- se salta", args.tienda, agregador, angulo)
+                continue
+
+            # NOTA (aclarado por el usuario 08/08): ya NO se para por horario de
+            # cierre -- "cerrado pero permite programar" ahora cuenta como
+            # disponible=True (confirma zona de reparto igual, ver
+            # ubereats.py::_leer_disponibilidad), así que correr con la tienda
+            # cerrada ya no corrompe el límite. _tienda_cerrada() se deja
+            # definida por si hace falta retomar este comportamiento.
+
             # Un fallo puntual (red, sitio caído un momento) en UNA dirección
             # no debe tirar por la borda las horas de progreso en el resto --
             # se registra como fallo y se sigue con la siguiente.

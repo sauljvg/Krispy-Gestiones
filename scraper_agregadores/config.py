@@ -10,6 +10,23 @@ load_dotenv()
 # añadirla aquí también (o promover esto a un GET /api/agregadores/tiendas si se automatiza).
 TIENDAS_SCHEDULER = ["parquesur", "princesa", "caleido", "granplaza2", "plenilunio", "lagavia"]
 
+# Hora de cierre de cada tienda (hora local, formato 24h) -- un chequeo hecho
+# tras el cierre puede salir "cerrado por horario" en vez de reflejar
+# cobertura real, contaminando la búsqueda de límite (confirmado en vivo
+# 08/08). Todas confirmadas en la ficha real de cada tienda en Google Maps
+# (no en la web genérica de "horario de restauración" del centro comercial,
+# que resultó no coincidir -- p.ej. Caleido decía cierre a las 21:00 ahí,
+# pero la ficha real de la tienda y la actividad en vivo esa noche confirman
+# 23:00). Parquesur/Princesa/Caleido además confirmadas a mano esa misma noche.
+HORARIOS_CIERRE_TIENDAS = {
+    "parquesur": 22.5,   # 22:30 -- confirmado a mano 08/08 y en Google Maps (ya aparecía "Cerrado" a las 22:2x)
+    "princesa": 23.0,    # 23:00 -- confirmado a mano 08/08 y en Google Maps ("Cierra pronto · 11 p.m.")
+    "caleido": 23.0,     # 23:00 -- confirmado a mano 08/08 y en Google Maps ("Cierra pronto · 11 p.m.")
+    "granplaza2": 22.5,  # 22:30 -- confirmado en Google Maps (ficha real de la tienda)
+    "plenilunio": 22.0,  # 22:00 -- confirmado en Google Maps (ficha real, horario 10:00-22:00 todos los días)
+    "lagavia": 22.0,     # 22:00 -- confirmado en Google Maps (ficha real, horario 10:00-22:00 todos los días)
+}
+
 # Uber Eats desactivado en producción: el 07/08 se confirmó que el challenge
 # anti-bot del sitio bloquea el 100% de los intentos (ver
 # logs/catchup_20260807_111914_completo.log y las pruebas locales de la misma
