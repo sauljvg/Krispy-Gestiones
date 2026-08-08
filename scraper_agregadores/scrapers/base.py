@@ -60,7 +60,11 @@ CHALLENGE_KEYWORDS = (
     # tienen sentido fuera de una pantalla de challenge real.
     "comprobación de seguridad automatizada",
     "no soy un robot",
-    "recaptcha",
+    # "recaptcha" (sin más) SE QUITÓ el 08/08: confirmado en vivo que Uber Eats
+    # mete el aviso legal "Este sitio está protegido por reCAPTCHA..." en el
+    # footer de TODA página, real challenge o no -- disparaba la alarma
+    # siempre, en cada chequeo, sin que hubiera nada que resolver. La frase
+    # específica del widget real ("no soy un robot") ya cubre el caso real.
 )
 
 _STEALTH = Stealth()
@@ -106,9 +110,16 @@ class BaseAggregatorScraper:
     url_base: str = ""
 
     # Si el sitio muestra un challenge anti-bot en modo headless, se reintenta una vez
-    # con una ventana visible para que un humano lo resuelva a mano (solo tiene sentido
-    # cuando el scraper se ejecuta de forma interactiva en la máquina local).
-    permitir_resolucion_manual: bool = True
+    # con una ventana visible para que un humano lo resuelva a mano -- pero SOLO tiene
+    # sentido cuando alguien ha lanzado el scraper a mano sabiendo que va a estar
+    # pendiente. Por defecto False: el daemon/scheduler/scripts de background NUNCA
+    # deben abrir ventanas ni disparar notificaciones sin que nadie lo esté esperando
+    # (confirmado en vivo 08/08: sys.stdin.isatty() daba falso positivo incluso en un
+    # proceso lanzado en background, así que "hay terminal" no basta como filtro --
+    # cada intento de challenge reintentaba con ventana + notificación, decenas de
+    # veces, sin que hubiera un humano real delante). Los scripts interactivos que sí
+    # quieran este flujo lo activan ellos mismos (ver _check_ubereats_rapido.py).
+    permitir_resolucion_manual: bool = False
 
     # Si nadie responde en este tiempo, se da por perdido el intento manual y se falla de
     # forma controlada en vez de bloquear el proceso para siempre.
@@ -307,8 +318,18 @@ class BaseAggregatorScraper:
         except Exception:
             return
 
-        if not any(palabra in texto for palabra in CHALLENGE_KEYWORDS):
+        coincidencias = [palabra for palabra in CHALLENGE_KEYWORDS if palabra in texto]
+        if not coincidencias:
             return
+
+        # Guarda captura + qué frase exacta disparó la detección -- antes esto
+        # simplemente lanzaba la excepción sin dejar rastro visual, así que un
+        # falso positivo (o uno real) no se podía diagnosticar después.
+        ruta_captura = await self.screenshot_on_error(page, "challenge")
+        logger.warning(
+            "%s: texto de challenge detectado (%s) -- captura: %s",
+            self.nombre_agregador, coincidencias, ruta_captura,
+        )
 
         try:
             hay_terminal = sys.stdin.isatty()

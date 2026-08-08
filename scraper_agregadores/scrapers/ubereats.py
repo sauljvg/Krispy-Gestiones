@@ -134,6 +134,15 @@ class UberEatsScraper(BaseAggregatorScraper):
             # simple retraso de red se leía como "no disponible" de verdad.
             await enlace.wait_for(state="visible", timeout=20000)
         except Exception:
+            # Confirmado en vivo 08/08: el reCAPTCHA real de Uber Eats no sale
+            # siempre al cargar la página -- a veces aparece justo aquí, a mitad
+            # del flujo, tras escribir la búsqueda. Sin este chequeo, ese caso se
+            # confundía con "tienda no confirmada" (un simple fallo técnico) en
+            # vez de tratarse como el challenge real que es (ventana visible +
+            # aviso para resolverlo a mano, ver _comprobar_challenge). Se
+            # comprueba primero, antes de asumir que es solo un render lento.
+            await self._comprobar_challenge(page)
+
             # IMPORTANTE: no devolver False aquí. Que el selector no encuentre la
             # tienda en el tiempo dado NO es lo mismo que "confirmado que no
             # reparte ahí" -- devolver False lo convertía en un resultado "no
