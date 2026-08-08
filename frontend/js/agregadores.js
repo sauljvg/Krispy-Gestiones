@@ -996,36 +996,42 @@ async function agrActualizarPoligonoLimite() {
   const checkboxPoligono = document.getElementById("agr-mostrar-poligono");
   if (checkboxPoligono) checkboxPoligono.checked = agrMostrarPoligonoActivo();
 
-  if (!agrMap || !agrTiendaActual || agrTiendaActual === AGR_TODAS || !agrMostrarPoligonoActivo()) {
+  if (!agrMap || !agrTiendaActual || !agrMostrarPoligonoActivo()) {
     if (nota) nota.textContent = "";
     return;
   }
 
-  const res = await fetch(`${AGR_API}/limites/${agrTiendaActual}`, { credentials: "include" });
-  const limites = res.ok ? await res.json() : [];
-  const centro = agrCentrosPorTienda[agrTiendaActual] || agrTiendaCentro;
-  if (!centro) return;
+  // En la vista "Todas" se dibuja el polígono de cada tienda que ya tenga
+  // datos (no solo de la seleccionada) -- un fetch por tienda, en paralelo.
+  const tiendas = agrTiendaActual === AGR_TODAS ? Object.keys(agrCentrosPorTienda) : [agrTiendaActual];
+  const porTienda = await Promise.all(
+    tiendas.map((tienda) =>
+      fetch(`${AGR_API}/limites/${tienda}`, { credentials: "include" }).then((r) => (r.ok ? r.json() : []))
+    )
+  );
 
-  if (agrFiltroAgregador) {
-    const limitesAgregador = limites.filter((l) => l.agregador === agrFiltroAgregador);
-    agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[agrFiltroAgregador] || "#0ca30c");
-    if (nota) {
-      nota.textContent = limitesAgregador.length >= 3
-        ? "Polígono con la forma real de cobertura de este agregador -- un vértice por dirección comprobada, a su límite real (puede tener huecos: cerrado en una dirección, abierto en otra)."
-        : "";
+  let algunoDibujado = false;
+  tiendas.forEach((tienda, i) => {
+    const centro = agrCentrosPorTienda[tienda] || agrTiendaCentro;
+    if (!centro) return;
+    const limites = porTienda[i];
+    if (agrFiltroAgregador) {
+      const limitesAgregador = limites.filter((l) => l.agregador === agrFiltroAgregador);
+      if (agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[agrFiltroAgregador] || "#0ca30c")) algunoDibujado = true;
+    } else {
+      Object.keys(AGR_NOMBRE_AGREGADOR).forEach((nombre) => {
+        const limitesAgregador = limites.filter((l) => l.agregador === nombre);
+        if (agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[nombre] || "#888")) algunoDibujado = true;
+      });
     }
-  } else {
-    let algunoDibujado = false;
-    Object.keys(AGR_NOMBRE_AGREGADOR).forEach((nombre) => {
-      const limitesAgregador = limites.filter((l) => l.agregador === nombre);
-      if (limitesAgregador.length >= 3) algunoDibujado = true;
-      agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[nombre] || "#888");
-    });
-    if (nota) {
-      nota.textContent = algunoDibujado
-        ? "Un polígono por agregador (JustEat naranja, Glovo amarillo, Uber Eats verde) con la forma real de cobertura (límite comprobado en cada dirección, no un envolvente aproximado)."
-        : "";
-    }
+  });
+
+  if (nota) {
+    nota.textContent = algunoDibujado
+      ? (agrFiltroAgregador
+          ? "Polígono con la forma real de cobertura de este agregador -- un vértice por dirección comprobada, a su límite real (puede tener huecos: cerrado en una dirección, abierto en otra)."
+          : "Un polígono por agregador (JustEat naranja, Glovo amarillo, Uber Eats verde) con la forma real de cobertura (límite comprobado en cada dirección, no un envolvente aproximado).")
+      : "";
   }
 }
 
