@@ -226,6 +226,14 @@ def podar_direcciones_route():
     return agregadores_module.podar_grid_reducido()
 
 
+@router.post("/admin/capturas/limpiar-inactivas", dependencies=[Depends(require_api_key)])
+def limpiar_capturas_inactivas_route():
+    """Mantenimiento puntual: borra los ARCHIVOS de captura (no las filas ni
+    ningún dato) de chequeos ligados a direcciones ya desactivadas -- para
+    liberar espacio en el volumen sin tocar nada de lo que sigue activo."""
+    return agregadores_module.limpiar_capturas_direcciones_inactivas()
+
+
 @router.post("/alertas/limpiar-excepcion-vacia", dependencies=[Depends(require_api_key)])
 def limpiar_alertas_excepcion_vacia_route():
     return agregadores_module.borrar_alertas_excepcion_vacia()

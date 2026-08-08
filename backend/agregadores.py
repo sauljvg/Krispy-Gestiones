@@ -895,6 +895,37 @@ def limpiar_capturas_viejas() -> int:
     return borrados
 
 
+def limpiar_capturas_direcciones_inactivas() -> dict:
+    """Borra los ARCHIVOS de captura (no filas ni datos) de chequeos ligados a
+    direcciones ya desactivadas (activo=0) -- los puntos inválidos que la
+    búsqueda de límite de cobertura descarta sobre la marcha. Esos puntos ni
+    siquiera se ven ya en el mapa, así que sus capturas no aportan nada, pero
+    sí ocupan espacio real en el volumen (confirmado 08/08: la búsqueda de
+    límite sube una captura por cada chequeo, y generó cientos en una sola
+    tarde -- llevó el volumen cerca del límite de Railway)."""
+    if not os.path.isdir(CAPTURAS_DIR):
+        return {"borrados": 0, "bytes_liberados": 0}
+    conn = get_connection()
+    filas = conn.execute(
+        """SELECT c.url_captura FROM agregadores_chequeos c
+           JOIN agregadores_direcciones d ON d.id = c.direccion_id
+           WHERE d.activo = 0 AND c.url_captura IS NOT NULL"""
+    ).fetchall()
+    conn.close()
+    borrados = 0
+    bytes_liberados = 0
+    for fila in filas:
+        ruta = fila["url_captura"]
+        try:
+            if ruta and os.path.isfile(ruta):
+                bytes_liberados += os.path.getsize(ruta)
+                os.remove(ruta)
+                borrados += 1
+        except OSError:
+            pass
+    return {"borrados": borrados, "bytes_liberados": bytes_liberados}
+
+
 _limpieza_capturas_iniciada = False
 
 
