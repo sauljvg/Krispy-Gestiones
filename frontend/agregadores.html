@@ -47,7 +47,7 @@
     font-weight: 600; cursor: pointer;
   }
   .agr-filtro-btn.activo[data-agregador=""] { background: var(--acento-calido); color: #fff; border-color: var(--acento-calido); }
-  .agr-filtro-btn.activo[data-agregador="justeat"] { background: #ff8000; color: #fff; border-color: #ff8000; }
+  .agr-filtro-btn.activo[data-agregador="justeat"] { background: #2563eb; color: #fff; border-color: #2563eb; }
   .agr-filtro-btn.activo[data-agregador="glovo"] { background: #ffc244; color: #4a3300; border-color: #ffc244; }
   .agr-filtro-btn.activo[data-agregador="ubereats"] { background: #06c167; color: #fff; border-color: #06c167; }
 
@@ -57,7 +57,7 @@
     font-weight: 600; cursor: pointer;
   }
   .agr-filtro-btn-cobertura.activo[data-agregador=""] { background: var(--acento-calido); color: #fff; border-color: var(--acento-calido); }
-  .agr-filtro-btn-cobertura.activo[data-agregador="justeat"] { background: #ff8000; color: #fff; border-color: #ff8000; }
+  .agr-filtro-btn-cobertura.activo[data-agregador="justeat"] { background: #2563eb; color: #fff; border-color: #2563eb; }
   .agr-filtro-btn-cobertura.activo[data-agregador="glovo"] { background: #ffc244; color: #4a3300; border-color: #ffc244; }
   .agr-filtro-btn-cobertura.activo[data-agregador="ubereats"] { background: #06c167; color: #fff; border-color: #06c167; }
 
@@ -76,6 +76,12 @@
     border: 1px solid #111; box-shadow: 0 1px 3px rgba(0,0,0,0.4); cursor: grab;
   }
   .agr-marker-dot span:active { cursor: grabbing; }
+  /* Puntos que solo existen por una búsqueda de límite (sin dato del scrap
+     inicial Glovo/JustEat) -- anillo blanco extra para distinguirlos de los
+     puntos originales sin ocultar ninguno. */
+  .agr-marker-dot span.agr-marker-nuevo {
+    box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px #2563eb, 0 1px 3px rgba(0,0,0,0.4);
+  }
   .agr-drag-tooltip { font-size: 12px; font-weight: 600; }
 
   .agr-marker-tienda { background: transparent; border: none; }
@@ -203,7 +209,7 @@
   #agr-transiciones .agr-trans-meta { display: flex; flex-direction: column; gap: 4px; }
   #agr-transiciones .agr-trans-hora { color: var(--text-muted); font-size: 0.72rem; font-weight: 600; }
   #agr-transiciones .agr-trans-agregador { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.70rem; font-weight: 600; }
-  #agr-transiciones .agr-trans-agregador.justeat { background: color-mix(in srgb, #ff8000 20%, transparent); color: #ff8000; }
+  #agr-transiciones .agr-trans-agregador.justeat { background: color-mix(in srgb, #2563eb 20%, transparent); color: #2563eb; }
   #agr-transiciones .agr-trans-agregador.glovo { background: color-mix(in srgb, #ffc244 20%, transparent); color: #cc9900; }
   #agr-transiciones .agr-trans-agregador.ubereats { background: color-mix(in srgb, #06c167 20%, transparent); color: #06c167; }
   #agr-transiciones .agr-trans-direccion { color: var(--text-primary); font-weight: 500; }
@@ -263,6 +269,7 @@
         Mostrar polígono de límite real (forma real de cobertura por dirección)
       </label>
       <p class="agr-resumen-nota" id="agr-cobertura-nota"></p>
+      <p class="agr-resumen-nota">Los puntos con anillo azul solo tienen dato de una búsqueda de límite (no venían del scrap inicial de Glovo/JustEat).</p>
       <div id="agr-map"></div>
       <div id="agr-leyenda" class="agr-leyenda"></div>
     </div>
@@ -350,6 +357,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/agregadores.js?v=20260808f"></script>
+<script src="js/agregadores.js?v=20260808g"></script>
 </body>
 </html>

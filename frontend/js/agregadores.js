@@ -44,7 +44,11 @@ let agrTablaColapsada = localStorage.getItem(AGR_TABLA_COLAPSADA_KEY) === "1";
 const AGR_TRANSICIONES_LIMPIADAS_KEY = "agr_transiciones_limpiadas_hasta";
 let agrTransicionesLimpiadasHasta = localStorage.getItem(AGR_TRANSICIONES_LIMPIADAS_KEY) || null;
 
-const AGR_COLOR_MARCA = { justeat: "#ff8000", glovo: "#ffc244", ubereats: "#06c167" };
+// JustEat era naranja (#ff8000) -- casi idéntico al amarillo de Glovo
+// (#ffc244) y al naranja de la categoría "error" (#e8a33d), imposibles de
+// distinguir de un vistazo en el mapa (confirmado 08/08). Azul contrasta con
+// los tres a la vez.
+const AGR_COLOR_MARCA = { justeat: "#2563eb", glovo: "#ffc244", ubereats: "#06c167" };
 const AGR_NOMBRE_AGREGADOR = { justeat: "JustEat", glovo: "Glovo", ubereats: "Uber Eats" };
 let agrMostrarCorrectos = false;
 
@@ -123,11 +127,22 @@ function agrDistanciaKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function agrPuntoEsNuevo(dir) {
+  // "Nuevo" = existe SOLO porque una búsqueda de límite lo creó (p.ej. Uber
+  // Eats hoy, buscando más lejos de lo que llegó la rejilla original) --
+  // no por fecha fija ni id, sino porque no tiene dato de ninguno de los
+  // agregadores del scrap inicial (Glovo/JustEat). Funciona igual para
+  // cualquier campaña futura sin tocar este código.
+  const detalle = dir.detalle || {};
+  return !detalle.glovo && !detalle.justeat;
+}
+
 function agrIconoDireccion(dir) {
   const color = AGR_COLOR_CATEGORIA[agrCategoriaDireccion(dir)] || "#898781";
+  const nuevo = agrPuntoEsNuevo(dir);
   return L.divIcon({
     className: "agr-marker-dot",
-    html: `<span style="background:${color}"></span>`,
+    html: `<span class="${nuevo ? "agr-marker-nuevo" : ""}" style="background:${color}"></span>`,
     iconSize: [16, 16],
     iconAnchor: [8, 8],
   });
@@ -1040,7 +1055,7 @@ async function agrActualizarPoligonoLimite() {
     nota.textContent = algunoDibujado
       ? (agrFiltroAgregador
           ? "Polígono con la forma real de cobertura de este agregador -- un vértice por dirección comprobada, a su límite real (puede tener huecos: cerrado en una dirección, abierto en otra)."
-          : "Un polígono por agregador (JustEat naranja, Glovo amarillo, Uber Eats verde) con la forma real de cobertura (límite comprobado en cada dirección, no un envolvente aproximado).")
+          : "Un polígono por agregador (JustEat azul, Glovo amarillo, Uber Eats verde) con la forma real de cobertura (límite comprobado en cada dirección, no un envolvente aproximado).")
       : "";
   }
 }
