@@ -226,6 +226,12 @@ def podar_direcciones_route():
     return agregadores_module.podar_grid_reducido()
 
 
+@router.get("/admin/capturas/info", dependencies=[Depends(require_api_key)])
+def info_capturas_route():
+    """Diagnóstico: número de archivos y tamaño total en CAPTURAS_DIR."""
+    return agregadores_module.info_capturas()
+
+
 @router.post("/admin/capturas/limpiar-inactivas", dependencies=[Depends(require_api_key)])
 def limpiar_capturas_inactivas_route():
     """Mantenimiento puntual: borra los ARCHIVOS de captura (no las filas ni

@@ -895,6 +895,25 @@ def limpiar_capturas_viejas() -> int:
     return borrados
 
 
+def info_capturas() -> dict:
+    """Diagnóstico: cuántos archivos hay en CAPTURAS_DIR y cuánto pesan en
+    total, para saber si de verdad son las capturas las que se están comiendo
+    el volumen antes de decidir qué tan agresivo ser limpiando."""
+    if not os.path.isdir(CAPTURAS_DIR):
+        return {"archivos": 0, "bytes_total": 0}
+    total = 0
+    n = 0
+    for nombre in os.listdir(CAPTURAS_DIR):
+        ruta = os.path.join(CAPTURAS_DIR, nombre)
+        try:
+            if os.path.isfile(ruta):
+                total += os.path.getsize(ruta)
+                n += 1
+        except OSError:
+            pass
+    return {"archivos": n, "bytes_total": total, "mb_total": round(total / 1024 / 1024, 1)}
+
+
 def limpiar_capturas_direcciones_inactivas() -> dict:
     """Borra los ARCHIVOS de captura (no filas ni datos) de chequeos ligados a
     direcciones ya desactivadas (activo=0) -- los puntos inválidos que la
