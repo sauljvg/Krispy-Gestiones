@@ -814,6 +814,38 @@ def info_archivos_duplicados() -> dict:
     }
 
 
+def deduplicar_archivos() -> dict:
+    """Aplica lo que mide info_archivos_duplicados(): por cada grupo de
+    archivos con el mismo contenido, deja UNA sola copia física en disco y
+    actualiza el resto de filas de candidato_archivos para que apunten a
+    esa misma ruta -- cada candidato SIGUE teniendo su adjunto exactamente
+    igual (mismo nombre_original, mismo contenido al verlo/descargarlo),
+    solo deja de haber 49 copias idénticas de los mismos bytes en disco."""
+    info = info_archivos_duplicados()
+    conn = get_connection()
+    borrados = 0
+    bytes_liberados = 0
+    for grupo in info["detalle"]:
+        canonica = grupo[0]["ruta"]
+        for copia in grupo[1:]:
+            if copia["ruta"] == canonica:
+                continue
+            conn.execute(
+                "UPDATE candidato_archivos SET ruta = ? WHERE id = ?",
+                (canonica, copia["archivo_id"]),
+            )
+            try:
+                if os.path.isfile(copia["ruta"]):
+                    bytes_liberados += os.path.getsize(copia["ruta"])
+                    os.remove(copia["ruta"])
+                    borrados += 1
+            except OSError:
+                pass
+    conn.commit()
+    conn.close()
+    return {"archivos_deduplicados": borrados, "bytes_liberados": bytes_liberados}
+
+
 def registrar_archivo_existente(candidato_id, nombre_original, ruta):
     """Como agregar_archivo, pero para un fichero que YA está guardado en
     disco (el CV que Informes guarda en su propia carpeta al compartir una

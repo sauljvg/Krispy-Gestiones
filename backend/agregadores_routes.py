@@ -252,6 +252,12 @@ def info_candidatos_duplicados_route():
     return reclutamiento.info_archivos_duplicados()
 
 
+@router.post("/admin/almacenamiento/candidatos-duplicados/deduplicar", dependencies=[Depends(require_api_key)])
+def deduplicar_candidatos_route():
+    import reclutamiento
+    return reclutamiento.deduplicar_archivos()
+
+
 @router.get("/admin/almacenamiento/fotos-perfil", dependencies=[Depends(require_api_key)])
 def info_fotos_perfil_route():
     import reclutamiento
