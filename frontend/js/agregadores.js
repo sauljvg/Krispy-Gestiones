@@ -9,6 +9,7 @@ let agrChart = null;
 let agrModoAnadir = false;
 let agrTiendaCentro = null;
 let agrCentrosPorTienda = {}; // slug -> {lat,lng}, usado en la vista "Todas"
+let agrDireccionesPorTienda = {}; // slug -> direcciones[] (grid normal, con distancia_km/angulo_grados/detalle) -- para extender el polígono de límite con puntos ya conocidos más lejos de lo muestreado
 let agrFiltroAgregador = null; // null = todos los agregadores a la vez
 let agrEstadosOcultos = new Set();
 
@@ -386,6 +387,7 @@ function agrRenderMapa(data) {
   const { tienda, direcciones } = data;
   if (!tienda) return;
   agrTiendaCentro = tienda;
+  agrDireccionesPorTienda = { [tienda.tienda]: direcciones };
   agrInitMap(tienda.lat, tienda.lng);
 
   L.marker([tienda.lat, tienda.lng], { icon: agrIconoTienda(tienda.tienda) }).addTo(agrMap).bindPopup(`<b>${tienda.nombre}</b>`);
@@ -407,6 +409,8 @@ function agrRenderMapaTodas(data) {
   agrTiendaCentro = null;
   agrCentrosPorTienda = {};
   tiendas.forEach((t) => { agrCentrosPorTienda[t.tienda] = t; });
+  agrDireccionesPorTienda = {};
+  direcciones.forEach((d) => { (agrDireccionesPorTienda[d.tienda] ||= []).push(d); });
 
   const lat0 = tiendas.reduce((s, t) => s + t.lat, 0) / tiendas.length;
   const lng0 = tiendas.reduce((s, t) => s + t.lng, 0) / tiendas.length;
@@ -977,7 +981,29 @@ function agrLimpiarPoligonoLimite() {
   agrPoligonoLayers = [];
 }
 
-function agrDibujarPoligonoLimite(limites, centro, color) {
+function agrRadioInterpolado(puntos, angulo) {
+  // Radio aproximado del polígono en un ángulo cualquiera, interpolando
+  // linealmente entre los dos vértices muestreados más cercanos (por
+  // ángulo, con wrap-around en 360°). Sirve para decidir si un punto ya
+  // conocido (grid normal) queda MÁS LEJOS de lo que el muestreo por
+  // ángulos fijos sugiere en esa dirección exacta.
+  const n = puntos.length;
+  if (n === 0) return 0;
+  for (let i = 0; i < n; i++) {
+    const a = puntos[i], b = puntos[(i + 1) % n];
+    let a0 = a.angulo, a1 = b.angulo;
+    if (a1 <= a0) a1 += 360;
+    let ang = angulo;
+    if (ang < a0) ang += 360;
+    if (ang >= a0 && ang <= a1) {
+      const t = a1 === a0 ? 0 : (ang - a0) / (a1 - a0);
+      return a.radio + t * (b.radio - a.radio);
+    }
+  }
+  return puntos[0].radio;
+}
+
+function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   // Polígono "araña/radar": un vértice por ángulo, a la distancia real del
   // límite de cobertura en esa dirección concreta -- a diferencia del
   // envolvente convexo, esto SÍ puede representar huecos de cobertura (ej.
@@ -985,43 +1011,73 @@ function agrDibujarPoligonoLimite(limites, centro, color) {
   // angular en vez de "abombar hacia fuera". Además marca cada vértice con
   // un punto clicable (ángulo + límite exacto de esa dirección).
   if (!limites || limites.length < 3) return null;
-  const ordenados = [...limites].sort((a, b) => a.angulo_grados - b.angulo_grados);
-  const vertices = ordenados.map((l) => ({
-    latlng: agrMoverPunto(centro.lat, centro.lng, l.angulo_grados, Math.max(agrRadioDeLimite(l), 0.05)),
-    limite: l,
+  const agregador = limites[0].agregador;
+  const base = [...limites]
+    .sort((a, b) => a.angulo_grados - b.angulo_grados)
+    .map((l) => ({ angulo: l.angulo_grados, radio: Math.max(agrRadioDeLimite(l), 0.05), limite: l }));
+
+  // El muestreo por ángulos fijos (cada 45°/22.5°) puede cortar un punto ya
+  // comprobado y disponible que cae ENTRE dos ángulos muestreados pero más
+  // lejos del centro que el polígono en su dirección exacta -- es más
+  // importante reflejar la cobertura real ya conocida que ceñirse a los
+  // ángulos exactos del muestreo (pedido explícito del usuario 09/08, con
+  // un caso real: un dot verde disponible quedaba fuera del polígono).
+  const puntosLejanos = (direccionesTienda || [])
+    .filter((d) => (d.detalle || {})[agregador]?.estado === "disponible" && d.angulo_grados != null && d.distancia_km != null)
+    .map((d) => ({ angulo: d.angulo_grados, radio: d.distancia_km, dir: d }))
+    .filter((p) => p.radio > agrRadioInterpolado(base, p.angulo) + 0.05);
+
+  const ordenados = [...base, ...puntosLejanos].sort((a, b) => a.angulo - b.angulo);
+  if (ordenados.length < 3) return null;
+
+  const vertices = ordenados.map((p) => ({
+    latlng: agrMoverPunto(centro.lat, centro.lng, p.angulo, p.radio),
+    punto: p,
   }));
   const poligono = L.polygon(vertices.map((v) => v.latlng), {
     color, weight: 4, opacity: 1, fillColor: color, fillOpacity: 0.28,
   }).addTo(agrMap);
   agrPoligonoLayers.push(poligono);
 
-  vertices.forEach(({ latlng, limite }) => {
-    const radio = agrRadioDeLimite(limite);
-    const etiqueta = limite.limite_km != null
-      ? `${limite.limite_km.toFixed(2)}km`
-      : `~${radio.toFixed(2)}km (${limite.nota || "sin dato exacto"})`;
-    const marker = L.circleMarker(latlng, {
-      radius: 6, color: "#1a1a1a", weight: 1.5, fillColor: color, fillOpacity: 1,
-    })
-      .bindPopup(`<b>${AGR_NOMBRE_AGREGADOR[limite.agregador] || limite.agregador}</b><br>Ángulo: ${limite.angulo_grados}°<br>Límite: ${etiqueta}<br>Dirección: <span class="agr-poligono-dir">cargando...</span>`)
-      .addTo(agrMap);
-    // La dirección real no se guarda en agregadores_limites (solo ángulo +
-    // km) -- se pide por reverse geocoding solo al abrir el popup (no al
-    // dibujar el polígono entero) para no disparar de golpe una llamada a
-    // Nominatim por cada vértice, que va limitado a 1 petición/segundo.
-    marker.on("popupopen", async () => {
-      const span = marker.getPopup().getElement()?.querySelector(".agr-poligono-dir");
-      if (!span || span.dataset.cargado) return;
-      span.dataset.cargado = "1";
-      try {
-        const res = await fetch(`${AGR_API}/geocodificar-inverso?lat=${latlng[0]}&lng=${latlng[1]}`, { credentials: "include" });
-        const datos = res.ok ? await res.json() : null;
-        span.textContent = datos?.direccion || "no disponible";
-      } catch {
-        span.textContent = "no disponible";
-      }
-    });
-    agrPoligonoLayers.push(marker);
+  vertices.forEach(({ latlng, punto }) => {
+    if (punto.limite) {
+      const limite = punto.limite;
+      const etiqueta = limite.limite_km != null
+        ? `${limite.limite_km.toFixed(2)}km`
+        : `~${punto.radio.toFixed(2)}km (${limite.nota || "sin dato exacto"})`;
+      const marker = L.circleMarker(latlng, {
+        radius: 6, color: "#1a1a1a", weight: 1.5, fillColor: color, fillOpacity: 1,
+      })
+        .bindPopup(`<b>${AGR_NOMBRE_AGREGADOR[limite.agregador] || limite.agregador}</b><br>Ángulo: ${limite.angulo_grados}°<br>Límite: ${etiqueta}<br>Dirección: <span class="agr-poligono-dir">cargando...</span>`)
+        .addTo(agrMap);
+      // La dirección real no se guarda en agregadores_limites (solo ángulo +
+      // km) -- se pide por reverse geocoding solo al abrir el popup (no al
+      // dibujar el polígono entero) para no disparar de golpe una llamada a
+      // Nominatim por cada vértice, que va limitado a 1 petición/segundo.
+      marker.on("popupopen", async () => {
+        const span = marker.getPopup().getElement()?.querySelector(".agr-poligono-dir");
+        if (!span || span.dataset.cargado) return;
+        span.dataset.cargado = "1";
+        try {
+          const res = await fetch(`${AGR_API}/geocodificar-inverso?lat=${latlng[0]}&lng=${latlng[1]}`, { credentials: "include" });
+          const datos = res.ok ? await res.json() : null;
+          span.textContent = datos?.direccion || "no disponible";
+        } catch {
+          span.textContent = "no disponible";
+        }
+      });
+      agrPoligonoLayers.push(marker);
+    } else {
+      // Vértice extra: punto del grid normal, ya disponible, más lejos de
+      // lo que el muestreo por ángulos alcanzó -- la dirección ya se conoce
+      // (no hace falta reverse geocoding).
+      const marker = L.circleMarker(latlng, {
+        radius: 6, color: "#ffffff", weight: 2, fillColor: color, fillOpacity: 1,
+      })
+        .bindPopup(`<b>${AGR_NOMBRE_AGREGADOR[agregador] || agregador}</b><br>Punto ya disponible, más lejos de lo muestreado por ángulo<br>Distancia: ${punto.radio.toFixed(2)}km<br>Dirección: ${punto.dir.direccion_text || "?"}`)
+        .addTo(agrMap);
+      agrPoligonoLayers.push(marker);
+    }
   });
 
   return poligono;
@@ -1052,13 +1108,14 @@ async function agrActualizarPoligonoLimite() {
     const centro = agrCentrosPorTienda[tienda] || agrTiendaCentro;
     if (!centro) return;
     const limites = porTienda[i];
+    const direccionesTienda = agrDireccionesPorTienda[tienda];
     if (agrFiltroAgregador) {
       const limitesAgregador = limites.filter((l) => l.agregador === agrFiltroAgregador);
-      if (agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[agrFiltroAgregador] || "#0ca30c")) algunoDibujado = true;
+      if (agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[agrFiltroAgregador] || "#0ca30c", direccionesTienda)) algunoDibujado = true;
     } else {
       Object.keys(AGR_NOMBRE_AGREGADOR).forEach((nombre) => {
         const limitesAgregador = limites.filter((l) => l.agregador === nombre);
-        if (agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[nombre] || "#888")) algunoDibujado = true;
+        if (agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[nombre] || "#888", direccionesTienda)) algunoDibujado = true;
       });
     }
   });
