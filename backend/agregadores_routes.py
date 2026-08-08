@@ -246,6 +246,12 @@ def borrar_candidatos_huerfanos_route():
     return reclutamiento.borrar_archivos_huerfanos()
 
 
+@router.get("/admin/almacenamiento/candidatos-duplicados", dependencies=[Depends(require_api_key)])
+def info_candidatos_duplicados_route():
+    import reclutamiento
+    return reclutamiento.info_archivos_duplicados()
+
+
 @router.get("/admin/almacenamiento/fotos-perfil", dependencies=[Depends(require_api_key)])
 def info_fotos_perfil_route():
     import reclutamiento

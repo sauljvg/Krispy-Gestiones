@@ -774,6 +774,46 @@ def quitar_todas_las_fotos() -> dict:
     return {"borrados": borrados, "bytes_liberados": bytes_liberados}
 
 
+def info_archivos_duplicados() -> dict:
+    """Diagnóstico de solo lectura: candidato_archivos cuyo contenido (hash)
+    coincide con el de otro archivo distinto -- p.ej. un PDF con varias
+    fichas juntas adjuntado a cada candidato como "copia propia" (ver
+    'Adjuntar PDF a fichas existentes'), que guarda una copia física
+    completa por cada ficha en vez de compartir el mismo archivo. No borra
+    nada, solo mide cuánto se podría ahorrar deduplicando."""
+    import hashlib
+
+    conn = get_connection()
+    filas = conn.execute("SELECT id, candidato_id, nombre_original, ruta FROM candidato_archivos").fetchall()
+    conn.close()
+
+    por_hash = {}
+    for fila in filas:
+        ruta = fila["ruta"]
+        if not ruta or not os.path.isfile(ruta):
+            continue
+        try:
+            with open(ruta, "rb") as f:
+                h = hashlib.sha256(f.read()).hexdigest()
+        except OSError:
+            continue
+        tamano = os.path.getsize(ruta)
+        por_hash.setdefault(h, []).append({
+            "archivo_id": fila["id"], "candidato_id": fila["candidato_id"],
+            "nombre_original": fila["nombre_original"], "ruta": ruta, "bytes": tamano,
+        })
+
+    grupos_duplicados = [copias for copias in por_hash.values() if len(copias) > 1]
+    bytes_recuperables = sum(copias[0]["bytes"] * (len(copias) - 1) for copias in grupos_duplicados)
+    return {
+        "grupos_duplicados": len(grupos_duplicados),
+        "copias_de_mas": sum(len(c) - 1 for c in grupos_duplicados),
+        "bytes_recuperables": bytes_recuperables,
+        "mb_recuperables": round(bytes_recuperables / 1024 / 1024, 1),
+        "detalle": grupos_duplicados[:20],
+    }
+
+
 def registrar_archivo_existente(candidato_id, nombre_original, ruta):
     """Como agregar_archivo, pero para un fichero que YA está guardado en
     disco (el CV que Informes guarda en su propia carpeta al compartir una
