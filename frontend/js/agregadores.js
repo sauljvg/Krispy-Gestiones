@@ -44,11 +44,12 @@ let agrTablaColapsada = localStorage.getItem(AGR_TABLA_COLAPSADA_KEY) === "1";
 const AGR_TRANSICIONES_LIMPIADAS_KEY = "agr_transiciones_limpiadas_hasta";
 let agrTransicionesLimpiadasHasta = localStorage.getItem(AGR_TRANSICIONES_LIMPIADAS_KEY) || null;
 
-// JustEat era naranja (#ff8000) -- casi idéntico al amarillo de Glovo
+// JustEat era naranja claro (#ff8000) -- casi idéntico al amarillo de Glovo
 // (#ffc244) y al naranja de la categoría "error" (#e8a33d), imposibles de
-// distinguir de un vistazo en el mapa (confirmado 08/08). Azul contrasta con
-// los tres a la vez.
-const AGR_COLOR_MARCA = { justeat: "#2563eb", glovo: "#ffc244", ubereats: "#06c167" };
+// distinguir de un vistazo en el mapa (confirmado 08/08). Se probó azul,
+// pero el usuario prefirió mantener naranja (más fiel a la marca real) con
+// un tono fuerte/rojizo que sí se separa bien del amarillo pálido de Glovo.
+const AGR_COLOR_MARCA = { justeat: "#e8590c", glovo: "#ffc244", ubereats: "#06c167" };
 const AGR_NOMBRE_AGREGADOR = { justeat: "JustEat", glovo: "Glovo", ubereats: "Uber Eats" };
 let agrMostrarCorrectos = false;
 
@@ -1055,7 +1056,7 @@ async function agrActualizarPoligonoLimite() {
     nota.textContent = algunoDibujado
       ? (agrFiltroAgregador
           ? "Polígono con la forma real de cobertura de este agregador -- un vértice por dirección comprobada, a su límite real (puede tener huecos: cerrado en una dirección, abierto en otra)."
-          : "Un polígono por agregador (JustEat azul, Glovo amarillo, Uber Eats verde) con la forma real de cobertura (límite comprobado en cada dirección, no un envolvente aproximado).")
+          : "Un polígono por agregador (JustEat naranja, Glovo amarillo, Uber Eats verde) con la forma real de cobertura (límite comprobado en cada dirección, no un envolvente aproximado).")
       : "";
   }
 }
