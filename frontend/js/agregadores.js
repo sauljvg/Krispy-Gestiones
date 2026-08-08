@@ -946,11 +946,34 @@ function agrDibujarPoligonoLimite(limites, centro, color) {
   // límite de cobertura en esa dirección concreta -- a diferencia del
   // envolvente convexo (turf.convex), esto SÍ puede representar huecos de
   // cobertura (ej. cerrado al norte, abierto al sur), porque conecta los
-  // vértices en orden angular en vez de "abombar hacia fuera".
+  // vértices en orden angular en vez de "abombar hacia fuera". Además marca
+  // cada vértice con un punto clicable (ángulo + límite exacto de esa
+  // dirección), para poder identificar cada uno sin adivinar por posición.
   if (!limites || limites.length < 3) return null;
   const ordenados = [...limites].sort((a, b) => a.angulo_grados - b.angulo_grados);
-  const puntos = ordenados.map((l) => agrMoverPunto(centro.lat, centro.lng, l.angulo_grados, Math.max(agrRadioDeLimite(l), 0.05)));
-  return L.polygon(puntos, { color, weight: 2, fillColor: color, fillOpacity: 0.12 }).addTo(agrMapaCobertura);
+  const vertices = ordenados.map((l) => ({
+    latlng: agrMoverPunto(centro.lat, centro.lng, l.angulo_grados, Math.max(agrRadioDeLimite(l), 0.05)),
+    limite: l,
+  }));
+  const poligono = L.polygon(vertices.map((v) => v.latlng), {
+    color, weight: 4, opacity: 1, fillColor: color, fillOpacity: 0.28,
+  }).addTo(agrMapaCobertura);
+  agrCoberturaPoligono.push(poligono);
+
+  vertices.forEach(({ latlng, limite }) => {
+    const radio = agrRadioDeLimite(limite);
+    const etiqueta = limite.limite_km != null
+      ? `${limite.limite_km.toFixed(2)}km`
+      : `~${radio.toFixed(2)}km (${limite.nota || "sin dato exacto"})`;
+    const marker = L.circleMarker(latlng, {
+      radius: 6, color: "#1a1a1a", weight: 1.5, fillColor: color, fillOpacity: 1,
+    })
+      .bindPopup(`<b>${AGR_NOMBRE_AGREGADOR[limite.agregador] || limite.agregador}</b><br>Dirección: ${limite.angulo_grados}°<br>Límite: ${etiqueta}`)
+      .addTo(agrMapaCobertura);
+    agrCoberturaPoligono.push(marker);
+  });
+
+  return poligono;
 }
 
 function agrDibujarCapaCobertura(puntos, colorDisponible, colorNoDisponible, dibujarMarcadores, limites, centro) {
@@ -982,8 +1005,9 @@ function agrDibujarCapaCobertura(puntos, colorDisponible, colorNoDisponible, dib
   }
 
   if (limites && limites.length >= 3 && centro) {
-    const poligono = agrDibujarPoligonoLimite(limites, centro, colorDisponible);
-    if (poligono) agrCoberturaPoligono.push(poligono);
+    // agrDibujarPoligonoLimite ya mete el polígono y los marcadores de
+    // vértice en agrCoberturaPoligono -- no hace falta empujarlo aquí también.
+    agrDibujarPoligonoLimite(limites, centro, colorDisponible);
     return { verdes, amarillos };
   }
 
