@@ -296,7 +296,14 @@ class BaseAggregatorScraper:
         (nadie va a pulsar Enter). En ese caso falla directo, de forma controlada.
         """
         try:
-            texto = (await page.locator("body").inner_text(timeout=3000)).lower()
+            # page.evaluate con document.body.innerText (no locator().inner_text()
+            # de Playwright) -- confirmado en vivo el 08/08 que el método de
+            # Playwright puede leer texto de dentro de <script> (JSON de traducciones
+            # interno de Uber Eats con la palabra "cloudflare" y "comprobación de
+            # seguridad automatizada" de verdad, pero nunca visibles para un humano),
+            # disparando falsos positivos constantes. document.body.innerText es el
+            # mismo algoritmo que usa un navegador real para lo que el usuario ve.
+            texto = (await page.evaluate("() => document.body.innerText")).lower()
         except Exception:
             return
 
