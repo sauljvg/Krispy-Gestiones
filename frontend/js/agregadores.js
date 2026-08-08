@@ -1022,6 +1022,7 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
       // se cae de vuelta al punto geométrico puro (recta centro-ángulo-
       // distancia) hasta que ese ángulo se vuelva a calcular.
       latlngReal: l.lat != null && l.lng != null ? [l.lat, l.lng] : null,
+      extendidoPor: null,
     }));
 
   // El muestreo por ángulos fijos (cada 45°/22.5°) puede cortar un punto ya
@@ -1030,10 +1031,31 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   // importante reflejar la cobertura real ya conocida que ceñirse a los
   // ángulos exactos del muestreo (pedido explícito del usuario 09/08, con
   // un caso real: un dot verde disponible quedaba fuera del polígono).
-  const puntosLejanos = (direccionesTienda || [])
+  const TOLERANCIA_ANGULO_GRADOS = 3; // por debajo de esto es "la misma dirección ya muestreada", no un hueco distinto
+  const puntosLejanos = [];
+  (direccionesTienda || [])
     .filter((d) => (d.detalle || {})[agregador]?.estado === "disponible" && d.angulo_grados != null && d.distancia_km != null)
     .map((d) => ({ angulo: d.angulo_grados, radio: d.distancia_km, dir: d }))
-    .filter((p) => p.radio > agrRadioInterpolado(base, p.angulo) + 0.05);
+    .filter((p) => p.radio > agrRadioInterpolado(base, p.angulo) + 0.05)
+    .forEach((p) => {
+      const vecino = base.find((b) => {
+        const diff = Math.abs(b.angulo - p.angulo);
+        return Math.min(diff, 360 - diff) < TOLERANCIA_ANGULO_GRADOS;
+      });
+      if (vecino) {
+        // Misma dirección que un vértice ya muestreado (dentro de la
+        // tolerancia) -- se EXTIENDE ese vértice en vez de dibujar un punto
+        // nuevo pegado al lado. Dos dots casi encima el uno del otro
+        // confundían más de lo que ayudaban (confirmado en vivo 09/08).
+        if (p.radio > vecino.radio) {
+          vecino.radio = p.radio;
+          vecino.latlngReal = [p.dir.lat, p.dir.lng];
+          vecino.extendidoPor = p.dir;
+        }
+      } else {
+        puntosLejanos.push(p);
+      }
+    });
 
   const ordenados = [...base, ...puntosLejanos].sort((a, b) => a.angulo - b.angulo);
   if (ordenados.length === 0) return null;
@@ -1058,21 +1080,25 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   vertices.forEach(({ latlng, punto }) => {
     if (punto.limite) {
       const limite = punto.limite;
-      const etiqueta = limite.limite_km != null
+      const etiqueta = punto.extendidoPor
+        ? `${punto.radio.toFixed(2)}km (extendido -- un punto ya conocido llega más lejos que el ${limite.limite_km != null ? limite.limite_km.toFixed(2) + "km" : "~" + agrRadioDeLimite(limite).toFixed(2) + "km"} de la búsqueda de límite en esta misma dirección)`
+        : limite.limite_km != null
         ? `${limite.limite_km.toFixed(2)}km`
         : `~${punto.radio.toFixed(2)}km (${limite.nota || "sin dato exacto"})`;
+      const direccionMostrar = punto.extendidoPor?.direccion_text || limite.direccion_text;
       const marker = L.circleMarker(latlng, {
         radius: 6, color: "#1a1a1a", weight: 1.5, fillColor: color, fillOpacity: 1,
       })
-        .bindPopup(`<b>${AGR_NOMBRE_AGREGADOR[limite.agregador] || limite.agregador}</b><br>Ángulo: ${limite.angulo_grados}°<br>Límite: ${etiqueta}<br>Dirección: <span class="agr-poligono-dir">${limite.direccion_text || "cargando..."}</span>`)
+        .bindPopup(`<b>${AGR_NOMBRE_AGREGADOR[limite.agregador] || limite.agregador}</b><br>Ángulo: ${limite.angulo_grados}°<br>Límite: ${etiqueta}<br>Dirección: <span class="agr-poligono-dir">${direccionMostrar || "cargando..."}</span>`)
         .addTo(agrMap);
       // Filas nuevas ya traen la dirección real que se probó de verdad
-      // (guardada por buscar_limite_cobertura.py). Filas viejas sin ese
-      // dato caen de vuelta al reverse geocoding del punto geométrico, solo
-      // al abrir el popup (no al dibujar el polígono entero) para no
-      // disparar de golpe una llamada a Nominatim por vértice, que va
-      // limitado a 1 petición/segundo.
-      if (!limite.direccion_text) {
+      // (guardada por buscar_limite_cobertura.py), y los vértices extendidos
+      // ya traen la del punto del grid que los extendió -- filas viejas sin
+      // ninguno de los dos caen de vuelta al reverse geocoding del punto
+      // geométrico, solo al abrir el popup (no al dibujar el polígono
+      // entero) para no disparar de golpe una llamada a Nominatim por
+      // vértice, que va limitado a 1 petición/segundo.
+      if (!direccionMostrar) {
         marker.on("popupopen", async () => {
           const span = marker.getPopup().getElement()?.querySelector(".agr-poligono-dir");
           if (!span || span.dataset.cargado) return;
