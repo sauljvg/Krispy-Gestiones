@@ -49,7 +49,13 @@ let agrTransicionesLimpiadasHasta = localStorage.getItem(AGR_TRANSICIONES_LIMPIA
 // distinguir de un vistazo en el mapa (confirmado 08/08). Se probó azul,
 // pero el usuario prefirió mantener naranja (más fiel a la marca real) con
 // un tono fuerte/rojizo que sí se separa bien del amarillo pálido de Glovo.
-const AGR_COLOR_MARCA = { justeat: "#e8590c", glovo: "#ffc244", ubereats: "#06c167" };
+//
+// El amarillo pálido de Glovo (#ffc244) también se perdía DIRECTAMENTE contra
+// el propio mapa base (zonas residenciales de OpenStreetMap se pintan en un
+// tono crema muy parecido) -- el polígono de Glovo era casi invisible incluso
+// sin chocar con otro agregador. Se oscurece a un dorado más fuerte que sigue
+// leyéndose como "amarillo/Glovo" pero contrasta con el fondo del mapa.
+const AGR_COLOR_MARCA = { justeat: "#e8590c", glovo: "#c99a00", ubereats: "#06c167" };
 const AGR_NOMBRE_AGREGADOR = { justeat: "JustEat", glovo: "Glovo", ubereats: "Uber Eats" };
 let agrMostrarCorrectos = false;
 
@@ -128,22 +134,11 @@ function agrDistanciaKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function agrPuntoEsNuevo(dir) {
-  // "Nuevo" = existe SOLO porque una búsqueda de límite lo creó (p.ej. Uber
-  // Eats hoy, buscando más lejos de lo que llegó la rejilla original) --
-  // no por fecha fija ni id, sino porque no tiene dato de ninguno de los
-  // agregadores del scrap inicial (Glovo/JustEat). Funciona igual para
-  // cualquier campaña futura sin tocar este código.
-  const detalle = dir.detalle || {};
-  return !detalle.glovo && !detalle.justeat;
-}
-
 function agrIconoDireccion(dir) {
   const color = AGR_COLOR_CATEGORIA[agrCategoriaDireccion(dir)] || "#898781";
-  const nuevo = agrPuntoEsNuevo(dir);
   return L.divIcon({
     className: "agr-marker-dot",
-    html: `<span class="${nuevo ? "agr-marker-nuevo" : ""}" style="background:${color}"></span>`,
+    html: `<span style="background:${color}"></span>`,
     iconSize: [16, 16],
     iconAnchor: [8, 8],
   });

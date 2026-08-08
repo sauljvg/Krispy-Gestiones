@@ -76,12 +76,6 @@
     border: 1px solid #111; box-shadow: 0 1px 3px rgba(0,0,0,0.4); cursor: grab;
   }
   .agr-marker-dot span:active { cursor: grabbing; }
-  /* Puntos que solo existen por una búsqueda de límite (sin dato del scrap
-     inicial Glovo/JustEat) -- anillo blanco extra para distinguirlos de los
-     puntos originales sin ocultar ninguno. */
-  .agr-marker-dot span.agr-marker-nuevo {
-    box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px #2563eb, 0 1px 3px rgba(0,0,0,0.4);
-  }
   .agr-drag-tooltip { font-size: 12px; font-weight: 600; }
 
   .agr-marker-tienda { background: transparent; border: none; }
@@ -269,7 +263,6 @@
         Mostrar polígono de límite real (forma real de cobertura por dirección)
       </label>
       <p class="agr-resumen-nota" id="agr-cobertura-nota"></p>
-      <p class="agr-resumen-nota">Los puntos con anillo azul solo tienen dato de una búsqueda de límite (no venían del scrap inicial de Glovo/JustEat).</p>
       <div id="agr-map"></div>
       <div id="agr-leyenda" class="agr-leyenda"></div>
     </div>
@@ -357,6 +350,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/agregadores.js?v=20260808h"></script>
+<script src="js/agregadores.js?v=20260809a"></script>
 </body>
 </html>
