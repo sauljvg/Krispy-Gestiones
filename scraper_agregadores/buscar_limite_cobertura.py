@@ -13,6 +13,7 @@ import logging
 import config
 from scrapers.glovo import GlovoScraper
 from scrapers.justeat import JustEatScraper
+from scrapers.ubereats import UberEatsScraper
 from utils import api_client
 
 logging.basicConfig(
@@ -22,7 +23,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("limite")
 
-SCRAPERS = {"glovo": GlovoScraper, "justeat": JustEatScraper}
+SCRAPERS = {"glovo": GlovoScraper, "justeat": JustEatScraper, "ubereats": UberEatsScraper}
 PRECISION_KM = 0.5
 # Si la geocodificación de dos distancias "mid" distintas cae en la MISMA
 # dirección real (zona con pocas direcciones numeradas), seguir pidiendo
