@@ -882,11 +882,57 @@ function agrInitMapaCobertura(lat, lng) {
   }).addTo(agrMapaCobertura);
 }
 
-function agrDibujarCapaCobertura(puntos, colorDisponible, colorNoDisponible, dibujarMarcadores) {
-  // Dibuja marcadores (opcional) + polígono de cobertura real (envolvente de
-  // los puntos donde SÍ reparte) para un único agregador, y devuelve
-  // {verdes, amarillos} para el contador. Con menos de 3 puntos disponibles
-  // no hay superficie que dibujar (turf.convex exige al menos un triángulo).
+function agrMoverPunto(lat, lng, bearingDeg, distanciaKm) {
+  // Igual que _mover_punto en el backend: punto de destino a una distancia
+  // y rumbo dados desde (lat, lng), sobre la esfera terrestre.
+  const R = 6371;
+  const bearing = (bearingDeg * Math.PI) / 180;
+  const lat1 = (lat * Math.PI) / 180;
+  const lng1 = (lng * Math.PI) / 180;
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(distanciaKm / R) + Math.cos(lat1) * Math.sin(distanciaKm / R) * Math.cos(bearing)
+  );
+  const lng2 = lng1 + Math.atan2(
+    Math.sin(bearing) * Math.sin(distanciaKm / R) * Math.cos(lat1),
+    Math.cos(distanciaKm / R) - Math.sin(lat1) * Math.sin(lat2)
+  );
+  return [(lat2 * 180) / Math.PI, (lng2 * 180) / Math.PI];
+}
+
+function agrRadioDeLimite(limite) {
+  // limite_km es el dato bueno; si es null, el "nota" casi siempre trae un
+  // número aprovechable ("no disponible incluso a 0.77km" -> cierre real
+  // cerca de la tienda, ">= 5.0km" -> cota inferior porque no se encontró
+  // el borde) -- mejor esa aproximación que dejar un hueco en el polígono.
+  if (limite.limite_km != null) return limite.limite_km;
+  const m = (limite.nota || "").match(/(\d+\.?\d*)\s*km/);
+  return m ? parseFloat(m[1]) : 0.05;
+}
+
+function agrDibujarPoligonoLimite(limites, centro, color) {
+  // Polígono "araña/radar": un vértice por ángulo, a la distancia real del
+  // límite de cobertura en esa dirección concreta -- a diferencia del
+  // envolvente convexo (turf.convex), esto SÍ puede representar huecos de
+  // cobertura (ej. cerrado al norte, abierto al sur), porque conecta los
+  // vértices en orden angular en vez de "abombar hacia fuera".
+  if (!limites || limites.length < 3) return null;
+  const ordenados = [...limites].sort((a, b) => a.angulo_grados - b.angulo_grados);
+  const puntos = ordenados.map((l) => agrMoverPunto(centro.lat, centro.lng, l.angulo_grados, Math.max(agrRadioDeLimite(l), 0.05)));
+  return L.polygon(puntos, { color, weight: 2, fillColor: color, fillOpacity: 0.12 }).addTo(agrMapaCobertura);
+}
+
+function agrDibujarCapaCobertura(puntos, colorDisponible, colorNoDisponible, dibujarMarcadores, limites, centro) {
+  // Dibuja marcadores (opcional) + polígono de cobertura para un único
+  // agregador, y devuelve {verdes, amarillos} para el contador.
+  //
+  // Si hay `limites` (resultado de la búsqueda adaptativa del límite real,
+  // ver buscar_limite_cobertura.py) con al menos 3 direcciones, se dibuja el
+  // polígono "araña" (un vértice por ángulo, a su distancia real) -- a
+  // diferencia del envolvente convexo de abajo, ESTE sí puede representar
+  // huecos de cobertura reales (cerrado en una dirección, abierto en otra).
+  // Si no hay límites calculados todavía para esta tienda/agregador, se cae
+  // al envolvente convexo de siempre sobre los puntos del grid normal
+  // (mejor una aproximación que nada, mientras se completa la búsqueda).
   const validos = puntos.filter((p) => p.lat != null && p.lng != null);
   const verdes = validos.filter((p) => p.disponible);
   const amarillos = validos.filter((p) => !p.disponible);
@@ -901,6 +947,12 @@ function agrDibujarCapaCobertura(puntos, colorDisponible, colorNoDisponible, dib
         .addTo(agrMapaCobertura);
       agrCoberturaMarkers.push(marker);
     });
+  }
+
+  if (limites && limites.length >= 3 && centro) {
+    const poligono = agrDibujarPoligonoLimite(limites, centro, colorDisponible);
+    if (poligono) agrCoberturaPoligono.push(poligono);
+    return { verdes, amarillos };
   }
 
   if (verdes.length >= 3 && typeof turf !== "undefined") {
@@ -941,11 +993,15 @@ async function agrCargarMapaCobertura() {
   const url = agregador
     ? `${AGR_API}/cobertura?tienda=${agrTiendaActual}&agregador=${agregador}`
     : `${AGR_API}/cobertura?tienda=${agrTiendaActual}`;
-  const res = await fetch(url, { credentials: "include" });
+  const [res, resLimites] = await Promise.all([
+    fetch(url, { credentials: "include" }),
+    fetch(`${AGR_API}/limites/${agrTiendaActual}`, { credentials: "include" }),
+  ]);
   const puntos = await res.json();
+  const limites = resLimites.ok ? await resLimites.json() : [];
 
+  const centro = (agrCentrosPorTienda[agrTiendaActual] || agrTiendaCentro) || { lat: 40.4168, lng: -3.7038 };
   if (!agrMapaCobertura) {
-    const centro = (agrCentrosPorTienda[agrTiendaActual] || agrTiendaCentro) || { lat: 40.4168, lng: -3.7038 };
     agrInitMapaCobertura(centro.lat, centro.lng);
   }
 
@@ -955,6 +1011,7 @@ async function agrCargarMapaCobertura() {
   agrCoberturaPoligono = [];
 
   const nota = document.getElementById("agr-cobertura-nota");
+  const hayLimitesReales = limites.length >= 3;
 
   if (!agregador) {
     // "Todos": un polígono por agregador, cada uno con su color de marca, sin
@@ -962,22 +1019,28 @@ async function agrCargarMapaCobertura() {
     const resumenes = [];
     for (const nombre of Object.keys(AGR_NOMBRE_AGREGADOR)) {
       const puntosAgregador = puntos.filter((p) => p.agregador === nombre);
+      const limitesAgregador = limites.filter((l) => l.agregador === nombre);
       const color = AGR_COLOR_MARCA[nombre] || "#888";
-      const { verdes } = agrDibujarCapaCobertura(puntosAgregador, color, color, false);
+      const { verdes } = agrDibujarCapaCobertura(puntosAgregador, color, color, false, limitesAgregador, centro);
       resumenes.push(`${AGR_NOMBRE_AGREGADOR[nombre]}: ${verdes.length}`);
     }
     if (contador) contador.textContent = `Con cobertura -- ${resumenes.join(" · ")}`;
     if (nota) {
-      nota.textContent = "Un polígono por agregador (JustEat naranja, Glovo amarillo, Uber Eats verde) uniendo los puntos donde SÍ reparte cada uno. Usa el último estado conocido de cada punto, no solo las últimas 24h.";
+      nota.textContent = hayLimitesReales
+        ? "Un polígono por agregador (JustEat naranja, Glovo amarillo, Uber Eats verde) con la forma real de cobertura (límite comprobado en cada dirección, no un envolvente aproximado)."
+        : "Un polígono por agregador (JustEat naranja, Glovo amarillo, Uber Eats verde) uniendo los puntos donde SÍ reparte cada uno. Usa el último estado conocido de cada punto, no solo las últimas 24h.";
     }
   } else {
-    const { verdes, amarillos } = agrDibujarCapaCobertura(puntos, "#0ca30c", "#fab219", true);
+    const limitesAgregador = limites.filter((l) => l.agregador === agregador);
+    const { verdes, amarillos } = agrDibujarCapaCobertura(puntos, "#0ca30c", "#fab219", true, limitesAgregador, centro);
     const nombre = AGR_NOMBRE_AGREGADOR[agregador] || agregador;
     if (contador) {
       contador.textContent = `${verdes.length} con cobertura / ${amarillos.length} sin cobertura (${nombre})`;
     }
     if (nota) {
-      nota.textContent = "Polígono que une los puntos más alejados donde el agregador SÍ reparte (verde) — la superficie de cobertura real, frente a los puntos donde no reparte (amarillo). Usa el último estado conocido de cada punto, no solo las últimas 24h.";
+      nota.textContent = hayLimitesReales
+        ? "Polígono con la forma real de cobertura -- un vértice por dirección comprobada, a su límite real (puede tener huecos: cerrado en una dirección, abierto en otra)."
+        : "Polígono que une los puntos más alejados donde el agregador SÍ reparte (verde) — la superficie de cobertura real, frente a los puntos donde no reparte (amarillo). Usa el último estado conocido de cada punto, no solo las últimas 24h.";
     }
   }
 }
