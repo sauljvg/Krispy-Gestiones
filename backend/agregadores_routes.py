@@ -234,6 +234,30 @@ def info_almacenamiento_route():
     return agregadores_module.info_almacenamiento()
 
 
+@router.get("/admin/almacenamiento/candidatos-huerfanos", dependencies=[Depends(require_api_key)])
+def info_candidatos_huerfanos_route():
+    import reclutamiento
+    return reclutamiento.info_archivos_huerfanos()
+
+
+@router.post("/admin/almacenamiento/candidatos-huerfanos/borrar", dependencies=[Depends(require_api_key)])
+def borrar_candidatos_huerfanos_route():
+    import reclutamiento
+    return reclutamiento.borrar_archivos_huerfanos()
+
+
+@router.get("/admin/almacenamiento/fotos-perfil", dependencies=[Depends(require_api_key)])
+def info_fotos_perfil_route():
+    import reclutamiento
+    return reclutamiento.info_fotos_perfil()
+
+
+@router.post("/admin/almacenamiento/fotos-perfil/borrar", dependencies=[Depends(require_api_key)])
+def borrar_fotos_perfil_route():
+    import reclutamiento
+    return reclutamiento.quitar_todas_las_fotos()
+
+
 @router.get("/admin/capturas/info", dependencies=[Depends(require_api_key)])
 def info_capturas_route():
     """Diagnóstico: número de archivos y tamaño total en CAPTURAS_DIR."""
