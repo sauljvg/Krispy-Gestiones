@@ -32,12 +32,23 @@ async def crear_direccion_calculada(tienda: str, distancia_km: float, angulo_gra
             return await resp.json()
 
 
-async def guardar_limite(tienda: str, agregador: str, angulo_grados: float, limite_km: float | None, nota: str | None):
+async def guardar_limite(
+    tienda: str, agregador: str, angulo_grados: float, limite_km: float | None, nota: str | None,
+    lat: float | None = None, lng: float | None = None, direccion_text: str | None = None,
+):
     """Guarda el resultado de buscar_limite_cobertura.py para una dirección
     -- el dashboard lo lee para dibujar el polígono real de cobertura
-    (forma de estrella, un vértice por ángulo)."""
+    (forma de estrella, un vértice por ángulo).
+
+    lat/lng/direccion_text: la dirección REAL que se probó (tras la espiral
+    de _punto_geocodificado_valido), para que el vértice se dibuje donde de
+    verdad se comprobó la entrega y no en el punto geométrico puro centro-
+    ángulo-distancia, que puede caer en medio de un parque sin calle."""
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/limites"
-    body = {"tienda": tienda, "agregador": agregador, "angulo_grados": angulo_grados, "limite_km": limite_km, "nota": nota}
+    body = {
+        "tienda": tienda, "agregador": agregador, "angulo_grados": angulo_grados, "limite_km": limite_km, "nota": nota,
+        "lat": lat, "lng": lng, "direccion_text": direccion_text,
+    }
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=body, headers=_headers(), timeout=15) as resp:
             resp.raise_for_status()

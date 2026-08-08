@@ -155,6 +155,12 @@ async def chequear_punto(scraper, tienda, direccion_id, direccion_text, agregado
 async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) -> dict:
     scraper = SCRAPERS[agregador](timeout_seg=config.SCRAPER_TIMEOUT, retry_max=config.SCRAPER_RETRY_MAX)
     lo = hi = None
+    # El punto REAL (lat/lng/direccion_text) del último "disponible"
+    # confirmado -- se guarda junto al límite para que el dashboard dibuje
+    # el vértice donde de verdad se probó la entrega, no en la recta
+    # geométrica centro-ángulo-distancia (que puede caer en medio de un
+    # parque sin ninguna calle real, confirmado en vivo 09/08).
+    punto_lo = None
     avisos_otra_tienda = []
 
     for d in DISTANCIAS_EXPANSION:
@@ -171,6 +177,7 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
         )
         if resultado == "disponible":
             lo = d_real
+            punto_lo = punto
         elif resultado == "no_disponible":
             hi = d_real
             break
@@ -182,9 +189,15 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
             resultado["nota"] = f"{resultado['nota']} -- {aviso}" if resultado["nota"] else aviso
         return resultado
 
+    def _con_punto(resultado: dict) -> dict:
+        resultado["lat"] = punto_lo["lat"] if punto_lo else None
+        resultado["lng"] = punto_lo["lng"] if punto_lo else None
+        resultado["direccion_text"] = punto_lo["direccion_text"] if punto_lo else None
+        return resultado
+
     if hi is None:
         nota = f">= {lo}km (no se encontró el borde dentro del rango probado)" if lo else "sin datos (todo falló)"
-        return _con_aviso({"angulo": angulo, "limite_km": None, "nota": nota})
+        return _con_punto(_con_aviso({"angulo": angulo, "limite_km": None, "nota": nota}))
     if lo is None:
         # Ni el primer punto probado (el más cercano de la expansión) tenía
         # cobertura -- en vez de conformarnos con "< X", afinamos hacia
@@ -198,15 +211,16 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
             if punto_base is not None:
                 break
         if punto_base is None:
-            return _con_aviso({"angulo": angulo, "limite_km": None, "nota": f"< {hi}km (sin dirección real cerca de la tienda en esta dirección, ni hasta {BASELINE_CERCANO_ESCALERA_KM[-1]}km)"})
+            return _con_punto(_con_aviso({"angulo": angulo, "limite_km": None, "nota": f"< {hi}km (sin dirección real cerca de la tienda en esta dirección, ni hasta {BASELINE_CERCANO_ESCALERA_KM[-1]}km)"}))
         resultado_base = await resultado_punto(scraper, tienda, punto_base, agregador, avisos_otra_tienda)
         await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
         if resultado_base != "disponible":
-            return _con_aviso({
+            return _con_punto(_con_aviso({
                 "angulo": angulo, "limite_km": None,
                 "nota": f"no disponible incluso a {punto_base['distancia_km']}km de la tienda -- puede que esta dirección esté fuera de zona por completo",
-            })
+            }))
         lo = punto_base["distancia_km"]
+        punto_lo = punto_base
 
     iteraciones = 0
     while (hi - lo) > PRECISION_KM:
@@ -239,6 +253,7 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
         )
         if resultado == "disponible":
             lo = d_real
+            punto_lo = punto
         elif resultado == "no_disponible":
             hi = d_real
         else:
@@ -246,7 +261,7 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
             break
         await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
 
-    return _con_aviso({"angulo": angulo, "limite_km": round((lo + hi) / 2, 2), "nota": None})
+    return _con_punto(_con_aviso({"angulo": angulo, "limite_km": round((lo + hi) / 2, 2), "nota": None}))
 
 
 def _tienda_cerrada(tienda: str) -> bool:
@@ -316,7 +331,10 @@ async def main():
             resultados[agregador].append(r)
             logger.info("RESULTADO %s / %s / %s°: %s", args.tienda, agregador, angulo, r)
             try:
-                await api_client.guardar_limite(args.tienda, agregador, angulo, r["limite_km"], r["nota"])
+                await api_client.guardar_limite(
+                    args.tienda, agregador, angulo, r["limite_km"], r["nota"],
+                    lat=r.get("lat"), lng=r.get("lng"), direccion_text=r.get("direccion_text"),
+                )
             except Exception as exc:
                 logger.warning("No se pudo guardar el límite en KG: %r", exc)
 

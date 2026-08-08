@@ -387,6 +387,9 @@ class LimiteIn(BaseModel):
     angulo_grados: float
     limite_km: float | None = None
     nota: str | None = None
+    lat: float | None = None
+    lng: float | None = None
+    direccion_text: str | None = None
 
 
 @router.post("/admin/limites", dependencies=[Depends(require_api_key)])
@@ -394,7 +397,10 @@ def guardar_limite_route(body: LimiteIn):
     """Guarda el límite real de cobertura de una dirección (buscar_limite_
     cobertura.py llama esto al terminar cada ángulo) -- el dashboard lee
     esto para dibujar el polígono real en forma de estrella."""
-    return agregadores_module.guardar_limite(body.tienda, body.agregador, body.angulo_grados, body.limite_km, body.nota)
+    return agregadores_module.guardar_limite(
+        body.tienda, body.agregador, body.angulo_grados, body.limite_km, body.nota,
+        lat=body.lat, lng=body.lng, direccion_text=body.direccion_text,
+    )
 
 
 @router.get("/limites/{tienda}")

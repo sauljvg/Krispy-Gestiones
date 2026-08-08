@@ -1014,7 +1014,15 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   const agregador = limites[0].agregador;
   const base = [...limites]
     .sort((a, b) => a.angulo_grados - b.angulo_grados)
-    .map((l) => ({ angulo: l.angulo_grados, radio: Math.max(agrRadioDeLimite(l), 0.05), limite: l }));
+    .map((l) => ({
+      angulo: l.angulo_grados,
+      radio: Math.max(agrRadioDeLimite(l), 0.05),
+      limite: l,
+      // Filas guardadas antes de este cambio no tienen lat/lng reales --
+      // se cae de vuelta al punto geométrico puro (recta centro-ángulo-
+      // distancia) hasta que ese ángulo se vuelva a calcular.
+      latlngReal: l.lat != null && l.lng != null ? [l.lat, l.lng] : null,
+    }));
 
   // El muestreo por ángulos fijos (cada 45°/22.5°) puede cortar un punto ya
   // comprobado y disponible que cae ENTRE dos ángulos muestreados pero más
@@ -1031,7 +1039,7 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   if (ordenados.length < 3) return null;
 
   const vertices = ordenados.map((p) => ({
-    latlng: agrMoverPunto(centro.lat, centro.lng, p.angulo, p.radio),
+    latlng: p.latlngReal || agrMoverPunto(centro.lat, centro.lng, p.angulo, p.radio),
     punto: p,
   }));
   const poligono = L.polygon(vertices.map((v) => v.latlng), {
@@ -1048,24 +1056,28 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
       const marker = L.circleMarker(latlng, {
         radius: 6, color: "#1a1a1a", weight: 1.5, fillColor: color, fillOpacity: 1,
       })
-        .bindPopup(`<b>${AGR_NOMBRE_AGREGADOR[limite.agregador] || limite.agregador}</b><br>Ángulo: ${limite.angulo_grados}°<br>Límite: ${etiqueta}<br>Dirección: <span class="agr-poligono-dir">cargando...</span>`)
+        .bindPopup(`<b>${AGR_NOMBRE_AGREGADOR[limite.agregador] || limite.agregador}</b><br>Ángulo: ${limite.angulo_grados}°<br>Límite: ${etiqueta}<br>Dirección: <span class="agr-poligono-dir">${limite.direccion_text || "cargando..."}</span>`)
         .addTo(agrMap);
-      // La dirección real no se guarda en agregadores_limites (solo ángulo +
-      // km) -- se pide por reverse geocoding solo al abrir el popup (no al
-      // dibujar el polígono entero) para no disparar de golpe una llamada a
-      // Nominatim por cada vértice, que va limitado a 1 petición/segundo.
-      marker.on("popupopen", async () => {
-        const span = marker.getPopup().getElement()?.querySelector(".agr-poligono-dir");
-        if (!span || span.dataset.cargado) return;
-        span.dataset.cargado = "1";
-        try {
-          const res = await fetch(`${AGR_API}/geocodificar-inverso?lat=${latlng[0]}&lng=${latlng[1]}`, { credentials: "include" });
-          const datos = res.ok ? await res.json() : null;
-          span.textContent = datos?.direccion || "no disponible";
-        } catch {
-          span.textContent = "no disponible";
-        }
-      });
+      // Filas nuevas ya traen la dirección real que se probó de verdad
+      // (guardada por buscar_limite_cobertura.py). Filas viejas sin ese
+      // dato caen de vuelta al reverse geocoding del punto geométrico, solo
+      // al abrir el popup (no al dibujar el polígono entero) para no
+      // disparar de golpe una llamada a Nominatim por vértice, que va
+      // limitado a 1 petición/segundo.
+      if (!limite.direccion_text) {
+        marker.on("popupopen", async () => {
+          const span = marker.getPopup().getElement()?.querySelector(".agr-poligono-dir");
+          if (!span || span.dataset.cargado) return;
+          span.dataset.cargado = "1";
+          try {
+            const res = await fetch(`${AGR_API}/geocodificar-inverso?lat=${latlng[0]}&lng=${latlng[1]}`, { credentials: "include" });
+            const datos = res.ok ? await res.json() : null;
+            span.textContent = datos?.direccion || "no disponible";
+          } catch {
+            span.textContent = "no disponible";
+          }
+        });
+      }
       agrPoligonoLayers.push(marker);
     } else {
       // Vértice extra: punto del grid normal, ya disponible, más lejos de

@@ -148,6 +148,21 @@ def ensure_tables():
             UNIQUE(tienda, agregador, angulo_grados)
         )
     """)
+    # lat/lng/direccion_text: el vértice del polígono se dibujaba en el punto
+    # GEOMÉTRICO puro (centro + ángulo + distancia), que puede caer en medio
+    # de un parque/campo sin ninguna calle -- el punto REALMENTE comprobado
+    # por el scraper (tras la búsqueda en espiral que busca la dirección
+    # numerada más cercana) puede estar unos metros/cientos de metros
+    # desplazado. Guardar su lat/lng/dirección real permite dibujar el
+    # vértice donde de verdad se probó la entrega, no donde cae la recta
+    # (confirmado en vivo 09/08: un vértice caía dentro de Casa de Campo).
+    cols_limites = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_limites)")}
+    if "lat" not in cols_limites:
+        conn.execute("ALTER TABLE agregadores_limites ADD COLUMN lat REAL")
+    if "lng" not in cols_limites:
+        conn.execute("ALTER TABLE agregadores_limites ADD COLUMN lng REAL")
+    if "direccion_text" not in cols_limites:
+        conn.execute("ALTER TABLE agregadores_limites ADD COLUMN direccion_text TEXT")
     conn.commit()
     conn.close()
 
@@ -524,24 +539,38 @@ def _tienda_mas_cercana(lat: float, lng: float) -> str:
     return mejor_tienda
 
 
-def guardar_limite(tienda: str, agregador: str, angulo_grados: float, limite_km: float | None, nota: str | None) -> dict:
+def guardar_limite(
+    tienda: str, agregador: str, angulo_grados: float, limite_km: float | None, nota: str | None,
+    lat: float | None = None, lng: float | None = None, direccion_text: str | None = None,
+) -> dict:
     """Guarda (o actualiza) el límite real de cobertura calculado por
     buscar_limite_cobertura.py para una dirección concreta -- lo llama el
     script al terminar cada ángulo, así el dashboard puede dibujar el
     polígono real (un vértice por ángulo) sin esperar a que termine toda la
-    tienda."""
+    tienda.
+
+    lat/lng/direccion_text (opcionales, para compatibilidad con filas viejas):
+    la dirección REAL que se probó (tras la búsqueda en espiral que busca la
+    calle numerada más cercana al punto geométrico puro), para que el
+    dashboard pueda dibujar el vértice donde de verdad se comprobó la
+    entrega en vez de en la recta centro-ángulo-distancia, que puede caer en
+    medio de un parque sin ninguna calle."""
     angulo_guardar = int(round(angulo_grados))
     conn = get_connection()
     conn.execute(
-        """INSERT INTO agregadores_limites (tienda, agregador, angulo_grados, limite_km, nota, actualizado_en)
-           VALUES (?, ?, ?, ?, ?, ?)
+        """INSERT INTO agregadores_limites (tienda, agregador, angulo_grados, limite_km, nota, actualizado_en, lat, lng, direccion_text)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(tienda, agregador, angulo_grados)
-           DO UPDATE SET limite_km=excluded.limite_km, nota=excluded.nota, actualizado_en=excluded.actualizado_en""",
-        (tienda, agregador, angulo_guardar, limite_km, nota, datetime.now(timezone.utc).isoformat()),
+           DO UPDATE SET limite_km=excluded.limite_km, nota=excluded.nota, actualizado_en=excluded.actualizado_en,
+                          lat=excluded.lat, lng=excluded.lng, direccion_text=excluded.direccion_text""",
+        (tienda, agregador, angulo_guardar, limite_km, nota, datetime.now(timezone.utc).isoformat(), lat, lng, direccion_text),
     )
     conn.commit()
     conn.close()
-    return {"tienda": tienda, "agregador": agregador, "angulo_grados": angulo_guardar, "limite_km": limite_km, "nota": nota}
+    return {
+        "tienda": tienda, "agregador": agregador, "angulo_grados": angulo_guardar, "limite_km": limite_km,
+        "nota": nota, "lat": lat, "lng": lng, "direccion_text": direccion_text,
+    }
 
 
 def get_limites(tienda: str, agregador: str = None) -> list[dict]:
