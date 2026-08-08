@@ -340,6 +340,10 @@
         <input type="checkbox" id="agr-solo-nuevos" onchange="agrToggleSoloNuevos()">
         Solo dots nuevos desde que active esto (oculta los puntos ya existentes)
       </label>
+      <label class="agr-toggle-nuevos">
+        <input type="checkbox" id="agr-mostrar-poligono" checked onchange="agrToggleMostrarPoligono()">
+        Mostrar polígono de límite real
+      </label>
       <p class="agr-resumen-nota" id="agr-cobertura-nota">
         Polígono que une los puntos más alejados donde el agregador SÍ reparte (verde) — la superficie de cobertura real, frente a los puntos donde no reparte (amarillo). Usa el último estado conocido de cada punto, no solo las últimas 24h.
       </p>
@@ -361,6 +365,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/agregadores.js?v=20260808b"></script>
+<script src="js/agregadores.js?v=20260808c"></script>
 </body>
 </html>

@@ -906,6 +906,22 @@ async function agrToggleSoloNuevos() {
   agrCargarMapaCobertura();
 }
 
+// Mostrar/ocultar el polígono de límite real (y sus puntos de vértice) --
+// preferencia general, no por tienda (a diferencia de "solo nuevos"), y
+// activada por defecto si nunca se ha tocado.
+const AGR_MOSTRAR_POLIGONO_KEY = "agr_mostrar_poligono_limite";
+
+function agrMostrarPoligonoActivo() {
+  const v = localStorage.getItem(AGR_MOSTRAR_POLIGONO_KEY);
+  return v == null ? true : v === "1";
+}
+
+function agrToggleMostrarPoligono() {
+  const activo = document.getElementById("agr-mostrar-poligono")?.checked;
+  localStorage.setItem(AGR_MOSTRAR_POLIGONO_KEY, activo ? "1" : "0");
+  agrCargarMapaCobertura();
+}
+
 function agrInitMapaCobertura(lat, lng) {
   if (agrMapaCobertura) agrMapaCobertura.remove();
   agrMapaCobertura = L.map("agr-mapa-cobertura").setView([lat, lng], 12);
@@ -1004,6 +1020,10 @@ function agrDibujarCapaCobertura(puntos, colorDisponible, colorNoDisponible, dib
     });
   }
 
+  if (!agrMostrarPoligonoActivo()) {
+    return { verdes, amarillos };
+  }
+
   if (limites && limites.length >= 3 && centro) {
     // agrDibujarPoligonoLimite ya mete el polígono y los marcadores de
     // vértice en agrCoberturaPoligono -- no hace falta empujarlo aquí también.
@@ -1062,6 +1082,8 @@ async function agrCargarMapaCobertura() {
   if (baseline != null) {
     puntos = puntos.filter((p) => (p.id || 0) > baseline);
   }
+  const checkboxPoligono = document.getElementById("agr-mostrar-poligono");
+  if (checkboxPoligono) checkboxPoligono.checked = agrMostrarPoligonoActivo();
 
   const centro = (agrCentrosPorTienda[agrTiendaActual] || agrTiendaCentro) || { lat: 40.4168, lng: -3.7038 };
   if (!agrMapaCobertura) {
