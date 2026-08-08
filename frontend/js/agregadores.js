@@ -1003,8 +1003,24 @@ function agrDibujarPoligonoLimite(limites, centro, color) {
     const marker = L.circleMarker(latlng, {
       radius: 6, color: "#1a1a1a", weight: 1.5, fillColor: color, fillOpacity: 1,
     })
-      .bindPopup(`<b>${AGR_NOMBRE_AGREGADOR[limite.agregador] || limite.agregador}</b><br>Dirección: ${limite.angulo_grados}°<br>Límite: ${etiqueta}`)
+      .bindPopup(`<b>${AGR_NOMBRE_AGREGADOR[limite.agregador] || limite.agregador}</b><br>Ángulo: ${limite.angulo_grados}°<br>Límite: ${etiqueta}<br>Dirección: <span class="agr-poligono-dir">cargando...</span>`)
       .addTo(agrMap);
+    // La dirección real no se guarda en agregadores_limites (solo ángulo +
+    // km) -- se pide por reverse geocoding solo al abrir el popup (no al
+    // dibujar el polígono entero) para no disparar de golpe una llamada a
+    // Nominatim por cada vértice, que va limitado a 1 petición/segundo.
+    marker.on("popupopen", async () => {
+      const span = marker.getPopup().getElement()?.querySelector(".agr-poligono-dir");
+      if (!span || span.dataset.cargado) return;
+      span.dataset.cargado = "1";
+      try {
+        const res = await fetch(`${AGR_API}/geocodificar-inverso?lat=${latlng.lat}&lng=${latlng.lng}`, { credentials: "include" });
+        const datos = res.ok ? await res.json() : null;
+        span.textContent = datos?.direccion || "no disponible";
+      } catch {
+        span.textContent = "no disponible";
+      }
+    });
     agrPoligonoLayers.push(marker);
   });
 

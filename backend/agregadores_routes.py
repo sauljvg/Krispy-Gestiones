@@ -404,6 +404,17 @@ def get_limites_route(tienda: str, agregador: str | None = None, _user: dict = D
     return agregadores_module.get_limites(tienda, agregador)
 
 
+@router.get("/geocodificar-inverso")
+def geocodificar_inverso_route(lat: float, lng: float, _user: dict = Depends(require_agregadores)):
+    """Reverse geocoding bajo demanda para mostrar la dirección real de un
+    vértice del polígono de cobertura al abrir su popup en el dashboard --
+    no se guarda en BD, solo se calcula al vuelo (agregadores_limites no
+    guarda direccion_text, solo ángulo + km)."""
+    texto_plano, componentes = agregadores_module._geocodificar(lat, lng)
+    direccion = agregadores_module._construir_direccion(componentes) or texto_plano
+    return {"direccion": direccion}
+
+
 @router.get("/admin/limites/{tienda}", dependencies=[Depends(require_api_key)])
 def admin_get_limites_route(tienda: str, agregador: str | None = None):
     """Igual que get_limites_route pero con API key -- para que
