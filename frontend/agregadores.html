@@ -215,7 +215,6 @@
   #agr-transiciones .agr-trans-borrar { background: none; border: none; padding: 0; font-family: inherit; color: var(--status-critical); }
   #agr-transiciones .agr-trans-borrar:disabled { opacity: 0.6; cursor: default; }
 
-  #agr-mapa-cobertura { height: 60vh; min-height: 400px; border-radius: 8px; overflow: hidden; margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -255,6 +254,15 @@
           <button type="button" class="agr-filtro-btn" data-agregador="ubereats">Uber Eats</button>
         </div>
       </div>
+      <label class="agr-toggle-nuevos">
+        <input type="checkbox" id="agr-solo-nuevos" onchange="agrToggleSoloNuevos()">
+        Solo dots nuevos desde que active esto (oculta los puntos ya existentes)
+      </label>
+      <label class="agr-toggle-nuevos">
+        <input type="checkbox" id="agr-mostrar-poligono" checked onchange="agrToggleMostrarPoligono()">
+        Mostrar polígono de límite real (forma real de cobertura por dirección)
+      </label>
+      <p class="agr-resumen-nota" id="agr-cobertura-nota"></p>
       <div id="agr-map"></div>
       <div id="agr-leyenda" class="agr-leyenda"></div>
     </div>
@@ -326,29 +334,6 @@
       </div>
     </div>
 
-    <div class="agr-panel">
-      <div class="agr-panel-mapa-header">
-        <h2>Superficie de cobertura real <span id="agr-cobertura-contador" class="agr-contador"></span></h2>
-        <div class="agr-filtro-agregador" id="agr-filtro-cobertura">
-          <button type="button" class="agr-filtro-btn-cobertura activo" data-agregador="">Todos</button>
-          <button type="button" class="agr-filtro-btn-cobertura" data-agregador="justeat">JustEat</button>
-          <button type="button" class="agr-filtro-btn-cobertura" data-agregador="glovo">Glovo</button>
-          <button type="button" class="agr-filtro-btn-cobertura" data-agregador="ubereats">Uber Eats</button>
-        </div>
-      </div>
-      <label class="agr-toggle-nuevos">
-        <input type="checkbox" id="agr-solo-nuevos" onchange="agrToggleSoloNuevos()">
-        Solo dots nuevos desde que active esto (oculta los puntos ya existentes)
-      </label>
-      <label class="agr-toggle-nuevos">
-        <input type="checkbox" id="agr-mostrar-poligono" checked onchange="agrToggleMostrarPoligono()">
-        Mostrar polígono de límite real
-      </label>
-      <p class="agr-resumen-nota" id="agr-cobertura-nota">
-        Polígono que une los puntos más alejados donde el agregador SÍ reparte (verde) — la superficie de cobertura real, frente a los puntos donde no reparte (amarillo). Usa el último estado conocido de cada punto, no solo las últimas 24h.
-      </p>
-      <div id="agr-mapa-cobertura"></div>
-    </div>
   </div>
 </div>
 
@@ -365,6 +350,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/agregadores.js?v=20260808c"></script>
+<script src="js/agregadores.js?v=20260808d"></script>
 </body>
 </html>

@@ -99,7 +99,10 @@ function agrCategoriaDireccion(dir) {
 }
 
 function agrMarcadorVisible(dir) {
-  return !agrEstadosOcultos.has(agrCategoriaDireccion(dir));
+  if (agrEstadosOcultos.has(agrCategoriaDireccion(dir))) return false;
+  const baseline = agrSoloNuevosBaseline();
+  if (baseline != null && (dir.id || 0) <= baseline) return false;
+  return true;
 }
 
 function agrInitMap(lat, lng) {
@@ -318,6 +321,7 @@ function agrWireFiltroAgregador() {
       agrActualizarLeyenda();
       agrActualizarMarcadores();
       agrRecalcularContador();
+      agrActualizarPoligonoLimite();
     });
   });
 }
@@ -439,10 +443,12 @@ async function agrCargarMapa() {
   if (agrTiendaActual === AGR_TODAS) {
     const res = await fetch(`${AGR_API}/mapa-datos-todas`, { credentials: "include" });
     agrRenderMapaTodas(await res.json());
+    await agrActualizarPoligonoLimite();
     return;
   }
   const res = await fetch(`${AGR_API}/mapa-datos?tienda=${agrTiendaActual}`, { credentials: "include" });
   agrRenderMapa(await res.json());
+  await agrActualizarPoligonoLimite();
 }
 
 function agrLimpiarTabla() {
@@ -870,15 +876,14 @@ async function agrCargarTransiciones() {
     .join("");
 }
 
-let agrMapaCobertura = null;
-let agrCoberturaPoligono = []; // uno o varios (vista "Todos": uno por agregador)
-let agrCoberturaMarkers = [];
+let agrPoligonoLayers = []; // polígono(s) de límite real + sus puntos de vértice, sobre agrMap
 
 // "Solo dots nuevos": guarda el id más alto ya visto al activar el filtro,
-// así el mapa solo dibuja marcadores creados DESPUÉS de ese momento -- para
-// ver en vivo dónde va cayendo la búsqueda de límite de cobertura sin el
-// ruido de todo el grid ya existente. Por tienda, en localStorage, para que
-// sobreviva a los refrescos automáticos (cada 30s) y a recargar la página.
+// así el mapa solo dibuja los puntos del grid creados DESPUÉS de ese
+// momento -- para ver en vivo dónde va cayendo la búsqueda de límite de
+// cobertura sin el ruido de todo el grid ya existente. Por tienda, en
+// localStorage, para que sobreviva a los refrescos automáticos (cada 30s)
+// y a recargar la página.
 function agrSoloNuevosKey(tienda) {
   return `agr_solo_nuevos_baseline_${tienda}`;
 }
@@ -889,21 +894,18 @@ function agrSoloNuevosBaseline() {
   return v == null ? null : parseInt(v, 10);
 }
 
-async function agrToggleSoloNuevos() {
+function agrToggleSoloNuevos() {
   const activo = document.getElementById("agr-solo-nuevos")?.checked;
   if (!agrTiendaActual) return;
   if (activo) {
-    // Fetch fresco (no los ya cargados en el mapa) para que el corte sea el
-    // id más alto que existe AHORA, sin depender de qué vista/agregador
-    // estuviera seleccionado antes de activar el filtro.
-    const res = await fetch(`${AGR_API}/cobertura?tienda=${agrTiendaActual}`, { credentials: "include" });
-    const puntos = await res.json();
-    const maxId = puntos.reduce((max, p) => Math.max(max, p.id || 0), 0);
+    // El máximo id ya cargado en el mapa ahora mismo -- todo lo que se cree
+    // a partir de aquí tendrá un id mayor.
+    const maxId = agrDireccionMarkers.reduce((max, m) => Math.max(max, (m._agrDir && m._agrDir.id) || 0), 0);
     localStorage.setItem(agrSoloNuevosKey(agrTiendaActual), String(maxId));
   } else {
     localStorage.removeItem(agrSoloNuevosKey(agrTiendaActual));
   }
-  agrCargarMapaCobertura();
+  agrActualizarMarcadores();
 }
 
 // Mostrar/ocultar el polígono de límite real (y sus puntos de vértice) --
@@ -919,15 +921,7 @@ function agrMostrarPoligonoActivo() {
 function agrToggleMostrarPoligono() {
   const activo = document.getElementById("agr-mostrar-poligono")?.checked;
   localStorage.setItem(AGR_MOSTRAR_POLIGONO_KEY, activo ? "1" : "0");
-  agrCargarMapaCobertura();
-}
-
-function agrInitMapaCobertura(lat, lng) {
-  if (agrMapaCobertura) agrMapaCobertura.remove();
-  agrMapaCobertura = L.map("agr-mapa-cobertura").setView([lat, lng], 12);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "&copy; OpenStreetMap",
-  }).addTo(agrMapaCobertura);
+  agrActualizarPoligonoLimite();
 }
 
 function agrMoverPunto(lat, lng, bearingDeg, distanciaKm) {
@@ -957,14 +951,18 @@ function agrRadioDeLimite(limite) {
   return m ? parseFloat(m[1]) : 0.05;
 }
 
+function agrLimpiarPoligonoLimite() {
+  agrPoligonoLayers.forEach((l) => agrMap && agrMap.removeLayer(l));
+  agrPoligonoLayers = [];
+}
+
 function agrDibujarPoligonoLimite(limites, centro, color) {
   // Polígono "araña/radar": un vértice por ángulo, a la distancia real del
   // límite de cobertura en esa dirección concreta -- a diferencia del
-  // envolvente convexo (turf.convex), esto SÍ puede representar huecos de
-  // cobertura (ej. cerrado al norte, abierto al sur), porque conecta los
-  // vértices en orden angular en vez de "abombar hacia fuera". Además marca
-  // cada vértice con un punto clicable (ángulo + límite exacto de esa
-  // dirección), para poder identificar cada uno sin adivinar por posición.
+  // envolvente convexo, esto SÍ puede representar huecos de cobertura (ej.
+  // cerrado al norte, abierto al sur), porque conecta los vértices en orden
+  // angular en vez de "abombar hacia fuera". Además marca cada vértice con
+  // un punto clicable (ángulo + límite exacto de esa dirección).
   if (!limites || limites.length < 3) return null;
   const ordenados = [...limites].sort((a, b) => a.angulo_grados - b.angulo_grados);
   const vertices = ordenados.map((l) => ({
@@ -973,8 +971,8 @@ function agrDibujarPoligonoLimite(limites, centro, color) {
   }));
   const poligono = L.polygon(vertices.map((v) => v.latlng), {
     color, weight: 4, opacity: 1, fillColor: color, fillOpacity: 0.28,
-  }).addTo(agrMapaCobertura);
-  agrCoberturaPoligono.push(poligono);
+  }).addTo(agrMap);
+  agrPoligonoLayers.push(poligono);
 
   vertices.forEach(({ latlng, limite }) => {
     const radio = agrRadioDeLimite(limite);
@@ -985,147 +983,48 @@ function agrDibujarPoligonoLimite(limites, centro, color) {
       radius: 6, color: "#1a1a1a", weight: 1.5, fillColor: color, fillOpacity: 1,
     })
       .bindPopup(`<b>${AGR_NOMBRE_AGREGADOR[limite.agregador] || limite.agregador}</b><br>Dirección: ${limite.angulo_grados}°<br>Límite: ${etiqueta}`)
-      .addTo(agrMapaCobertura);
-    agrCoberturaPoligono.push(marker);
+      .addTo(agrMap);
+    agrPoligonoLayers.push(marker);
   });
 
   return poligono;
 }
 
-function agrDibujarCapaCobertura(puntos, colorDisponible, colorNoDisponible, dibujarMarcadores, limites, centro) {
-  // Dibuja marcadores (opcional) + polígono de cobertura para un único
-  // agregador, y devuelve {verdes, amarillos} para el contador.
-  //
-  // Si hay `limites` (resultado de la búsqueda adaptativa del límite real,
-  // ver buscar_limite_cobertura.py) con al menos 3 direcciones, se dibuja el
-  // polígono "araña" (un vértice por ángulo, a su distancia real) -- a
-  // diferencia del envolvente convexo de abajo, ESTE sí puede representar
-  // huecos de cobertura reales (cerrado en una dirección, abierto en otra).
-  // Si no hay límites calculados todavía para esta tienda/agregador, se cae
-  // al envolvente convexo de siempre sobre los puntos del grid normal
-  // (mejor una aproximación que nada, mientras se completa la búsqueda).
-  const validos = puntos.filter((p) => p.lat != null && p.lng != null);
-  const verdes = validos.filter((p) => p.disponible);
-  const amarillos = validos.filter((p) => !p.disponible);
-
-  if (dibujarMarcadores) {
-    validos.forEach((p) => {
-      const color = p.disponible ? colorDisponible : colorNoDisponible;
-      const marker = L.circleMarker([p.lat, p.lng], {
-        radius: 7, color, fillColor: color, fillOpacity: 0.85, weight: 2,
-      })
-        .bindPopup(`<b>${p.direccion_text || "Punto"}</b><br>${p.disponible ? "✅ Disponible" : "❌ No disponible"}`)
-        .addTo(agrMapaCobertura);
-      agrCoberturaMarkers.push(marker);
-    });
-  }
-
-  if (!agrMostrarPoligonoActivo()) {
-    return { verdes, amarillos };
-  }
-
-  if (limites && limites.length >= 3 && centro) {
-    // agrDibujarPoligonoLimite ya mete el polígono y los marcadores de
-    // vértice en agrCoberturaPoligono -- no hace falta empujarlo aquí también.
-    agrDibujarPoligonoLimite(limites, centro, colorDisponible);
-    return { verdes, amarillos };
-  }
-
-  if (verdes.length >= 3 && typeof turf !== "undefined") {
-    try {
-      const fc = turf.featureCollection(verdes.map((p) => turf.point([p.lng, p.lat])));
-      const hull = turf.convex(fc);
-      if (hull) {
-        const latlngs = hull.geometry.coordinates[0].map(([lng, lat]) => [lat, lng]);
-        const poligono = L.polygon(latlngs, {
-          color: colorDisponible, weight: 2, fillColor: colorDisponible, fillOpacity: 0.1,
-        }).addTo(agrMapaCobertura);
-        agrCoberturaPoligono.push(poligono);
-      }
-    } catch (e) {
-      // Puntos colineales u otro caso degenerado: se queda solo con los marcadores.
-    }
-  }
-
-  return { verdes, amarillos };
-}
-
-async function agrCargarMapaCobertura() {
-  const cont = document.getElementById("agr-mapa-cobertura");
-  const contador = document.getElementById("agr-cobertura-contador");
-  if (!cont || !agrTiendaActual || agrTiendaActual === AGR_TODAS) {
-    if (contador) contador.textContent = "El mapa de cobertura no está disponible en la vista \"Todas\" — selecciona una tienda.";
-    if (agrMapaCobertura) {
-      agrMapaCobertura.remove();
-      agrMapaCobertura = null;
-      agrCoberturaMarkers = [];
-      agrCoberturaPoligono = [];
-    }
-    return;
-  }
-  const btnActivo = document.querySelector("#agr-filtro-cobertura .agr-filtro-btn-cobertura.activo");
-  const agregador = btnActivo ? btnActivo.dataset.agregador : "";
-
-  const url = agregador
-    ? `${AGR_API}/cobertura?tienda=${agrTiendaActual}&agregador=${agregador}`
-    : `${AGR_API}/cobertura?tienda=${agrTiendaActual}`;
-  const [res, resLimites] = await Promise.all([
-    fetch(url, { credentials: "include" }),
-    fetch(`${AGR_API}/limites/${agrTiendaActual}`, { credentials: "include" }),
-  ]);
-  let puntos = await res.json();
-  const limites = resLimites.ok ? await resLimites.json() : [];
-
-  const checkboxNuevos = document.getElementById("agr-solo-nuevos");
-  const baseline = agrSoloNuevosBaseline();
-  if (checkboxNuevos) checkboxNuevos.checked = baseline != null;
-  if (baseline != null) {
-    puntos = puntos.filter((p) => (p.id || 0) > baseline);
-  }
+async function agrActualizarPoligonoLimite() {
+  agrLimpiarPoligonoLimite();
+  const nota = document.getElementById("agr-cobertura-nota");
   const checkboxPoligono = document.getElementById("agr-mostrar-poligono");
   if (checkboxPoligono) checkboxPoligono.checked = agrMostrarPoligonoActivo();
 
-  const centro = (agrCentrosPorTienda[agrTiendaActual] || agrTiendaCentro) || { lat: 40.4168, lng: -3.7038 };
-  if (!agrMapaCobertura) {
-    agrInitMapaCobertura(centro.lat, centro.lng);
+  if (!agrMap || !agrTiendaActual || agrTiendaActual === AGR_TODAS || !agrMostrarPoligonoActivo()) {
+    if (nota) nota.textContent = "";
+    return;
   }
 
-  agrCoberturaMarkers.forEach((m) => agrMapaCobertura.removeLayer(m));
-  agrCoberturaMarkers = [];
-  (agrCoberturaPoligono || []).forEach((p) => agrMapaCobertura.removeLayer(p));
-  agrCoberturaPoligono = [];
+  const res = await fetch(`${AGR_API}/limites/${agrTiendaActual}`, { credentials: "include" });
+  const limites = res.ok ? await res.json() : [];
+  const centro = agrCentrosPorTienda[agrTiendaActual] || agrTiendaCentro;
+  if (!centro) return;
 
-  const nota = document.getElementById("agr-cobertura-nota");
-  const hayLimitesReales = limites.length >= 3;
-
-  if (!agregador) {
-    // "Todos": un polígono por agregador, cada uno con su color de marca, sin
-    // marcadores individuales (con 3 agregadores solapados se saturaría el mapa).
-    const resumenes = [];
-    for (const nombre of Object.keys(AGR_NOMBRE_AGREGADOR)) {
-      const puntosAgregador = puntos.filter((p) => p.agregador === nombre);
-      const limitesAgregador = limites.filter((l) => l.agregador === nombre);
-      const color = AGR_COLOR_MARCA[nombre] || "#888";
-      const { verdes } = agrDibujarCapaCobertura(puntosAgregador, color, color, false, limitesAgregador, centro);
-      resumenes.push(`${AGR_NOMBRE_AGREGADOR[nombre]}: ${verdes.length}`);
-    }
-    if (contador) contador.textContent = `Con cobertura -- ${resumenes.join(" · ")}${baseline != null ? " (solo dots nuevos)" : ""}`;
+  if (agrFiltroAgregador) {
+    const limitesAgregador = limites.filter((l) => l.agregador === agrFiltroAgregador);
+    agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[agrFiltroAgregador] || "#0ca30c");
     if (nota) {
-      nota.textContent = hayLimitesReales
-        ? "Un polígono por agregador (JustEat naranja, Glovo amarillo, Uber Eats verde) con la forma real de cobertura (límite comprobado en cada dirección, no un envolvente aproximado)."
-        : "Un polígono por agregador (JustEat naranja, Glovo amarillo, Uber Eats verde) uniendo los puntos donde SÍ reparte cada uno. Usa el último estado conocido de cada punto, no solo las últimas 24h.";
+      nota.textContent = limitesAgregador.length >= 3
+        ? "Polígono con la forma real de cobertura de este agregador -- un vértice por dirección comprobada, a su límite real (puede tener huecos: cerrado en una dirección, abierto en otra)."
+        : "";
     }
   } else {
-    const limitesAgregador = limites.filter((l) => l.agregador === agregador);
-    const { verdes, amarillos } = agrDibujarCapaCobertura(puntos, "#0ca30c", "#fab219", true, limitesAgregador, centro);
-    const nombre = AGR_NOMBRE_AGREGADOR[agregador] || agregador;
-    if (contador) {
-      contador.textContent = `${verdes.length} con cobertura / ${amarillos.length} sin cobertura (${nombre})${baseline != null ? " -- solo dots nuevos" : ""}`;
-    }
+    let algunoDibujado = false;
+    Object.keys(AGR_NOMBRE_AGREGADOR).forEach((nombre) => {
+      const limitesAgregador = limites.filter((l) => l.agregador === nombre);
+      if (limitesAgregador.length >= 3) algunoDibujado = true;
+      agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[nombre] || "#888");
+    });
     if (nota) {
-      nota.textContent = hayLimitesReales
-        ? "Polígono con la forma real de cobertura -- un vértice por dirección comprobada, a su límite real (puede tener huecos: cerrado en una dirección, abierto en otra)."
-        : "Polígono que une los puntos más alejados donde el agregador SÍ reparte (verde) — la superficie de cobertura real, frente a los puntos donde no reparte (amarillo). Usa el último estado conocido de cada punto, no solo las últimas 24h.";
+      nota.textContent = algunoDibujado
+        ? "Un polígono por agregador (JustEat naranja, Glovo amarillo, Uber Eats verde) con la forma real de cobertura (límite comprobado en cada dirección, no un envolvente aproximado)."
+        : "";
     }
   }
 }
@@ -1155,9 +1054,9 @@ async function agrCargarEstado() {
 
 async function agrCargarTodo() {
   // agrCargarMapa() debe ir primero: fija agrTiendaCentro/agrCentrosPorTienda,
-  // que agrCargarMapaCobertura() usa para centrar su propio mapa la primera vez.
+  // que agrActualizarPoligonoLimite() usa para calcular los vértices del polígono.
   await agrCargarMapa();
-  await Promise.all([agrCargarTabla(), agrCargarResumen(), agrCargarAlertas(), agrCargarTransiciones(), agrCargarMapaCobertura(), agrCargarEstado()]);
+  await Promise.all([agrCargarTabla(), agrCargarResumen(), agrCargarAlertas(), agrCargarTransiciones(), agrCargarEstado()]);
   document.getElementById("agr-actualizado").textContent = "Actualizado: " + new Date().toLocaleTimeString("es-ES", { timeZone: "Europe/Madrid" });
 }
 
@@ -1171,14 +1070,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   wireUserBar(user);
   agrWireFiltroAgregador();
   agrAplicarColapsoTabla();
-
-  document.querySelectorAll("#agr-filtro-cobertura .agr-filtro-btn-cobertura").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll("#agr-filtro-cobertura .agr-filtro-btn-cobertura").forEach((b) => b.classList.remove("activo"));
-      btn.classList.add("activo");
-      agrCargarMapaCobertura();
-    });
-  });
 
   await agrCargarTiendas();
   await agrCargarTodo();
