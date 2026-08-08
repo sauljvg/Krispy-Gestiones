@@ -874,6 +874,38 @@ let agrMapaCobertura = null;
 let agrCoberturaPoligono = []; // uno o varios (vista "Todos": uno por agregador)
 let agrCoberturaMarkers = [];
 
+// "Solo dots nuevos": guarda el id más alto ya visto al activar el filtro,
+// así el mapa solo dibuja marcadores creados DESPUÉS de ese momento -- para
+// ver en vivo dónde va cayendo la búsqueda de límite de cobertura sin el
+// ruido de todo el grid ya existente. Por tienda, en localStorage, para que
+// sobreviva a los refrescos automáticos (cada 30s) y a recargar la página.
+function agrSoloNuevosKey(tienda) {
+  return `agr_solo_nuevos_baseline_${tienda}`;
+}
+
+function agrSoloNuevosBaseline() {
+  if (!agrTiendaActual) return null;
+  const v = localStorage.getItem(agrSoloNuevosKey(agrTiendaActual));
+  return v == null ? null : parseInt(v, 10);
+}
+
+async function agrToggleSoloNuevos() {
+  const activo = document.getElementById("agr-solo-nuevos")?.checked;
+  if (!agrTiendaActual) return;
+  if (activo) {
+    // Fetch fresco (no los ya cargados en el mapa) para que el corte sea el
+    // id más alto que existe AHORA, sin depender de qué vista/agregador
+    // estuviera seleccionado antes de activar el filtro.
+    const res = await fetch(`${AGR_API}/cobertura?tienda=${agrTiendaActual}`, { credentials: "include" });
+    const puntos = await res.json();
+    const maxId = puntos.reduce((max, p) => Math.max(max, p.id || 0), 0);
+    localStorage.setItem(agrSoloNuevosKey(agrTiendaActual), String(maxId));
+  } else {
+    localStorage.removeItem(agrSoloNuevosKey(agrTiendaActual));
+  }
+  agrCargarMapaCobertura();
+}
+
 function agrInitMapaCobertura(lat, lng) {
   if (agrMapaCobertura) agrMapaCobertura.remove();
   agrMapaCobertura = L.map("agr-mapa-cobertura").setView([lat, lng], 12);
@@ -997,8 +1029,15 @@ async function agrCargarMapaCobertura() {
     fetch(url, { credentials: "include" }),
     fetch(`${AGR_API}/limites/${agrTiendaActual}`, { credentials: "include" }),
   ]);
-  const puntos = await res.json();
+  let puntos = await res.json();
   const limites = resLimites.ok ? await resLimites.json() : [];
+
+  const checkboxNuevos = document.getElementById("agr-solo-nuevos");
+  const baseline = agrSoloNuevosBaseline();
+  if (checkboxNuevos) checkboxNuevos.checked = baseline != null;
+  if (baseline != null) {
+    puntos = puntos.filter((p) => (p.id || 0) > baseline);
+  }
 
   const centro = (agrCentrosPorTienda[agrTiendaActual] || agrTiendaCentro) || { lat: 40.4168, lng: -3.7038 };
   if (!agrMapaCobertura) {
@@ -1024,7 +1063,7 @@ async function agrCargarMapaCobertura() {
       const { verdes } = agrDibujarCapaCobertura(puntosAgregador, color, color, false, limitesAgregador, centro);
       resumenes.push(`${AGR_NOMBRE_AGREGADOR[nombre]}: ${verdes.length}`);
     }
-    if (contador) contador.textContent = `Con cobertura -- ${resumenes.join(" · ")}`;
+    if (contador) contador.textContent = `Con cobertura -- ${resumenes.join(" · ")}${baseline != null ? " (solo dots nuevos)" : ""}`;
     if (nota) {
       nota.textContent = hayLimitesReales
         ? "Un polígono por agregador (JustEat naranja, Glovo amarillo, Uber Eats verde) con la forma real de cobertura (límite comprobado en cada dirección, no un envolvente aproximado)."
@@ -1035,7 +1074,7 @@ async function agrCargarMapaCobertura() {
     const { verdes, amarillos } = agrDibujarCapaCobertura(puntos, "#0ca30c", "#fab219", true, limitesAgregador, centro);
     const nombre = AGR_NOMBRE_AGREGADOR[agregador] || agregador;
     if (contador) {
-      contador.textContent = `${verdes.length} con cobertura / ${amarillos.length} sin cobertura (${nombre})`;
+      contador.textContent = `${verdes.length} con cobertura / ${amarillos.length} sin cobertura (${nombre})${baseline != null ? " -- solo dots nuevos" : ""}`;
     }
     if (nota) {
       nota.textContent = hayLimitesReales
