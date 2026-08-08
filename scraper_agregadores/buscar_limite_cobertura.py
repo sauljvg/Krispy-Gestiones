@@ -24,6 +24,12 @@ logger = logging.getLogger("limite")
 
 SCRAPERS = {"glovo": GlovoScraper, "justeat": JustEatScraper}
 PRECISION_KM = 0.5
+# Si la geocodificación de dos distancias "mid" distintas cae en la MISMA
+# dirección real (zona con pocas direcciones numeradas), seguir pidiendo
+# puntos intermedios no sirve de nada -- red de seguridad contra bucle
+# infinito real (visto en producción: 256 iteraciones seguidas sin converger).
+PRECISION_MINIMA_KM = 0.02
+MAX_ITERACIONES_BINARIA = 12
 DISTANCIAS_EXPANSION = [2.5, 5.0, 7.0, 9.0]
 # Si ni el primer punto de la expansión (2.5km) tiene cobertura, se prueban
 # estas distancias (de más cerca a menos) como extremo "seguro" para afinar
@@ -175,14 +181,31 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
             })
         lo = punto_base["distancia_km"]
 
+    iteraciones = 0
     while (hi - lo) > PRECISION_KM:
+        iteraciones += 1
+        if iteraciones > MAX_ITERACIONES_BINARIA:
+            logger.warning("[%s/%s/%.0f°] %d iteraciones sin converger, se para la binaria con lo que hay", tienda, agregador, angulo, iteraciones)
+            break
         mid = round((lo + hi) / 2, 2)
         punto = await crear_punto_valido(tienda, mid, angulo)
         if punto is None:
             logger.warning("[%s/%s/%.0f°] %.2fkm -- sin dirección real cerca, se para la binaria aquí", tienda, agregador, angulo, mid)
             break
-        resultado = await resultado_punto(scraper, tienda, punto, agregador, avisos_otra_tienda)
         d_real = punto["distancia_km"]
+        if abs(d_real - lo) < PRECISION_MINIMA_KM or abs(d_real - hi) < PRECISION_MINIMA_KM:
+            # La búsqueda en espiral geocodificó al MISMO punto real ya
+            # probado (la zona no tiene más direcciones numeradas entre lo y
+            # hi) -- pedir un mid distinto no sirve de nada, siempre cae
+            # aquí. Sin esto, hi/lo nunca se mueven y (hi - lo) no baja
+            # nunca de PRECISION_KM: bucle infinito real, confirmado en vivo
+            # (256 iteraciones seguidas en el mismo punto antes de este fix).
+            logger.warning(
+                "[%s/%s/%.0f°] %.2fkm geocodifica al mismo punto ya probado (%s) -- no hay más direcciones numeradas por aquí, se para la binaria",
+                tienda, agregador, angulo, mid, punto["direccion_text"],
+            )
+            break
+        resultado = await resultado_punto(scraper, tienda, punto, agregador, avisos_otra_tienda)
         logger.info(
             "[%s/%s/%.0f°] binaria %.2fkm -> %s (%s)",
             tienda, agregador, angulo, d_real, resultado, punto["direccion_text"],
