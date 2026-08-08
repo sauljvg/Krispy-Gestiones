@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -10,6 +11,37 @@ from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 
 logger = logging.getLogger(__name__)
+
+
+def _avisar_captcha_pendiente(agregador: str, segundos_espera: int) -> None:
+    """Aviso nativo de Windows (globo + sonido) cuando aparece un captcha que
+    necesita resolución manual -- para no tener que estar mirando la terminal
+    esperando a que salga el mensaje. No resuelve nada, solo avisa a un
+    humano de que tiene que actuar él (ver _comprobar_challenge)."""
+    try:
+        import winsound
+
+        winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+    except Exception:
+        pass
+
+    mensaje = f"{agregador}: resuelve el captcha en la ventana del navegador ({segundos_espera}s)"
+    try:
+        subprocess.Popen(
+            [
+                "powershell", "-NoProfile", "-Command",
+                "Add-Type -AssemblyName System.Windows.Forms; "
+                "$n = New-Object System.Windows.Forms.NotifyIcon; "
+                "$n.Icon = [System.Drawing.SystemIcons]::Warning; "
+                "$n.Visible = $true; "
+                f"$n.ShowBalloonTip(15000, 'Captcha pendiente', '{mensaje}', "
+                "[System.Windows.Forms.ToolTipIcon]::Warning); "
+                "Start-Sleep -Seconds 16; $n.Dispose()",
+            ],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except Exception:
+        logger.warning("No se pudo lanzar el aviso nativo de captcha (sigue esperando igual)")
 
 SCREENSHOTS_DIR = Path(__file__).resolve().parent.parent / "logs" / "screenshots"
 
@@ -289,6 +321,7 @@ class BaseAggregatorScraper:
             f"ventana del navegador. Resuélvela manualmente y pulsa Enter aquí en los próximos "
             f"{self.timeout_resolucion_manual_seg}s para continuar...\n"
         )
+        _avisar_captcha_pendiente(self.nombre_agregador, self.timeout_resolucion_manual_seg)
         try:
             await asyncio.wait_for(
                 asyncio.to_thread(input), timeout=self.timeout_resolucion_manual_seg
