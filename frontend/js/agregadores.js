@@ -440,6 +440,16 @@ async function agrCargarTiendas() {
 
 async function agrCargarMapa() {
   if (!agrTiendaActual) return;
+
+  // Bug confirmado en vivo 08/08: la casilla siempre arranca DESMARCADA al
+  // recargar la página (no hay código que la marque), pero el filtro en sí
+  // vive en localStorage y SÍ sobrevive a la recarga -- si se activó una vez
+  // para esta tienda y nunca se desmarcó a mano antes de recargar, el filtro
+  // seguía activo ocultando TODOS los puntos, con la casilla mintiendo que
+  // estaba apagado. Se sincroniza la casilla con el estado real al cargar.
+  const checkboxSoloNuevos = document.getElementById("agr-solo-nuevos");
+  if (checkboxSoloNuevos) checkboxSoloNuevos.checked = agrSoloNuevosBaseline() != null;
+
   if (agrTiendaActual === AGR_TODAS) {
     const res = await fetch(`${AGR_API}/mapa-datos-todas`, { credentials: "include" });
     agrRenderMapaTodas(await res.json());
