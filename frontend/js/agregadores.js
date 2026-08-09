@@ -983,9 +983,15 @@ function agrRadioDeLimite(limite) {
   // número aprovechable ("no disponible incluso a 0.77km" -> cierre real
   // cerca de la tienda, ">= 5.0km" -> cota inferior porque no se encontró
   // el borde) -- mejor esa aproximación que dejar un hueco en el polígono.
+  // "sin datos (todo falló)" NO trae número -- antes caía a 0.05km por
+  // defecto, dibujando el vértice literalmente ENCIMA de la tienda y
+  // creando una "pincelada" recta hacia el centro y de vuelta que parecía
+  // decir "aquí no hay cobertura" cuando en realidad es que no hay NINGÚN
+  // dato en esa dirección (confirmado en vivo 09/08 con La Gavia). Devolver
+  // null aquí hace que ese ángulo se salte del polígono en vez de mentir.
   if (limite.limite_km != null) return limite.limite_km;
   const m = (limite.nota || "").match(/(\d+\.?\d*)\s*km/);
-  return m ? parseFloat(m[1]) : 0.05;
+  return m ? parseFloat(m[1]) : null;
 }
 
 function agrLimpiarPoligonoLimite() {
@@ -1025,6 +1031,12 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   if (!limites || limites.length === 0) return null;
   const agregador = limites[0].agregador;
   const base = [...limites]
+    // "sin datos (todo falló)" no aporta ni siquiera una cota aproximada --
+    // se salta ese ángulo del polígono en vez de inventar un radio (ver
+    // agrRadioDeLimite). Deja un hueco angular más ancho, pero eso es
+    // honesto: no sabemos qué pasa ahí, en vez de fingir que la cobertura
+    // colapsa a cero justo en ese punto.
+    .filter((l) => agrRadioDeLimite(l) != null)
     .sort((a, b) => a.angulo_grados - b.angulo_grados)
     .map((l) => ({
       angulo: l.angulo_grados,
