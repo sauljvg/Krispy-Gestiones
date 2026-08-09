@@ -202,7 +202,8 @@ function agrIconoTienda(tienda) {
 
 function agrPopupDireccion(dir, editable) {
   const iconos = { disponible: "✅", no_disponible: "❌", error: "⚠️" };
-  const detalleHtml = Object.entries(dir.detalle || {})
+  const entradas = Object.entries(dir.detalle || {});
+  const detalleHtml = (agrFiltroAgregador ? entradas.filter(([nombre]) => nombre === agrFiltroAgregador) : entradas)
     .map(([nombre, info]) => {
       const icono = iconos[info.estado] || "❔";
       const tiempo = info.tiempo_entrega_min ? ` (${info.tiempo_entrega_min} min)` : "";
