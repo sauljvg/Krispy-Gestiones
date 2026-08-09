@@ -32,6 +32,20 @@ async def crear_direccion_calculada(tienda: str, distancia_km: float, angulo_gra
             return await resp.json()
 
 
+async def reasignar_punto_otra_tienda(tienda: str, lat: float, lng: float, direccion_text: str | None) -> dict:
+    """Cuando la búsqueda de límite de UNA tienda descubre un punto
+    disponible que en realidad está más cerca de OTRA (ver 'contaminado'
+    en buscar_limite_cobertura.py), se guarda aquí como punto suelto de la
+    tienda correcta -- el backend evita duplicados si ya hay uno muy
+    próximo guardado."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direcciones/reasignada"
+    body = {"tienda": tienda, "lat": lat, "lng": lng, "direccion_text": direccion_text}
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=body, headers=_headers(), timeout=30) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+
 async def guardar_limite(
     tienda: str, agregador: str, angulo_grados: float, limite_km: float | None, nota: str | None,
     lat: float | None = None, lng: float | None = None, direccion_text: str | None = None,

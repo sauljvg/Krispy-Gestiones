@@ -381,6 +381,25 @@ def crear_direccion_calculada_route(body: DireccionCalculadaIn):
     return resultado
 
 
+class DireccionReasignadaIn(BaseModel):
+    tienda: str
+    lat: float
+    lng: float
+    direccion_text: str | None = None
+
+
+@router.post("/admin/direcciones/reasignada", dependencies=[Depends(require_api_key)])
+def crear_direccion_reasignada_route(body: DireccionReasignadaIn):
+    """Para buscar_limite_cobertura.py: cuando la búsqueda de límite de UNA
+    tienda descubre un punto disponible que en realidad está más cerca de
+    OTRA, se guarda aquí como punto suelto de la tienda correcta (con
+    dedup si ya existe uno muy próximo) en vez de perder el dato."""
+    resultado = agregadores_module.agregar_o_reusar_direccion_otra_tienda(body.tienda, body.lat, body.lng, body.direccion_text)
+    if resultado is None:
+        raise HTTPException(status_code=400, detail="Tienda no reconocida")
+    return resultado
+
+
 class LimiteIn(BaseModel):
     tienda: str
     agregador: str

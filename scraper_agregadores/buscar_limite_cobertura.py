@@ -84,24 +84,47 @@ async def crear_punto_valido(tienda: str, distancia_km: float, angulo_grados: fl
 
 async def resultado_punto(scraper, tienda, punto, agregador, avisos: list) -> str:
     """Como chequear_punto, pero si el punto cae más cerca de OTRA sucursal
-    (ver crear_punto_calculado / tienda_mas_cercana) NO llega a comprobarse
-    -- con varias tiendas relativamente próximas (ej. Princesa-Caleido a
-    6km), un "disponible" ahí PODRÍA deberse a que responde la otra tienda,
-    porque los agregadores solo buscan por marca "Krispy Kreme" y no
-    distinguen sucursal. Antes esto era solo un aviso informativo y la
-    búsqueda seguía expandiéndose igual -- confirmado en vivo 09/08 que eso
-    producía picos falsos de +9km en el polígono que en realidad eran
-    cobertura de OTRA tienda, no de la que se estaba midiendo. Ahora se
-    devuelve 'contaminado' para que la búsqueda pare ahí en esa dirección
-    en vez de seguir con datos que no se pueden atribuir a la tienda
-    correcta."""
+    (ver crear_punto_calculado / tienda_mas_cercana) el resultado NO se usa
+    como límite de ESTA tienda -- con varias tiendas relativamente próximas
+    (ej. Princesa-Caleido a 6km), un "disponible" ahí PODRÍA deberse a que
+    responde la otra tienda, porque los agregadores solo buscan por marca
+    "Krispy Kreme" y no distinguen sucursal. Antes esto era solo un aviso
+    informativo y la búsqueda seguía expandiéndose igual -- confirmado en
+    vivo 09/08 que eso producía picos falsos de +9km en el polígono que en
+    realidad eran cobertura de OTRA tienda. Se devuelve 'contaminado' para
+    que la búsqueda pare ahí en esa dirección; si el resultado real es
+    "disponible", se reasigna como punto suelto a la tienda a la que de
+    verdad pertenece en vez de perder el dato (pedido explícito del
+    usuario 09/08)."""
     otra = punto.get("tienda_mas_cercana")
     if otra and otra != tienda:
         logger.warning(
-            "  %.2fkm cae más cerca de '%s' que de '%s' -- se para aquí, el resultado no se puede atribuir con fiabilidad a esta tienda",
+            "  %.2fkm cae más cerca de '%s' que de '%s' -- se comprueba pero no se usa como límite de esta tienda",
             punto["distancia_km"], otra, tienda,
         )
         avisos.append(punto["distancia_km"])
+        resultado = await chequear_punto(scraper, tienda, punto["id"], punto["direccion_text"], agregador)
+        if resultado == "disponible":
+            # No se tira el dato -- se guarda como punto suelto de la
+            # tienda a la que de verdad pertenece (pedido explícito del
+            # usuario 09/08: "si dice cerrado que en realidad es la otra
+            # sucursal, asignémoslo a la tienda correcta en vez de
+            # descartarlo"). Solo para "disponible": un "no_disponible"
+            # cerca de otra tienda no aporta nada útil para ninguna de
+            # las dos.
+            try:
+                direccion = await api_client.reasignar_punto_otra_tienda(
+                    otra, punto["lat"], punto["lng"], punto["direccion_text"],
+                )
+                await api_client.enviar_chequeo({
+                    "tienda": otra,
+                    "agregador": agregador,
+                    "direccion_id": direccion["id"],
+                    "disponible": True,
+                })
+                logger.info("  punto reasignado a '%s' (más cerca que '%s')", otra, tienda)
+            except Exception as exc:
+                logger.warning("  no se pudo reasignar el punto a '%s': %r", otra, exc)
         return "contaminado"
     return await chequear_punto(scraper, tienda, punto["id"], punto["direccion_text"], agregador)
 

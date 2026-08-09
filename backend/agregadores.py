@@ -640,6 +640,32 @@ def agregar_direccion_manual(tienda: str, lat: float, lng: float, direccion_text
     return dict(fila)
 
 
+def agregar_o_reusar_direccion_otra_tienda(tienda: str, lat: float, lng: float, direccion_text: str | None) -> dict | None:
+    """Como agregar_direccion_manual, pero reutiliza un punto ya existente
+    si hay uno muy cercano (<0.05km) para esta tienda en vez de duplicar.
+
+    Pensado para cuando la búsqueda de límite de OTRA tienda descubre por
+    casualidad un punto disponible que en realidad está más cerca de esta
+    (ver 'contaminado' en buscar_limite_cobertura.py) -- en vez de
+    descartar ese dato, se guarda aquí como punto suelto real de esta
+    tienda. Sin el dedup, la misma zona de solape generaría un punto
+    duplicado cada vez que otra tienda vuelve a pasar por ahí en rondas
+    sucesivas (8->16->32 ángulos, o entre agregadores distintos)."""
+    if tienda not in TIENDAS:
+        return None
+    conn = get_connection()
+    existentes = conn.execute(
+        "SELECT * FROM agregadores_direcciones WHERE tienda=? AND activo=1", (tienda,)
+    ).fetchall()
+    for fila in existentes:
+        distancia_a_existente, _ = _distancia_y_angulo(fila["lat"], fila["lng"], lat, lng)
+        if distancia_a_existente < 0.05:
+            conn.close()
+            return dict(fila)
+    conn.close()
+    return agregar_direccion_manual(tienda, lat, lng, direccion_text)
+
+
 def _con_datos_reales(conn, resultado: list[dict], agregador: str) -> set:
     """IDs de direcciones que ya tienen al menos un chequeo real (sin contar
     fallos técnicos, que no dicen nada sobre si reparte o no) de este
