@@ -382,8 +382,6 @@ function agrToggleModoAnadir() {
   if (agrMap) {
     document.getElementById("agr-map").style.cursor = agrModoAnadir ? "crosshair" : "";
   }
-  if (agrModoAnadir) agrDibujarGuiasAngulo();
-  else agrLimpiarGuiasAngulo();
 }
 
 function agrTiendaMasCercana(lat, lng) {
@@ -404,13 +402,32 @@ function agrLimpiarGuiasAngulo() {
   agrLineasGuiaAngulo = [];
 }
 
+const AGR_MOSTRAR_COMPAS_KEY = "agr_mostrar_compas_angulo";
+
+function agrMostrarCompasActivo() {
+  return localStorage.getItem(AGR_MOSTRAR_COMPAS_KEY) === "1";
+}
+
+function agrToggleCompas() {
+  const activo = document.getElementById("agr-mostrar-compas")?.checked;
+  localStorage.setItem(AGR_MOSTRAR_COMPAS_KEY, activo ? "1" : "0");
+  agrActualizarGuiasAngulo();
+}
+
+function agrActualizarGuiasAngulo() {
+  const checkbox = document.getElementById("agr-mostrar-compas");
+  if (checkbox) checkbox.checked = agrMostrarCompasActivo();
+  if (agrMostrarCompasActivo()) agrDibujarGuiasAngulo();
+  else agrLimpiarGuiasAngulo();
+}
+
 function agrDibujarGuiasAngulo() {
   agrLimpiarGuiasAngulo();
   // Con varias tiendas visibles a la vez (vista "Todas") no hay un único
   // centro del que trazar el compás sin amontonar líneas de las 6 tiendas
   // unas sobre otras -- se omite ahí; el popup del punto ya añadido sigue
   // mostrando su ángulo real para poder ajustar el siguiente clic a ojo.
-  if (!agrMap || agrTiendaActual === AGR_TODAS) return;
+  if (!agrMap || !agrMostrarCompasActivo() || agrTiendaActual === AGR_TODAS) return;
   const centro = agrCentrosPorTienda[agrTiendaActual] || agrTiendaCentro;
   if (!centro) return;
   for (let angulo = 0; angulo < 360; angulo += AGR_GUIA_ANGULO_PASO) {
@@ -633,6 +650,7 @@ async function agrCargarMapa() {
   };
   agrRenderMapaTodas(filtrado);
   await agrActualizarPoligonoLimite();
+  agrActualizarGuiasAngulo();
 }
 
 function agrLimpiarTabla() {
