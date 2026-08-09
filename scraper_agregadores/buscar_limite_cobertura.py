@@ -83,20 +83,26 @@ async def crear_punto_valido(tienda: str, distancia_km: float, angulo_grados: fl
 
 
 async def resultado_punto(scraper, tienda, punto, agregador, avisos: list) -> str:
-    """Como chequear_punto, pero además avisa (sin cortar la búsqueda) si el
-    punto cae más cerca de OTRA sucursal (ver crear_punto_calculado /
-    tienda_mas_cercana) -- con varias tiendas relativamente próximas (ej.
-    Princesa-Caleido a 6km), un "disponible" ahí PODRÍA deberse a que
-    responde la otra tienda, porque los agregadores solo buscan por marca
-    "Krispy Kreme" y no distinguen sucursal. Es solo información para
-    interpretar el resultado después, no se usa para decidir el límite."""
+    """Como chequear_punto, pero si el punto cae más cerca de OTRA sucursal
+    (ver crear_punto_calculado / tienda_mas_cercana) NO llega a comprobarse
+    -- con varias tiendas relativamente próximas (ej. Princesa-Caleido a
+    6km), un "disponible" ahí PODRÍA deberse a que responde la otra tienda,
+    porque los agregadores solo buscan por marca "Krispy Kreme" y no
+    distinguen sucursal. Antes esto era solo un aviso informativo y la
+    búsqueda seguía expandiéndose igual -- confirmado en vivo 09/08 que eso
+    producía picos falsos de +9km en el polígono que en realidad eran
+    cobertura de OTRA tienda, no de la que se estaba midiendo. Ahora se
+    devuelve 'contaminado' para que la búsqueda pare ahí en esa dirección
+    en vez de seguir con datos que no se pueden atribuir a la tienda
+    correcta."""
     otra = punto.get("tienda_mas_cercana")
     if otra and otra != tienda:
         logger.warning(
-            "  aviso: %.2fkm cae más cerca de '%s' que de '%s' -- el resultado podría reflejar la otra sucursal",
+            "  %.2fkm cae más cerca de '%s' que de '%s' -- se para aquí, el resultado no se puede atribuir con fiabilidad a esta tienda",
             punto["distancia_km"], otra, tienda,
         )
         avisos.append(punto["distancia_km"])
+        return "contaminado"
     return await chequear_punto(scraper, tienda, punto["id"], punto["direccion_text"], agregador)
 
 
@@ -162,6 +168,7 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
     # parque sin ninguna calle real, confirmado en vivo 09/08).
     punto_lo = None
     avisos_otra_tienda = []
+    parado_por_contaminacion = False
 
     for d in DISTANCIAS_EXPANSION:
         punto = await crear_punto_valido(tienda, d, angulo)
@@ -181,6 +188,12 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
         elif resultado == "no_disponible":
             hi = d_real
             break
+        elif resultado == "contaminado":
+            # A partir de aquí los "disponible" podrían ser en realidad de
+            # otra sucursal -- no tiene sentido seguir expandiendo, el dato
+            # ya no se puede atribuir con fiabilidad a esta tienda.
+            parado_por_contaminacion = True
+            break
         await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
 
     def _con_aviso(resultado: dict) -> dict:
@@ -196,7 +209,10 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
         return resultado
 
     if hi is None:
-        nota = f">= {lo}km (no se encontró el borde dentro del rango probado)" if lo else "sin datos (todo falló)"
+        if parado_por_contaminacion:
+            nota = f">= {lo}km (no se pudo seguir: más allá cae más cerca de otra sucursal)" if lo else "sin datos (cae más cerca de otra sucursal desde el primer punto probado)"
+        else:
+            nota = f">= {lo}km (no se encontró el borde dentro del rango probado)" if lo else "sin datos (todo falló)"
         return _con_punto(_con_aviso({"angulo": angulo, "limite_km": None, "nota": nota}))
     if lo is None:
         # Ni el primer punto probado (el más cercano de la expansión) tenía
@@ -214,6 +230,15 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
             return _con_punto(_con_aviso({"angulo": angulo, "limite_km": None, "nota": f"< {hi}km (sin dirección real cerca de la tienda en esta dirección, ni hasta {BASELINE_CERCANO_ESCALERA_KM[-1]}km)"}))
         resultado_base = await resultado_punto(scraper, tienda, punto_base, agregador, avisos_otra_tienda)
         await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
+        if resultado_base == "contaminado":
+            # Incluso el punto más cercano posible cae más cerca de otra
+            # sucursal -- no se puede decir nada fiable de esta dirección
+            # para esta tienda (caso raro, pero mejor esto que inventar un
+            # "no disponible" que en realidad es solo contaminación).
+            return _con_punto(_con_aviso({
+                "angulo": angulo, "limite_km": None,
+                "nota": f"no se pudo determinar -- incluso a {punto_base['distancia_km']}km de la tienda cae más cerca de otra sucursal",
+            }))
         if resultado_base != "disponible":
             return _con_punto(_con_aviso({
                 "angulo": angulo, "limite_km": None,
@@ -256,6 +281,11 @@ async def buscar_limite_direccion(tienda: str, angulo: float, agregador: str) ->
             punto_lo = punto
         elif resultado == "no_disponible":
             hi = d_real
+        elif resultado == "contaminado":
+            # A partir de aquí no se puede afinar más con datos fiables --
+            # se queda con el rango [lo, hi] ya confirmado hasta ahora.
+            logger.warning("  punto en zona de otra sucursal, se para la binaria aquí con lo que hay")
+            break
         else:
             logger.warning("  fallo técnico persistente en la binaria, se para aquí con lo que hay")
             break

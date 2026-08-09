@@ -429,6 +429,16 @@ def admin_get_limites_route(tienda: str, agregador: str | None = None):
     return agregadores_module.get_limites(tienda, agregador)
 
 
+@router.delete("/admin/limites/{tienda}", dependencies=[Depends(require_api_key)])
+def admin_eliminar_limite_route(tienda: str, agregador: str, angulo_grados: float):
+    """Borra un vértice de límite (no baja lógica -- ver eliminar_limite).
+    Para limpiar vértices contaminados por cercanía a otra sucursal, o para
+    forzar que un ángulo se recalcule en el próximo relanzamiento."""
+    if not agregadores_module.eliminar_limite(tienda, agregador, angulo_grados):
+        raise HTTPException(status_code=404, detail="Límite no encontrado")
+    return {"ok": True}
+
+
 @router.delete("/admin/direccion/{direccion_id}", dependencies=[Depends(require_api_key)])
 def admin_eliminar_direccion_route(direccion_id: int):
     """Igual que eliminar_direccion_route pero con API key -- para que el

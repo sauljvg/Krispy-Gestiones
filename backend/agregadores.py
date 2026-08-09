@@ -573,6 +573,25 @@ def guardar_limite(
     }
 
 
+def eliminar_limite(tienda: str, agregador: str, angulo_grados: float) -> bool:
+    """Borra un vértice de límite guardado (no baja lógica -- a diferencia
+    de agregadores_direcciones, aquí no hay riesgo de que se regenere solo:
+    el skip-logic de buscar_limite_cobertura.py trata CUALQUIER fila
+    existente para ese ángulo como "ya completado", así que hay que
+    borrarla de verdad para que un relanzamiento futuro lo vuelva a
+    calcular. Para limpiar vértices contaminados por cercanía a otra
+    sucursal (ver resultado_punto en el script)."""
+    angulo_guardar = int(round(angulo_grados))
+    conn = get_connection()
+    cur = conn.execute(
+        "DELETE FROM agregadores_limites WHERE tienda=? AND agregador=? AND angulo_grados=?",
+        (tienda, agregador, angulo_guardar),
+    )
+    conn.commit()
+    conn.close()
+    return cur.rowcount > 0
+
+
 def get_limites(tienda: str, agregador: str = None) -> list[dict]:
     """Límites guardados para una tienda -- ordenados por ángulo, para que
     el frontend pueda conectar los vértices en orden sin tener que
