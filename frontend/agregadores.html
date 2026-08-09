@@ -61,6 +61,17 @@
   .agr-filtro-btn-cobertura.activo[data-agregador="glovo"] { background: #ffc244; color: #4a3300; border-color: #ffc244; }
   .agr-filtro-btn-cobertura.activo[data-agregador="ubereats"] { background: #06c167; color: #fff; border-color: #06c167; }
 
+  .agr-tiendas-mapa { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 8px; }
+  .agr-tiendas-mapa-label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+  .agr-tiendas-mapa-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .agr-tienda-chip {
+    padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-muted); font-size: 12px;
+    font-weight: 600; cursor: pointer; opacity: 0.55;
+  }
+  .agr-tienda-chip.activo { background: var(--acento-calido); color: #fff; border-color: var(--acento-calido); opacity: 1; }
+  .agr-tienda-chip-todas { border-style: dashed; }
+
   .agr-bottom-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; }
   @media (max-width: 900px) { .agr-bottom-grid { grid-template-columns: 1fr; } }
   .agr-leyenda { display: flex; gap: 16px; margin-top: 10px; font-size: 12px; color: var(--text-secondary); flex-wrap: wrap; }
@@ -254,6 +265,10 @@
           <button type="button" class="agr-filtro-btn" data-agregador="ubereats">Uber Eats</button>
         </div>
       </div>
+      <div class="agr-tiendas-mapa">
+        <span class="agr-tiendas-mapa-label">Tiendas en el mapa:</span>
+        <div id="agr-tiendas-mapa-chips" class="agr-tiendas-mapa-chips"></div>
+      </div>
       <label class="agr-toggle-nuevos">
         <input type="checkbox" id="agr-solo-nuevos" onchange="agrToggleSoloNuevos()">
         Solo dots nuevos desde que active esto (oculta los puntos ya existentes)
@@ -350,6 +365,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/agregadores.js?v=20260809l"></script>
+<script src="js/agregadores.js?v=20260809m"></script>
 </body>
 </html>

@@ -395,8 +395,9 @@ function agrRecalcularContador() {
   // no cambiaba nunca al tocar un filtro (confirmado en vivo 09/08).
   const visibles = agrDireccionMarkers.filter((m) => agrMarcadorVisible(m._agrDir));
   const n = visibles.length;
-  const base = agrTiendaActual === AGR_TODAS
-    ? `${n} puntos en ${Object.keys(agrCentrosPorTienda).length} tiendas`
+  const numTiendasMapa = Object.keys(agrCentrosPorTienda).length;
+  const base = numTiendasMapa > 1
+    ? `${n} puntos en ${numTiendasMapa} tiendas`
     : `${n} punto${n === 1 ? "" : "s"}`;
 
   if (!agrFiltroAgregador) {
@@ -467,6 +468,8 @@ function agrBadge(c) {
     : '<span class="agr-badge no">No</span>';
 }
 
+let agrMapaTiendasSeleccionadas = null; // Set de slugs -- qué tiendas se DIBUJAN en el mapa; independiente del selector "Tienda:" de arriba, que sigue controlando tabla/alertas/tarjetas de resumen
+
 async function agrCargarTiendas() {
   const res = await fetch(`${AGR_API}/tiendas`);
   const tiendas = await res.json();
@@ -482,10 +485,54 @@ async function agrCargarTiendas() {
     if (agrModoAnadir) agrToggleModoAnadir();
     agrCargarTodo();
   });
+
+  agrMapaTiendasSeleccionadas = new Set(tiendas.map((t) => t.tienda));
+  agrRenderChipsTiendasMapa(tiendas);
+}
+
+function agrRenderChipsTiendasMapa(tiendas) {
+  const cont = document.getElementById("agr-tiendas-mapa-chips");
+  if (!cont) return;
+  const chips = [`<button type="button" class="agr-tienda-chip agr-tienda-chip-todas" data-todas="1">Todas</button>`].concat(
+    tiendas.map((t) => `<button type="button" class="agr-tienda-chip" data-tienda="${t.tienda}">${t.nombre}</button>`)
+  );
+  cont.innerHTML = chips.join("");
+  agrActualizarChipsTiendasMapa();
+  cont.querySelectorAll(".agr-tienda-chip").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.dataset.todas) {
+        agrMapaTiendasSeleccionadas = new Set(tiendas.map((t) => t.tienda));
+      } else {
+        const slug = btn.dataset.tienda;
+        if (agrMapaTiendasSeleccionadas.has(slug)) {
+          // Al menos una tienda tiene que quedar seleccionada -- no tiene
+          // sentido un mapa vacío.
+          if (agrMapaTiendasSeleccionadas.size > 1) agrMapaTiendasSeleccionadas.delete(slug);
+        } else {
+          agrMapaTiendasSeleccionadas.add(slug);
+        }
+      }
+      agrActualizarChipsTiendasMapa();
+      agrCargarMapa();
+    });
+  });
+}
+
+function agrActualizarChipsTiendasMapa() {
+  const cont = document.getElementById("agr-tiendas-mapa-chips");
+  if (!cont || !agrMapaTiendasSeleccionadas) return;
+  const totalTiendas = cont.querySelectorAll("[data-tienda]").length;
+  cont.querySelectorAll(".agr-tienda-chip").forEach((btn) => {
+    if (btn.dataset.todas) {
+      btn.classList.toggle("activo", agrMapaTiendasSeleccionadas.size === totalTiendas);
+    } else {
+      btn.classList.toggle("activo", agrMapaTiendasSeleccionadas.has(btn.dataset.tienda));
+    }
+  });
 }
 
 async function agrCargarMapa() {
-  if (!agrTiendaActual) return;
+  if (!agrTiendaActual || !agrMapaTiendasSeleccionadas || agrMapaTiendasSeleccionadas.size === 0) return;
 
   // Bug confirmado en vivo 08/08: la casilla siempre arranca DESMARCADA al
   // recargar la página (no hay código que la marque), pero el filtro en sí
@@ -496,14 +543,20 @@ async function agrCargarMapa() {
   const checkboxSoloNuevos = document.getElementById("agr-solo-nuevos");
   if (checkboxSoloNuevos) checkboxSoloNuevos.checked = agrSoloNuevosBaseline() != null;
 
-  if (agrTiendaActual === AGR_TODAS) {
-    const res = await fetch(`${AGR_API}/mapa-datos-todas`, { credentials: "include" });
-    agrRenderMapaTodas(await res.json());
-    await agrActualizarPoligonoLimite();
-    return;
-  }
-  const res = await fetch(`${AGR_API}/mapa-datos?tienda=${agrTiendaActual}`, { credentials: "include" });
-  agrRenderMapa(await res.json());
+  // Siempre se pide el dato de las 6 tiendas y se filtra en el cliente a las
+  // chips activas -- así "Princesa y Caleido" o "todas menos una" es solo
+  // cuestión de qué chips están marcadas, sin pedirle al backend un
+  // endpoint nuevo por cada combinación posible (pedido explícito del
+  // usuario 09/08: poder elegir qué tiendas ver en el mapa, no solo "una" o
+  // "todas").
+  const res = await fetch(`${AGR_API}/mapa-datos-todas`, { credentials: "include" });
+  const data = await res.json();
+  const seleccion = agrMapaTiendasSeleccionadas;
+  const filtrado = {
+    tiendas: (data.tiendas || []).filter((t) => seleccion.has(t.tienda)),
+    direcciones: (data.direcciones || []).filter((d) => seleccion.has(d.tienda)),
+  };
+  agrRenderMapaTodas(filtrado);
   await agrActualizarPoligonoLimite();
 }
 
@@ -1236,9 +1289,10 @@ async function agrActualizarPoligonoLimite() {
     return;
   }
 
-  // En la vista "Todas" se dibuja el polígono de cada tienda que ya tenga
-  // datos (no solo de la seleccionada) -- un fetch por tienda, en paralelo.
-  const tiendas = agrTiendaActual === AGR_TODAS ? Object.keys(agrCentrosPorTienda) : [agrTiendaActual];
+  // El mapa siempre renderiza vía agrRenderMapaTodas (aunque sea una sola
+  // tienda), así que agrCentrosPorTienda ya refleja exactamente las chips
+  // activas -- se dibuja el polígono de cada una de esas, en paralelo.
+  const tiendas = Object.keys(agrCentrosPorTienda);
   const porTienda = await Promise.all(
     tiendas.map((tienda) =>
       fetch(`${AGR_API}/limites/${tienda}`, { credentials: "include" }).then((r) => (r.ok ? r.json() : []))
