@@ -1430,7 +1430,46 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
       }
     });
 
-  const ordenados = [...base, ...puntosLejanos].sort((a, b) => a.bearingReal - b.bearingReal);
+  // Espejo de puntosLejanos, pero hacia dentro: un punto NO disponible que
+  // cae dentro del borde recto entre dos vértices vecinos es la misma
+  // situación que un disponible que cae fuera, solo que el hueco angular del
+  // muestreo esconde una zona SIN cobertura en vez de una CON cobertura no
+  // detectada. Sin esto el polígono nunca se corrige hacia dentro -- solo se
+  // ensancha (ver el bloque anterior) -- y deja rojos claramente dentro del
+  // área sombreada, que es justo lo que se ve mal en el mapa (confirmado por
+  // el usuario 09/08: rojos dentro del polígono en varios agregadores).
+  const puntosCercanos = [];
+  (direccionesTienda || [])
+    .filter((d) => (d.detalle || {})[agregador]?.estado === "no_disponible" && d.lat != null && d.lng != null && d.distancia_km != null)
+    .forEach((d) => {
+      if (base.length < 2) return; // no hay borde todavía con el que comparar
+      const latlng = [d.lat, d.lng];
+      const bearing = agrAnguloDesde(centro, latlng);
+      const yaMuestreado = base.some((b) => {
+        const diff = Math.abs(b.bearingReal - bearing);
+        return Math.min(diff, 360 - diff) < TOLERANCIA_ANGULO_GRADOS;
+      });
+      // Si ya hay un vértice medido (búsqueda de límite) casi en la misma
+      // dirección, se respeta ese dato -- viene de una búsqueda binaria
+      // real, más fiable que un único punto de grid.
+      if (yaMuestreado) return;
+      let borde = null;
+      for (let i = 0; i < base.length; i++) {
+        const a = base[i], b = base[(i + 1) % base.length];
+        let a0 = a.bearingReal, a1 = b.bearingReal;
+        if (a1 <= a0) a1 += 360;
+        let ang = bearing;
+        if (ang < a0) ang += 360;
+        if (ang >= a0 && ang <= a1) { borde = [a, b]; break; }
+      }
+      if (!borde) return;
+      const cruce = agrCruceConBorde(borde[0].local, borde[1].local, bearing);
+      if (cruce != null && d.distancia_km < cruce - 0.05) {
+        puntosCercanos.push({ angulo: d.angulo_grados, radio: d.distancia_km, dir: d, latlng, bearingReal: bearing });
+      }
+    });
+
+  const ordenados = [...base, ...puntosLejanos, ...puntosCercanos].sort((a, b) => a.bearingReal - b.bearingReal);
   if (ordenados.length === 0) return null;
 
   const vertices = ordenados.map((p) => ({ latlng: p.latlng, punto: p }));
@@ -1493,13 +1532,21 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
       }
       agrPoligonoLayers.push(marker);
     } else {
-      // Vértice extra: punto del grid normal, ya disponible, más lejos de
-      // lo que el muestreo por ángulos alcanzó -- la dirección ya se conoce
-      // (no hace falta reverse geocoding).
+      // Vértice extra: punto del grid normal, más lejos (disponible,
+      // puntosLejanos) o más cerca (no disponible, puntosCercanos) de lo que
+      // el muestreo por ángulos alcanzó -- la dirección ya se conoce (no
+      // hace falta reverse geocoding).
+      const esCercano = (punto.dir.detalle || {})[agregador]?.estado === "no_disponible";
       const marker = L.circleMarker(latlng, {
-        radius: 6, color: "#ffffff", weight: 2, fillColor: color, fillOpacity: 1,
+        radius: 6, color: "#ffffff", weight: 2, fillColor: esCercano ? "#d03b3b" : color, fillOpacity: 1,
       })
-        .bindPopup(`<b>${AGR_NOMBRE_AGREGADOR[agregador] || agregador}</b><br>Punto ya disponible, más lejos de lo muestreado por ángulo<br>Distancia: ${punto.radio.toFixed(2)}km<br>Dirección: ${punto.dir.direccion_text || "?"}`)
+        .bindPopup(
+          `<b>${AGR_NOMBRE_AGREGADOR[agregador] || agregador}</b><br>` +
+            (esCercano
+              ? `Punto ya NO disponible, más cerca de lo muestreado por ángulo`
+              : `Punto ya disponible, más lejos de lo muestreado por ángulo`) +
+            `<br>Distancia: ${punto.radio.toFixed(2)}km<br>Dirección: ${punto.dir.direccion_text || "?"}`
+        )
         .addTo(agrMap);
       agrPoligonoLayers.push(marker);
     }
