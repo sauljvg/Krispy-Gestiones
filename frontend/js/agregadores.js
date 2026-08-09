@@ -1173,8 +1173,17 @@ function agrToggleSoloNuevos() {
   if (!agrTiendaActual) return;
   if (activo) {
     // El máximo id ya cargado en el mapa ahora mismo -- todo lo que se cree
-    // a partir de aquí tendrá un id mayor.
-    const maxId = agrDireccionMarkers.reduce((max, m) => Math.max(max, (m._agrDir && m._agrDir.id) || 0), 0);
+    // a partir de aquí tendrá un id mayor. Se excluyen los manuales del
+    // cálculo: sus ids son de una tanda aparte y normalmente más alta (se
+    // añaden después, a mano), así que si se contasen aquí, el baseline
+    // quedaría por encima de TODOS los ids de grid/límite -- el filtro
+    // acabaría ocultándolos todos y "solo nuevos" pasaría a comportarse
+    // exactamente igual que "solo manuales" (confirmado por el usuario
+    // 09/08: los dos primeros checkboxes hacían lo mismo).
+    const maxId = agrDireccionMarkers.reduce(
+      (max, m) => (m._agrDir && m._agrDir.origen !== "manual" ? Math.max(max, m._agrDir.id || 0) : max),
+      0
+    );
     localStorage.setItem(agrSoloNuevosKey(agrTiendaActual), String(maxId));
   } else {
     localStorage.removeItem(agrSoloNuevosKey(agrTiendaActual));
