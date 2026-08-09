@@ -377,12 +377,15 @@ function agrActualizarLeyenda() {
   });
 }
 
+const AGR_FILTRO_AGREGADOR_KEY = "agr_filtro_agregador";
+
 function agrWireFiltroAgregador() {
   document.querySelectorAll(".agr-filtro-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".agr-filtro-btn").forEach((b) => b.classList.remove("activo"));
       btn.classList.add("activo");
       agrFiltroAgregador = btn.dataset.agregador || null;
+      localStorage.setItem(AGR_FILTRO_AGREGADOR_KEY, agrFiltroAgregador || "");
       agrEstadosOcultos.clear(); // las categorías cambian de significado al cambiar de filtro
       agrActualizarLeyenda();
       agrActualizarMarcadores();
@@ -390,6 +393,17 @@ function agrWireFiltroAgregador() {
       agrActualizarPoligonoLimite();
     });
   });
+
+  // Restaura el filtro elegido antes de recargar (persiste en localStorage).
+  const guardado = localStorage.getItem(AGR_FILTRO_AGREGADOR_KEY);
+  if (guardado) {
+    const btn = document.querySelector(`.agr-filtro-btn[data-agregador="${guardado}"]`);
+    if (btn) {
+      document.querySelectorAll(".agr-filtro-btn").forEach((b) => b.classList.remove("activo"));
+      btn.classList.add("activo");
+      agrFiltroAgregador = guardado;
+    }
+  }
 }
 
 function agrToggleModoAnadir() {
