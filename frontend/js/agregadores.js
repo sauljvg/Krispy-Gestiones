@@ -110,11 +110,15 @@ function agrCategoriaDireccion(dir) {
   return "algunos";
 }
 
-function agrMarcadorVisible(dir) {
-  if (agrEstadosOcultos.has(agrCategoriaDireccion(dir))) return false;
+function agrPasaFiltroNuevos(dir) {
   const baseline = agrSoloNuevosBaseline();
   if (baseline != null && (dir.id || 0) <= baseline) return false;
   return true;
+}
+
+function agrMarcadorVisible(dir) {
+  if (agrEstadosOcultos.has(agrCategoriaDireccion(dir))) return false;
+  return agrPasaFiltroNuevos(dir);
 }
 
 function agrInitMap(lat, lng) {
@@ -297,8 +301,15 @@ function agrActualizarLeyenda() {
   const cont = document.getElementById("agr-leyenda");
   if (!cont) return;
 
+  // Solo respeta "solo dots nuevos" (no las categorías ocultas -- la
+  // leyenda tiene que seguir mostrando el total real de una categoría
+  // aunque esté oculta, si no nunca sabrías cuántos hay para decidir si
+  // mostrarla). Antes contaba TODOS los puntos siempre, así que con "solo
+  // nuevos" activo la leyenda seguía dando el total de siempre mientras el
+  // contador de arriba decía 0 -- números contradictorios en la misma
+  // pantalla (confirmado en vivo 09/08).
   const conteos = {};
-  agrDireccionMarkers.forEach((m) => {
+  agrDireccionMarkers.filter((m) => agrPasaFiltroNuevos(m._agrDir)).forEach((m) => {
     const cat = agrCategoriaDireccion(m._agrDir);
     conteos[cat] = (conteos[cat] || 0) + 1;
   });
@@ -358,9 +369,23 @@ function agrLimpiarMapa() {
   agrMarkersPorId = {};
 }
 
+let agrContadorBase = ""; // texto de "N puntos..." sin el sufijo de vértices del polígono, para poder recombinar
+
 function agrActualizarContador(texto) {
+  agrContadorBase = texto;
   const el = document.getElementById("agr-contador-puntos");
   if (el) el.textContent = texto;
+}
+
+function agrActualizarContadorPoligono(n) {
+  // El contador solo contaba los dots del grid normal -- los vértices del
+  // polígono de límite son una capa totalmente distinta y nunca se
+  // reflejaban ahí, así que con "solo dots nuevos" activo podía decir
+  // "0 puntos" mientras el mapa mostraba un polígono lleno de datos reales
+  // (confirmado en vivo 09/08). Se añade como sufijo sin pisar el texto base.
+  const el = document.getElementById("agr-contador-puntos");
+  if (!el) return;
+  el.textContent = n > 0 ? `${agrContadorBase} · ${n} vértice${n === 1 ? "" : "s"} de límite` : agrContadorBase;
 }
 
 function agrRecalcularContador() {
@@ -1196,7 +1221,7 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
     }
   });
 
-  return poligono || vertices.length > 0;
+  return vertices.length;
 }
 
 async function agrActualizarPoligonoLimite() {
@@ -1207,6 +1232,7 @@ async function agrActualizarPoligonoLimite() {
 
   if (!agrMap || !agrTiendaActual || !agrMostrarPoligonoActivo()) {
     if (nota) nota.textContent = "";
+    agrActualizarContadorPoligono(0);
     return;
   }
 
@@ -1219,7 +1245,7 @@ async function agrActualizarPoligonoLimite() {
     )
   );
 
-  let algunoDibujado = false;
+  let totalVertices = 0;
   tiendas.forEach((tienda, i) => {
     const centro = agrCentrosPorTienda[tienda] || agrTiendaCentro;
     if (!centro) return;
@@ -1227,14 +1253,16 @@ async function agrActualizarPoligonoLimite() {
     const direccionesTienda = agrDireccionesPorTienda[tienda];
     if (agrFiltroAgregador) {
       const limitesAgregador = limites.filter((l) => l.agregador === agrFiltroAgregador);
-      if (agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[agrFiltroAgregador] || "#0ca30c", direccionesTienda)) algunoDibujado = true;
+      totalVertices += agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[agrFiltroAgregador] || "#0ca30c", direccionesTienda);
     } else {
       Object.keys(AGR_NOMBRE_AGREGADOR).forEach((nombre) => {
         const limitesAgregador = limites.filter((l) => l.agregador === nombre);
-        if (agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[nombre] || "#888", direccionesTienda)) algunoDibujado = true;
+        totalVertices += agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[nombre] || "#888", direccionesTienda);
       });
     }
   });
+  const algunoDibujado = totalVertices > 0;
+  agrActualizarContadorPoligono(totalVertices);
 
   if (nota) {
     nota.textContent = algunoDibujado
