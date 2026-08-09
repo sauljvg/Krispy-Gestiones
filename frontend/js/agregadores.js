@@ -113,8 +113,14 @@ function agrCategoriaDireccion(dir) {
 }
 
 function agrPasaFiltroNuevos(dir) {
+  // "Solo nuevos" filtra por ID (antes/después de activar el checkbox) --
+  // pero un dot manual no es "viejo" solo porque se añadiese antes de
+  // activar el filtro: es una categoría aparte (origen=manual) que no
+  // depende de la existencia de los dots de grid/límite y debe convivir
+  // con ellos siempre, se active o no "solo nuevos" (pedido explícito del
+  // usuario 09/08: antes "solo nuevos" ocultaba también los manuales viejos).
   const baseline = agrSoloNuevosBaseline();
-  if (baseline != null && (dir.id || 0) <= baseline) return false;
+  if (baseline != null && dir.origen !== "manual" && (dir.id || 0) <= baseline) return false;
   if (agrSoloManualesActivo() && dir.origen !== "manual") return false;
   return true;
 }
