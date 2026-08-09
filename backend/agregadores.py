@@ -87,6 +87,26 @@ def ensure_tables():
     cols = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_direcciones)")}
     if "activo" not in cols:
         conn.execute("ALTER TABLE agregadores_direcciones ADD COLUMN activo INTEGER NOT NULL DEFAULT 1")
+    # origen: distingue el grid fijo, los puntos de sondeo de la búsqueda de
+    # límite (buscar_limite_cobertura.py) y los añadidos a mano -- para poder
+    # desactivar en bloque solo los de sondeo cuando la búsqueda de límite
+    # termine, sin tocar el grid normal ni lo puesto a mano (ver
+    # desactivar_puntos_busqueda_limite). Backfill de lo ya existente: el
+    # grid se reconoce por encajar exacto en (radio, ángulo) fijos; todo lo
+    # demás activo hasta ahora es de la búsqueda de límite -- "Añadir punto"
+    # llevaba roto desde la consolidación del selector (09/08), así que no
+    # hay puntos manuales de verdad mezclados en este momento.
+    if "origen" not in cols:
+        conn.execute("ALTER TABLE agregadores_direcciones ADD COLUMN origen TEXT")
+        angulos_grid = [int(round((360 / GRID_ANGULOS_COUNT) * i)) for i in range(GRID_ANGULOS_COUNT)]
+        marcadores_radios = ",".join("?" * len(GRID_RADIOS_KM))
+        marcadores_angulos = ",".join("?" * len(angulos_grid))
+        conn.execute(
+            f"""UPDATE agregadores_direcciones SET origen = CASE
+                WHEN distancia_km IN ({marcadores_radios}) AND angulo_grados IN ({marcadores_angulos})
+                THEN 'grid' ELSE 'limite' END""",
+            (*GRID_RADIOS_KM, *angulos_grid),
+        )
     conn.execute("""
         CREATE TABLE IF NOT EXISTS agregadores_chequeos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -487,8 +507,8 @@ def crear_punto_calculado(tienda: str, distancia_km: float, angulo_grados: float
     try:
         cur = conn.execute(
             """INSERT INTO agregadores_direcciones
-               (tienda, lat, lng, distancia_km, angulo_grados, direccion_text, activo)
-               VALUES (?, ?, ?, ?, ?, ?, 1)""",
+               (tienda, lat, lng, distancia_km, angulo_grados, direccion_text, activo, origen)
+               VALUES (?, ?, ?, ?, ?, ?, 1, 'limite')""",
             (tienda, lat_final, lng_final, distancia_guardar, angulo_guardar, direccion_text),
         )
         conn.commit()
@@ -630,14 +650,41 @@ def agregar_direccion_manual(tienda: str, lat: float, lng: float, direccion_text
     conn = get_connection()
     cur = conn.execute(
         """INSERT INTO agregadores_direcciones
-           (tienda, lat, lng, distancia_km, angulo_grados, direccion_text, activo)
-           VALUES (?, ?, ?, ?, ?, ?, 1)""",
+           (tienda, lat, lng, distancia_km, angulo_grados, direccion_text, activo, origen)
+           VALUES (?, ?, ?, ?, ?, ?, 1, 'manual')""",
         (tienda, lat, lng, distancia_km, int(round(angulo_grados)), direccion_text),
     )
     conn.commit()
     fila = conn.execute("SELECT * FROM agregadores_direcciones WHERE id=?", (cur.lastrowid,)).fetchone()
     conn.close()
     return dict(fila)
+
+
+def desactivar_puntos_busqueda_limite(tienda: str | None = None) -> int:
+    """Al terminar la búsqueda de límite de una tienda (o de todas), los
+    puntos de sondeo que se usaron para encontrarlo (crear_punto_calculado,
+    origen='limite') dejan de tener sentido en la rotación diaria del daemon
+    -- su única función era descubrir el límite en sí, que ya quedó guardado
+    aparte en agregadores_limites (independiente de esta tabla), no vigilar
+    cobertura día a día. Sin esto, cada ronda de ángulos (8->16->32...) deja
+    para siempre cientos de puntos activos que el daemon vuelve a comprobar
+    en cada vuelta sin aportar nada nuevo (pedido explícito del usuario
+    09/08: 'que revise únicamente los dots que le pongamos a mano', para no
+    alargar el ciclo diario reconstruyendo el borde una y otra vez). Baja
+    lógica (activo=0), igual que eliminar_direccion -- no se pierden, se
+    pueden reactivar si hiciera falta."""
+    conn = get_connection()
+    if tienda:
+        cur = conn.execute(
+            "UPDATE agregadores_direcciones SET activo=0 WHERE origen='limite' AND activo=1 AND tienda=?",
+            (tienda,),
+        )
+    else:
+        cur = conn.execute("UPDATE agregadores_direcciones SET activo=0 WHERE origen='limite' AND activo=1")
+    conn.commit()
+    n = cur.rowcount
+    conn.close()
+    return n
 
 
 def buscar_chequeo_cercano(lat: float, lng: float, agregador: str, radio_km: float = 0.1, horas_max: int = 24) -> dict | None:
@@ -794,8 +841,8 @@ def get_o_crear_direcciones(
                 try:
                     cur = conn.execute(
                         """INSERT INTO agregadores_direcciones
-                           (tienda, lat, lng, distancia_km, angulo_grados, direccion_text)
-                           VALUES (?, ?, ?, ?, ?, ?)""",
+                           (tienda, lat, lng, distancia_km, angulo_grados, direccion_text, origen)
+                           VALUES (?, ?, ?, ?, ?, ?, 'grid')""",
                         (tienda, lat_dest, lng_dest, radio, int(angulo), direccion_text),
                     )
                     conn.commit()

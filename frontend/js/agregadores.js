@@ -202,26 +202,37 @@ async function agrEliminarPunto(direccionId) {
 }
 
 async function agrAnadirPunto(lat, lng) {
+  // Con varias tiendas visibles (vista "Todas") no hay una sola tienda a la
+  // que asignar el punto -- se asigna a la más cercana al clic, igual que la
+  // reasignación automática de puntos contaminados de la búsqueda de límite.
+  const tiendaDestino = agrTiendaActual === AGR_TODAS ? agrTiendaMasCercana(lat, lng) : agrTiendaActual;
+  if (!tiendaDestino) return;
+  const nombreDestino = agrCentrosPorTienda[tiendaDestino]?.nombre || tiendaDestino;
+
   // Marcador provisional mientras el servidor consulta la dirección de este
   // punto exacto (una sola llamada, sin desplazarlo -- se queda donde se
   // hizo clic aunque no tenga número de portal cerca).
   const provisional = L.marker([lat, lng], {
     icon: L.divIcon({ className: "agr-marker-dot", html: `<span style="background:#898781;opacity:0.6;"></span>`, iconSize: [16, 16], iconAnchor: [8, 8] }),
-  }).addTo(agrMap).bindPopup("Buscando dirección…").openPopup();
+  }).addTo(agrMap).bindPopup(
+    agrTiendaActual === AGR_TODAS ? `Buscando dirección… (asignado a ${nombreDestino})` : "Buscando dirección…"
+  ).openPopup();
 
   try {
     const res = await agrFetchConTimeout(`${AGR_API}/direcciones`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tienda: agrTiendaActual, lat, lng }),
+      body: JSON.stringify({ tienda: tiendaDestino, lat, lng }),
       credentials: "include",
     });
     if (!res.ok) throw new Error("No se pudo añadir");
     const dir = await res.json();
     dir.detalle = {};
     dir.disponible_count = dir.no_disponible_count = dir.error_count = 0;
+    if (agrTiendaActual === AGR_TODAS) dir.tienda_nombre = nombreDestino;
     agrMap.removeLayer(provisional);
     agrAgregarMarcador(dir, { editable: true });
+    (agrDireccionesPorTienda[tiendaDestino] ||= []).push(dir);
     agrRecalcularContador();
   } catch (e) {
     agrMap.removeLayer(provisional);
@@ -351,16 +362,35 @@ function agrWireFiltroAgregador() {
 }
 
 function agrToggleModoAnadir() {
-  if (agrTiendaActual === AGR_TODAS) return;
   agrModoAnadir = !agrModoAnadir;
   const btn = document.getElementById("agr-btn-anadir");
   if (btn) {
     btn.classList.toggle("activo", agrModoAnadir);
-    btn.textContent = agrModoAnadir ? "✓ Clic en el mapa para añadir…" : "➕ Añadir punto";
+    // Con varias tiendas visibles a la vez no hay "la tienda actual" a la
+    // que asignar el punto -- se asigna sola a la más cercana al clic (ver
+    // agrTiendaMasCercana), igual que ya se hace al reasignar puntos
+    // contaminados de la búsqueda de límite. Antes este modo se
+    // desactivaba directamente en vista "Todas" sin avisar por qué
+    // (pedido explícito del usuario 09/08: poder añadir puntos viendo
+    // varias tiendas para rellenar huecos entre ellas).
+    btn.textContent = agrModoAnadir
+      ? agrTiendaActual === AGR_TODAS
+        ? "✓ Clic en el mapa (se asigna a la tienda más cercana)…"
+        : "✓ Clic en el mapa para añadir…"
+      : "➕ Añadir punto";
   }
   if (agrMap) {
     document.getElementById("agr-map").style.cursor = agrModoAnadir ? "crosshair" : "";
   }
+}
+
+function agrTiendaMasCercana(lat, lng) {
+  let mejor = null, mejorDist = null;
+  Object.entries(agrCentrosPorTienda).forEach(([slug, centro]) => {
+    const d = agrDistanciaKm(centro.lat, centro.lng, lat, lng);
+    if (mejorDist == null || d < mejorDist) { mejor = slug; mejorDist = d; }
+  });
+  return mejor;
 }
 
 function agrLimpiarMapa() {

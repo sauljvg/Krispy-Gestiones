@@ -467,6 +467,17 @@ def admin_eliminar_limite_route(tienda: str, agregador: str, angulo_grados: floa
     return {"ok": True}
 
 
+@router.post("/admin/direcciones/desactivar-busqueda-limite", dependencies=[Depends(require_api_key)])
+def admin_desactivar_busqueda_limite_route(tienda: str | None = None):
+    """Al terminar la campaña de ángulos de una tienda (o de todas), apaga
+    en bloque los puntos de sondeo que sirvieron solo para encontrar el
+    límite (origen='limite') -- el límite en sí ya quedó guardado aparte en
+    agregadores_limites, así que el daemon no necesita seguir revisando esos
+    puntos cada día. Baja lógica: se pueden reactivar si hiciera falta."""
+    n = agregadores_module.desactivar_puntos_busqueda_limite(tienda)
+    return {"ok": True, "desactivados": n}
+
+
 @router.delete("/admin/direccion/{direccion_id}", dependencies=[Depends(require_api_key)])
 def admin_eliminar_direccion_route(direccion_id: int):
     """Igual que eliminar_direccion_route pero con API key -- para que el
