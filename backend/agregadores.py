@@ -800,6 +800,11 @@ def _priorizar_sin_datos(conn, resultado: list[dict], agregador: str) -> list[di
         return resultado
     con_datos = _con_datos_reales(conn, resultado, agregador)
     sin_datos = [r for r in resultado if r["id"] not in con_datos]
+    # Entre los "sin datos", los añadidos a mano van primero -- si no, se
+    # mezclan sin orden con los cientos de puntos de la búsqueda de límite
+    # también sin datos y pueden tardar pasadas enteras en tocarles el turno
+    # (pedido explícito del usuario 09/08).
+    sin_datos.sort(key=lambda r: r.get("origen") != "manual")
     con_datos_lista = [r for r in resultado if r["id"] in con_datos]
     return sin_datos + con_datos_lista
 
