@@ -409,7 +409,12 @@ def mover_direccion_manual(direccion_id: int, lat: float, lng: float, direccion_
         # arrastró -- solo se consulta la dirección de ESE punto para
         # mostrarla, sin desplazarlo si no tiene número de portal cerca (eso
         # sería ignorar la decisión de quien lo movió a propósito).
-        direccion_text = _geocodificar(lat, lng)
+        # _geocodificar devuelve (texto_plano, componentes) -- asignar la
+        # tupla entera a direccion_text (bug real, confirmado en producción
+        # 09/08 con "Error binding parameter 6: type 'tuple' is not
+        # supported") rompía CUALQUIER arrastre sin dirección ya conocida.
+        texto_plano, componentes = _geocodificar(lat, lng)
+        direccion_text = _construir_direccion(componentes) or texto_plano
     conn.execute(
         "UPDATE agregadores_direcciones SET lat=?, lng=?, direccion_text=? WHERE id=?",
         (lat, lng, direccion_text, direccion_id),
@@ -643,8 +648,11 @@ def agregar_direccion_manual(tienda: str, lat: float, lng: float, direccion_text
 
     if not direccion_text:
         # Igual que en mover_direccion_manual: sin espiral, el punto se
-        # queda donde se hizo clic.
-        direccion_text = _geocodificar(lat, lng)
+        # queda donde se hizo clic. _geocodificar devuelve (texto_plano,
+        # componentes) -- ver el fix ahí mismo, mismo bug aquí (confirmado
+        # en producción 09/08: "Añadir punto" siempre fallaba con 500).
+        texto_plano, componentes = _geocodificar(lat, lng)
+        direccion_text = _construir_direccion(componentes) or texto_plano
     distancia_km, angulo_grados = _distancia_y_angulo(info["lat"], info["lng"], lat, lng)
 
     conn = get_connection()

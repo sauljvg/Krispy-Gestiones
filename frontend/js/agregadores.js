@@ -5,6 +5,8 @@ let agrIntervalo = null;
 let agrMap = null;
 let agrDireccionMarkers = [];
 let agrMarkersPorId = {};
+let agrTiendaMarkers = []; // iconos de tienda en el mapa -- se limpian y recrean en cada render para no acumularse ahora que agrMap ya no se destruye/recrea cada 30s
+let agrUltimaSeleccionMapa = null; // clave de qué tiendas estaban seleccionadas la última vez que se reencuadró el mapa -- ver agrCargarMapa
 let agrChart = null;
 let agrModoAnadir = false;
 let agrTiendaCentro = null;
@@ -122,11 +124,27 @@ function agrMarcadorVisible(dir) {
 }
 
 function agrInitMap(lat, lng) {
-  if (agrMap) agrMap.remove();
+  // El refresco automático (cada 30s, ver agrIntervalo) llama a esto en
+  // cada vuelta -- antes se destruía y recreaba el mapa entero cada vez
+  // (agrMap.remove() + nuevo L.map con la vista fija de siempre), lo que
+  // reiniciaba el zoom/pan del usuario cada 30 segundos ("parpadeo",
+  // confirmado en vivo 09/08, hacía muy difícil hacer clic con precisión
+  // para añadir puntos). Si el mapa ya existe, no se toca -- se conserva
+  // el zoom/pan tal cual estaba.
+  if (agrMap) return false;
   agrMap = L.map("agr-map").setView([lat, lng], 12);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap",
   }).addTo(agrMap);
+  // Se registra una sola vez aquí (no en cada render) -- si se registrara en
+  // agrRenderMapa/agrRenderMapaTodas, que ahora se llaman cada 30s sobre el
+  // MISMO mapa persistente, cada vuelta añadiría un listener más y un clic
+  // acabaría creando varios puntos duplicados a la vez.
+  agrMap.on("click", (e) => {
+    if (!agrModoAnadir) return;
+    agrAnadirPunto(e.latlng.lat, e.latlng.lng);
+  });
+  return true;
 }
 
 function agrDistanciaKm(lat1, lng1, lat2, lng2) {
@@ -423,27 +441,30 @@ function agrActualizarGuiasAngulo() {
 
 function agrDibujarGuiasAngulo() {
   agrLimpiarGuiasAngulo();
-  // Con varias tiendas visibles a la vez (vista "Todas") no hay un único
-  // centro del que trazar el compás sin amontonar líneas de las 6 tiendas
-  // unas sobre otras -- se omite ahí; el popup del punto ya añadido sigue
-  // mostrando su ángulo real para poder ajustar el siguiente clic a ojo.
-  if (!agrMap || !agrMostrarCompasActivo() || agrTiendaActual === AGR_TODAS) return;
-  const centro = agrCentrosPorTienda[agrTiendaActual] || agrTiendaCentro;
-  if (!centro) return;
-  for (let angulo = 0; angulo < 360; angulo += AGR_GUIA_ANGULO_PASO) {
-    const destino = agrMoverPunto(centro.lat, centro.lng, angulo, AGR_GUIA_ANGULO_RADIO_KM);
-    agrLineasGuiaAngulo.push(
-      L.polyline([[centro.lat, centro.lng], destino], {
-        color: "#666", weight: 1, opacity: 0.35, dashArray: "3 5", interactive: false,
-      }).addTo(agrMap)
-    );
-    agrLineasGuiaAngulo.push(
-      L.marker(destino, {
-        icon: L.divIcon({ className: "agr-guia-angulo-label", html: `${angulo}°`, iconSize: [34, 14], iconAnchor: [17, 7] }),
-        interactive: false,
-      }).addTo(agrMap)
-    );
-  }
+  if (!agrMap || !agrMostrarCompasActivo()) return;
+  // Un compás por cada tienda visible en el mapa ahora mismo -- con la
+  // asignación al punto "más cercano" en vista con varias tiendas (ver
+  // agrTiendaMasCercana), el caso más útil es justo comparar dos tiendas
+  // vecinas a la vez (ej. Princesa/Caleido), así que restringir el compás a
+  // una sola tienda seleccionada dejaba sin líneas guía justo ese caso
+  // (confirmado en vivo 09/08). Con 3+ tiendas a la vez se puede ver
+  // recargado, pero es una elección del usuario al activar el checkbox.
+  Object.values(agrCentrosPorTienda).forEach((centro) => {
+    for (let angulo = 0; angulo < 360; angulo += AGR_GUIA_ANGULO_PASO) {
+      const destino = agrMoverPunto(centro.lat, centro.lng, angulo, AGR_GUIA_ANGULO_RADIO_KM);
+      agrLineasGuiaAngulo.push(
+        L.polyline([[centro.lat, centro.lng], destino], {
+          color: "#666", weight: 1, opacity: 0.35, dashArray: "3 5", interactive: false,
+        }).addTo(agrMap)
+      );
+      agrLineasGuiaAngulo.push(
+        L.marker(destino, {
+          icon: L.divIcon({ className: "agr-guia-angulo-label", html: `${angulo}°`, iconSize: [34, 14], iconAnchor: [17, 7] }),
+          interactive: false,
+        }).addTo(agrMap)
+      );
+    }
+  });
 }
 
 function agrLimpiarMapa() {
@@ -518,7 +539,7 @@ function agrRenderMapa(data) {
   agrRecalcularContador();
 }
 
-function agrRenderMapaTodas(data) {
+function agrRenderMapaTodas(data, ajustarVista = true) {
   const { tiendas, direcciones } = data;
   if (!tiendas || !tiendas.length) return;
   agrTiendaCentro = null;
@@ -529,27 +550,29 @@ function agrRenderMapaTodas(data) {
 
   const lat0 = tiendas.reduce((s, t) => s + t.lat, 0) / tiendas.length;
   const lng0 = tiendas.reduce((s, t) => s + t.lng, 0) / tiendas.length;
-  agrInitMap(lat0, lng0);
+  const esMapaNuevo = agrInitMap(lat0, lng0);
 
-  tiendas.forEach((t) => {
-    L.marker([t.lat, t.lng], { icon: agrIconoTienda(t.tienda) }).addTo(agrMap).bindPopup(`<b>${t.nombre}</b>`);
-  });
+  // El refresco automático (cada 30s) vuelve a llamar a esto sobre el MISMO
+  // mapa persistente -- sin limpiar antes, cada vuelta añadía otro icono de
+  // tienda encima de los anteriores (no se notaba mientras el mapa entero se
+  // destruía y recreaba cada vez, ver agrInitMap).
+  agrTiendaMarkers.forEach((m) => agrMap.removeLayer(m));
+  agrTiendaMarkers = tiendas.map((t) =>
+    L.marker([t.lat, t.lng], { icon: agrIconoTienda(t.tienda) }).addTo(agrMap).bindPopup(`<b>${t.nombre}</b>`)
+  );
 
   agrLimpiarMapa();
   direcciones.forEach((dir) => agrAgregarMarcador(dir, { editable: true }));
 
-  // agrRenderMapaTodas() es ahora la ÚNICA ruta de render del mapa (incluso
-  // con 1 sola tienda, ver agrCargarMapa) -- pero nunca tuvo este listener,
-  // solo lo tenía agrRenderMapa() que dejó de usarse al quitar el <select>
-  // duplicado. Sin esto "Añadir punto" se quedaba en modo activado sin que
-  // el clic hiciera nada (confirmado en vivo 09/08, roto desde ese cambio).
-  agrMap.on("click", (e) => {
-    if (!agrModoAnadir) return;
-    agrAnadirPunto(e.latlng.lat, e.latlng.lng);
-  });
-
-  const bounds = L.latLngBounds(tiendas.map((t) => [t.lat, t.lng]));
-  agrMap.fitBounds(bounds.pad(0.25));
+  // Solo se reencuadra el mapa la primera vez que se crea o cuando cambia de
+  // verdad qué tiendas se están viendo (ver agrCargarMapa) -- el refresco
+  // automático de cada 30s ya no toca el zoom/pan que el usuario haya puesto
+  // a mano (pedido explícito del usuario 09/08: el reencuadre constante
+  // hacía muy difícil hacer clic con precisión para añadir puntos).
+  if (esMapaNuevo || ajustarVista) {
+    const bounds = L.latLngBounds(tiendas.map((t) => [t.lat, t.lng]));
+    agrMap.fitBounds(bounds.pad(0.25));
+  }
   agrActualizarLeyenda();
   agrRecalcularContador();
 }
@@ -648,7 +671,15 @@ async function agrCargarMapa() {
     tiendas: (data.tiendas || []).filter((t) => seleccion.has(t.tienda)),
     direcciones: (data.direcciones || []).filter((d) => seleccion.has(d.tienda)),
   };
-  agrRenderMapaTodas(filtrado);
+  // El refresco automático (cada 30s) llama a agrCargarMapa() con la MISMA
+  // selección de tiendas de siempre -- solo se reencuadra el mapa si esa
+  // selección cambió de verdad (o es la primera carga), para no pisar el
+  // zoom/pan que el usuario haya puesto a mano cada 30 segundos (pedido
+  // explícito del usuario 09/08).
+  const seleccionClave = [...seleccion].sort().join(",");
+  const ajustarVista = seleccionClave !== agrUltimaSeleccionMapa;
+  agrUltimaSeleccionMapa = seleccionClave;
+  agrRenderMapaTodas(filtrado, ajustarVista);
   await agrActualizarPoligonoLimite();
   agrActualizarGuiasAngulo();
 }
