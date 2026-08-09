@@ -454,7 +454,12 @@ function agrDibujarGuiasAngulo() {
       const destino = agrMoverPunto(centro.lat, centro.lng, angulo, AGR_GUIA_ANGULO_RADIO_KM);
       agrLineasGuiaAngulo.push(
         L.polyline([[centro.lat, centro.lng], destino], {
-          color: "#666", weight: 1, opacity: 0.35, dashArray: "3 5", interactive: false,
+          // Más oscuro/visible que antes (pedido explícito del usuario
+          // 09/08: se perdía en el mapa) pero fino y punteado -- para no
+          // confundirse con el polígono de límite (línea gruesa sólida del
+          // color del agregador) ni con el contorno de la unión (gruesa,
+          // #1a1a1a, guiones largos "6 4").
+          color: "#333", weight: 1.5, opacity: 0.75, dashArray: "2 6", interactive: false,
         }).addTo(agrMap)
       );
       agrLineasGuiaAngulo.push(
