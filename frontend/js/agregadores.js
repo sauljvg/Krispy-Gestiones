@@ -455,6 +455,16 @@ function agrRenderMapaTodas(data) {
   agrLimpiarMapa();
   direcciones.forEach((dir) => agrAgregarMarcador(dir, { editable: true }));
 
+  // agrRenderMapaTodas() es ahora la ÚNICA ruta de render del mapa (incluso
+  // con 1 sola tienda, ver agrCargarMapa) -- pero nunca tuvo este listener,
+  // solo lo tenía agrRenderMapa() que dejó de usarse al quitar el <select>
+  // duplicado. Sin esto "Añadir punto" se quedaba en modo activado sin que
+  // el clic hiciera nada (confirmado en vivo 09/08, roto desde ese cambio).
+  agrMap.on("click", (e) => {
+    if (!agrModoAnadir) return;
+    agrAnadirPunto(e.latlng.lat, e.latlng.lng);
+  });
+
   const bounds = L.latLngBounds(tiendas.map((t) => [t.lat, t.lng]));
   agrMap.fitBounds(bounds.pad(0.25));
   agrActualizarLeyenda();
