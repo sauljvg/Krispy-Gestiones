@@ -382,6 +382,8 @@ function agrToggleModoAnadir() {
   if (agrMap) {
     document.getElementById("agr-map").style.cursor = agrModoAnadir ? "crosshair" : "";
   }
+  if (agrModoAnadir) agrDibujarGuiasAngulo();
+  else agrLimpiarGuiasAngulo();
 }
 
 function agrTiendaMasCercana(lat, lng) {
@@ -391,6 +393,40 @@ function agrTiendaMasCercana(lat, lng) {
     if (mejorDist == null || d < mejorDist) { mejor = slug; mejorDist = d; }
   });
   return mejor;
+}
+
+let agrLineasGuiaAngulo = []; // líneas "compás" (cada 15°, con etiqueta) que salen del centro de la tienda mientras se está en modo añadir -- calcular a mano a qué ángulo cae un hueco en el mapa es poco práctico (pedido explícito del usuario 09/08), esto lo hace visual: solo hay que mirar entre qué dos líneas cae el hueco y hacer clic ahí.
+const AGR_GUIA_ANGULO_PASO = 15;
+const AGR_GUIA_ANGULO_RADIO_KM = 9; // cubre incluso el punto más lejano que prueba la búsqueda de límite (DISTANCIAS_EXPANSION llega a 9km)
+
+function agrLimpiarGuiasAngulo() {
+  agrLineasGuiaAngulo.forEach((l) => agrMap && agrMap.removeLayer(l));
+  agrLineasGuiaAngulo = [];
+}
+
+function agrDibujarGuiasAngulo() {
+  agrLimpiarGuiasAngulo();
+  // Con varias tiendas visibles a la vez (vista "Todas") no hay un único
+  // centro del que trazar el compás sin amontonar líneas de las 6 tiendas
+  // unas sobre otras -- se omite ahí; el popup del punto ya añadido sigue
+  // mostrando su ángulo real para poder ajustar el siguiente clic a ojo.
+  if (!agrMap || agrTiendaActual === AGR_TODAS) return;
+  const centro = agrCentrosPorTienda[agrTiendaActual] || agrTiendaCentro;
+  if (!centro) return;
+  for (let angulo = 0; angulo < 360; angulo += AGR_GUIA_ANGULO_PASO) {
+    const destino = agrMoverPunto(centro.lat, centro.lng, angulo, AGR_GUIA_ANGULO_RADIO_KM);
+    agrLineasGuiaAngulo.push(
+      L.polyline([[centro.lat, centro.lng], destino], {
+        color: "#666", weight: 1, opacity: 0.35, dashArray: "3 5", interactive: false,
+      }).addTo(agrMap)
+    );
+    agrLineasGuiaAngulo.push(
+      L.marker(destino, {
+        icon: L.divIcon({ className: "agr-guia-angulo-label", html: `${angulo}°`, iconSize: [34, 14], iconAnchor: [17, 7] }),
+        interactive: false,
+      }).addTo(agrMap)
+    );
+  }
 }
 
 function agrLimpiarMapa() {
