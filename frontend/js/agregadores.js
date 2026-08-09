@@ -319,6 +319,7 @@ function agrActualizarLeyenda() {
       else agrEstadosOcultos.add(cat);
       agrActualizarLeyenda();
       agrActualizarMarcadores();
+      agrRecalcularContador();
     });
   });
 }
@@ -363,7 +364,12 @@ function agrActualizarContador(texto) {
 }
 
 function agrRecalcularContador() {
-  const n = agrDireccionMarkers.length;
+  // Cuenta solo los puntos REALMENTE visibles ahora mismo (respeta "solo
+  // dots nuevos" y las categorías de leyenda ocultas vía agrMarcadorVisible)
+  // -- antes contaba siempre el total de puntos cargados, así que el número
+  // no cambiaba nunca al tocar un filtro (confirmado en vivo 09/08).
+  const visibles = agrDireccionMarkers.filter((m) => agrMarcadorVisible(m._agrDir));
+  const n = visibles.length;
   const base = agrTiendaActual === AGR_TODAS
     ? `${n} puntos en ${Object.keys(agrCentrosPorTienda).length} tiendas`
     : `${n} punto${n === 1 ? "" : "s"}`;
@@ -373,10 +379,10 @@ function agrRecalcularContador() {
     return;
   }
 
-  // Filtrado por un agregador concreto: de los N puntos totales, cuántos
+  // Filtrado por un agregador concreto: de los N puntos VISIBLES, cuántos
   // tienen dato real de ese agregador (disponible/no disponible/error) --
   // "sin datos" no cuenta como un punto "que existe" para ese filtro.
-  const conDatos = agrDireccionMarkers.filter(
+  const conDatos = visibles.filter(
     (m) => ((m._agrDir.detalle || {})[agrFiltroAgregador])
   ).length;
   const nombre = AGR_NOMBRE_AGREGADOR[agrFiltroAgregador] || agrFiltroAgregador;
@@ -400,7 +406,7 @@ function agrRenderMapa(data) {
     agrAnadirPunto(e.latlng.lat, e.latlng.lng);
   });
   agrActualizarLeyenda();
-  agrActualizarContador(`${direcciones.length} punto${direcciones.length === 1 ? "" : "s"}`);
+  agrRecalcularContador();
 }
 
 function agrRenderMapaTodas(data) {
@@ -426,7 +432,7 @@ function agrRenderMapaTodas(data) {
   const bounds = L.latLngBounds(tiendas.map((t) => [t.lat, t.lng]));
   agrMap.fitBounds(bounds.pad(0.25));
   agrActualizarLeyenda();
-  agrActualizarContador(`${direcciones.length} puntos en ${tiendas.length} tiendas`);
+  agrRecalcularContador();
 }
 
 function agrBadge(c) {
@@ -931,6 +937,7 @@ function agrToggleSoloNuevos() {
     localStorage.removeItem(agrSoloNuevosKey(agrTiendaActual));
   }
   agrActualizarMarcadores();
+  agrRecalcularContador();
 }
 
 // Mostrar/ocultar el polígono de límite real (y sus puntos de vértice) --
