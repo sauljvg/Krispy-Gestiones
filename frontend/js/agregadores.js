@@ -1255,20 +1255,29 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   if (ordenados.length === 0) return null;
 
   const vertices = ordenados.map((p) => ({ latlng: p.latlng, punto: p }));
+  // Con la "cobertura combinada" activa, el polígono y los vértices de CADA
+  // tienda por separado son puro ruido -- varias estrellas solapadas se ven
+  // como una maraña de líneas cruzadas y puntos por dentro (pedido explícito
+  // del usuario 09/08: "que no veamos nada dentro", comparando con lo limpio
+  // que se ve una tienda sola). En ese modo solo interesa el contorno de la
+  // unión (agrDibujarUnionCobertura), así que aquí nos saltamos el dibujado
+  // individual pero seguimos calculando el anillo más abajo para la unión.
+  const ocultarDetalle = agrMostrarUnionActivo();
+
   // Con menos de 3 vértices no hay figura que cerrar (un polígono real
   // necesita al menos un triángulo) -- pero los puntos ya comprobados SÍ se
   // muestran igual, para no dejar la tienda "en blanco" mientras la
   // búsqueda de límite todavía va por su segundo o tercer ángulo (visto en
   // vivo 09/08: con 2 de 8 ángulos guardados no aparecía nada en el mapa).
   let poligono = null;
-  if (vertices.length >= 3) {
+  if (vertices.length >= 3 && !ocultarDetalle) {
     poligono = L.polygon(vertices.map((v) => v.latlng), {
       color, weight: 4, opacity: 1, fillColor: color, fillOpacity: 0.28,
     }).addTo(agrMap);
     agrPoligonoLayers.push(poligono);
   }
 
-  vertices.forEach(({ latlng, punto }) => {
+  (ocultarDetalle ? [] : vertices).forEach(({ latlng, punto }) => {
     if (punto.limite) {
       const limite = punto.limite;
       const etiqueta = punto.extendidoPor
