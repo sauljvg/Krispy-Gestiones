@@ -46,6 +46,20 @@ async def reasignar_punto_otra_tienda(tienda: str, lat: float, lng: float, direc
             return await resp.json()
 
 
+async def buscar_chequeo_cercano(lat: float, lng: float, agregador: str) -> dict | None:
+    """Busca un chequeo real ya hecho (de cualquier tienda) muy cerca de
+    este punto para reutilizarlo en vez de repetir el mismo scrape --
+    evita que tiendas vecinas con zonas de solape (o rondas sucesivas de
+    la misma tienda) vuelvan a probar la misma dirección real por
+    separado. None si no hay nada reutilizable a menos de 100m."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/chequeo-cercano"
+    params = {"lat": lat, "lng": lng, "agregador": agregador}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params=params, headers=_headers(), timeout=15) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+
 async def guardar_limite(
     tienda: str, agregador: str, angulo_grados: float, limite_km: float | None, nota: str | None,
     lat: float | None = None, lng: float | None = None, direccion_text: str | None = None,

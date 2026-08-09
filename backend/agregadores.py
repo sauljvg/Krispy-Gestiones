@@ -640,6 +640,53 @@ def agregar_direccion_manual(tienda: str, lat: float, lng: float, direccion_text
     return dict(fila)
 
 
+def buscar_chequeo_cercano(lat: float, lng: float, agregador: str, radio_km: float = 0.1, horas_max: int = 24) -> dict | None:
+    """Busca un chequeo real ya hecho (de CUALQUIER tienda) muy cerca de
+    este punto exacto para este agregador -- si existe, se puede reutilizar
+    su resultado en vez de scrapear la misma dirección real otra vez desde
+    otra tienda (zonas de solape entre sucursales vecinas) o en una ronda
+    posterior (8->16->32 ángulos). El radio es deliberadamente pequeño
+    (100m): es "¿ya probamos ESTA calle?", no "¿ya sabemos algo de esta
+    zona?" -- no se puede asumir que toda una zona comparte resultado (la
+    frontera real entre dos tiendas no es el punto medio geométrico,
+    aclarado por el usuario 09/08). Solo cuenta chequeos de las últimas
+    horas_max horas, para no reutilizar datos ya viejos."""
+    conn = get_connection()
+    desde = (datetime.now(timezone.utc) - timedelta(hours=horas_max)).isoformat()
+    filas = conn.execute(
+        """SELECT d.tienda, d.lat, d.lng, d.direccion_text, c.disponible, c.timestamp
+           FROM agregadores_chequeos c
+           JOIN agregadores_direcciones d ON d.id = c.direccion_id
+           WHERE c.agregador = ? AND c.error_texto IS NULL AND c.timestamp >= ? AND d.activo = 1
+           ORDER BY c.timestamp DESC""",
+        (agregador, desde),
+    ).fetchall()
+    conn.close()
+
+    mejor = None
+    mejor_distancia = None
+    vistas = set()
+    for fila in filas:
+        # Ya vienen ordenadas por timestamp desc -- solo el chequeo más
+        # reciente por dirección real (la misma dirección puede tener
+        # muchos chequeos a lo largo de la noche).
+        clave = (fila["tienda"], round(fila["lat"], 6), round(fila["lng"], 6))
+        if clave in vistas:
+            continue
+        vistas.add(clave)
+        distancia, _ = _distancia_y_angulo(fila["lat"], fila["lng"], lat, lng)
+        if distancia <= radio_km and (mejor_distancia is None or distancia < mejor_distancia):
+            mejor, mejor_distancia = fila, distancia
+    if mejor is None:
+        return None
+    return {
+        "disponible": bool(mejor["disponible"]),
+        "distancia_km": round(mejor_distancia, 4),
+        "tienda_origen": mejor["tienda"],
+        "direccion_text": mejor["direccion_text"],
+    }
+
+
 def agregar_o_reusar_direccion_otra_tienda(tienda: str, lat: float, lng: float, direccion_text: str | None) -> dict | None:
     """Como agregar_direccion_manual, pero reutiliza un punto ya existente
     si hay uno muy cercano (<0.05km) para esta tienda en vez de duplicar.

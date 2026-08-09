@@ -400,6 +400,15 @@ def crear_direccion_reasignada_route(body: DireccionReasignadaIn):
     return resultado
 
 
+@router.get("/admin/chequeo-cercano", dependencies=[Depends(require_api_key)])
+def chequeo_cercano_route(lat: float, lng: float, agregador: str):
+    """Para buscar_limite_cobertura.py: busca un chequeo real ya hecho (de
+    cualquier tienda) muy cerca de este punto para poder reutilizarlo en
+    vez de repetir el mismo scrape -- evita que tiendas vecinas con zonas
+    de solape (o rondas sucesivas) vuelvan a probar la misma dirección."""
+    return agregadores_module.buscar_chequeo_cercano(lat, lng, agregador)
+
+
 class LimiteIn(BaseModel):
     tienda: str
     agregador: str

@@ -249,8 +249,8 @@
   <div class="agr-wrap">
     <div class="agr-toolbar">
       <span id="agr-estado" class="agr-estado-pill neutro">…</span>
-      <label for="agr-tienda-select">Tienda:</label>
-      <select id="agr-tienda-select"></select>
+      <span class="agr-tiendas-mapa-label">Tiendas:</span>
+      <div id="agr-tiendas-mapa-chips" class="agr-tiendas-mapa-chips"></div>
       <button type="button" id="agr-btn-anadir" class="btn btn-ghost" onclick="agrToggleModoAnadir()">➕ Añadir punto</button>
       <span id="agr-actualizado" style="color:var(--text-muted); font-size:12px;"></span>
     </div>
@@ -265,10 +265,6 @@
           <button type="button" class="agr-filtro-btn" data-agregador="ubereats">Uber Eats</button>
         </div>
       </div>
-      <div class="agr-tiendas-mapa">
-        <span class="agr-tiendas-mapa-label">Tiendas en el mapa:</span>
-        <div id="agr-tiendas-mapa-chips" class="agr-tiendas-mapa-chips"></div>
-      </div>
       <label class="agr-toggle-nuevos">
         <input type="checkbox" id="agr-solo-nuevos" onchange="agrToggleSoloNuevos()">
         Solo dots nuevos desde que active esto (oculta los puntos ya existentes)
@@ -276,6 +272,10 @@
       <label class="agr-toggle-nuevos">
         <input type="checkbox" id="agr-mostrar-poligono" checked onchange="agrToggleMostrarPoligono()">
         Mostrar polígono de límite real (forma real de cobertura por dirección)
+      </label>
+      <label class="agr-toggle-nuevos">
+        <input type="checkbox" id="agr-mostrar-union" onchange="agrToggleMostrarUnion()">
+        Mostrar cobertura combinada (unión de todas las tiendas visibles, por agregador)
       </label>
       <p class="agr-resumen-nota" id="agr-cobertura-nota"></p>
       <div id="agr-map"></div>
@@ -365,6 +365,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/agregadores.js?v=20260809m"></script>
+<script src="js/agregadores.js?v=20260809n"></script>
 </body>
 </html>

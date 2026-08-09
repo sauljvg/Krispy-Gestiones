@@ -468,26 +468,23 @@ function agrBadge(c) {
     : '<span class="agr-badge no">No</span>';
 }
 
-let agrMapaTiendasSeleccionadas = null; // Set de slugs -- qué tiendas se DIBUJAN en el mapa; independiente del selector "Tienda:" de arriba, que sigue controlando tabla/alertas/tarjetas de resumen
+let agrMapaTiendasSeleccionadas = null; // Set de slugs -- qué tiendas se muestran. AHORA es el único selector de tienda de toda la página (antes había un <select> Y estas chips diciendo lo mismo dos veces, confirmado en vivo 09/08 -- se quitó el select).
 
 async function agrCargarTiendas() {
   const res = await fetch(`${AGR_API}/tiendas`);
   const tiendas = await res.json();
-  const select = document.getElementById("agr-tienda-select");
-  const opciones = [`<option value="${AGR_TODAS}">Todas</option>`].concat(
-    tiendas.map((t) => `<option value="${t.tienda}">${t.nombre}</option>`)
-  );
-  select.innerHTML = opciones.join("");
-  agrTiendaActual = tiendas.length ? tiendas[0].tienda : AGR_TODAS;
-  select.value = agrTiendaActual;
-  select.addEventListener("change", (e) => {
-    agrTiendaActual = e.target.value;
-    if (agrModoAnadir) agrToggleModoAnadir();
-    agrCargarTodo();
-  });
-
-  agrMapaTiendasSeleccionadas = new Set(tiendas.map((t) => t.tienda));
+  agrMapaTiendasSeleccionadas = new Set(tiendas.length ? [tiendas[0].tienda] : []);
+  agrSincronizarTiendaActual();
   agrRenderChipsTiendasMapa(tiendas);
+}
+
+function agrSincronizarTiendaActual() {
+  // El resto del dashboard (tabla, alertas, tarjetas, transiciones) solo
+  // entiende "una tienda concreta" o AGR_TODAS -- con exactamente una chip
+  // activa se usa esa tienda; con 2+ activas se cae al modo agregado
+  // "Todas" que esas secciones ya sabían manejar.
+  const seleccion = [...(agrMapaTiendasSeleccionadas || [])];
+  agrTiendaActual = seleccion.length === 1 ? seleccion[0] : AGR_TODAS;
 }
 
 function agrRenderChipsTiendasMapa(tiendas) {
@@ -513,7 +510,9 @@ function agrRenderChipsTiendasMapa(tiendas) {
         }
       }
       agrActualizarChipsTiendasMapa();
-      agrCargarMapa();
+      agrSincronizarTiendaActual();
+      if (agrModoAnadir) agrToggleModoAnadir();
+      agrCargarTodo();
     });
   });
 }
@@ -986,6 +985,7 @@ async function agrCargarTransiciones() {
 }
 
 let agrPoligonoLayers = []; // polígono(s) de límite real + sus puntos de vértice, sobre agrMap
+let agrUnionLayers = []; // contorno(s) de la unión de cobertura (turf.union), uno por agregador cuando "mostrar cobertura combinada" está activo
 
 // "Solo dots nuevos": guarda el id más alto ya visto al activar el filtro,
 // así el mapa solo dibuja los puntos del grid creados DESPUÉS de ese
@@ -1082,6 +1082,49 @@ function agrRadioDeLimite(limite) {
 function agrLimpiarPoligonoLimite() {
   agrPoligonoLayers.forEach((l) => agrMap && agrMap.removeLayer(l));
   agrPoligonoLayers = [];
+  agrUnionLayers.forEach((l) => agrMap && agrMap.removeLayer(l));
+  agrUnionLayers = [];
+}
+
+function agrMostrarUnionActivo() {
+  return document.getElementById("agr-mostrar-union")?.checked || false;
+}
+
+function agrToggleMostrarUnion() {
+  agrActualizarPoligonoLimite();
+}
+
+function agrDibujarUnionCobertura(anillosPorAgregador) {
+  if (!agrMostrarUnionActivo() || !agrMap) return;
+  Object.entries(anillosPorAgregador).forEach(([agregador, anillos]) => {
+    // La unión solo aporta algo con 2+ tiendas -- con una sola, la unión
+    // ES ese mismo polígono, ya visible.
+    if (anillos.length < 2) return;
+    let poligonos = anillos.map((anillo) => turf.polygon([anillo]));
+    let union = poligonos[0];
+    for (let i = 1; i < poligonos.length; i++) {
+      try {
+        // API de turf@6: union(poly1, poly2) toma dos Features directos,
+        // no una FeatureCollection (eso es turf@7).
+        const combinado = turf.union(union, poligonos[i]);
+        if (combinado) union = combinado;
+      } catch (err) {
+        // turf.union puede fallar con geometrías inválidas (auto-
+        // intersecciones del propio polígono araña) -- mejor omitir la
+        // unión de ese agregador que romper el mapa entero.
+        console.warn("No se pudo unir el polígono de", agregador, err);
+        return;
+      }
+    }
+    const color = AGR_COLOR_MARCA[agregador] || "#333";
+    // Turf/GeoJSON puede devolver Polygon o MultiPolygon (si hay tiendas
+    // sin solape real entre sí, quedan como piezas separadas) -- Leaflet
+    // entiende ambos directamente vía geoJSON().
+    const capa = L.geoJSON(union, {
+      style: { color: "#1a1a1a", weight: 3, dashArray: "6 4", fillColor: color, fillOpacity: 0.12 },
+    }).addTo(agrMap);
+    agrUnionLayers.push(capa);
+  });
 }
 
 function agrProyeccionLocal(centro, latlng) {
@@ -1274,7 +1317,15 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
     }
   });
 
-  return vertices.length;
+  // anillo GeoJSON [lng,lat] (Turf/GeoJSON van al revés que Leaflet) para
+  // poder calcular la unión real de varias tiendas con turf.union -- solo
+  // tiene sentido si hay polígono de verdad (3+ vértices) y cerrado (el
+  // primer punto repetido al final).
+  const anillo = vertices.length >= 3
+    ? [...vertices.map((v) => [v.latlng[1], v.latlng[0]]), [vertices[0].latlng[1], vertices[0].latlng[0]]]
+    : null;
+
+  return { n: vertices.length, anillo, agregador };
 }
 
 async function agrActualizarPoligonoLimite() {
@@ -1300,6 +1351,13 @@ async function agrActualizarPoligonoLimite() {
   );
 
   let totalVertices = 0;
+  const anillosPorAgregador = {}; // nombre -> [anillo, anillo, ...] (uno por tienda con polígono cerrado) -- para la unión
+  const agregarAnillo = (resultado) => {
+    totalVertices += resultado.n;
+    if (resultado.anillo) {
+      (anillosPorAgregador[resultado.agregador] ||= []).push(resultado.anillo);
+    }
+  };
   tiendas.forEach((tienda, i) => {
     const centro = agrCentrosPorTienda[tienda] || agrTiendaCentro;
     if (!centro) return;
@@ -1307,16 +1365,17 @@ async function agrActualizarPoligonoLimite() {
     const direccionesTienda = agrDireccionesPorTienda[tienda];
     if (agrFiltroAgregador) {
       const limitesAgregador = limites.filter((l) => l.agregador === agrFiltroAgregador);
-      totalVertices += agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[agrFiltroAgregador] || "#0ca30c", direccionesTienda);
+      agregarAnillo(agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[agrFiltroAgregador] || "#0ca30c", direccionesTienda));
     } else {
       Object.keys(AGR_NOMBRE_AGREGADOR).forEach((nombre) => {
         const limitesAgregador = limites.filter((l) => l.agregador === nombre);
-        totalVertices += agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[nombre] || "#888", direccionesTienda);
+        agregarAnillo(agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[nombre] || "#888", direccionesTienda));
       });
     }
   });
   const algunoDibujado = totalVertices > 0;
   agrActualizarContadorPoligono(totalVertices);
+  agrDibujarUnionCobertura(anillosPorAgregador);
 
   if (nota) {
     nota.textContent = algunoDibujado

@@ -96,6 +96,32 @@ async def resultado_punto(scraper, tienda, punto, agregador, avisos: list) -> st
     "disponible", se reasigna como punto suelto a la tienda a la que de
     verdad pertenece en vez de perder el dato (pedido explícito del
     usuario 09/08)."""
+    # ¿Ya hay un chequeo real reciente de este agregador a menos de 100m de
+    # este punto exacto (de cualquier tienda)? Se reutiliza en vez de
+    # scrapear otra vez -- evita repetir la misma dirección real cuando dos
+    # tiendas vecinas con zonas de solape (o rondas sucesivas 8->16->32)
+    # acaban probando prácticamente el mismo sitio (pedido explícito del
+    # usuario 09/08).
+    try:
+        reuso = await api_client.buscar_chequeo_cercano(punto["lat"], punto["lng"], agregador)
+    except Exception as exc:
+        reuso = None
+        logger.warning("  no se pudo consultar reuso de chequeo cercano: %r", exc)
+    if reuso is not None:
+        logger.info(
+            "  [%s/%s] reutilizado de '%s' (%.3fkm, %s) -> %s",
+            tienda, agregador, reuso["tienda_origen"], reuso["distancia_km"], reuso["direccion_text"],
+            "disponible" if reuso["disponible"] else "no_disponible",
+        )
+        try:
+            await api_client.enviar_chequeo({
+                "tienda": tienda, "agregador": agregador, "direccion_id": punto["id"],
+                "disponible": reuso["disponible"],
+            })
+        except Exception as exc:
+            logger.warning("  no se pudo subir el chequeo reutilizado a KG: %r", exc)
+        return "disponible" if reuso["disponible"] else "no_disponible"
+
     otra = punto.get("tienda_mas_cercana")
     if otra and otra != tienda:
         logger.warning(
