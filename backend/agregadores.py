@@ -1410,6 +1410,7 @@ def get_mapa_datos(tienda: str):
                 "distancia_km": d["distancia_km"],
                 "angulo_grados": d["angulo_grados"],
                 "direccion_text": d["direccion_text"],
+                "origen": d["origen"],
                 "disponible_count": disponible_count,
                 "no_disponible_count": no_disponible_count,
                 "error_count": error_count,

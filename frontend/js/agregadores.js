@@ -115,7 +115,20 @@ function agrCategoriaDireccion(dir) {
 function agrPasaFiltroNuevos(dir) {
   const baseline = agrSoloNuevosBaseline();
   if (baseline != null && (dir.id || 0) <= baseline) return false;
+  if (agrSoloManualesActivo() && dir.origen !== "manual") return false;
   return true;
+}
+
+const AGR_SOLO_MANUALES_KEY = "agr_solo_manuales";
+function agrSoloManualesActivo() {
+  return localStorage.getItem(AGR_SOLO_MANUALES_KEY) === "1";
+}
+function agrToggleSoloManuales() {
+  const activo = document.getElementById("agr-solo-manuales")?.checked;
+  localStorage.setItem(AGR_SOLO_MANUALES_KEY, activo ? "1" : "0");
+  agrActualizarMarcadores();
+  agrActualizarLeyenda();
+  agrRecalcularContador();
 }
 
 function agrMarcadorVisible(dir) {
@@ -662,6 +675,8 @@ async function agrCargarMapa() {
   // estaba apagado. Se sincroniza la casilla con el estado real al cargar.
   const checkboxSoloNuevos = document.getElementById("agr-solo-nuevos");
   if (checkboxSoloNuevos) checkboxSoloNuevos.checked = agrSoloNuevosBaseline() != null;
+  const checkboxSoloManuales = document.getElementById("agr-solo-manuales");
+  if (checkboxSoloManuales) checkboxSoloManuales.checked = agrSoloManualesActivo();
 
   // Siempre se pide el dato de las 6 tiendas y se filtra en el cliente a las
   // chips activas -- así "Princesa y Caleido" o "todas menos una" es solo
