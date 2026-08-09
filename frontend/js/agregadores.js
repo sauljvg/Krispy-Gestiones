@@ -307,7 +307,15 @@ function agrAgregarMarcador(dir, opts = {}) {
     icon: agrIconoDireccion(dir),
     draggable: editable,
   })
-    .bindPopup(agrPopupDireccion(dir, editable))
+    // Función en vez de string fijo: Leaflet la vuelve a llamar cada vez que
+    // se abre el popup, así que siempre refleja el agregador filtrado
+    // actual. Antes se generaba una sola vez al crear el marcador -- si el
+    // usuario cambiaba de agregador (JustEat/Glovo/Uber Eats) sin esperar al
+    // refresco automático (cada 30s), el popup seguía mostrando el
+    // agregador de cuando se creó el marcador, no el filtro activo
+    // (confirmado en vivo 09/08 con capturas: filtro Uber Eats mostrando
+    // datos de JustEat).
+    .bindPopup(() => agrPopupDireccion(dir, editable))
     .bindTooltip("", { permanent: false, direction: "top", className: "agr-drag-tooltip" });
 
   marker._agrDir = dir;
