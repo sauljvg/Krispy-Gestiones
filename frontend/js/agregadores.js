@@ -966,6 +966,18 @@ function agrMoverPunto(lat, lng, bearingDeg, distanciaKm) {
   return [(lat2 * 180) / Math.PI, (lng2 * 180) / Math.PI];
 }
 
+function agrAnguloDesde(centro, latlng) {
+  // Inverso de agrMoverPunto: rumbo real (0-360°) desde el centro hasta un
+  // punto -- para ordenar los vértices del polígono por su posición REAL en
+  // vez del ángulo que se pidió al muestrear (que puede no coincidir si el
+  // punto se desplazó a la calle numerada más cercana).
+  const lat1 = (centro.lat * Math.PI) / 180, lng1 = (centro.lng * Math.PI) / 180;
+  const lat2 = (latlng[0] * Math.PI) / 180, lng2 = (latlng[1] * Math.PI) / 180;
+  const y = Math.sin(lng2 - lng1) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lng2 - lng1);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
 function agrRadioDeLimite(limite) {
   // limite_km es el dato bueno; si es null, el "nota" casi siempre trae un
   // número aprovechable ("no disponible incluso a 0.77km" -> cierre real
@@ -1064,6 +1076,18 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
     latlng: p.latlngReal || agrMoverPunto(centro.lat, centro.lng, p.angulo, p.radio),
     punto: p,
   }));
+  // Dibujar en la dirección REAL comprobada (no en la recta geométrica) puede
+  // desplazar un vértice de su ángulo nominal -- en zonas con pocas calles
+  // numeradas, varios ángulos distintos pueden geocodificar a la MISMA calle
+  // real o a calles muy próximas entre sí. Conectar los vértices en el orden
+  // del ÁNGULO PEDIDO (en vez del real) cruza las líneas del polígono en esos
+  // casos (confirmado en vivo 09/08 con La Gavia). Reordenar por el ángulo
+  // REAL de cada posición evita el cruce, sea cual sea el ángulo que se pidió.
+  vertices.sort((a, b) => {
+    const angA = agrAnguloDesde(centro, a.latlng);
+    const angB = agrAnguloDesde(centro, b.latlng);
+    return angA - angB;
+  });
   // Con menos de 3 vértices no hay figura que cerrar (un polígono real
   // necesita al menos un triángulo) -- pero los puntos ya comprobados SÍ se
   // muestran igual, para no dejar la tienda "en blanco" mientras la
