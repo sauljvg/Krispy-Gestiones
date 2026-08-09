@@ -1245,11 +1245,15 @@ function agrLimpiarPoligonoLimite() {
   agrUnionLayers = [];
 }
 
+const AGR_MOSTRAR_UNION_KEY = "agr_mostrar_union";
+
 function agrMostrarUnionActivo() {
-  return document.getElementById("agr-mostrar-union")?.checked || false;
+  return localStorage.getItem(AGR_MOSTRAR_UNION_KEY) === "1";
 }
 
 function agrToggleMostrarUnion() {
+  const activo = document.getElementById("agr-mostrar-union")?.checked;
+  localStorage.setItem(AGR_MOSTRAR_UNION_KEY, activo ? "1" : "0");
   agrActualizarPoligonoLimite();
 }
 
@@ -1501,6 +1505,8 @@ async function agrActualizarPoligonoLimite() {
   const nota = document.getElementById("agr-cobertura-nota");
   const checkboxPoligono = document.getElementById("agr-mostrar-poligono");
   if (checkboxPoligono) checkboxPoligono.checked = agrMostrarPoligonoActivo();
+  const checkboxUnion = document.getElementById("agr-mostrar-union");
+  if (checkboxUnion) checkboxUnion.checked = agrMostrarUnionActivo();
 
   if (!agrMap || !agrTiendaActual || !agrMostrarPoligonoActivo()) {
     if (nota) nota.textContent = "";
