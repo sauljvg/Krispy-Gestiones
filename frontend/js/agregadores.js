@@ -999,26 +999,35 @@ function agrLimpiarPoligonoLimite() {
   agrPoligonoLayers = [];
 }
 
-function agrRadioInterpolado(puntos, angulo) {
-  // Radio aproximado del polígono en un ángulo cualquiera, interpolando
-  // linealmente entre los dos vértices muestreados más cercanos (por
-  // ángulo, con wrap-around en 360°). Sirve para decidir si un punto ya
-  // conocido (grid normal) queda MÁS LEJOS de lo que el muestreo por
-  // ángulos fijos sugiere en esa dirección exacta.
-  const n = puntos.length;
-  if (n === 0) return 0;
-  for (let i = 0; i < n; i++) {
-    const a = puntos[i], b = puntos[(i + 1) % n];
-    let a0 = a.angulo, a1 = b.angulo;
-    if (a1 <= a0) a1 += 360;
-    let ang = angulo;
-    if (ang < a0) ang += 360;
-    if (ang >= a0 && ang <= a1) {
-      const t = a1 === a0 ? 0 : (ang - a0) / (a1 - a0);
-      return a.radio + t * (b.radio - a.radio);
-    }
-  }
-  return puntos[0].radio;
+function agrProyeccionLocal(centro, latlng) {
+  // Coordenadas planas locales en km (x=Este, y=Norte), aproximación
+  // equirectangular centrada en la tienda -- suficiente a esta escala
+  // (unos pocos km) y necesaria para poder hacer geometría de segmentos
+  // rectos de verdad (intersección rayo-segmento), no aproximaciones.
+  const kmPorGradoLat = 111.32;
+  const kmPorGradoLng = 111.32 * Math.cos((centro.lat * Math.PI) / 180);
+  return [(latlng[1] - centro.lng) * kmPorGradoLng, (latlng[0] - centro.lat) * kmPorGradoLat];
+}
+
+function agrCruceConBorde(a, b, bearingDeg) {
+  // Distancia (km) desde el centro hasta donde el rayo en ese rumbo cruza
+  // el segmento recto a-b (coordenadas locales planas) -- la prueba
+  // GEOMÉTRICA real de si un punto cae dentro o fuera del borde que
+  // Leaflet dibuja entre dos vértices consecutivos. Interpolar el radio
+  // linealmente por ángulo (lo que hacía antes) se desvía mucho de la
+  // recta real cuando el hueco angular entre vértices es grande, dejando
+  // fuera puntos disponibles que en el mapa se ven claramente más lejos
+  // que el borde (confirmado en vivo 09/08). Null si el rayo no cruza el
+  // segmento (no debería pasar si el ángulo cae entre los dos vértices).
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const rad = (bearingDeg * Math.PI) / 180;
+  const dirX = Math.sin(rad), dirY = Math.cos(rad);
+  const D = dx * dirY - dy * dirX;
+  if (Math.abs(D) < 1e-9) return null;
+  const t = (dx * a[1] - dy * a[0]) / D;
+  const s = (dirX * a[1] - dirY * a[0]) / D;
+  if (t < 0 || s < -0.01 || s > 1.01) return null;
+  return t;
 }
 
 function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
@@ -1037,33 +1046,49 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
     // honesto: no sabemos qué pasa ahí, en vez de fingir que la cobertura
     // colapsa a cero justo en ese punto.
     .filter((l) => agrRadioDeLimite(l) != null)
-    .sort((a, b) => a.angulo_grados - b.angulo_grados)
-    .map((l) => ({
-      angulo: l.angulo_grados,
-      radio: Math.max(agrRadioDeLimite(l), 0.05),
-      limite: l,
-      // Filas guardadas antes de este cambio no tienen lat/lng reales --
-      // se cae de vuelta al punto geométrico puro (recta centro-ángulo-
+    .map((l) => {
+      const radio = Math.max(agrRadioDeLimite(l), 0.05);
+      // Filas guardadas antes de este cambio no tienen lat/lng reales -- se
+      // cae de vuelta al punto geométrico puro (recta centro-ángulo-
       // distancia) hasta que ese ángulo se vuelva a calcular.
-      latlngReal: l.lat != null && l.lng != null ? [l.lat, l.lng] : null,
-      extendidoPor: null,
-    }));
+      const latlngReal = l.lat != null && l.lng != null ? [l.lat, l.lng] : null;
+      const latlng = latlngReal || agrMoverPunto(centro.lat, centro.lng, l.angulo_grados, radio);
+      return {
+        angulo: l.angulo_grados,
+        radio,
+        limite: l,
+        latlngReal,
+        latlng,
+        bearingReal: agrAnguloDesde(centro, latlng),
+        local: agrProyeccionLocal(centro, latlng),
+        extendidoPor: null,
+      };
+    })
+    // Se ordena por el ángulo REAL de cada posición (no el pedido) -- dibujar
+    // en la dirección REAL comprobada puede desplazar un vértice de su
+    // ángulo nominal (zonas con pocas calles numeradas geocodifican varios
+    // ángulos pedidos a la misma calle o a calles muy próximas). Conectar
+    // por el ángulo pedido cruzaba las líneas del polígono en esos casos
+    // (confirmado en vivo 09/08 con La Gavia).
+    .sort((a, b) => a.bearingReal - b.bearingReal);
 
-  // El muestreo por ángulos fijos (cada 45°/22.5°) puede cortar un punto ya
-  // comprobado y disponible que cae ENTRE dos ángulos muestreados pero más
-  // lejos del centro que el polígono en su dirección exacta -- es más
-  // importante reflejar la cobertura real ya conocida que ceñirse a los
-  // ángulos exactos del muestreo (pedido explícito del usuario 09/08, con
-  // un caso real: un dot verde disponible quedaba fuera del polígono).
+  // El muestreo por ángulos fijos (cada 45°/22.5°) puede dejar huecos donde
+  // un punto ya comprobado y disponible (grid normal) queda fuera del borde
+  // recto que conecta dos vértices vecinos -- es más importante reflejar la
+  // cobertura real ya conocida que ceñirse a los ángulos exactos del
+  // muestreo (pedido explícito del usuario 09/08, con un caso real: un dot
+  // verde disponible quedaba fuera del polígono aunque el radio
+  // "interpolado" dijera que no -- por eso se usa la intersección
+  // geométrica real con el segmento, no una interpolación lineal).
   const TOLERANCIA_ANGULO_GRADOS = 3; // por debajo de esto es "la misma dirección ya muestreada", no un hueco distinto
   const puntosLejanos = [];
   (direccionesTienda || [])
-    .filter((d) => (d.detalle || {})[agregador]?.estado === "disponible" && d.angulo_grados != null && d.distancia_km != null)
-    .map((d) => ({ angulo: d.angulo_grados, radio: d.distancia_km, dir: d }))
-    .filter((p) => p.radio > agrRadioInterpolado(base, p.angulo) + 0.05)
-    .forEach((p) => {
+    .filter((d) => (d.detalle || {})[agregador]?.estado === "disponible" && d.lat != null && d.lng != null && d.distancia_km != null)
+    .forEach((d) => {
+      const latlng = [d.lat, d.lng];
+      const bearing = agrAnguloDesde(centro, latlng);
       const vecino = base.find((b) => {
-        const diff = Math.abs(b.angulo - p.angulo);
+        const diff = Math.abs(b.bearingReal - bearing);
         return Math.min(diff, 360 - diff) < TOLERANCIA_ANGULO_GRADOS;
       });
       if (vecino) {
@@ -1071,35 +1096,37 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
         // tolerancia) -- se EXTIENDE ese vértice en vez de dibujar un punto
         // nuevo pegado al lado. Dos dots casi encima el uno del otro
         // confundían más de lo que ayudaban (confirmado en vivo 09/08).
-        if (p.radio > vecino.radio) {
-          vecino.radio = p.radio;
-          vecino.latlngReal = [p.dir.lat, p.dir.lng];
-          vecino.extendidoPor = p.dir;
+        if (d.distancia_km > vecino.radio) {
+          vecino.radio = d.distancia_km;
+          vecino.latlngReal = latlng;
+          vecino.latlng = latlng;
+          vecino.bearingReal = bearing;
+          vecino.local = agrProyeccionLocal(centro, latlng);
+          vecino.extendidoPor = d;
         }
-      } else {
-        puntosLejanos.push(p);
+        return;
+      }
+      if (base.length < 2) return; // no hay borde todavía con el que comparar
+      let borde = null;
+      for (let i = 0; i < base.length; i++) {
+        const a = base[i], b = base[(i + 1) % base.length];
+        let a0 = a.bearingReal, a1 = b.bearingReal;
+        if (a1 <= a0) a1 += 360;
+        let ang = bearing;
+        if (ang < a0) ang += 360;
+        if (ang >= a0 && ang <= a1) { borde = [a, b]; break; }
+      }
+      if (!borde) return;
+      const cruce = agrCruceConBorde(borde[0].local, borde[1].local, bearing);
+      if (cruce == null || d.distancia_km > cruce + 0.05) {
+        puntosLejanos.push({ angulo: d.angulo_grados, radio: d.distancia_km, dir: d, latlng, bearingReal: bearing });
       }
     });
 
-  const ordenados = [...base, ...puntosLejanos].sort((a, b) => a.angulo - b.angulo);
+  const ordenados = [...base, ...puntosLejanos].sort((a, b) => a.bearingReal - b.bearingReal);
   if (ordenados.length === 0) return null;
 
-  const vertices = ordenados.map((p) => ({
-    latlng: p.latlngReal || agrMoverPunto(centro.lat, centro.lng, p.angulo, p.radio),
-    punto: p,
-  }));
-  // Dibujar en la dirección REAL comprobada (no en la recta geométrica) puede
-  // desplazar un vértice de su ángulo nominal -- en zonas con pocas calles
-  // numeradas, varios ángulos distintos pueden geocodificar a la MISMA calle
-  // real o a calles muy próximas entre sí. Conectar los vértices en el orden
-  // del ÁNGULO PEDIDO (en vez del real) cruza las líneas del polígono en esos
-  // casos (confirmado en vivo 09/08 con La Gavia). Reordenar por el ángulo
-  // REAL de cada posición evita el cruce, sea cual sea el ángulo que se pidió.
-  vertices.sort((a, b) => {
-    const angA = agrAnguloDesde(centro, a.latlng);
-    const angB = agrAnguloDesde(centro, b.latlng);
-    return angA - angB;
-  });
+  const vertices = ordenados.map((p) => ({ latlng: p.latlng, punto: p }));
   // Con menos de 3 vértices no hay figura que cerrar (un polígono real
   // necesita al menos un triángulo) -- pero los puntos ya comprobados SÍ se
   // muestran igual, para no dejar la tienda "en blanco" mientras la
