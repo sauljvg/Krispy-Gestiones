@@ -1565,25 +1565,10 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
 
   // Dots reales (chequeos) de esta tienda, ya descartados los que en
   // realidad pertenecen a otra sucursal más cercana (ver más abajo,
-  // agrEsTiendaMasCercana) -- se calcula aquí porque también sirve para
-  // corroborar los vértices base, no solo puntosLejanos/puntosCercanos.
+  // agrEsTiendaMasCercana).
   const direccionesPropias = (direccionesTienda || []).filter(
     (d) => d.lat == null || d.lng == null || agrEsTiendaMasCercana(centro, d.lat, d.lng)
   );
-  // Distancia real disponible más lejana entre los dots de una franja
-  // angular (±ventanaGrados) -- para contrastar un límite lejano de la
-  // búsqueda binaria contra datos reales de chequeos.
-  const radioDisponibleCercaDe = (bearingDeg, ventanaGrados) => {
-    let max = null;
-    direccionesPropias.forEach((d) => {
-      if ((d.detalle || {})[agregador]?.estado !== "disponible" || d.lat == null || d.lng == null || d.distancia_km == null) return;
-      const b = agrAnguloDesde(centro, [d.lat, d.lng]);
-      const diff = Math.abs(b - bearingDeg);
-      if (Math.min(diff, 360 - diff) > ventanaGrados) return;
-      if (max == null || d.distancia_km > max) max = d.distancia_km;
-    });
-    return max;
-  };
 
   const base = [...limites]
     // "sin datos (todo falló)" no aporta ni siquiera una cota aproximada --
@@ -1595,40 +1580,20 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
     // Un límite lejano (búsqueda binaria) marcado "disponible" puede en
     // realidad haber respondido OTRA sucursal más cercana a ese punto -- el
     // buscador solo filtra por marca "Krispy Kreme", no por sucursal (mismo
-    // problema que con los dots, ver agrEsTiendaMasCercana). Si el punto
-    // medido está más cerca de otra tienda, se descarta ese vértice en vez
-    // de inflar el polígono con cobertura ajena (pedido explícito del
-    // usuario 10/08).
-    .filter((l) => l.lat == null || l.lng == null || agrEsTiendaMasCercana(centro, l.lat, l.lng))
+    // problema que con los dots, ver agrEsTiendaMasCercana). Si es de verdad
+    // la tienda más cercana de las 6, SÍ cuenta aunque esté lejos (pedido
+    // explícito del usuario 10/08: "si de verdad reparte hasta ahí, aunque
+    // sean 9km, hay que tomarlo en cuenta"). Las filas antiguas (de cuando
+    // se armaron los grids) sin lat/lng guardado no se pueden verificar --
+    // en vez de dejarlas pasar sin comprobar (bug real: eran justo los
+    // "picos que no llevan a nada", de otra tienda pero sin forma de
+    // saberlo), se descartan directamente.
+    .filter((l) => l.lat != null && l.lng != null && agrEsTiendaMasCercana(centro, l.lat, l.lng))
     .map((l) => {
-      let radio = Math.max(agrRadioDeLimite(l), 0.05);
-      // Filas guardadas antes de este cambio no tienen lat/lng reales -- se
-      // cae de vuelta al punto geométrico puro (recta centro-ángulo-
-      // distancia) hasta que ese ángulo se vuelva a calcular.
-      let latlngReal = l.lat != null && l.lng != null ? [l.lat, l.lng] : null;
-      let latlng = latlngReal || agrMoverPunto(centro.lat, centro.lng, l.angulo_grados, radio);
-      let bearingReal = agrAnguloDesde(centro, latlng);
-      let recortadoSinRespaldo = false;
-      // Un límite lejano de la búsqueda binaria (7-9km) puede ser real, pero
-      // en zonas sin ningún dot verde real que lo respalde cerca, es más
-      // probable que sea ruido (otra tienda no registrada respondiendo,
-      // fallo puntual del buscador...) que cobertura real -- se contrasta
-      // contra el dot disponible real más lejano en una franja de ±20°, y si
-      // no hay ninguno cercano al valor reclamado, se recorta el vértice a
-      // ese dato real en vez de fiarse a ciegas del límite (pedido explícito
-      // del usuario 10/08: los bordes se van "muy lejos" sin dots detrás).
-      const respaldo = radioDisponibleCercaDe(bearingReal, 20);
-      if (respaldo == null || radio > respaldo + 1.0) {
-        if (respaldo != null) {
-          radio = respaldo;
-        } else {
-          radio = Math.min(radio, 4);
-        }
-        latlngReal = null;
-        latlng = agrMoverPunto(centro.lat, centro.lng, l.angulo_grados, radio);
-        bearingReal = agrAnguloDesde(centro, latlng);
-        recortadoSinRespaldo = true;
-      }
+      const radio = Math.max(agrRadioDeLimite(l), 0.05);
+      const latlngReal = [l.lat, l.lng];
+      const latlng = latlngReal;
+      const bearingReal = agrAnguloDesde(centro, latlng);
       return {
         angulo: l.angulo_grados,
         radio,
@@ -1638,13 +1603,7 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
         bearingReal,
         local: agrProyeccionLocal(centro, latlng),
         extendidoPor: null,
-        // true = búsqueda binaria real (limite_km); false = solo una cota
-        // aproximada sacada de la nota (">= Xkm", "no se encontró el
-        // borde"...) -- estos últimos son los candidatos a que el relleno
-        // agresivo los suba si los dos vecinos confirman cobertura (ver
-        // más abajo), un dato real nunca se sobrescribe así.
-        confirmado: l.limite_km != null && !recortadoSinRespaldo,
-        recortadoSinRespaldo,
+        confirmado: l.limite_km != null,
       };
     })
     // Se ordena por el ángulo REAL de cada posición (no el pedido) -- dibujar
@@ -1807,32 +1766,17 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   // dato) se puede subir si queda flanqueado por vértices sin ese tope.
   // DESACTIVADO 10/08: subir todo un tramo hasta su radio máximo asumía que
   // ese máximo era un dato fiable -- con chequeos "disponible" contaminados
-  // por sucursales de Krispy Kreme reales pero no rastreadas (ver el tope
-  // duro más abajo), ese máximo podía venir de un punto que no es cobertura
-  // real de esta tienda, y el relleno lo esparcía igual por todo el tramo
-  // (confirmado en vivo con Caleido: el polígono entero se igualaba a un
-  // círculo perfecto, primero de 9km y luego, tras acotar el tope local, de
-  // exactamente 6km -- el mismo síntoma, solo que más pequeño). Mientras no
-  // haya una forma fiable de distinguir cobertura real de contaminación
-  // lejana, cada vértice se queda con SU PROPIO dato (base + puntosLejanos/
-  // Cercanos + tope duro más abajo), sin suavizar contra los vecinos.
-
-  // Tope duro final: aunque un punto sea genuinamente el MÁS CERCANO de las
-  // 6 tiendas rastreadas y esté "corroborado" por dots reales, 8-9km no es
-  // una distancia de reparto plausible -- lo más probable es que responda
-  // una sucursal de Krispy Kreme real pero que no rastreamos (confirmado en
-  // vivo 10/08 con Caleido: puntos en Alcobendas a 8km, más cerca de Caleido
-  // que de cualquier otra de las 6, pero demasiado lejos para ser reparto
-  // real de Caleido). Pedido explícito del usuario 10/08.
-  const TOPE_DURO_KM = 6;
-  ordenados.forEach((v) => {
-    if (v.radio > TOPE_DURO_KM) {
-      v.radio = TOPE_DURO_KM;
-      v.latlng = agrMoverPunto(centro.lat, centro.lng, v.bearingReal, v.radio);
-      v.local = agrProyeccionLocal(centro, v.latlng);
-      v.recortadoSinRespaldo = true;
-    }
-  });
+  // por sucursales de Krispy Kreme reales pero no rastreadas, ese máximo
+  // podía venir de un punto que no es cobertura real de esta tienda, y el
+  // relleno lo esparcía igual por todo el tramo (confirmado en vivo con
+  // Caleido: el polígono entero se igualaba a un círculo perfecto). Sin una
+  // forma fiable de distinguir cobertura real de contaminación lejana, cada
+  // vértice se queda con SU PROPIO dato (base + puntosLejanos/Cercanos), sin
+  // suavizar contra los vecinos. No hay tope duro de distancia -- si un
+  // punto es de verdad el más cercano de las 6 tiendas rastreadas (ver
+  // agrEsTiendaMasCercana), su distancia real cuenta tal cual, aunque sean
+  // 9km: "si de verdad reparte hasta ahí, hay que tomarlo en cuenta" (pedido
+  // explícito del usuario 10/08).
 
   const vertices = ordenados.map((p) => ({ latlng: p.latlng, punto: p }));
   // Con la "cobertura combinada" activa, el polígono y los vértices de CADA
