@@ -1554,6 +1554,29 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   // un punto clicable (ángulo + límite exacto de esa dirección).
   if (!limites || limites.length === 0) return null;
   const agregador = limites[0].agregador;
+
+  // Dots reales (chequeos) de esta tienda, ya descartados los que en
+  // realidad pertenecen a otra sucursal más cercana (ver más abajo,
+  // agrEsTiendaMasCercana) -- se calcula aquí porque también sirve para
+  // corroborar los vértices base, no solo puntosLejanos/puntosCercanos.
+  const direccionesPropias = (direccionesTienda || []).filter(
+    (d) => d.lat == null || d.lng == null || agrEsTiendaMasCercana(centro, d.lat, d.lng)
+  );
+  // Distancia real disponible más lejana entre los dots de una franja
+  // angular (±ventanaGrados) -- para contrastar un límite lejano de la
+  // búsqueda binaria contra datos reales de chequeos.
+  const radioDisponibleCercaDe = (bearingDeg, ventanaGrados) => {
+    let max = null;
+    direccionesPropias.forEach((d) => {
+      if ((d.detalle || {})[agregador]?.estado !== "disponible" || d.lat == null || d.lng == null || d.distancia_km == null) return;
+      const b = agrAnguloDesde(centro, [d.lat, d.lng]);
+      const diff = Math.abs(b - bearingDeg);
+      if (Math.min(diff, 360 - diff) > ventanaGrados) return;
+      if (max == null || d.distancia_km > max) max = d.distancia_km;
+    });
+    return max;
+  };
+
   const base = [...limites]
     // "sin datos (todo falló)" no aporta ni siquiera una cota aproximada --
     // se salta ese ángulo del polígono en vez de inventar un radio (ver
@@ -1570,19 +1593,41 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
     // usuario 10/08).
     .filter((l) => l.lat == null || l.lng == null || agrEsTiendaMasCercana(centro, l.lat, l.lng))
     .map((l) => {
-      const radio = Math.max(agrRadioDeLimite(l), 0.05);
+      let radio = Math.max(agrRadioDeLimite(l), 0.05);
       // Filas guardadas antes de este cambio no tienen lat/lng reales -- se
       // cae de vuelta al punto geométrico puro (recta centro-ángulo-
       // distancia) hasta que ese ángulo se vuelva a calcular.
-      const latlngReal = l.lat != null && l.lng != null ? [l.lat, l.lng] : null;
-      const latlng = latlngReal || agrMoverPunto(centro.lat, centro.lng, l.angulo_grados, radio);
+      let latlngReal = l.lat != null && l.lng != null ? [l.lat, l.lng] : null;
+      let latlng = latlngReal || agrMoverPunto(centro.lat, centro.lng, l.angulo_grados, radio);
+      let bearingReal = agrAnguloDesde(centro, latlng);
+      let recortadoSinRespaldo = false;
+      // Un límite lejano de la búsqueda binaria (7-9km) puede ser real, pero
+      // en zonas sin ningún dot verde real que lo respalde cerca, es más
+      // probable que sea ruido (otra tienda no registrada respondiendo,
+      // fallo puntual del buscador...) que cobertura real -- se contrasta
+      // contra el dot disponible real más lejano en una franja de ±20°, y si
+      // no hay ninguno cercano al valor reclamado, se recorta el vértice a
+      // ese dato real en vez de fiarse a ciegas del límite (pedido explícito
+      // del usuario 10/08: los bordes se van "muy lejos" sin dots detrás).
+      const respaldo = radioDisponibleCercaDe(bearingReal, 20);
+      if (respaldo == null || radio > respaldo + 1.0) {
+        if (respaldo != null) {
+          radio = respaldo;
+        } else {
+          radio = Math.min(radio, 4);
+        }
+        latlngReal = null;
+        latlng = agrMoverPunto(centro.lat, centro.lng, l.angulo_grados, radio);
+        bearingReal = agrAnguloDesde(centro, latlng);
+        recortadoSinRespaldo = true;
+      }
       return {
         angulo: l.angulo_grados,
         radio,
         limite: l,
         latlngReal,
         latlng,
-        bearingReal: agrAnguloDesde(centro, latlng),
+        bearingReal,
         local: agrProyeccionLocal(centro, latlng),
         extendidoPor: null,
         // true = búsqueda binaria real (limite_km); false = solo una cota
@@ -1590,7 +1635,8 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
         // borde"...) -- estos últimos son los candidatos a que el relleno
         // agresivo los suba si los dos vecinos confirman cobertura (ver
         // más abajo), un dato real nunca se sobrescribe así.
-        confirmado: l.limite_km != null,
+        confirmado: l.limite_km != null && !recortadoSinRespaldo,
+        recortadoSinRespaldo,
       };
     })
     // Se ordena por el ángulo REAL de cada posición (no el pedido) -- dibujar
@@ -1622,15 +1668,8 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   // reservando la fusión solo para el caso real que la motivó: dos sondeos
   // casi literalmente en el mismo sitio.
   const TOLERANCIA_ANGULO_GRADOS = 0.5;
-  // Un dot guardado bajo esta tienda puede estar geográficamente más cerca
-  // de OTRA sucursal (tiendas solapadas en zonas densas, ej. Madrid centro)
-  // -- si se deja, el polígono se estira hacia el territorio de la tienda
-  // vecina sin motivo real (confirmado en vivo 10/08, capturas con bordes
-  // "comidos" entre tiendas cercanas). Solo cuenta para ESTE borde si esta
-  // tienda es realmente la más cercana a ese punto.
-  const direccionesPropias = (direccionesTienda || []).filter(
-    (d) => d.lat == null || d.lng == null || agrEsTiendaMasCercana(centro, d.lat, d.lng)
-  );
+  // direccionesPropias ya se calculó arriba (se reutiliza también para
+  // contrastar los vértices base contra dots reales).
   const puntosLejanos = [];
   direccionesPropias
     .filter((d) => (d.detalle || {})[agregador]?.estado === "disponible" && d.lat != null && d.lng != null && d.distancia_km != null)
