@@ -3,6 +3,7 @@ const AGR_TODAS = "__todas__";
 let agrTiendaActual = null;
 let agrIntervalo = null;
 let agrMap = null;
+let agrMap9am = null; // mapa de referencia de solo lectura, algoritmo del polígono tal como estaba a las 9:00 (ver agrDibujarPoligono9am) -- solo visible para saul
 let agrDireccionMarkers = [];
 let agrMarkersPorId = {};
 let agrTiendaMarkers = []; // iconos de tienda en el mapa -- se limpian y recrean en cada render para no acumularse ahora que agrMap ya no se destruye/recrea cada 30s
@@ -185,6 +186,15 @@ function agrInitMap(lat, lng) {
     if (!agrModoAnadir) return;
     agrAnadirPunto(e.latlng.lat, e.latlng.lng);
   });
+  return true;
+}
+
+function agrInitMap9am(lat, lng) {
+  if (agrMap9am) return false;
+  agrMap9am = L.map("agr-map-9am").setView([lat, lng], 12);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap",
+  }).addTo(agrMap9am);
   return true;
 }
 
@@ -1006,6 +1016,7 @@ async function agrCargarMapa() {
   agrRenderMapaTodas(filtrado, ajustarVista);
   await agrActualizarPoligonoLimite();
   agrActualizarGuiasAngulo();
+  agrActualizarPoligono9am();
 }
 
 function agrLimpiarTabla() {
@@ -1618,6 +1629,141 @@ function agrCruceConBorde(a, b, bearingDeg) {
   const s = (dirX * a[1] - dirY * a[0]) / D;
   if (t < 0 || s < -0.01 || s > 1.01) return null;
   return t;
+}
+
+// Algoritmo del polígono TAL COMO ESTABA a las 9:00 de hoy (commit 2b396c3,
+// antes de cualquiera de los cambios de hoy: sin filtro de tienda más
+// cercana, tolerancia de 3° -- no 0.5° --, y "puntosCercanos" solo ignoraba
+// un no_disponible cercano a un vértice medido en vez de encogerlo). Copia
+// deliberada, no una llamada a la versión actual: es justo el "antes" que el
+// usuario quiere ver al lado del "después" para comparar (pedido explícito
+// del usuario 10/08, tras preguntar por volver a la versión de las 9am).
+// Solo calcula los vértices (lat/lng) -- el mapa de referencia los pinta
+// como polígono + puntos simples, de solo lectura, sin popups ni arrastre.
+function agrCalcularPoligono9am(limites, centro, direccionesTienda) {
+  if (!limites || limites.length === 0) return null;
+  const agregador = limites[0].agregador;
+  const base = [...limites]
+    .filter((l) => agrRadioDeLimite(l) != null)
+    .map((l) => {
+      const radio = Math.max(agrRadioDeLimite(l), 0.05);
+      const latlngReal = l.lat != null && l.lng != null ? [l.lat, l.lng] : null;
+      const latlng = latlngReal || agrMoverPunto(centro.lat, centro.lng, l.angulo_grados, radio);
+      return { radio, latlng, bearingReal: agrAnguloDesde(centro, latlng), local: agrProyeccionLocal(centro, latlng) };
+    })
+    .sort((a, b) => a.bearingReal - b.bearingReal);
+
+  const TOLERANCIA_ANGULO_GRADOS = 3;
+  const puntosLejanos = [];
+  (direccionesTienda || [])
+    .filter((d) => (d.detalle || {})[agregador]?.estado === "disponible" && d.lat != null && d.lng != null && d.distancia_km != null)
+    .forEach((d) => {
+      const latlng = [d.lat, d.lng];
+      const bearing = agrAnguloDesde(centro, latlng);
+      const vecino = base.find((b) => {
+        const diff = Math.abs(b.bearingReal - bearing);
+        return Math.min(diff, 360 - diff) < TOLERANCIA_ANGULO_GRADOS;
+      });
+      if (vecino) {
+        if (d.distancia_km > vecino.radio) {
+          vecino.radio = d.distancia_km;
+          vecino.latlng = latlng;
+          vecino.bearingReal = bearing;
+          vecino.local = agrProyeccionLocal(centro, latlng);
+        }
+        return;
+      }
+      if (base.length < 2) return;
+      let borde = null;
+      for (let i = 0; i < base.length; i++) {
+        const a = base[i], b = base[(i + 1) % base.length];
+        let a0 = a.bearingReal, a1 = b.bearingReal;
+        if (a1 <= a0) a1 += 360;
+        let ang = bearing;
+        if (ang < a0) ang += 360;
+        if (ang >= a0 && ang <= a1) { borde = [a, b]; break; }
+      }
+      if (!borde) return;
+      const cruce = agrCruceConBorde(borde[0].local, borde[1].local, bearing);
+      if (cruce == null || d.distancia_km > cruce + 0.05) {
+        puntosLejanos.push({ radio: d.distancia_km, latlng, bearingReal: bearing });
+      }
+    });
+
+  const puntosCercanos = [];
+  (direccionesTienda || [])
+    .filter((d) => (d.detalle || {})[agregador]?.estado === "no_disponible" && d.lat != null && d.lng != null && d.distancia_km != null)
+    .forEach((d) => {
+      if (base.length < 2) return;
+      const latlng = [d.lat, d.lng];
+      const bearing = agrAnguloDesde(centro, latlng);
+      const yaMuestreado = base.some((b) => {
+        const diff = Math.abs(b.bearingReal - bearing);
+        return Math.min(diff, 360 - diff) < TOLERANCIA_ANGULO_GRADOS;
+      });
+      if (yaMuestreado) return;
+      let borde = null;
+      for (let i = 0; i < base.length; i++) {
+        const a = base[i], b = base[(i + 1) % base.length];
+        let a0 = a.bearingReal, a1 = b.bearingReal;
+        if (a1 <= a0) a1 += 360;
+        let ang = bearing;
+        if (ang < a0) ang += 360;
+        if (ang >= a0 && ang <= a1) { borde = [a, b]; break; }
+      }
+      if (!borde) return;
+      const cruce = agrCruceConBorde(borde[0].local, borde[1].local, bearing);
+      if (cruce != null && d.distancia_km < cruce - 0.05) {
+        puntosCercanos.push({ radio: d.distancia_km, latlng, bearingReal: bearing });
+      }
+    });
+
+  const ordenados = [...base, ...puntosLejanos, ...puntosCercanos].sort((a, b) => a.bearingReal - b.bearingReal);
+  if (ordenados.length === 0) return null;
+  return { n: ordenados.length, latlngs: ordenados.map((p) => p.latlng) };
+}
+
+let agrPoligono9amLayers = [];
+
+function agrLimpiarPoligono9am() {
+  agrPoligono9amLayers.forEach((l) => agrMap9am && agrMap9am.removeLayer(l));
+  agrPoligono9amLayers = [];
+}
+
+async function agrActualizarPoligono9am() {
+  if (!agrUsuarioActual || agrUsuarioActual.username !== "saul") return;
+  const panel = document.getElementById("agr-panel-9am");
+  if (panel) panel.hidden = false;
+  if (!agrTiendaCentro && Object.keys(agrCentrosPorTienda).length === 0) return;
+  const lat0 = agrTiendaCentro ? agrTiendaCentro.lat : Object.values(agrCentrosPorTienda).reduce((s, t) => s + t.lat, 0) / Object.keys(agrCentrosPorTienda).length;
+  const lng0 = agrTiendaCentro ? agrTiendaCentro.lng : Object.values(agrCentrosPorTienda).reduce((s, t) => s + t.lng, 0) / Object.keys(agrCentrosPorTienda).length;
+  agrInitMap9am(lat0, lng0);
+  if (!agrMap9am) return;
+  agrLimpiarPoligono9am();
+
+  const tiendas = Object.keys(agrCentrosPorTienda);
+  const porTienda = await Promise.all(
+    tiendas.map((tienda) => fetch(`${AGR_API}/limites/${tienda}`, { credentials: "include" }).then((r) => (r.ok ? r.json() : [])))
+  );
+  tiendas.forEach((tienda, i) => {
+    const centro = agrCentrosPorTienda[tienda] || agrTiendaCentro;
+    if (!centro) return;
+    const limites = porTienda[i];
+    const direccionesTienda = agrDireccionesPorTienda[tienda];
+    const agregadoresAMostrar = agrFiltroAgregador ? [agrFiltroAgregador] : Object.keys(AGR_NOMBRE_AGREGADOR);
+    agregadoresAMostrar.forEach((nombre) => {
+      const limitesAgregador = limites.filter((l) => l.agregador === nombre);
+      const resultado = agrCalcularPoligono9am(limitesAgregador, centro, direccionesTienda);
+      if (!resultado || resultado.latlngs.length < 3) return;
+      const color = AGR_COLOR_MARCA[nombre] || "#888";
+      const poligono = L.polygon(resultado.latlngs, { color, weight: 2, opacity: 0.9, fillColor: color, fillOpacity: 0.2 }).addTo(agrMap9am);
+      agrPoligono9amLayers.push(poligono);
+      resultado.latlngs.forEach((ll) => {
+        const punto = L.circleMarker(ll, { radius: 4, color: "#1a1a1a", weight: 1, fillColor: color, fillOpacity: 1 }).addTo(agrMap9am);
+        agrPoligono9amLayers.push(punto);
+      });
+    });
+  });
 }
 
 function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uniones) {
