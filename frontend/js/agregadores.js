@@ -1731,7 +1731,10 @@ function agrLimpiarPoligono9am() {
 }
 
 async function agrActualizarPoligono9am(ajustarVista) {
-  if (!agrUsuarioActual || agrUsuarioActual.username !== "saul") return;
+  // Visible para cualquiera con acceso al módulo "agregadores" (ya
+  // comprobado al cargar la página, ver DOMContentLoaded) -- no solo saul,
+  // pedido explícito del usuario 10/08.
+  if (!agrUsuarioActual) return;
   const panel = document.getElementById("agr-panel-9am");
   if (panel) panel.hidden = false;
   if (!agrTiendaCentro && Object.keys(agrCentrosPorTienda).length === 0) return;
