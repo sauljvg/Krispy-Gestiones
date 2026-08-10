@@ -11,6 +11,12 @@ let agrChart = null;
 let agrModoAnadir = false;
 let agrTiendaCentro = null;
 let agrCentrosPorTienda = {}; // slug -> {lat,lng}, usado en la vista "Todas"
+// Las 6 tiendas SIEMPRE, sin filtrar por chips activas -- agrCentrosPorTienda
+// solo trae las seleccionadas, así que con una sola tienda vista, "cuál está
+// más cerca" no tenía con qué comparar y siempre ganaba esa única tienda por
+// defecto (bug confirmado en vivo 10/08 con Caleido: dots a 8km realmente
+// más cercanos a Princesa/Plenilunio se seguían contando como de Caleido).
+let agrCentrosTodos = {};
 let agrDireccionesPorTienda = {}; // slug -> direcciones[] (grid normal, con distancia_km/angulo_grados/detalle) -- para extender el polígono de límite con puntos ya conocidos más lejos de lo muestreado
 let agrFiltroAgregador = null; // null = todos los agregadores a la vez
 let agrEstadosOcultos = new Set();
@@ -190,12 +196,13 @@ function agrDistanciaKm(lat1, lng1, lat2, lng2) {
 }
 
 function agrEsTiendaMasCercana(centro, lat, lng) {
-  let mejorCentro = null, mejorDist = Infinity;
-  Object.values(agrCentrosPorTienda).forEach((c) => {
+  const candidatas = Object.keys(agrCentrosTodos).length ? agrCentrosTodos : agrCentrosPorTienda;
+  let mejorSlug = null, mejorDist = Infinity;
+  Object.entries(candidatas).forEach(([slug, c]) => {
     const d = agrDistanciaKm(c.lat, c.lng, lat, lng);
-    if (d < mejorDist) { mejorDist = d; mejorCentro = c; }
+    if (d < mejorDist) { mejorDist = d; mejorSlug = slug; }
   });
-  return mejorCentro === centro;
+  return mejorSlug == null || mejorSlug === centro.tienda;
 }
 
 function agrIconoDireccion(dir) {
@@ -904,6 +911,7 @@ async function agrCargarMapa() {
   // apuntando a la fila real de la BD), solo esta agrupación visual.
   const centrosTodos = {};
   (data.tiendas || []).forEach((t) => { centrosTodos[t.tienda] = t; });
+  agrCentrosTodos = centrosTodos; // ver agrEsTiendaMasCercana -- siempre las 6, no solo las chips activas
   (data.direcciones || []).forEach((d) => {
     d._tiendaVisual = d.tienda;
     if (d.lat == null || d.lng == null) return;
