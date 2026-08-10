@@ -1805,43 +1805,17 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   // puntosCercanos) -- eso es el único tope de verdad. Cualquier otro
   // vértice (con limite_km real pero corto, con solo una estimación, o sin
   // dato) se puede subir si queda flanqueado por vértices sin ese tope.
-  const totalVert = ordenados.length;
-  for (let i = 0; i < totalVert; i++) {
-    if (ordenados[i].esNoDisponible) continue; // esto SÍ es un tope real, nunca se toca
-    let j = i;
-    while (j < i + totalVert && !ordenados[j % totalVert].esNoDisponible) j++;
-    if (j >= i + totalVert) {
-      // Ningún no_disponible real en todo el polígono -- el tramo es TODO
-      // el círculo. Se rellena igual, tomando como referencia el máximo
-      // radio ya conocido en él (mejor eso que dejarlo intacto).
-      j = i + totalVert;
-    }
-    const tramo = [];
-    for (let k = i; k < j; k++) tramo.push(ordenados[k % totalVert]);
-    const radioRelleno = Math.max(...tramo.map((v) => v.radio));
-    tramo.forEach((v) => {
-      if (radioRelleno > v.radio) {
-        // Tope local: subir un vértice hasta el máximo del TRAMO ENTERO (sin
-        // más) dejaba que un único límite lejano (ej. 9km) inflara TODO el
-        // tramo hasta ahí, incluso vértices sin ningún dot real cerca --
-        // confirmado en vivo 10/08 con Caleido: el polígono entero se
-        // convertía en un círculo del tamaño del vértice más lejano. Cada
-        // vértice solo se sube hasta lo que corroboran SUS PROPIOS dots
-        // reales cercanos (misma lógica que el recorte de los vértices
-        // base), nunca más allá aunque el tramo tenga un vecino más lejano.
-        const respaldo = radioDisponibleCercaDe(v.bearingReal, 20);
-        const tope = respaldo != null ? Math.max(respaldo + 1.0, v.radio) : Math.max(v.radio, 4);
-        const nuevoRadio = Math.min(radioRelleno, tope);
-        if (nuevoRadio > v.radio) {
-          v.radio = nuevoRadio;
-          v.latlng = agrMoverPunto(centro.lat, centro.lng, v.bearingReal, v.radio);
-          v.local = agrProyeccionLocal(centro, v.latlng);
-          v.rellenoAgresivo = true;
-        }
-      }
-    });
-    i = j - 1; // el tramo ya se proceso entero, saltar al siguiente confirmado
-  }
+  // DESACTIVADO 10/08: subir todo un tramo hasta su radio máximo asumía que
+  // ese máximo era un dato fiable -- con chequeos "disponible" contaminados
+  // por sucursales de Krispy Kreme reales pero no rastreadas (ver el tope
+  // duro más abajo), ese máximo podía venir de un punto que no es cobertura
+  // real de esta tienda, y el relleno lo esparcía igual por todo el tramo
+  // (confirmado en vivo con Caleido: el polígono entero se igualaba a un
+  // círculo perfecto, primero de 9km y luego, tras acotar el tope local, de
+  // exactamente 6km -- el mismo síntoma, solo que más pequeño). Mientras no
+  // haya una forma fiable de distinguir cobertura real de contaminación
+  // lejana, cada vértice se queda con SU PROPIO dato (base + puntosLejanos/
+  // Cercanos + tope duro más abajo), sin suavizar contra los vecinos.
 
   // Tope duro final: aunque un punto sea genuinamente el MÁS CERCANO de las
   // 6 tiendas rastreadas y esté "corroborado" por dots reales, 8-9km no es
