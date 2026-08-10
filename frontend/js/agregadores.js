@@ -1843,6 +1843,23 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
     i = j - 1; // el tramo ya se proceso entero, saltar al siguiente confirmado
   }
 
+  // Tope duro final: aunque un punto sea genuinamente el MÁS CERCANO de las
+  // 6 tiendas rastreadas y esté "corroborado" por dots reales, 8-9km no es
+  // una distancia de reparto plausible -- lo más probable es que responda
+  // una sucursal de Krispy Kreme real pero que no rastreamos (confirmado en
+  // vivo 10/08 con Caleido: puntos en Alcobendas a 8km, más cerca de Caleido
+  // que de cualquier otra de las 6, pero demasiado lejos para ser reparto
+  // real de Caleido). Pedido explícito del usuario 10/08.
+  const TOPE_DURO_KM = 6;
+  ordenados.forEach((v) => {
+    if (v.radio > TOPE_DURO_KM) {
+      v.radio = TOPE_DURO_KM;
+      v.latlng = agrMoverPunto(centro.lat, centro.lng, v.bearingReal, v.radio);
+      v.local = agrProyeccionLocal(centro, v.latlng);
+      v.recortadoSinRespaldo = true;
+    }
+  });
+
   const vertices = ordenados.map((p) => ({ latlng: p.latlng, punto: p }));
   // Con la "cobertura combinada" activa, el polígono y los vértices de CADA
   // tienda por separado son puro ruido -- varias estrellas solapadas se ven
