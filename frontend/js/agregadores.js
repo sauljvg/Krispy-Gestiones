@@ -1482,7 +1482,19 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   // verde disponible quedaba fuera del polígono aunque el radio
   // "interpolado" dijera que no -- por eso se usa la intersección
   // geométrica real con el segmento, no una interpolación lineal).
-  const TOLERANCIA_ANGULO_GRADOS = 3; // por debajo de esto es "la misma dirección ya muestreada", no un hueco distinto
+  // Antes eran 3° -- con la campaña de 32 ángulos (11.25° entre vértices
+  // medidos) eso reclama ±3° a cada lado de cada uno de los 32, casi 200° de
+  // los 360° totales ya "ocupados". Con cientos de puntos de grid/límite/
+  // manual, la inmensa mayoría de ellos caía dentro de esa franja y se
+  // fundía con el vértice medido más cercano en vez de aportar su propio
+  // vértice -- el polígono quedaba "atado" casi siempre a exactamente los 32
+  // vértices originales (confirmado en vivo 10/08: tras el fix de encoger,
+  // seguían saliendo 32 vértices finales, cero insertados). Bajado a 0.5°
+  // (~25-50m de separación real, según distancia) para que el polígono vaya
+  // "por libre" y cada dirección realmente distinta aporte su propio dato,
+  // reservando la fusión solo para el caso real que la motivó: dos sondeos
+  // casi literalmente en el mismo sitio.
+  const TOLERANCIA_ANGULO_GRADOS = 0.5;
   const puntosLejanos = [];
   (direccionesTienda || [])
     .filter((d) => (d.detalle || {})[agregador]?.estado === "disponible" && d.lat != null && d.lng != null && d.distancia_km != null)
