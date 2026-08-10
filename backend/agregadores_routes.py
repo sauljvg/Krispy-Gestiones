@@ -554,19 +554,28 @@ def mover_limite_route(
 class UnionIn(BaseModel):
     tienda: str
     agregador: str
-    direccion_id_a: int
-    direccion_id_b: int
+    lat_a: float
+    lng_a: float
+    lat_b: float
+    lng_b: float
+    direccion_id_a: int | None = None
+    direccion_id_b: int | None = None
 
 
 @router.post("/uniones")
 def crear_union_route(body: UnionIn, _user: dict = Depends(require_agregadores)):
-    """Puente manual entre dos direcciones: el usuario ve dos dots
-    disponibles con un hueco/pico raro entre medias en el polígono y decide
-    a ojo que ahí también hay cobertura, sin depender de un relleno
-    automático poco fiable (ver agregadores_uniones, pedido explícito del
-    usuario 10/08: "haré clic sobre un punto y sobre un segundo punto y eso
-    va a unir el borde límite")."""
-    return agregadores_module.crear_union(body.tienda, body.agregador, body.direccion_id_a, body.direccion_id_b)
+    """Puente manual entre dos puntos: el usuario ve dos dots disponibles (o
+    dos vértices ya calculados del borde) con un hueco/pico raro entre
+    medias y decide a ojo que ahí también hay cobertura, sin depender de un
+    relleno automático poco fiable (ver agregadores_uniones, pedido
+    explícito del usuario 10/08: "haré clic sobre un punto y sobre un
+    segundo punto y eso va a unir el borde límite"). Por lat/lng en vez de
+    direccion_id porque los vértices del borde no siempre tienen una fila de
+    dirección real detrás."""
+    return agregadores_module.crear_union(
+        body.tienda, body.agregador, body.lat_a, body.lng_a, body.lat_b, body.lng_b,
+        body.direccion_id_a, body.direccion_id_b,
+    )
 
 
 @router.get("/uniones/{tienda}")

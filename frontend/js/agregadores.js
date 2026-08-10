@@ -286,11 +286,9 @@ function agrPopupDireccion(dir, editable) {
   // ojo dos dots disponibles con un hueco raro entre medias en el polígono
   // (pedido explícito del usuario 10/08).
   const unirHtml = editable && agrModoUnir && agrFiltroAgregador
-    ? agrUnionPendiente && agrUnionPendiente.id === dir.id
+    ? agrUnionPendiente && agrUnionPendiente.lat === dir.lat && agrUnionPendiente.lng === dir.lng
       ? `<div style="margin-top:6px;color:var(--acento-calido);font-size:12px;">🔗 Punto de partida -- haz clic en el segundo</div>`
-      : agrUnionPendiente
-        ? `<div style="margin-top:6px;"><button type="button" class="btn btn-ghost" style="font-size:12px;padding:3px 8px;" onclick="agrCompletarUnion(${dir.id})">🔗 Unir con ${agrUnionPendiente.direccion_text || "el punto marcado"}</button></div>`
-        : `<div style="margin-top:6px;"><button type="button" class="btn btn-ghost" style="font-size:12px;padding:3px 8px;" onclick="agrIniciarUnion(${dir.id})">🔗 Unir con otro punto</button></div>`
+      : `<div style="margin-top:6px;"><button type="button" class="btn btn-ghost" style="font-size:12px;padding:3px 8px;" onclick="agrUnionElegirPunto(${dir.lat}, ${dir.lng}, '${dir.tienda}', '${(dir.direccion_text || "punto").replace(/'/g, "\\'")}', ${dir.id})">🔗 ${agrUnionPendiente ? `Unir aquí (con ${agrUnionPendiente.etiqueta})` : "Unir con otro punto"}</button></div>`
     : "";
   const textoEliminar = agrFiltroAgregador
     ? `🗑️ Eliminar solo en ${AGR_NOMBRE_AGREGADOR[agrFiltroAgregador] || agrFiltroAgregador}`
@@ -654,30 +652,36 @@ function agrToggleModoUnir() {
   }
 }
 
-async function agrIniciarUnion(direccionId) {
-  const dir = agrMarkersPorId[direccionId]?._agrDir;
-  if (!dir) return;
-  agrUnionPendiente = dir;
-  const marker = agrMarkersPorId[direccionId];
-  if (marker && marker.isPopupOpen()) marker.closePopup();
-  alert(`Punto de partida marcado: ${dir.direccion_text || "sin dirección"}.\nAhora haz clic en el segundo dot para unirlos.`);
-}
-
-async function agrCompletarUnion(direccionId) {
-  const dir = agrMarkersPorId[direccionId]?._agrDir;
-  if (!dir || !agrUnionPendiente || !agrFiltroAgregador) return;
-  if (dir.id === agrUnionPendiente.id) return;
-  const tienda = dir.tienda || agrTiendaActual;
+// Punto genérico para la herramienta de unir -- sirve igual para un dot del
+// grid que para un vértice ya calculado del borde (límite o extendido), que
+// no siempre tiene una dirección real detrás y suele estar tapando al dot
+// que hay justo debajo en el mapa (pedido explícito del usuario 10/08: "los
+// dots ahora están justo debajo del vértice, no puedo acceder a ellos").
+async function agrUnionElegirPunto(lat, lng, tienda, etiqueta, direccionId) {
+  if (!agrModoUnir || !agrFiltroAgregador) return;
+  if (!agrUnionPendiente) {
+    agrUnionPendiente = { lat, lng, tienda, etiqueta, direccionId };
+    if (agrMap) agrMap.closePopup();
+    alert(`Punto de partida marcado: ${etiqueta}.\nAhora haz clic en "🔗 Unir aquí" en el segundo punto.`);
+    return;
+  }
+  if (agrUnionPendiente.lat === lat && agrUnionPendiente.lng === lng) return; // el mismo punto
   try {
     const res = await agrFetchConTimeout(`${AGR_API}/uniones`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tienda, agregador: agrFiltroAgregador, direccion_id_a: agrUnionPendiente.id, direccion_id_b: dir.id }),
+      body: JSON.stringify({
+        tienda: agrUnionPendiente.tienda || tienda,
+        agregador: agrFiltroAgregador,
+        lat_a: agrUnionPendiente.lat, lng_a: agrUnionPendiente.lng,
+        lat_b: lat, lng_b: lng,
+        direccion_id_a: agrUnionPendiente.direccionId ?? null,
+        direccion_id_b: direccionId ?? null,
+      }),
       credentials: "include",
     });
     if (!res.ok) throw new Error("No se pudo guardar la unión");
-    const marker = agrMarkersPorId[direccionId];
-    if (marker && marker.isPopupOpen()) marker.closePopup();
+    if (agrMap) agrMap.closePopup();
     agrActualizarPoligonoLimite();
   } catch (e) {
     alert("No se pudo unir los dos puntos. Inténtalo de nuevo.");
@@ -1804,10 +1808,7 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
   // "haré clic sobre un punto y sobre un segundo punto y eso va a unir el
   // borde límite".
   (uniones || []).forEach((u) => {
-    const dirA = (direccionesTienda || []).find((d) => d.id === u.direccion_id_a);
-    const dirB = (direccionesTienda || []).find((d) => d.id === u.direccion_id_b);
-    if (!dirA || !dirB || dirA.lat == null || dirB.lat == null || dirA.lng == null || dirB.lng == null) return;
-    const latlngA = [dirA.lat, dirA.lng], latlngB = [dirB.lat, dirB.lng];
+    const latlngA = [u.lat_a, u.lng_a], latlngB = [u.lat_b, u.lng_b];
     const bearingA = agrAnguloDesde(centro, latlngA);
     const bearingB = agrAnguloDesde(centro, latlngB);
     let diff = bearingB - bearingA;
@@ -1822,13 +1823,18 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
       const enArco = desde <= hasta ? (ang > desde && ang < hasta) : (ang > desde || ang < hasta);
       if (enArco) ordenados.splice(i, 1);
     }
-    [[dirA, latlngA, bearingA], [dirB, latlngB, bearingB]].forEach(([dir, latlng, bearing]) => {
-      if (ordenados.some((v) => v.dir && v.dir.id === dir.id)) return;
+    [[latlngA, bearingA, u.direccion_id_a], [latlngB, bearingB, u.direccion_id_b]].forEach(([latlng, bearing, direccionId]) => {
+      if (ordenados.some((v) => Math.abs(v.latlng[0] - latlng[0]) < 1e-7 && Math.abs(v.latlng[1] - latlng[1]) < 1e-7)) return;
       ordenados.push({
-        radio: dir.distancia_km,
+        radio: agrDistanciaKm(centro.lat, centro.lng, latlng[0], latlng[1]),
         latlng, latlngReal: latlng, bearingReal: bearing,
         local: agrProyeccionLocal(centro, latlng),
-        confirmado: true, union: true, dir,
+        confirmado: true, union: true,
+        // El vértice del renderizado (rama "else" más abajo) siempre espera
+        // un punto.dir con .detalle/.direccion_text -- un puente puede venir
+        // de un vértice del borde sin dirección real detrás, así que cuando
+        // no hay direccion_id se rellena un dir mínimo en vez de null.
+        dir: (direccionId != null && (direccionesTienda || []).find((d) => d.id === direccionId)) || { id: direccionId, detalle: {}, direccion_text: null },
       });
     });
   });
@@ -1911,6 +1917,14 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
         ? `${limite.limite_km.toFixed(2)}km`
         : `~${punto.radio.toFixed(2)}km (${limite.nota || "sin dato exacto"})`;
       const direccionMostrar = punto.extendidoPor?.direccion_text || limite.direccion_text;
+      // Los vértices ya calculados tapan al dot que hay justo debajo en el
+      // mapa, así que la herramienta de unir también tiene que poder
+      // elegirlos directamente aquí, no solo desde el popup del dot (pedido
+      // explícito del usuario 10/08: "los dots están justo debajo del
+      // vértice, no puedo acceder a ellos").
+      const unirVerticeHtml = agrModoUnir && agrFiltroAgregador
+        ? `<button type="button" class="btn btn-ghost" style="margin-top:6px;font-size:12px;padding:3px 8px;" onclick="agrUnionElegirPunto(${latlng[0]}, ${latlng[1]}, '${centro.tienda}', 'vértice a ${punto.radio.toFixed(2)}km')">🔗 ${agrUnionPendiente ? "Unir aquí" : "Unir con otro punto"}</button><br>`
+        : "";
       // Los rellenados agresivamente se marcan con un borde punteado en vez
       // de sólido -- de un vistazo, cuál es dato real y cuál es inferencia
       // (pedido explícito del usuario 10/08: poder "estilizar" el borde).
@@ -1921,6 +1935,7 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
         .bindPopup(
           `<b>${AGR_NOMBRE_AGREGADOR[limite.agregador] || limite.agregador}</b><br>Ángulo: ${limite.angulo_grados}°<br>Límite: ${etiqueta}<br>Dirección: <span class="agr-poligono-dir">${direccionMostrar || "cargando..."}</span><br>` +
             `<i style="color:var(--text-muted);font-size:11px;">Arrastra para ajustar el borde</i><br>` +
+            unirVerticeHtml +
             `<button type="button" class="btn btn-ghost" style="margin-top:6px;font-size:12px;padding:3px 8px;" onclick="agrEliminarLimite('${limite.tienda}', '${limite.agregador}', ${limite.angulo_grados})">🗑️ Quitar este vértice del borde</button>`
         )
         .addTo(agrMap);
@@ -1958,6 +1973,9 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
       // (punto.dir.id), así que arrastrarlo reubica el punto de verdad, con
       // el mismo endpoint que usa el drag normal de un dot.
       const esCercano = (punto.dir.detalle || {})[agregador]?.estado === "no_disponible";
+      const unirVerticeHtml2 = agrModoUnir && agrFiltroAgregador
+        ? `<br><button type="button" class="btn btn-ghost" style="margin-top:6px;font-size:12px;padding:3px 8px;" onclick="agrUnionElegirPunto(${latlng[0]}, ${latlng[1]}, '${centro.tienda}', '${(punto.dir.direccion_text || "punto").replace(/'/g, "\\'")}', ${punto.dir.id})">🔗 ${agrUnionPendiente ? "Unir aquí" : "Unir con otro punto"}</button>`
+        : "";
       const marker = L.marker(latlng, {
         icon: agrIconoVerticePoligono("#ffffff", esCercano ? "#d03b3b" : color, punto.rellenoAgresivo ? 8 : 12, !!punto.rellenoAgresivo, punto.rellenoAgresivo ? 0.55 : 1),
         draggable: true,
@@ -1968,7 +1986,8 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
               ? `Punto ya NO disponible, más cerca de lo muestreado por ángulo`
               : `Punto ya disponible, más lejos de lo muestreado por ángulo`) +
             `<br>Distancia: ${punto.radio.toFixed(2)}km<br>Dirección: ${punto.dir.direccion_text || "?"}<br>` +
-            `<i style="color:var(--text-muted);font-size:11px;">Arrastra para reubicar este punto</i>`
+            `<i style="color:var(--text-muted);font-size:11px;">Arrastra para reubicar este punto</i>` +
+            unirVerticeHtml2
         )
         .addTo(agrMap);
       marker.on("dragend", (e) => {

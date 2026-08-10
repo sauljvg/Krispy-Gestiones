@@ -217,16 +217,30 @@ def ensure_tables():
     # con contaminación de otra sucursal -- pero el usuario SÍ puede verlo a
     # ojo en el mapa ("estos dos dots verdes tienen un hueco entre medias, y
     # sé que en realidad está todo cubierto"). Esta tabla guarda esa decisión
-    # manual: un puente entre dos direcciones concretas, por tienda y
-    # agregador, para que el polígono conecte esos dos puntos en línea recta
-    # sin dejar que un vértice intermedio más corto cree un hueco/pico.
+    # manual: un puente entre dos puntos concretos (por lat/lng, no por
+    # direccion_id -- los vértices del borde ya calculados no siempre tienen
+    # una fila de dirección real detrás, ver resultado_punto/agregadores_limites,
+    # y el usuario también quiere poder unir esos, no solo los dots del grid),
+    # por tienda y agregador, para que el polígono conecte esos dos puntos en
+    # línea recta sin dejar que un vértice intermedio más corto cree un
+    # hueco/pico.
+    cols_uniones = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_uniones)")}
+    if cols_uniones and "lat_a" not in cols_uniones:
+        # Esquema viejo (solo direccion_id, NOT NULL) de la primera versión
+        # de esta tabla -- se creó en esta misma sesión con un único registro
+        # de prueba, seguro recrearla con el esquema nuevo.
+        conn.execute("DROP TABLE agregadores_uniones")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS agregadores_uniones (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tienda TEXT NOT NULL,
             agregador TEXT NOT NULL,
-            direccion_id_a INTEGER NOT NULL,
-            direccion_id_b INTEGER NOT NULL,
+            lat_a REAL NOT NULL,
+            lng_a REAL NOT NULL,
+            lat_b REAL NOT NULL,
+            lng_b REAL NOT NULL,
+            direccion_id_a INTEGER,
+            direccion_id_b INTEGER,
             creado_en TEXT NOT NULL
         )
     """)
@@ -703,20 +717,30 @@ def eliminar_limite(tienda: str, agregador: str, angulo_grados: float) -> bool:
     return cur.rowcount > 0
 
 
-def crear_union(tienda: str, agregador: str, direccion_id_a: int, direccion_id_b: int) -> dict:
-    """Puente manual entre dos direcciones -- ver agregadores_uniones en
-    init_db. El usuario decide a ojo que el hueco entre esos dos puntos está
-    cubierto, en vez de que un algoritmo automático lo adivine mal."""
+def crear_union(
+    tienda: str, agregador: str, lat_a: float, lng_a: float, lat_b: float, lng_b: float,
+    direccion_id_a: int | None = None, direccion_id_b: int | None = None,
+) -> dict:
+    """Puente manual entre dos puntos (lat/lng, no direccion_id -- ver
+    agregadores_uniones en init_db). El usuario decide a ojo que el hueco
+    entre esos dos puntos está cubierto, en vez de que un algoritmo
+    automático lo adivine mal."""
     conn = get_connection()
     creado_en = datetime.now(timezone.utc).isoformat()
     cur = conn.execute(
-        "INSERT INTO agregadores_uniones (tienda, agregador, direccion_id_a, direccion_id_b, creado_en) VALUES (?, ?, ?, ?, ?)",
-        (tienda, agregador, direccion_id_a, direccion_id_b, creado_en),
+        """INSERT INTO agregadores_uniones
+           (tienda, agregador, lat_a, lng_a, lat_b, lng_b, direccion_id_a, direccion_id_b, creado_en)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (tienda, agregador, lat_a, lng_a, lat_b, lng_b, direccion_id_a, direccion_id_b, creado_en),
     )
     conn.commit()
     union_id = cur.lastrowid
     conn.close()
-    return {"id": union_id, "tienda": tienda, "agregador": agregador, "direccion_id_a": direccion_id_a, "direccion_id_b": direccion_id_b, "creado_en": creado_en}
+    return {
+        "id": union_id, "tienda": tienda, "agregador": agregador,
+        "lat_a": lat_a, "lng_a": lng_a, "lat_b": lat_b, "lng_b": lng_b,
+        "direccion_id_a": direccion_id_a, "direccion_id_b": direccion_id_b, "creado_en": creado_en,
+    }
 
 
 def get_uniones(tienda: str, agregador: str = None) -> list[dict]:
