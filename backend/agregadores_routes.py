@@ -512,6 +512,23 @@ def admin_eliminar_limite_route(tienda: str, agregador: str, angulo_grados: floa
     return {"ok": True}
 
 
+@router.delete("/limites/{tienda}")
+def eliminar_limite_route(
+    tienda: str,
+    agregador: str,
+    angulo_grados: float,
+    _user: dict = Depends(require_agregadores),
+):
+    """Igual que admin_eliminar_limite_route pero con sesión de usuario --
+    para poder quitar a mano, desde el propio popup del vértice en el mapa,
+    un punto del borde que se ve claramente mal (contaminado, muy alejado
+    del resto) sin tener que usar la API key (pedido explícito del usuario
+    10/08: quiere poder "estilizar" el borde tocando esos vértices)."""
+    if not agregadores_module.eliminar_limite(tienda, agregador, angulo_grados):
+        raise HTTPException(status_code=404, detail="Límite no encontrado")
+    return {"ok": True}
+
+
 @router.post("/admin/direcciones/desactivar-busqueda-limite", dependencies=[Depends(require_api_key)])
 def admin_desactivar_busqueda_limite_route(tienda: str | None = None):
     """Al terminar la campaña de ángulos de una tienda (o de todas), apaga

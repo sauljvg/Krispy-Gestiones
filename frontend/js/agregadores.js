@@ -295,6 +295,24 @@ async function agrVerificarManual(direccionId, agregador, disponible) {
   }
 }
 
+async function agrEliminarLimite(tienda, agregador, anguloGrados) {
+  // Los vértices del borde (agregadores_limites) no son direcciones -- los
+  // generó buscar_limite_cobertura.py con una búsqueda binaria, no vienen
+  // del grid normal. No había forma de tocarlos desde el dashboard; esto
+  // permite quitar uno puntual que se vea claramente mal (contaminado, muy
+  // alejado del resto) sin tener que usar la API key a mano (pedido
+  // explícito del usuario 10/08).
+  if (!confirm("¿Quitar este vértice del borde? No es una dirección normal -- esto borra la medición de límite de ese ángulo, no un punto del mapa.")) return;
+  try {
+    const url = `${AGR_API}/limites/${tienda}?${new URLSearchParams({ agregador, angulo_grados: anguloGrados })}`;
+    const res = await fetch(url, { method: "DELETE", credentials: "include" });
+    if (!res.ok) throw new Error("No se pudo eliminar el vértice");
+    agrActualizarPoligonoLimite();
+  } catch (e) {
+    alert("No se pudo quitar el vértice. Inténtalo de nuevo.");
+  }
+}
+
 async function agrEliminarPunto(direccionId) {
   try {
     // Con un agregador filtrado, borrar solo apaga esa capa (el punto sigue
@@ -1464,6 +1482,12 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
         bearingReal: agrAnguloDesde(centro, latlng),
         local: agrProyeccionLocal(centro, latlng),
         extendidoPor: null,
+        // true = búsqueda binaria real (limite_km); false = solo una cota
+        // aproximada sacada de la nota (">= Xkm", "no se encontró el
+        // borde"...) -- estos últimos son los candidatos a que el relleno
+        // agresivo los suba si los dos vecinos confirman cobertura (ver
+        // más abajo), un dato real nunca se sobrescribe así.
+        confirmado: l.limite_km != null,
       };
     })
     // Se ordena por el ángulo REAL de cada posición (no el pedido) -- dibujar
@@ -1517,6 +1541,7 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
           vecino.bearingReal = bearing;
           vecino.local = agrProyeccionLocal(centro, latlng);
           vecino.extendidoPor = d;
+          vecino.confirmado = true; // ya no es una estimación, es un chequeo real
         }
         return;
       }
@@ -1533,7 +1558,7 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
       if (!borde) return;
       const cruce = agrCruceConBorde(borde[0].local, borde[1].local, bearing);
       if (cruce == null || d.distancia_km > cruce + 0.05) {
-        puntosLejanos.push({ angulo: d.angulo_grados, radio: d.distancia_km, dir: d, latlng, bearingReal: bearing });
+        puntosLejanos.push({ angulo: d.angulo_grados, radio: d.distancia_km, dir: d, latlng, bearingReal: bearing, confirmado: true });
       }
     });
 
@@ -1574,6 +1599,8 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
           vecino.local = agrProyeccionLocal(centro, latlng);
           vecino.extendidoPor = d;
         }
+        vecino.confirmado = true;
+        vecino.esNoDisponible = true; // dato real de "no reparte" -- nunca lo sube el relleno agresivo
         return;
       }
       let borde = null;
@@ -1588,12 +1615,46 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
       if (!borde) return;
       const cruce = agrCruceConBorde(borde[0].local, borde[1].local, bearing);
       if (cruce != null && d.distancia_km < cruce - 0.05) {
-        puntosCercanos.push({ angulo: d.angulo_grados, radio: d.distancia_km, dir: d, latlng, bearingReal: bearing });
+        puntosCercanos.push({ angulo: d.angulo_grados, radio: d.distancia_km, dir: d, latlng, bearingReal: bearing, confirmado: true, esNoDisponible: true });
       }
     });
 
   const ordenados = [...base, ...puntosLejanos, ...puntosCercanos].sort((a, b) => a.bearingReal - b.bearingReal);
   if (ordenados.length === 0) return null;
+
+  // Relleno agresivo: un tramo de vértices SIN confirmar (solo una cota
+  // aproximada, ni búsqueda binaria real ni un chequeo propio) que queda
+  // entre dos vértices confirmados disponibles, sin ningún no_disponible
+  // real de por medio, se sube hasta el menor de esos dos extremos -- si
+  // reparte en un punto de la calle y en otro más lejos, es razonable
+  // asumir que también reparte en medio, en vez de dejar el hueco sin
+  // datos tirando el borde hacia el centro y dibujando "picos" finos que no
+  // reflejan que en realidad toda esa calle está cubierta (pedido explícito
+  // del usuario 10/08, modo agresivo elegido a propósito: mejor un mapa
+  // "lleno" con inferencia razonable que uno lleno de agujeros sin probar).
+  // Nunca sube un tramo que toque un no_disponible real -- ese sí es tope.
+  const totalVert = ordenados.length;
+  for (let i = 0; i < totalVert; i++) {
+    if (ordenados[i].confirmado) continue;
+    let j = i;
+    while (j < i + totalVert && !ordenados[j % totalVert].confirmado) j++;
+    if (j >= i + totalVert) break; // ningún vértice confirmado en todo el polígono, nada de donde tirar
+    const antes = ordenados[(i - 1 + totalVert) % totalVert];
+    const despues = ordenados[j % totalVert];
+    if (antes.confirmado && !antes.esNoDisponible && !despues.esNoDisponible) {
+      const radioRelleno = Math.min(antes.radio, despues.radio);
+      for (let k = i; k < j; k++) {
+        const v = ordenados[k % totalVert];
+        if (radioRelleno > v.radio) {
+          v.radio = radioRelleno;
+          v.latlng = agrMoverPunto(centro.lat, centro.lng, v.bearingReal, v.radio);
+          v.local = agrProyeccionLocal(centro, v.latlng);
+          v.rellenoAgresivo = true;
+        }
+      }
+    }
+    i = j - 1; // el tramo ya se proceso entero, saltar al siguiente confirmado
+  }
 
   const vertices = ordenados.map((p) => ({ latlng: p.latlng, punto: p }));
   // Con la "cobertura combinada" activa, el polígono y los vértices de CADA
@@ -1612,8 +1673,11 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   // vivo 09/08: con 2 de 8 ángulos guardados no aparecía nada en el mapa).
   let poligono = null;
   if (vertices.length >= 3 && !ocultarDetalle) {
+    // weight bajado de 4 a 2: con cientos de vértices y picos finos, un
+    // trazo grueso hacía el borde ilegible ("picos gordos", pedido
+    // explícito del usuario 10/08).
     poligono = L.polygon(vertices.map((v) => v.latlng), {
-      color, weight: 4, opacity: 1, fillColor: color, fillOpacity: 0.28,
+      color, weight: 2, opacity: 1, fillColor: color, fillOpacity: 0.28,
     }).addTo(agrMap);
     agrPoligonoLayers.push(poligono);
   }
@@ -1621,16 +1685,29 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   (ocultarDetalle ? [] : vertices).forEach(({ latlng, punto }) => {
     if (punto.limite) {
       const limite = punto.limite;
-      const etiqueta = punto.extendidoPor
+      const etiqueta = punto.rellenoAgresivo
+        ? `~${punto.radio.toFixed(2)}km (inferido -- sin comprobar directamente, relleno entre dos puntos disponibles cercanos)`
+        : punto.extendidoPor
         ? `${punto.radio.toFixed(2)}km (extendido -- un punto ya conocido llega más lejos que el ${limite.limite_km != null ? limite.limite_km.toFixed(2) + "km" : "~" + agrRadioDeLimite(limite).toFixed(2) + "km"} de la búsqueda de límite en esta misma dirección)`
         : limite.limite_km != null
         ? `${limite.limite_km.toFixed(2)}km`
         : `~${punto.radio.toFixed(2)}km (${limite.nota || "sin dato exacto"})`;
       const direccionMostrar = punto.extendidoPor?.direccion_text || limite.direccion_text;
+      // Los rellenados agresivamente se marcan con un borde punteado en vez
+      // de sólido -- de un vistazo, cuál es dato real y cuál es inferencia
+      // (pedido explícito del usuario 10/08: poder "estilizar" el borde).
       const marker = L.circleMarker(latlng, {
-        radius: 6, color: "#1a1a1a", weight: 1.5, fillColor: color, fillOpacity: 1,
+        radius: punto.rellenoAgresivo ? 4 : 6,
+        color: "#1a1a1a",
+        weight: 1.5,
+        dashArray: punto.rellenoAgresivo ? "2 2" : null,
+        fillColor: color,
+        fillOpacity: punto.rellenoAgresivo ? 0.55 : 1,
       })
-        .bindPopup(`<b>${AGR_NOMBRE_AGREGADOR[limite.agregador] || limite.agregador}</b><br>Ángulo: ${limite.angulo_grados}°<br>Límite: ${etiqueta}<br>Dirección: <span class="agr-poligono-dir">${direccionMostrar || "cargando..."}</span>`)
+        .bindPopup(
+          `<b>${AGR_NOMBRE_AGREGADOR[limite.agregador] || limite.agregador}</b><br>Ángulo: ${limite.angulo_grados}°<br>Límite: ${etiqueta}<br>Dirección: <span class="agr-poligono-dir">${direccionMostrar || "cargando..."}</span><br>` +
+            `<button type="button" class="btn btn-ghost" style="margin-top:6px;font-size:12px;padding:3px 8px;" onclick="agrEliminarLimite('${limite.tienda}', '${limite.agregador}', ${limite.angulo_grados})">🗑️ Quitar este vértice del borde</button>`
+        )
         .addTo(agrMap);
       // Filas nuevas ya traen la dirección real que se probó de verdad
       // (guardada por buscar_limite_cobertura.py), y los vértices extendidos
