@@ -1813,13 +1813,25 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
     const radioRelleno = Math.max(...tramo.map((v) => v.radio));
     tramo.forEach((v) => {
       if (radioRelleno > v.radio) {
-        v.radio = radioRelleno;
-        v.latlng = agrMoverPunto(centro.lat, centro.lng, v.bearingReal, v.radio);
-        v.local = agrProyeccionLocal(centro, v.latlng);
-        v.rellenoAgresivo = true;
+        // Tope local: subir un vértice hasta el máximo del TRAMO ENTERO (sin
+        // más) dejaba que un único límite lejano (ej. 9km) inflara TODO el
+        // tramo hasta ahí, incluso vértices sin ningún dot real cerca --
+        // confirmado en vivo 10/08 con Caleido: el polígono entero se
+        // convertía en un círculo del tamaño del vértice más lejano. Cada
+        // vértice solo se sube hasta lo que corroboran SUS PROPIOS dots
+        // reales cercanos (misma lógica que el recorte de los vértices
+        // base), nunca más allá aunque el tramo tenga un vecino más lejano.
+        const respaldo = radioDisponibleCercaDe(v.bearingReal, 20);
+        const tope = respaldo != null ? Math.max(respaldo + 1.0, v.radio) : Math.max(v.radio, 4);
+        const nuevoRadio = Math.min(radioRelleno, tope);
+        if (nuevoRadio > v.radio) {
+          v.radio = nuevoRadio;
+          v.latlng = agrMoverPunto(centro.lat, centro.lng, v.bearingReal, v.radio);
+          v.local = agrProyeccionLocal(centro, v.latlng);
+          v.rellenoAgresivo = true;
+        }
       }
     });
-    i = j - 1;
     i = j - 1; // el tramo ya se proceso entero, saltar al siguiente confirmado
   }
 
