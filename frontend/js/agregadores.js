@@ -189,6 +189,15 @@ function agrDistanciaKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function agrEsTiendaMasCercana(centro, lat, lng) {
+  let mejorCentro = null, mejorDist = Infinity;
+  Object.values(agrCentrosPorTienda).forEach((c) => {
+    const d = agrDistanciaKm(c.lat, c.lng, lat, lng);
+    if (d < mejorDist) { mejorDist = d; mejorCentro = c; }
+  });
+  return mejorCentro === centro;
+}
+
 function agrIconoDireccion(dir) {
   const color = AGR_COLOR_CATEGORIA[agrCategoriaDireccion(dir)] || "#898781";
   return L.divIcon({
@@ -1578,8 +1587,17 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   // reservando la fusión solo para el caso real que la motivó: dos sondeos
   // casi literalmente en el mismo sitio.
   const TOLERANCIA_ANGULO_GRADOS = 0.5;
+  // Un dot guardado bajo esta tienda puede estar geográficamente más cerca
+  // de OTRA sucursal (tiendas solapadas en zonas densas, ej. Madrid centro)
+  // -- si se deja, el polígono se estira hacia el territorio de la tienda
+  // vecina sin motivo real (confirmado en vivo 10/08, capturas con bordes
+  // "comidos" entre tiendas cercanas). Solo cuenta para ESTE borde si esta
+  // tienda es realmente la más cercana a ese punto.
+  const direccionesPropias = (direccionesTienda || []).filter(
+    (d) => d.lat == null || d.lng == null || agrEsTiendaMasCercana(centro, d.lat, d.lng)
+  );
   const puntosLejanos = [];
-  (direccionesTienda || [])
+  direccionesPropias
     .filter((d) => (d.detalle || {})[agregador]?.estado === "disponible" && d.lat != null && d.lng != null && d.distancia_km != null)
     .forEach((d) => {
       const latlng = [d.lat, d.lng];
@@ -1630,7 +1648,7 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   // área sombreada, que es justo lo que se ve mal en el mapa (confirmado por
   // el usuario 09/08: rojos dentro del polígono en varios agregadores).
   const puntosCercanos = [];
-  (direccionesTienda || [])
+  direccionesPropias
     .filter((d) => (d.detalle || {})[agregador]?.estado === "no_disponible" && d.lat != null && d.lng != null && d.distancia_km != null)
     .forEach((d) => {
       if (base.length < 2) return; // no hay borde todavía con el que comparar
