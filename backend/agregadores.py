@@ -183,6 +183,14 @@ def ensure_tables():
         conn.execute("ALTER TABLE agregadores_limites ADD COLUMN lng REAL")
     if "direccion_text" not in cols_limites:
         conn.execute("ALTER TABLE agregadores_limites ADD COLUMN direccion_text TEXT")
+
+    # total_planeado: cuántos chequeos individuales (tienda x agregador x
+    # dirección) va a hacer la pasada en curso -- el scheduler lo calcula al
+    # empezar (ver scheduler.py) y lo manda aquí para que el dashboard pueda
+    # mostrar un progreso real ("22/66") en vez de solo "activo/inactivo".
+    cols_sesiones = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_sesiones)")}
+    if "total_planeado" not in cols_sesiones:
+        conn.execute("ALTER TABLE agregadores_sesiones ADD COLUMN total_planeado INTEGER")
     conn.commit()
     conn.close()
 
@@ -1331,11 +1339,12 @@ def registrar_alerta(tipo: str, mensaje: str, tienda: str = None, agregador: str
     conn.close()
 
 
-def iniciar_sesion(modo: str) -> int:
+def iniciar_sesion(modo: str, total_planeado: int | None = None) -> int:
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO agregadores_sesiones (modo, fecha_inicio, estado) VALUES (?, ?, 'en_curso')",
-        (modo, datetime.now(timezone.utc).isoformat()),
+        """INSERT INTO agregadores_sesiones (modo, fecha_inicio, estado, total_planeado)
+           VALUES (?, ?, 'en_curso', ?)""",
+        (modo, datetime.now(timezone.utc).isoformat(), total_planeado),
     )
     conn.commit()
     sesion_id = cur.lastrowid
@@ -1563,6 +1572,21 @@ def get_estado():
         ).total_seconds() / 60
         margen = frecuencia_min * 3
         retrasado = es_horario_apertura() and minutos_desde > margen
+
+        # Progreso en vivo: solo tiene sentido con la sesión todavía abierta
+        # (fecha_fin IS NULL). "hechos" se cuenta directamente de los
+        # chequeos ya guardados desde que empezó -- cada chequeo individual
+        # los va insertando en tiempo real (ver main.chequear_tienda), así
+        # que no hace falta que el scheduler reporte progreso aparte, solo
+        # el total planeado al principio (ver iniciar_sesion).
+        en_curso = fila["fecha_fin"] is None
+        hechos = None
+        if en_curso:
+            hechos = conn.execute(
+                "SELECT COUNT(*) FROM agregadores_chequeos WHERE timestamp>=?",
+                (fila["fecha_inicio"],),
+            ).fetchone()[0]
+
         return {
             "ultima_sesion_inicio": fila["fecha_inicio"],
             "ultima_sesion_fin": fila["fecha_fin"],
@@ -1572,6 +1596,9 @@ def get_estado():
             "frecuencia_esperada_min": frecuencia_min,
             "retrasado": retrasado,
             "minutos_desde_ultima": round(minutos_desde, 1),
+            "en_curso": en_curso,
+            "progreso_hechos": hechos,
+            "progreso_total": fila["total_planeado"] if en_curso else None,
         }
 
     resultado = {

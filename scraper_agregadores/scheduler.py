@@ -59,6 +59,26 @@ async def _chequear_agregador_aislado(
         return False
 
 
+async def _calcular_total_planeado(cercano: bool) -> int | None:
+    """Cuenta cuántos chequeos individuales (tienda x agregador x dirección)
+    va a hacer la pasada completa (fase 2, la que domina el tiempo total --
+    la fase 1 de "solo huecos" normalmente no añade nada una vez la
+    cobertura está madura, ver _chequeo). Una llamada de conteo por tienda,
+    reusando el mismo endpoint que ya usa chequear_tienda -- nada nuevo del
+    lado del backend, solo se suma el tamaño de la lista que devuelve. Si
+    falla, se sigue sin total (el dashboard mostrará "en curso" sin X/Y en
+    vez de romper la pasada por esto)."""
+    total = 0
+    try:
+        for tienda in config.TIENDAS_SCHEDULER:
+            direcciones = await api_client.obtener_direcciones(tienda, cercano=cercano)
+            total += len(direcciones) * len(config.AGREGADORES)
+    except Exception as exc:
+        logger.warning("No se pudo calcular el total planeado de la pasada: %r", exc)
+        return None
+    return total
+
+
 async def _chequeo(modo: str, cercano: bool):
     if not config.SCRAPER_ENABLED:
         logger.info("SCRAPER_ENABLED=False — se omite el chequeo (%s).", modo)
@@ -67,8 +87,10 @@ async def _chequeo(modo: str, cercano: bool):
         logger.debug("Fuera de horas punta — se omite el chequeo (%s).", modo)
         return
 
+    total_planeado = await _calcular_total_planeado(cercano)
+
     try:
-        sesion_id = await api_client.iniciar_sesion(modo)
+        sesion_id = await api_client.iniciar_sesion(modo, total_planeado)
     except Exception as exc:
         logger.error("No se pudo iniciar sesión en la API de KG (%s): %s", modo, exc)
         return

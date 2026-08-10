@@ -161,14 +161,15 @@ async def subir_captura(chequeo_id: int, ruta_local: str):
         logger.error("No se pudo subir la captura de transición (chequeo %s): %s", chequeo_id, exc)
 
 
-async def iniciar_sesion(modo: str) -> int:
+async def iniciar_sesion(modo: str, total_planeado: int | None = None) -> int:
     if config.MODO_LOCAL:
         logger.info("[MODO_LOCAL] sesión no iniciada en KG (modo=%s)", modo)
         return -1
 
     url = f"{config.KG_API_BASE_URL}/api/agregadores/sesiones"
+    body = {"modo": modo, "total_planeado": total_planeado}
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json={"modo": modo}, headers=_headers(), timeout=15) as resp:
+        async with session.post(url, json=body, headers=_headers(), timeout=15) as resp:
             resp.raise_for_status()
             data = await resp.json()
             return data["id"]

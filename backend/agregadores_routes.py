@@ -45,6 +45,7 @@ class ChequeoIn(BaseModel):
 
 class SesionIniciarIn(BaseModel):
     modo: str
+    total_planeado: int | None = None
 
 
 class SesionCerrarIn(BaseModel):
@@ -311,7 +312,7 @@ def resetear_estadisticas_hoy_route():
 
 @router.post("/sesiones", dependencies=[Depends(require_api_key)])
 def iniciar_sesion_route(body: SesionIniciarIn):
-    return {"id": agregadores_module.iniciar_sesion(body.modo)}
+    return {"id": agregadores_module.iniciar_sesion(body.modo, body.total_planeado)}
 
 
 @router.put("/sesiones/{sesion_id}", dependencies=[Depends(require_api_key)])

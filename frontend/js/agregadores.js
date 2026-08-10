@@ -1631,22 +1631,33 @@ async function agrActualizarPoligonoLimite() {
   }
 }
 
+function agrTextoProgreso(estado) {
+  // La pasada "en curso" con más avance manda -- si las dos (cercano y
+  // completo) están en curso a la vez (no debería, pero por si acaso) se
+  // muestra la que lleve más hechos, que es la más informativa.
+  const enCurso = [estado.cercano, estado.completo].filter((m) => m.en_curso && m.progreso_hechos != null);
+  if (enCurso.length === 0) return "";
+  const modo = enCurso.sort((a, b) => (b.progreso_hechos || 0) - (a.progreso_hechos || 0))[0];
+  return modo.progreso_total ? ` (${modo.progreso_hechos}/${modo.progreso_total})` : ` (${modo.progreso_hechos})`;
+}
+
 async function agrCargarEstado() {
   const pill = document.getElementById("agr-estado");
   try {
     const res = await fetch(`${AGR_API}/estado`, { credentials: "include" });
     const estado = await res.json();
+    const progreso = agrTextoProgreso(estado);
     if (!estado.es_horario_apertura) {
       pill.textContent = "⏸ Fuera de horario";
       pill.className = "agr-estado-pill neutro";
       return;
     }
     if (estado.cercano.retrasado || estado.completo.retrasado) {
-      pill.textContent = "⚠ Scraper retrasado";
+      pill.textContent = "⚠ Scraper retrasado" + progreso;
       pill.className = "agr-estado-pill alerta";
       return;
     }
-    pill.textContent = "● Scraper OK";
+    pill.textContent = "● Scraper OK" + progreso;
     pill.className = "agr-estado-pill ok";
   } catch {
     pill.textContent = "? Estado desconocido";
