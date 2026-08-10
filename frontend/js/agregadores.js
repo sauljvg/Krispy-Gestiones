@@ -280,6 +280,14 @@ async function agrVerificarManual(direccionId, agregador, disponible) {
     agrActualizarMarcadores();
     agrActualizarLeyenda();
     agrRecalcularContador();
+    // `dir` es el mismo objeto que agrDireccionesPorTienda[tienda] guarda
+    // (misma referencia, no una copia -- ver agrRenderMapa/agrRenderMapaTodas),
+    // así que mutar dir.detalle arriba ya es visible aquí: redibujar el
+    // polígono ahora mismo hace que puntosLejanos/puntosCercanos (ver
+    // agrDibujarPoligonoLimite) estiren o recorten el borde hasta este punto
+    // al instante, sin esperar al refresco de 30s (pedido explícito del
+    // usuario 10/08: "si lo doy como disponible el borde alcanza ese dot").
+    agrActualizarPoligonoLimite();
     const marker = agrMarkersPorId[direccionId];
     if (marker && marker.isPopupOpen()) marker.closePopup();
   } catch (e) {
@@ -312,6 +320,7 @@ async function agrEliminarPunto(direccionId) {
     }
     agrActualizarLeyenda();
     agrRecalcularContador();
+    agrActualizarPoligonoLimite(); // si este punto estiraba/recortaba el borde (puntosLejanos/Cercanos), se recalcula ya
   } catch (e) {
     alert("No se pudo eliminar el punto. Inténtalo de nuevo.");
   }
