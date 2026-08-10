@@ -79,23 +79,9 @@ def ensure_tables():
             UNIQUE(tienda, distancia_km, angulo_grados)
         )
     """)
-    # activo: puntos "eliminados" desde el mapa se marcan inactivos en vez de
-    # borrarse -- si se borrara la fila, get_o_crear_direcciones la volvería
-    # a crear en el siguiente chequeo (el hueco (tienda, distancia, angulo)
-    # vuelve a estar libre). Además así el histórico de chequeos con ese
-    # direccion_id sigue teniendo sentido.
     cols = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_direcciones)")}
     if "activo" not in cols:
         conn.execute("ALTER TABLE agregadores_direcciones ADD COLUMN activo INTEGER NOT NULL DEFAULT 1")
-    # origen: distingue el grid fijo, los puntos de sondeo de la búsqueda de
-    # límite (buscar_limite_cobertura.py) y los añadidos a mano -- para poder
-    # desactivar en bloque solo los de sondeo cuando la búsqueda de límite
-    # termine, sin tocar el grid normal ni lo puesto a mano (ver
-    # desactivar_puntos_busqueda_limite). Backfill de lo ya existente: el
-    # grid se reconoce por encajar exacto en (radio, ángulo) fijos; todo lo
-    # demás activo hasta ahora es de la búsqueda de límite -- "Añadir punto"
-    # llevaba roto desde la consolidación del selector (09/08), así que no
-    # hay puntos manuales de verdad mezclados en este momento.
     if "origen" not in cols:
         conn.execute("ALTER TABLE agregadores_direcciones ADD COLUMN origen TEXT")
         angulos_grid = [int(round((360 / GRID_ANGULOS_COUNT) * i)) for i in range(GRID_ANGULOS_COUNT)]
@@ -120,19 +106,9 @@ def ensure_tables():
             error_texto TEXT
         )
     """)
-    # url_captura: solo se rellena cuando el chequeo resulta ser una transición
-    # real de disponible->no disponible (ver hubo_transicion_a_no_disponible) --
-    # no en cada chequeo, para no subir una captura por cada uno de los muchos
-    # puntos que simplemente están siempre fuera de cobertura.
     cols_chequeos = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_chequeos)")}
     if "url_captura" not in cols_chequeos:
         conn.execute("ALTER TABLE agregadores_chequeos ADD COLUMN url_captura TEXT")
-    # verificado_por: nombre del usuario cuando el chequeo lo puso a mano
-    # desde el dashboard (ver guardar_chequeo_manual) en vez del scraper --
-    # NULL para los del scraper. Sirve para distinguir en el popup del mapa
-    # un dato confirmado en vivo por una persona de uno automático (pedido
-    # explícito del usuario 10/08: quiere poder priorizar y confirmar puntos
-    # concretos a mano, sin esperar al scraper).
     if "verificado_por" not in cols_chequeos:
         conn.execute("ALTER TABLE agregadores_chequeos ADD COLUMN verificado_por TEXT")
     conn.execute("""
@@ -159,11 +135,6 @@ def ensure_tables():
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_agr_chequeos_tienda_ts ON agregadores_chequeos(tienda, timestamp)"
     )
-    # Un límite real de cobertura por (tienda, agregador, ángulo) -- lo
-    # calcula buscar_limite_cobertura.py (búsqueda adaptativa) y lo guarda
-    # aquí para que el dashboard pueda dibujar el polígono real (forma de
-    # estrella, un vértice por ángulo) en vez de un envolvente convexo sobre
-    # los puntos sueltos, que no puede representar huecos de cobertura.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS agregadores_limites (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -176,14 +147,6 @@ def ensure_tables():
             UNIQUE(tienda, agregador, angulo_grados)
         )
     """)
-    # lat/lng/direccion_text: el vértice del polígono se dibujaba en el punto
-    # GEOMÉTRICO puro (centro + ángulo + distancia), que puede caer en medio
-    # de un parque/campo sin ninguna calle -- el punto REALMENTE comprobado
-    # por el scraper (tras la búsqueda en espiral que busca la dirección
-    # numerada más cercana) puede estar unos metros/cientos de metros
-    # desplazado. Guardar su lat/lng/dirección real permite dibujar el
-    # vértice donde de verdad se probó la entrega, no donde cae la recta
-    # (confirmado en vivo 09/08: un vértice caía dentro de Casa de Campo).
     cols_limites = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_limites)")}
     if "lat" not in cols_limites:
         conn.execute("ALTER TABLE agregadores_limites ADD COLUMN lat REAL")
@@ -192,17 +155,6 @@ def ensure_tables():
     if "direccion_text" not in cols_limites:
         conn.execute("ALTER TABLE agregadores_limites ADD COLUMN direccion_text TEXT")
 
-    # Cada punto del grid es una única fila (una ubicación física), compartida
-    # por los 3 agregadores -- pero la cobertura real de cada uno es
-    # independiente (un mismo punto puede repartir en JustEat y no en Glovo).
-    # Esta tabla deja "borrar un punto" ser una acción POR agregador (una capa
-    # cada uno) en vez de una baja global: ausencia de fila = activo (para no
-    # tener que rellenar 3 filas por cada punto ya existente), una fila con
-    # activo=0 = desactivado solo para ese agregador. La baja global de
-    # agregadores_direcciones.activo sigue existiendo aparte para cuando de
-    # verdad no hace falta el punto para NINGÚN agregador (pedido explícito
-    # del usuario 10/08: "puedo borrar uno en justeat pero no significa que
-    # deba borrarse en uber").
     conn.execute("""
         CREATE TABLE IF NOT EXISTS agregadores_direcciones_estado (
             direccion_id INTEGER NOT NULL,
@@ -212,10 +164,6 @@ def ensure_tables():
         )
     """)
 
-    # total_planeado: cuántos chequeos individuales (tienda x agregador x
-    # dirección) va a hacer la pasada en curso -- el scheduler lo calcula al
-    # empezar (ver scheduler.py) y lo manda aquí para que el dashboard pueda
-    # mostrar un progreso real ("22/66") en vez de solo "activo/inactivo".
     cols_sesiones = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_sesiones)")}
     if "total_planeado" not in cols_sesiones:
         conn.execute("ALTER TABLE agregadores_sesiones ADD COLUMN total_planeado INTEGER")
@@ -240,9 +188,6 @@ def _mover_punto(lat, lng, bearing_deg, distancia_km):
 
 
 def _distancia_y_angulo(lat_centro, lng_centro, lat, lng):
-    """Inverso de _mover_punto: dado un punto puesto a mano en el mapa,
-    calcula a qué distancia (línea recta) y ángulo queda del centro de la
-    tienda, para guardarlo con el mismo formato que los puntos del grid."""
     R = 6371
     lat1, lng1, lat2, lng2 = map(math.radians, (lat_centro, lng_centro, lat, lng))
     dlat, dlng = lat2 - lat1, lng2 - lng1
@@ -259,21 +204,10 @@ def _distancia_y_angulo(lat_centro, lng_centro, lat, lng):
 
 _NOMINATIM_LOCK = threading.Lock()
 _nominatim_ultima_llamada = 0.0
-_NOMINATIM_INTERVALO_MIN_SEG = 1.1  # política de Nominatim: máx. 1 petición/segundo
+_NOMINATIM_INTERVALO_MIN_SEG = 1.1
 
 
 def _geocodificar(lat, lng):
-    """Reverse geocoding vía Nominatim. Con la búsqueda en espiral de
-    _punto_geocodificado_valido ya no es "una vez por punto" -- puede haber
-    varios intentos seguidos, así que aquí sí hace falta espaciar las
-    llamadas o Nominatim empieza a bloquear/ralentizar el IP entero (nos
-    pasó: cada llamada tardaba 5-6s y fallaba tras machacarlo sin pausas).
-
-    Devuelve (texto_plano, componentes): el texto plano es el display_name
-    genérico de Nominatim (fallback si no hay calle+número reales), y
-    componentes es el dict estructurado (road, house_number, city,
-    postcode...) -- de ahí se construye el formato español real, más fiable
-    que adivinar por posición de comas en el texto plano."""
     global _nominatim_ultima_llamada
     with _NOMINATIM_LOCK:
         espera = _NOMINATIM_INTERVALO_MIN_SEG - (time.monotonic() - _nominatim_ultima_llamada)
@@ -300,14 +234,6 @@ _PATRON_NUMERO_LIMPIO = re.compile(r"^\d+[a-zA-Z]?$")
 
 
 def _construir_direccion(componentes: dict) -> str | None:
-    """'Calle número, Ciudad, CP' a partir de los componentes estructurados
-    de Nominatim -- el formato real con el que se busca en España (calle
-    primero), sin el barrio/distrito de en medio que solo confunde al
-    autocompletado, y con el código postal para no ambiguar entre calles
-    con el mismo nombre en zonas distintas. None si no hay una calle CON
-    número de portal real: autovía/polígono sin número, o portal compuesto
-    tipo "74,76" (Nominatim lo junta en un único campo house_number que ni
-    el propio buscador de los agregadores sabe resolver de forma fiable)."""
     calle = (componentes.get("road") or "").strip()
     numero = (componentes.get("house_number") or "").strip()
     if not calle or not numero or not _PATRON_NUMERO_LIMPIO.match(numero):
@@ -323,20 +249,11 @@ def _construir_direccion(componentes: dict) -> str | None:
 
 
 def _direccion_valida(texto: str) -> bool:
-    """Valida un direccion_text YA GUARDADO en la base -- para repasar filas
-    existentes, que pueden venir tanto en el formato nuevo ("Calle X 20,
-    Alcorcón, 28923") como en el crudo de Nominatim de antes de este cambio
-    ("20, Calle X, Barrio, ..."). Para geocodificar puntos nuevos se usa
-    _construir_direccion, que es más fiable porque parte de los componentes
-    estructurados en vez de adivinar por comas."""
     t = texto.strip()
     primer_segmento = t.split(",", 1)[0].strip()
     if _PATRON_VIA_NO_DIRECCION.match(primer_segmento):
         return False
     if _PATRON_NUMERO_LIMPIO.match(primer_segmento):
-        # Formato crudo viejo "74, Calle X, ..." -- si el siguiente trozo
-        # también empieza por dígitos, en realidad es un portal compuesto
-        # tipo "74,76" partido por la coma, no una calle real.
         resto = t.split(",", 2)
         siguiente = resto[1].strip() if len(resto) > 1 else ""
         return not re.match(r"^\d", siguiente)
@@ -345,12 +262,6 @@ def _direccion_valida(texto: str) -> bool:
 
 
 def _punto_geocodificado_valido(lat, lng, intentos_extra=7, paso_km=0.07, radio_max_km=0.5):
-    """Geocodifica un punto y, si no es una calle con número real, prueba
-    puntos cercanos en espiral alrededor del MISMO punto original (nunca más
-    lejos de radio_max_km, para que siga representando ese sitio del círculo
-    y no se desplace de zona) hasta encontrar una dirección numerada válida.
-    Si agota los intentos, se queda con el último probado (texto plano, para
-    que quede algo legible aunque no sea una dirección válida)."""
     lat0, lng0 = lat, lng
     texto_plano, componentes = _geocodificar(lat, lng)
     texto = _construir_direccion(componentes)
@@ -360,7 +271,7 @@ def _punto_geocodificado_valido(lat, lng, intentos_extra=7, paso_km=0.07, radio_
     mejor = (lat, lng, texto_plano)
     for intento in range(1, intentos_extra + 1):
         radio = min(paso_km * intento, radio_max_km)
-        bearing = (intento * 137) % 360  # ángulo dorado: cubre el círculo sin repetir dirección
+        bearing = (intento * 137) % 360
         lat_i, lng_i = _mover_punto(lat0, lng0, bearing, radio)
         texto_plano_i, componentes_i = _geocodificar(lat_i, lng_i)
         texto_i = _construir_direccion(componentes_i)
@@ -371,14 +282,6 @@ def _punto_geocodificado_valido(lat, lng, intentos_extra=7, paso_km=0.07, radio_
 
 
 def reparar_direcciones_invalidas() -> dict:
-    """Recorre los puntos ya guardados y reubica los que no tienen número de
-    portal real (sin él, el autocompletado de los agregadores es ambiguo --
-    confirmado en vivo: pasa incluso mandando el texto tal cual, no es solo
-    un problema de coordenadas en bruto). Actualiza la misma fila (mismo id),
-    pero como el punto pasa a ser una dirección FÍSICA DISTINTA, los chequeos
-    que tenía guardados ya no dicen nada de la nueva -- se borran (no solo el
-    dato, el punto "pasa a sin datos otra vez") para que el scheduler lo
-    priorice en la próxima pasada (ver get_o_crear_direcciones/scheduler.py)."""
     conn = get_connection()
     filas = conn.execute("SELECT * FROM agregadores_direcciones").fetchall()
     reparadas = []
@@ -391,10 +294,6 @@ def reparar_direcciones_invalidas() -> dict:
             (lat, lng, texto, fila["id"]),
         )
         conn.execute("DELETE FROM agregadores_chequeos WHERE direccion_id=?", (fila["id"],))
-        # Commit por fila, no al final: cada punto tarda varios segundos en
-        # geocodificar (varios intentos a Nominatim), así que un commit único
-        # al final mantendría la escritura abierta -- y el archivo bloqueado
-        # para cualquier otra petición -- durante toda la duración del repaso.
         conn.commit()
         reparadas.append({"id": fila["id"], "antes": fila["direccion_text"], "despues": texto})
     conn.close()
@@ -402,14 +301,6 @@ def reparar_direcciones_invalidas() -> dict:
 
 
 def reformatear_direcciones() -> dict:
-    """Pasada única para pasar los puntos ya guardados ANTES de este cambio
-    al formato nuevo 'Calle número, Ciudad, CP' (ver _construir_direccion).
-    Re-geocodifica el mismo lat/lng exacto que ya tenían (no busca uno
-    nuevo) solo para leer los componentes estructurados -- el resultado
-    debería ser la misma calle de siempre, así que NO se tocan los chequeos
-    que ya tenía la fila (a diferencia de reparar_direcciones_invalidas,
-    que si reubica de verdad el punto). Si por lo que sea la nueva lectura
-    no da una dirección válida, se deja el texto de antes tal cual."""
     conn = get_connection()
     filas = conn.execute("SELECT id, lat, lng, direccion_text FROM agregadores_direcciones WHERE activo=1").fetchall()
     cambiadas = []
@@ -425,30 +316,12 @@ def reformatear_direcciones() -> dict:
 
 
 def mover_direccion_manual(direccion_id: int, lat: float, lng: float, direccion_text: str = None) -> dict | None:
-    """Reubicación manual desde el mapa del dashboard (arrastrar un punto).
-    Sin texto de dirección, se geocodifica automáticamente la posición nueva
-    -- si no, el texto quedaría desactualizado (el de antes de arrastrar, ya
-    no corresponde a dónde está el punto ahora).
-
-    Al ser ahora una dirección física distinta, los chequeos que tenía
-    guardados se borran -- el punto "pasa a sin datos" y el scheduler lo
-    prioriza en la siguiente pasada (mismo criterio que
-    reparar_direcciones_invalidas)."""
     conn = get_connection()
     fila = conn.execute("SELECT id FROM agregadores_direcciones WHERE id=?", (direccion_id,)).fetchone()
     if not fila:
         conn.close()
         return None
     if not direccion_text:
-        # Aquí NO se usa la búsqueda en espiral: es una reubicación manual,
-        # el punto tiene que quedarse exactamente donde lo soltó quien lo
-        # arrastró -- solo se consulta la dirección de ESE punto para
-        # mostrarla, sin desplazarlo si no tiene número de portal cerca (eso
-        # sería ignorar la decisión de quien lo movió a propósito).
-        # _geocodificar devuelve (texto_plano, componentes) -- asignar la
-        # tupla entera a direccion_text (bug real, confirmado en producción
-        # 09/08 con "Error binding parameter 6: type 'tuple' is not
-        # supported") rompía CUALQUIER arrastre sin dirección ya conocida.
         texto_plano, componentes = _geocodificar(lat, lng)
         direccion_text = _construir_direccion(componentes) or texto_plano
     conn.execute(
@@ -463,11 +336,6 @@ def mover_direccion_manual(direccion_id: int, lat: float, lng: float, direccion_
 
 
 def formatear_alerta_transicion(agregador: str, tienda: str, direccion_id: int | None, mensaje_bloqueo: str | None) -> str:
-    """Mensaje de la alerta 'paso_a_no_disponible' -- antes solo llevaba el
-    slug interno de la tienda ("granplaza2") sin decir QUÉ punto exacto dejó
-    de estar disponible, aunque el dato ya está guardado y "Dejaron de estar
-    disponibles" sí lo muestra para el mismo evento. Se usa el nombre real de
-    la tienda y, si hay direccion_id, la dirección completa de ese punto."""
     nombre_tienda = TIENDAS.get(tienda, {}).get("nombre", tienda)
     direccion_text = None
     if direccion_id:
@@ -482,14 +350,6 @@ def formatear_alerta_transicion(agregador: str, tienda: str, direccion_id: int |
 
 
 def eliminar_direccion(direccion_id: int, agregador: str | None = None) -> bool:
-    """Baja lógica (activo=0), no DELETE -- si se borrara la fila, el hueco
-    (tienda, distancia, angulo) quedaría libre y get_o_crear_direcciones lo
-    volvería a generar (y geocodificar) en el siguiente chequeo.
-
-    Sin `agregador`: baja global, como siempre (desaparece de los 3). Con
-    `agregador`: solo se desactiva esa capa (ver agregadores_direcciones_estado
-    en init_db) -- el punto sigue existiendo y comprobándose igual para los
-    otros dos."""
     conn = get_connection()
     fila = conn.execute("SELECT id FROM agregadores_direcciones WHERE id=?", (direccion_id,)).fetchone()
     if not fila:
@@ -510,12 +370,6 @@ def eliminar_direccion(direccion_id: int, agregador: str | None = None) -> bool:
 
 
 def podar_grid_reducido() -> dict:
-    """Mantenimiento puntual: desactiva (activo=0) los puntos ya generados
-    con el grid viejo (4 radios x 12 ángulos) que ya no encajan en el grid
-    reducido actual (GRID_RADIOS_KM x GRID_ANGULOS_COUNT) -- radio 7km fuera,
-    y de 12 a 8 ángulos por radio. Los puntos añadidos a mano (fuera del
-    grid, con su propio distancia/angulo) no se tocan. Baja lógica, igual
-    que eliminar_direccion -- no vuelven a regenerarse solos."""
     angulos_validos = {round((360 / GRID_ANGULOS_COUNT) * i) for i in range(GRID_ANGULOS_COUNT)}
     radios_validos = set(GRID_RADIOS_KM)
 
@@ -525,8 +379,6 @@ def podar_grid_reducido() -> dict:
     ).fetchall()
     podados = 0
     for fila in filas:
-        # Solo puntos del grid original de 12 ángulos (múltiplos de 30) --
-        # así no se tocan puntos añadidos a mano con ángulos arbitrarios.
         es_del_grid_original = fila["angulo_grados"] % 30 == 0
         if not es_del_grid_original:
             continue
@@ -536,17 +388,9 @@ def podar_grid_reducido() -> dict:
     conn.commit()
     conn.close()
     return {"podados": podados}
-    return True
 
 
 def crear_punto_calculado(tienda: str, distancia_km: float, angulo_grados: float) -> dict | None:
-    """Como el grid fijo, pero para una distancia/ángulo CUALQUIERA (no solo
-    GRID_RADIOS_KM) -- para la búsqueda adaptativa del límite real de
-    cobertura (un punto por iteración del binary search, en la dirección que
-    toque). Usa la misma búsqueda en espiral que el grid (evita autovías/
-    puntos sin número de portal), así que el punto final puede quedar hasta
-    0.5km desdesplazado del pedido -- por eso se devuelve la distancia/
-    ángulo REALES del punto ya geocodificado, no los pedidos."""
     if tienda not in TIENDAS:
         return None
     info = TIENDAS[tienda]
@@ -568,12 +412,6 @@ def crear_punto_calculado(tienda: str, distancia_km: float, angulo_grados: float
         conn.commit()
         fila = conn.execute("SELECT * FROM agregadores_direcciones WHERE id=?", (cur.lastrowid,)).fetchone()
     except sqlite3.IntegrityError:
-        # Dos peticiones distintas (dos pasos del binary search, o dos
-        # empujones de ángulo) pueden geocodificar al MISMO punto real más
-        # cercano si están a menos de la distancia de redondeo -- choca con
-        # el índice único (tienda, distancia_km, angulo_grados) del grid fijo.
-        # No es un fallo: simplemente ya existe ese punto exacto, se reusa
-        # (mismo patrón que get_o_crear_direcciones para el grid normal).
         conn.rollback()
         fila = conn.execute(
             "SELECT * FROM agregadores_direcciones WHERE tienda=? AND distancia_km=? AND angulo_grados=?",
@@ -585,26 +423,12 @@ def crear_punto_calculado(tienda: str, distancia_km: float, angulo_grados: float
             fila = conn.execute("SELECT * FROM agregadores_direcciones WHERE id=?", (fila["id"],)).fetchone()
     conn.close()
     resultado = dict(fila)
-    # La búsqueda en espiral puede agotar los intentos sin encontrar nada
-    # válido (p.ej. cae en plena M-40) y quedarse con el último probado --
-    # sigue siendo inválido. El que llama (script de límite de cobertura)
-    # necesita saberlo para no tratar ese chequeo como un dato real.
     resultado["direccion_valida"] = _direccion_valida(direccion_text)
-    # Con varias tiendas relativamente cerca (ej. Princesa y Caleido, a
-    # 6km), la búsqueda del límite real de UNA tienda puede acabar probando
-    # una dirección que en realidad está más cerca de OTRA sucursal -- si
-    # ahí sale "disponible", puede ser porque responde la otra tienda, no la
-    # que se está midiendo (el buscador de los agregadores solo busca por
-    # marca "Krispy Kreme", no distingue sucursal). El que llama necesita
-    # saber esto para no tratarlo como límite real de `tienda`.
     resultado["tienda_mas_cercana"] = _tienda_mas_cercana(fila["lat"], fila["lng"])
     return resultado
 
 
 def _tienda_mas_cercana(lat: float, lng: float) -> str:
-    """De las 6 sucursales, cuál está geográficamente más cerca de este
-    punto -- para detectar cuándo un punto de test de una tienda cae en
-    realidad más cerca de otra (ver crear_punto_calculado)."""
     mejor_tienda, mejor_distancia = None, None
     for nombre, info in TIENDAS.items():
         distancia, _ = _distancia_y_angulo(info["lat"], info["lng"], lat, lng)
@@ -617,18 +441,6 @@ def guardar_limite(
     tienda: str, agregador: str, angulo_grados: float, limite_km: float | None, nota: str | None,
     lat: float | None = None, lng: float | None = None, direccion_text: str | None = None,
 ) -> dict:
-    """Guarda (o actualiza) el límite real de cobertura calculado por
-    buscar_limite_cobertura.py para una dirección concreta -- lo llama el
-    script al terminar cada ángulo, así el dashboard puede dibujar el
-    polígono real (un vértice por ángulo) sin esperar a que termine toda la
-    tienda.
-
-    lat/lng/direccion_text (opcionales, para compatibilidad con filas viejas):
-    la dirección REAL que se probó (tras la búsqueda en espiral que busca la
-    calle numerada más cercana al punto geométrico puro), para que el
-    dashboard pueda dibujar el vértice donde de verdad se comprobó la
-    entrega en vez de en la recta centro-ángulo-distancia, que puede caer en
-    medio de un parque sin ninguna calle."""
     angulo_guardar = int(round(angulo_grados))
     conn = get_connection()
     conn.execute(
@@ -648,13 +460,6 @@ def guardar_limite(
 
 
 def eliminar_limite(tienda: str, agregador: str, angulo_grados: float) -> bool:
-    """Borra un vértice de límite guardado (no baja lógica -- a diferencia
-    de agregadores_direcciones, aquí no hay riesgo de que se regenere solo:
-    el skip-logic de buscar_limite_cobertura.py trata CUALQUIER fila
-    existente para ese ángulo como "ya completado", así que hay que
-    borrarla de verdad para que un relanzamiento futuro lo vuelva a
-    calcular. Para limpiar vértices contaminados por cercanía a otra
-    sucursal (ver resultado_punto en el script)."""
     angulo_guardar = int(round(angulo_grados))
     conn = get_connection()
     cur = conn.execute(
@@ -667,9 +472,6 @@ def eliminar_limite(tienda: str, agregador: str, angulo_grados: float) -> bool:
 
 
 def get_limites(tienda: str, agregador: str = None) -> list[dict]:
-    """Límites guardados para una tienda -- ordenados por ángulo, para que
-    el frontend pueda conectar los vértices en orden sin tener que
-    ordenarlos él. Si se pasa agregador, filtra a ese solo."""
     conn = get_connection()
     if agregador:
         filas = conn.execute(
@@ -686,20 +488,11 @@ def get_limites(tienda: str, agregador: str = None) -> list[dict]:
 
 
 def agregar_direccion_manual(tienda: str, lat: float, lng: float, direccion_text: str = None) -> dict | None:
-    """Punto añadido a mano en el mapa (no del grid de radios/ángulos fijo)
-    -- útil para tiendas donde el grid estándar no encaja bien (ej. una zona
-    comercial concreta que interesa vigilar más de cerca). Sin texto de
-    dirección, se geocodifica automáticamente (misma búsqueda en espiral que
-    usa el grid) en vez de pedirle a quien hace clic que la escriba a mano."""
     if tienda not in TIENDAS:
         return None
     info = TIENDAS[tienda]
 
     if not direccion_text:
-        # Igual que en mover_direccion_manual: sin espiral, el punto se
-        # queda donde se hizo clic. _geocodificar devuelve (texto_plano,
-        # componentes) -- ver el fix ahí mismo, mismo bug aquí (confirmado
-        # en producción 09/08: "Añadir punto" siempre fallaba con 500).
         texto_plano, componentes = _geocodificar(lat, lng)
         direccion_text = _construir_direccion(componentes) or texto_plano
     distancia_km, angulo_grados = _distancia_y_angulo(info["lat"], info["lng"], lat, lng)
@@ -718,18 +511,6 @@ def agregar_direccion_manual(tienda: str, lat: float, lng: float, direccion_text
 
 
 def desactivar_puntos_busqueda_limite(tienda: str | None = None) -> int:
-    """Al terminar la búsqueda de límite de una tienda (o de todas), los
-    puntos de sondeo que se usaron para encontrarlo (crear_punto_calculado,
-    origen='limite') dejan de tener sentido en la rotación diaria del daemon
-    -- su única función era descubrir el límite en sí, que ya quedó guardado
-    aparte en agregadores_limites (independiente de esta tabla), no vigilar
-    cobertura día a día. Sin esto, cada ronda de ángulos (8->16->32...) deja
-    para siempre cientos de puntos activos que el daemon vuelve a comprobar
-    en cada vuelta sin aportar nada nuevo (pedido explícito del usuario
-    09/08: 'que revise únicamente los dots que le pongamos a mano', para no
-    alargar el ciclo diario reconstruyendo el borde una y otra vez). Baja
-    lógica (activo=0), igual que eliminar_direccion -- no se pierden, se
-    pueden reactivar si hiciera falta."""
     conn = get_connection()
     if tienda:
         cur = conn.execute(
@@ -745,16 +526,6 @@ def desactivar_puntos_busqueda_limite(tienda: str | None = None) -> int:
 
 
 def buscar_chequeo_cercano(lat: float, lng: float, agregador: str, radio_km: float = 0.1, horas_max: int = 24) -> dict | None:
-    """Busca un chequeo real ya hecho (de CUALQUIER tienda) muy cerca de
-    este punto exacto para este agregador -- si existe, se puede reutilizar
-    su resultado en vez de scrapear la misma dirección real otra vez desde
-    otra tienda (zonas de solape entre sucursales vecinas) o en una ronda
-    posterior (8->16->32 ángulos). El radio es deliberadamente pequeño
-    (100m): es "¿ya probamos ESTA calle?", no "¿ya sabemos algo de esta
-    zona?" -- no se puede asumir que toda una zona comparte resultado (la
-    frontera real entre dos tiendas no es el punto medio geométrico,
-    aclarado por el usuario 09/08). Solo cuenta chequeos de las últimas
-    horas_max horas, para no reutilizar datos ya viejos."""
     conn = get_connection()
     desde = (datetime.now(timezone.utc) - timedelta(hours=horas_max)).isoformat()
     filas = conn.execute(
@@ -771,9 +542,6 @@ def buscar_chequeo_cercano(lat: float, lng: float, agregador: str, radio_km: flo
     mejor_distancia = None
     vistas = set()
     for fila in filas:
-        # Ya vienen ordenadas por timestamp desc -- solo el chequeo más
-        # reciente por dirección real (la misma dirección puede tener
-        # muchos chequeos a lo largo de la noche).
         clave = (fila["tienda"], round(fila["lat"], 6), round(fila["lng"], 6))
         if clave in vistas:
             continue
@@ -792,16 +560,6 @@ def buscar_chequeo_cercano(lat: float, lng: float, agregador: str, radio_km: flo
 
 
 def agregar_o_reusar_direccion_otra_tienda(tienda: str, lat: float, lng: float, direccion_text: str | None) -> dict | None:
-    """Como agregar_direccion_manual, pero reutiliza un punto ya existente
-    si hay uno muy cercano (<0.05km) para esta tienda en vez de duplicar.
-
-    Pensado para cuando la búsqueda de límite de OTRA tienda descubre por
-    casualidad un punto disponible que en realidad está más cerca de esta
-    (ver 'contaminado' en buscar_limite_cobertura.py) -- en vez de
-    descartar ese dato, se guarda aquí como punto suelto real de esta
-    tienda. Sin el dedup, la misma zona de solape generaría un punto
-    duplicado cada vez que otra tienda vuelve a pasar por ahí en rondas
-    sucesivas (8->16->32 ángulos, o entre agregadores distintos)."""
     if tienda not in TIENDAS:
         return None
     conn = get_connection()
@@ -818,9 +576,6 @@ def agregar_o_reusar_direccion_otra_tienda(tienda: str, lat: float, lng: float, 
 
 
 def _con_datos_reales(conn, resultado: list[dict], agregador: str) -> set:
-    """IDs de direcciones que ya tienen al menos un chequeo real (sin contar
-    fallos técnicos, que no dicen nada sobre si reparte o no) de este
-    agregador."""
     if not resultado:
         return set()
     ids = [r["id"] for r in resultado]
@@ -836,31 +591,13 @@ def _con_datos_reales(conn, resultado: list[dict], agregador: str) -> set:
 
 
 def _radio_limite(fila) -> float | None:
-    """Mismo criterio que agrRadioDeLimite() en el frontend (agregadores.js):
-    limite_km si existe, si no un número aprovechable del texto de la nota
-    (">= 5.0km", "no disponible incluso a 0.77km"...). Se mantiene igual en
-    los dos sitios a propósito -- si un punto ya "cuenta" como cobertura
-    confirmada aquí, el polígono que ve el usuario en el mapa debe estar de
-    acuerdo, si no parecería que el scraper se salta puntos sin motivo
-    visible."""
-    if fila["limite_km"] is not None:
+    """Devuelve únicamente distancias reales confirmadas de cobertura disponible."""
+    if fila["limite_km"] is not None and fila["limite_km"] > 0:
         return fila["limite_km"]
-    m = re.search(r"(\d+\.?\d*)\s*km", fila["nota"] or "")
-    return float(m.group(1)) if m else None
+    return None
 
 
 def _cobertura_confirmada_por_limite(conn, tienda: str, agregador: str, resultado: list[dict]) -> set:
-    """IDs de direcciones que caen DENTRO del polígono de límite real ya
-    confirmado de este agregador en esta tienda -- no hace falta comprobarlas
-    aunque no tengan chequeo propio: la búsqueda de límite (binaria, por
-    ángulo) ya demuestra que ese punto está en zona de reparto. Cada
-    agregador tiene su propio límite, así que un punto "sin datos" de JustEat
-    con el límite de JustEat ya confirmado ahí puede seguir siendo frontera
-    real para Glovo si el límite de Glovo no ha llegado tan lejos todavía --
-    por eso esto se calcula por agregador, no una vez por tienda (pedido
-    explícito del usuario 10/08, con un caso real: los mismos puntos grises
-    de JustEat, ya dentro de su borde confirmado, seguían siendo frontera
-    real de Glovo con un polígono bastante más pequeño)."""
     info = TIENDAS.get(tienda)
     if not info or not resultado:
         return set()
@@ -877,9 +614,6 @@ def _cobertura_confirmada_por_limite(conn, tienda: str, agregador: str, resultad
         else:
             angulo = fila["angulo_grados"] % 360
         vertices.append((angulo, max(radio, 0.05)))
-    # Con menos de 3 vértices no hay polígono real que cierre -- sin límite
-    # fiable, todo sigue contando como "sin datos" (se prefiere comprobar de
-    # más a asumir cobertura sin base).
     if len(vertices) < 3:
         return set()
     vertices.sort(key=lambda v: v[0])
@@ -908,23 +642,10 @@ def _cobertura_confirmada_por_limite(conn, tienda: str, agregador: str, resultad
 
 
 def _priorizar_sin_datos(conn, resultado: list[dict], agregador: str) -> list[dict]:
-    """Reordena para que las direcciones sin datos reales de este agregador
-    vayan primero (ver _con_datos_reales). Se aplica en CADA tienda por
-    igual -- como el scheduler recorre las 6 tiendas en cada pasada (ver
-    scheduler.py), esto ya prioriza "los puntos sin datos" en conjunto sin
-    tener que tocar el scheduler ni conocer el resto de tiendas: si una
-    pasada se corta a medias (ha pasado de verdad -- ver
-    logs/catchup_20260807_111914_completo.log), lo que sí se llegó a
-    comprobar son los puntos que más falta hacía cubrir, en vez de repetir
-    de nuevo los primeros de la lista."""
     if not resultado:
         return resultado
     con_datos = _con_datos_reales(conn, resultado, agregador)
     sin_datos = [r for r in resultado if r["id"] not in con_datos]
-    # Entre los "sin datos", los añadidos a mano van primero -- si no, se
-    # mezclan sin orden con los cientos de puntos de la búsqueda de límite
-    # también sin datos y pueden tardar pasadas enteras en tocarles el turno
-    # (pedido explícito del usuario 09/08).
     sin_datos.sort(key=lambda r: r.get("origen") != "manual")
     con_datos_lista = [r for r in resultado if r["id"] in con_datos]
     return sin_datos + con_datos_lista
@@ -933,20 +654,6 @@ def _priorizar_sin_datos(conn, resultado: list[dict], agregador: str) -> list[di
 def get_o_crear_direcciones(
     tienda: str, radios_km=None, agregador: str | None = None, solo_sin_datos: bool = False
 ) -> list[dict]:
-    """Genera (si hace falta) y devuelve el grid de puntos de test de una
-    tienda. Determinista: mismos radios/ángulos siempre dan los mismos
-    puntos, así se puede comparar disponibilidad de un punto en el tiempo.
-
-    `agregador`, si se pasa, prioriza al principio de la lista los puntos que
-    ese agregador concreto todavía no ha comprobado nunca de verdad (ver
-    _priorizar_sin_datos) -- el orden base del grid no cambia para nada más.
-
-    `solo_sin_datos=True` (requiere `agregador`) va más allá de solo
-    reordenar: DEVUELVE únicamente esos puntos sin datos, para que el
-    scheduler pueda hacer una pasada previa "solo huecos" cruzando las 6
-    tiendas antes de empezar la pasada completa normal por tienda (ver
-    scheduler.py) -- así el hueco se cubre esté donde esté, no solo dentro de
-    la tienda que le toque primero por orden."""
     if tienda not in TIENDAS:
         return []
     radios_km = radios_km or GRID_RADIOS_KM
@@ -963,9 +670,6 @@ def get_o_crear_direcciones(
                     (tienda, radio, int(angulo)),
                 ).fetchone()
                 if fila:
-                    # Existe pero puede estar eliminado (activo=0) -- no se
-                    # regenera (el hueco sigue "ocupado" por esa fila), solo no
-                    # se devuelve para que el scraper no lo compruebe.
                     if fila["activo"]:
                         resultado.append(dict(fila))
                     continue
@@ -992,10 +696,6 @@ def get_o_crear_direcciones(
                         }
                     )
                 except sqlite3.IntegrityError:
-                    # Los 3 agregadores piden el grid de la tienda en paralelo al
-                    # empezar un chequeo -- si el punto no existía, los tres lo ven
-                    # libre a la vez y solo uno gana la inserción. En vez de fallar
-                    # toda la petición, se recupera la fila que sí se creó.
                     conn.rollback()
                     fila = conn.execute(
                         "SELECT * FROM agregadores_direcciones WHERE tienda=? AND distancia_km=? AND angulo_grados=?",
@@ -1004,8 +704,6 @@ def get_o_crear_direcciones(
                     if fila and fila["activo"]:
                         resultado.append(dict(fila))
 
-        # Puntos añadidos a mano desde el mapa (no encajan en el grid de radios
-        # fijos que se recorrió arriba) -- se incluyen igual si están activos.
         ids_grid = {r["id"] for r in resultado}
         extra = conn.execute(
             "SELECT * FROM agregadores_direcciones WHERE tienda=? AND activo=1", (tienda,)
@@ -1015,9 +713,6 @@ def get_o_crear_direcciones(
                 resultado.append(dict(fila))
 
         if agregador:
-            # Puntos desactivados solo para ESTE agregador (ver
-            # agregadores_direcciones_estado) -- siguen existiendo y
-            # comprobándose para los otros dos, pero aquí no cuentan.
             inactivos = {
                 row["direccion_id"]
                 for row in conn.execute(
@@ -1041,11 +736,6 @@ def get_o_crear_direcciones(
 
 
 def borrar_alertas_excepcion_vacia():
-    """Mantenimiento puntual: borra las alertas "excepción no controlada — "
-    con el mensaje vacío tras el guion (asyncio.TimeoutError y similares no
-    llevan texto) -- quedaron así de un blip de red real del 06/08 antes de
-    que scheduler.py empezara a loguear repr(exc) en vez de str(exc). No
-    toca ninguna otra alerta."""
     conn = get_connection()
     cur = conn.execute(
         "DELETE FROM agregadores_alertas WHERE tipo='scraper_error' AND mensaje LIKE '%excepción no controlada — '"
@@ -1057,12 +747,6 @@ def borrar_alertas_excepcion_vacia():
 
 
 def borrar_chequeos_error_texto():
-    """Mantenimiento puntual: borra los chequeos marcados como fallo técnico
-    (error_texto IS NOT NULL) -- no toca los chequeos con resultado real
-    (disponible/no disponible), solo el ruido de bugs de scraper ya
-    corregidos (p.ej. el selector sin :visible de Uber Eats del 06/08).
-    También borra las alertas scraper_error asociadas, para no dejar
-    alertas huérfanas de chequeos que ya no existen."""
     conn = get_connection()
     cur_chequeos = conn.execute("DELETE FROM agregadores_chequeos WHERE error_texto IS NOT NULL")
     cur_alertas = conn.execute("DELETE FROM agregadores_alertas WHERE tipo='scraper_error'")
@@ -1073,13 +757,6 @@ def borrar_chequeos_error_texto():
 
 
 def resetear_estadisticas():
-    """Borra todo el historial de chequeos y alertas de los 3 agregadores
-    (las 6 tiendas) -- deja los puntos del grid (agregadores_direcciones)
-    intactos, solo limpia el histórico de resultados. Uso puntual: varios
-    bugs de lectura (Glovo marcaba "cerrado" mirando toda la página, JustEat
-    recibía coordenadas en bruto, timeouts demasiado cortos) contaminaron el
-    historial de hoy antes de arreglarse -- sin esto, las estadísticas
-    tardarían días en "diluir" los datos incorrectos ya guardados."""
     conn = get_connection()
     cur_chequeos = conn.execute("DELETE FROM agregadores_chequeos")
     cur_alertas = conn.execute("DELETE FROM agregadores_alertas")
@@ -1090,10 +767,6 @@ def resetear_estadisticas():
 
 
 def resetear_estadisticas_hoy():
-    """Como resetear_estadisticas() pero solo borra el día de hoy (hora de
-    Madrid), conservando días anteriores intactos para no perder histórico de
-    los reportes semanales. El corte usa el inicio del día en Europe/Madrid
-    convertido a UTC, porque los timestamps se guardan en UTC."""
     inicio_hoy_madrid = datetime.now(ZoneInfo("Europe/Madrid")).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
@@ -1113,12 +786,6 @@ def resetear_estadisticas_hoy():
 
 
 def guardar_chequeo(data: dict) -> int:
-    """`data` es el JSON que manda el scraper: tienda, agregador,
-    direccion_id, disponible, tiempo_entrega_min, mensaje_bloqueo,
-    error_texto. `timestamp` es opcional (por defecto ahora). Devuelve el id
-    insertado -- lo necesita el scraper para poder subir una captura ligada
-    a este chequeo concreto si resulta ser una transición (ver
-    hubo_transicion_a_no_disponible)."""
     conn = get_connection()
     cur = conn.execute(
         """INSERT INTO agregadores_chequeos
@@ -1144,11 +811,6 @@ def guardar_chequeo(data: dict) -> int:
 
 
 def hubo_transicion_a_no_disponible(direccion_id: int | None, agregador: str) -> bool:
-    """True si el chequeo anterior (real, sin error) de este punto+agregador
-    estaba disponible -- es decir, este chequeo es el momento exacto en que
-    un punto que sí repartía dejó de hacerlo. Se consulta ANTES de insertar
-    el chequeo actual, así que "el anterior" es simplemente el último que ya
-    existe en la tabla."""
     if direccion_id is None:
         return False
     conn = get_connection()
@@ -1192,12 +854,6 @@ CAPTURAS_DIAS_A_CONSERVAR = 3
 
 
 def limpiar_capturas_viejas() -> int:
-    """Borra los ARCHIVOS de captura de más de CAPTURAS_DIAS_A_CONSERVAR días
-    (no la fila del chequeo ni el resto de sus datos -- get_ruta_captura ya
-    devuelve None si el archivo no existe, así que "Ver captura" simplemente
-    deja de ofrecerse para esos chequeos viejos). Pensado para correr
-    periódicamente (ver start_scheduler_limpieza) y no dejar crecer sin
-    límite el volumen de uploads."""
     if not os.path.isdir(CAPTURAS_DIR):
         return 0
     limite = time.time() - CAPTURAS_DIAS_A_CONSERVAR * 86400
@@ -1229,9 +885,6 @@ def _tamano_dir(ruta: str) -> dict:
 
 
 def info_almacenamiento() -> dict:
-    """Diagnóstico del volumen entero (no solo agregadores) -- para saber de
-    verdad qué se está comiendo el espacio antes de borrar nada a ciegas.
-    Todas las carpetas de subida del backend viven bajo el mismo DATA_DIR."""
     from db import DB_PATH
 
     carpetas = {
@@ -1251,9 +904,6 @@ def info_almacenamiento() -> dict:
 
 
 def info_capturas() -> dict:
-    """Diagnóstico: cuántos archivos hay en CAPTURAS_DIR y cuánto pesan en
-    total, para saber si de verdad son las capturas las que se están comiendo
-    el volumen antes de decidir qué tan agresivo ser limpiando."""
     if not os.path.isdir(CAPTURAS_DIR):
         return {"archivos": 0, "bytes_total": 0}
     total = 0
@@ -1270,13 +920,6 @@ def info_capturas() -> dict:
 
 
 def limpiar_capturas_direcciones_inactivas() -> dict:
-    """Borra los ARCHIVOS de captura (no filas ni datos) de chequeos ligados a
-    direcciones ya desactivadas (activo=0) -- los puntos inválidos que la
-    búsqueda de límite de cobertura descarta sobre la marcha. Esos puntos ni
-    siquiera se ven ya en el mapa, así que sus capturas no aportan nada, pero
-    sí ocupan espacio real en el volumen (confirmado 08/08: la búsqueda de
-    límite sube una captura por cada chequeo, y generó cientos en una sola
-    tarde -- llevó el volumen cerca del límite de Railway)."""
     if not os.path.isdir(CAPTURAS_DIR):
         return {"borrados": 0, "bytes_liberados": 0}
     conn = get_connection()
@@ -1304,8 +947,6 @@ _limpieza_capturas_iniciada = False
 
 
 def start_scheduler_limpieza_capturas():
-    """Hilo en segundo plano (mismo patrón que backups.start_scheduler) que
-    borra capturas de más de 3 días una vez al día."""
     global _limpieza_capturas_iniciada
     if _limpieza_capturas_iniciada:
         return
@@ -1325,10 +966,6 @@ def start_scheduler_limpieza_capturas():
 
 
 def eliminar_chequeo(chequeo_id: int) -> bool:
-    """Borra un chequeo puntual y su captura si tiene -- para corregir un
-    dato confirmado como erróneo (p.ej. el bug de coordenadas en bruto que
-    comprobó una dirección distinta a la real, ver main.py del scraper), no
-    para limpiar en bloque. Uso puntual vía /admin/chequeo/{id}."""
     conn = get_connection()
     fila = conn.execute(
         "SELECT url_captura FROM agregadores_chequeos WHERE id=?", (chequeo_id,)
@@ -1348,15 +985,11 @@ def eliminar_chequeo(chequeo_id: int) -> bool:
 
 
 def get_transiciones(tienda: str | None, horas: int = 24):
-    """Puntos que aparecían disponibles y, en el chequeo siguiente (real, sin
-    error), dejaron de estarlo. Amplía el resultado con timestamp del cambio,
-    duración en disponible, y detalles de por qué se bloqueó."""
     desde = (datetime.now(timezone.utc) - timedelta(hours=horas)).isoformat()
     conn = get_connection()
     condicion_tienda = "AND c.tienda=?" if tienda else ""
     params = (tienda, desde) if tienda else (desde,)
 
-    # Consulta principal: detecta transiciones DD→DND
     filas = conn.execute(
         f"""
         WITH chequeos_ordenados AS (
@@ -1385,17 +1018,14 @@ def get_transiciones(tienda: str | None, horas: int = 24):
         params,
     ).fetchall()
 
-    # Post-procesamiento: calcula duración en disponible y nombre de tienda
     resultado = []
     for fila in filas:
         fila_dict = dict(fila)
-        # Calcula cuánto tiempo estuvo disponible (desde timestamp_anterior hasta timestamp)
         if fila_dict["timestamp_anterior"]:
             try:
                 ts_ant = datetime.fromisoformat(fila_dict["timestamp_anterior"])
                 ts_act = datetime.fromisoformat(fila_dict["timestamp"])
                 duracion = ts_act - ts_ant
-                # Expresa como "X min" o "X h Y min"
                 total_seg = int(duracion.total_seconds())
                 horas, resto = divmod(total_seg, 3600)
                 minutos = resto // 60
@@ -1408,12 +1038,7 @@ def get_transiciones(tienda: str | None, horas: int = 24):
         else:
             fila_dict["duracion_disponible"] = None
 
-        # Nombre de la tienda desde TIENDAS
         fila_dict["nombre_tienda"] = TIENDAS.get(fila_dict["tienda"], {}).get("nombre", fila_dict["tienda"])
-
-        # timestamp_anterior se deja tal cual (hora de la última vez que se
-        # vio disponible) -- el frontend lo muestra junto a "timestamp" (hora
-        # en que se detectó que ya no lo estaba), no solo la duración.
         resultado.append(fila_dict)
 
     conn.close()
@@ -1421,9 +1046,6 @@ def get_transiciones(tienda: str | None, horas: int = 24):
 
 
 def get_cobertura_mapa(tienda: str | None = None, agregador: str | None = None):
-    """Obtiene último estado conocido de cada dirección para dibujar mapas
-    de cobertura. Devuelve puntos verdes (disponible) y amarillos (no disponible).
-    Útil para polígono convex de cobertura real."""
     conn = get_connection()
     condicion_tienda = "AND c.tienda=?" if tienda else ""
     condicion_agregador = "AND c.agregador=?" if agregador else ""
@@ -1433,7 +1055,6 @@ def get_cobertura_mapa(tienda: str | None = None, agregador: str | None = None):
     if agregador:
         params.append(agregador)
 
-    # Últimos chequeos (sin error) de cada punto
     filas = conn.execute(
         f"""
         WITH ultimo_por_punto AS (
@@ -1470,18 +1091,6 @@ def registrar_alerta(tipo: str, mensaje: str, tienda: str = None, agregador: str
 
 def iniciar_sesion(modo: str, total_planeado: int | None = None) -> int:
     conn = get_connection()
-    # Si el proceso del daemon se mató a media pasada (crash, reinicio manual,
-    # el kill de la tarea programada de las 22:00 pillando algo a medias...)
-    # esa sesión se queda "en_curso" para siempre -- nadie llama a
-    # cerrar_sesion. get_estado() la sigue viendo como "la última sesión" y
-    # cuenta TODOS los chequeos guardados desde su fecha_inicio como
-    # progreso, mezclando pasadas de reinicios distintos en un solo número
-    # disparatado (confirmado en vivo 10/08: "1944" sin total, acumulado de
-    # varias pasadas ya muertas). Con max_instances=1 en el scheduler nunca
-    # debería haber dos sesiones "en_curso" del mismo modo a la vez, así que
-    # cualquiera que quede así al empezar una nueva es, por definición, una
-    # huérfana de un proceso anterior -- se cierra aquí antes de abrir la
-    # siguiente.
     conn.execute(
         """UPDATE agregadores_sesiones SET fecha_fin=?, estado='interrumpido'
            WHERE modo=? AND fecha_fin IS NULL""",
@@ -1499,10 +1108,6 @@ def iniciar_sesion(modo: str, total_planeado: int | None = None) -> int:
 
 
 def cerrar_sesiones_huerfanas() -> int:
-    """Mantenimiento puntual: cierra cualquier sesión que haya quedado
-    'en_curso' sin fecha_fin (ver el comentario en iniciar_sesion -- ahora
-    esto se evita solo hacia adelante, pero no arregla lo que ya estaba
-    huérfano en la BD antes de ese fix)."""
     conn = get_connection()
     cur = conn.execute(
         """UPDATE agregadores_sesiones SET fecha_fin=?, estado='interrumpido'
@@ -1549,9 +1154,6 @@ def get_mapa_datos(tienda: str):
         "SELECT * FROM agregadores_direcciones WHERE tienda=? AND activo=1", (tienda,)
     ).fetchall()
 
-    # Desactivaciones por agregador (ver agregadores_direcciones_estado) de
-    # TODAS las direcciones de esta tienda en una sola consulta, en vez de una
-    # por punto -- el mapa puede tener cientos de puntos.
     inactivos_por_direccion: dict[int, list[str]] = {}
     if direcciones:
         ids = [d["id"] for d in direcciones]
@@ -1621,9 +1223,6 @@ def get_mapa_datos(tienda: str):
 
 
 def get_mapa_datos_todas():
-    """Igual que get_mapa_datos pero de las 6 tiendas a la vez, para la
-    vista "Todas" del mapa -- cada dirección lleva su slug de tienda para
-    poder identificar de cuál es en el popup."""
     tiendas = []
     direcciones = []
     for slug in TIENDAS:
@@ -1654,19 +1253,6 @@ def get_alertas(tienda: str = None, horas: int = 24):
 
 
 def get_reporte(tienda: str | None, desde: datetime, hasta: datetime, resets: dict[str, str] | None = None):
-    """tienda=None agrega las 6 tiendas juntas (vista "Todas").
-
-    Los tres porcentajes (disponible/no_disponible/error) se calculan sobre
-    el MISMO total de intentos -- suman 100%, para que no haya ambigüedad
-    sobre a qué total se refiere cada uno (antes "disponibilidad_pct" se
-    calculaba solo sobre los intentos validos, distinto del total de la
-    tarjeta de al lado, lo que confundía más que aclaraba).
-
-    `resets` (opcional): {agregador: iso_timestamp} -- para ese agregador,
-    ignora los chequeos anteriores al timestamp al calcular sus %. Es un
-    filtro de lectura nada más (no borra ni modifica filas) para poder ver
-    "cómo va desde que reinicié el contador" sin que los fallos de antes de
-    un fix sigan contaminando el % del día."""
     conn = get_connection()
     if tienda:
         filas = conn.execute(
@@ -1719,9 +1305,6 @@ def get_reporte(tienda: str | None, desde: datetime, hasta: datetime, resets: di
 
 
 def es_horario_apertura(ahora: datetime = None) -> bool:
-    # datetime.now() sin zona da la hora del sistema del servidor -- en
-    # Railway corre en UTC, así que a las 10:05 de Madrid (CEST, UTC+2)
-    # marcaba "fuera de horario" porque para el servidor eran las 08:05.
     ahora = ahora or datetime.now(MADRID_TZ)
     return any(r["inicio"] <= ahora.hour < r["fin"] for r in HORARIOS_APERTURA)
 
@@ -1752,12 +1335,6 @@ def get_estado():
         margen = frecuencia_min * 3
         retrasado = es_horario_apertura() and minutos_desde > margen
 
-        # Progreso en vivo: solo tiene sentido con la sesión todavía abierta
-        # (fecha_fin IS NULL). "hechos" se cuenta directamente de los
-        # chequeos ya guardados desde que empezó -- cada chequeo individual
-        # los va insertando en tiempo real (ver main.chequear_tienda), así
-        # que no hace falta que el scheduler reporte progreso aparte, solo
-        # el total planeado al principio (ver iniciar_sesion).
         en_curso = fila["fecha_fin"] is None
         hechos = None
         if en_curso:
