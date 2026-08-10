@@ -647,6 +647,24 @@ def guardar_limite(
     }
 
 
+def mover_limite(tienda: str, agregador: str, angulo_grados: float, lat: float, lng: float) -> dict | None:
+    """Reajusta a mano un vértice de límite ya guardado, arrastrándolo en el
+    mapa -- recalcula limite_km (distancia real al nuevo punto) y limpia la
+    nota/dirección vieja (direccion_text vuelve a None; el frontend ya hace
+    reverse geocoding perezoso al abrir el popup si falta, ver
+    agrDibujarPoligonoLimite). No cambia angulo_grados -- se sigue tratando
+    como el mismo vértice, solo con una posición corregida a mano (pedido
+    explícito del usuario 10/08: "no quiero quitarlos quiero moverlos")."""
+    if tienda not in TIENDAS:
+        return None
+    info = TIENDAS[tienda]
+    limite_km, _ = _distancia_y_angulo(info["lat"], info["lng"], lat, lng)
+    return guardar_limite(
+        tienda, agregador, angulo_grados, round(limite_km, 3), "ajustado a mano en el mapa",
+        lat=lat, lng=lng, direccion_text=None,
+    )
+
+
 def eliminar_limite(tienda: str, agregador: str, angulo_grados: float) -> bool:
     """Borra un vértice de límite guardado (no baja lógica -- a diferencia
     de agregadores_direcciones, aquí no hay riesgo de que se regenere solo:

@@ -199,6 +199,22 @@ function agrIconoDireccion(dir) {
   });
 }
 
+function agrIconoVerticePoligono(colorBorde, colorRelleno, diametroPx, punteado, opacidadRelleno) {
+  // Vértice del polígono (límite real o "extra") como L.marker arrastrable
+  // -- antes eran L.circleMarker, que en Leaflet NO se puede arrastrar
+  // (draggable solo existe en L.marker). Se replica el mismo look con un
+  // divIcon: circulo con borde de color, mismo tamaño/estilo que antes
+  // (pedido explícito del usuario 10/08: "no quiero quitarlos quiero
+  // moverlos para ajustar el polígono").
+  const estiloBorde = punteado ? "dashed" : "solid";
+  return L.divIcon({
+    className: "agr-marker-vertice",
+    html: `<span style="display:block;width:${diametroPx}px;height:${diametroPx}px;border-radius:50%;background:${colorRelleno};opacity:${opacidadRelleno};border:2px ${estiloBorde} ${colorBorde};box-sizing:border-box;"></span>`,
+    iconSize: [diametroPx, diametroPx],
+    iconAnchor: [diametroPx / 2, diametroPx / 2],
+  });
+}
+
 function agrIconoTienda(tienda) {
   // Parquesur ya lleva el letrero "Hot Now" (donuts recién hechos) en la
   // tienda real -- de ahí el icono especial en negro para ese centro.
@@ -292,6 +308,49 @@ async function agrVerificarManual(direccionId, agregador, disponible) {
     if (marker && marker.isPopupOpen()) marker.closePopup();
   } catch (e) {
     alert("No se pudo guardar la verificación manual. Inténtalo de nuevo.");
+  }
+}
+
+async function agrMoverVerticeLimite(tienda, agregador, anguloGrados, lat, lng) {
+  // Arrastrar un vértice negro (agregadores_limites) -- recalcula el límite
+  // desde la nueva posición, en vez de solo poder borrarlo (pedido
+  // explícito del usuario 10/08: "no quiero quitarlos quiero moverlos").
+  try {
+    const url = `${AGR_API}/limites/${tienda}?${new URLSearchParams({ agregador, angulo_grados: anguloGrados })}`;
+    const res = await agrFetchConTimeout(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lat, lng }),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("No se pudo mover el vértice");
+    agrActualizarPoligonoLimite();
+  } catch (e) {
+    alert("No se pudo mover el vértice del borde. Inténtalo de nuevo.");
+    agrActualizarPoligonoLimite(); // vuelve a la posición guardada de verdad
+  }
+}
+
+async function agrMoverVerticeDireccion(dir, lat, lng) {
+  // Arrastrar un vértice blanco (una dirección real, extendida/recortada
+  // por puntosLejanos/Cercanos) -- reubica el punto de verdad, mismo
+  // endpoint que el drag normal de un dot del mapa.
+  try {
+    const res = await agrFetchConTimeout(`${AGR_API}/direcciones/${dir.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lat, lng }),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("No se pudo mover el punto");
+    const actualizado = await res.json();
+    dir.lat = actualizado.lat;
+    dir.lng = actualizado.lng;
+    dir.direccion_text = actualizado.direccion_text;
+    agrActualizarPoligonoLimite();
+  } catch (e) {
+    alert("No se pudo mover el punto. Inténtalo de nuevo.");
+    agrActualizarPoligonoLimite();
   }
 }
 
@@ -1633,26 +1692,42 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
   // del usuario 10/08, modo agresivo elegido a propósito: mejor un mapa
   // "lleno" con inferencia razonable que uno lleno de agujeros sin probar).
   // Nunca sube un tramo que toque un no_disponible real -- ese sí es tope.
+  // v1 de esto solo trataba como "rellenable" un vértice sin limite_km real
+  // (solo estimación de la nota) -- pero en la práctica casi todos los
+  // vértices de agregadores_limites SÍ tienen limite_km (venían de una
+  // búsqueda binaria real), así que casi nada calificaba como "sin
+  // confirmar" y el relleno no se veía (confirmado en vivo 10/08: "vertices
+  // totales: 69 | limites guardados: 31" -- se insertaron 38 vértices
+  // nuevos por puntosLejanos/Cercanos y aun así el relleno seguía sin
+  // disparar). En modo agresivo lo que de verdad importa no es si ESE
+  // vértice concreto tiene un número guardado, sino si hay una prueba
+  // DIRECTA de que ahí no reparte (un chequeo real no_disponible,
+  // puntosCercanos) -- eso es el único tope de verdad. Cualquier otro
+  // vértice (con limite_km real pero corto, con solo una estimación, o sin
+  // dato) se puede subir si queda flanqueado por vértices sin ese tope.
   const totalVert = ordenados.length;
   for (let i = 0; i < totalVert; i++) {
-    if (ordenados[i].confirmado) continue;
+    if (ordenados[i].esNoDisponible) continue; // esto SÍ es un tope real, nunca se toca
     let j = i;
-    while (j < i + totalVert && !ordenados[j % totalVert].confirmado) j++;
-    if (j >= i + totalVert) break; // ningún vértice confirmado en todo el polígono, nada de donde tirar
-    const antes = ordenados[(i - 1 + totalVert) % totalVert];
-    const despues = ordenados[j % totalVert];
-    if (antes.confirmado && !antes.esNoDisponible && !despues.esNoDisponible) {
-      const radioRelleno = Math.min(antes.radio, despues.radio);
-      for (let k = i; k < j; k++) {
-        const v = ordenados[k % totalVert];
-        if (radioRelleno > v.radio) {
-          v.radio = radioRelleno;
-          v.latlng = agrMoverPunto(centro.lat, centro.lng, v.bearingReal, v.radio);
-          v.local = agrProyeccionLocal(centro, v.latlng);
-          v.rellenoAgresivo = true;
-        }
-      }
+    while (j < i + totalVert && !ordenados[j % totalVert].esNoDisponible) j++;
+    if (j >= i + totalVert) {
+      // Ningún no_disponible real en todo el polígono -- el tramo es TODO
+      // el círculo. Se rellena igual, tomando como referencia el máximo
+      // radio ya conocido en él (mejor eso que dejarlo intacto).
+      j = i + totalVert;
     }
+    const tramo = [];
+    for (let k = i; k < j; k++) tramo.push(ordenados[k % totalVert]);
+    const radioRelleno = Math.max(...tramo.map((v) => v.radio));
+    tramo.forEach((v) => {
+      if (radioRelleno > v.radio) {
+        v.radio = radioRelleno;
+        v.latlng = agrMoverPunto(centro.lat, centro.lng, v.bearingReal, v.radio);
+        v.local = agrProyeccionLocal(centro, v.latlng);
+        v.rellenoAgresivo = true;
+      }
+    });
+    i = j - 1;
     i = j - 1; // el tramo ya se proceso entero, saltar al siguiente confirmado
   }
 
@@ -1696,19 +1771,20 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
       // Los rellenados agresivamente se marcan con un borde punteado en vez
       // de sólido -- de un vistazo, cuál es dato real y cuál es inferencia
       // (pedido explícito del usuario 10/08: poder "estilizar" el borde).
-      const marker = L.circleMarker(latlng, {
-        radius: punto.rellenoAgresivo ? 4 : 6,
-        color: "#1a1a1a",
-        weight: 1.5,
-        dashArray: punto.rellenoAgresivo ? "2 2" : null,
-        fillColor: color,
-        fillOpacity: punto.rellenoAgresivo ? 0.55 : 1,
+      const marker = L.marker(latlng, {
+        icon: agrIconoVerticePoligono("#1a1a1a", color, punto.rellenoAgresivo ? 8 : 12, !!punto.rellenoAgresivo, punto.rellenoAgresivo ? 0.55 : 1),
+        draggable: true,
       })
         .bindPopup(
           `<b>${AGR_NOMBRE_AGREGADOR[limite.agregador] || limite.agregador}</b><br>Ángulo: ${limite.angulo_grados}°<br>Límite: ${etiqueta}<br>Dirección: <span class="agr-poligono-dir">${direccionMostrar || "cargando..."}</span><br>` +
+            `<i style="color:var(--text-muted);font-size:11px;">Arrastra para ajustar el borde</i><br>` +
             `<button type="button" class="btn btn-ghost" style="margin-top:6px;font-size:12px;padding:3px 8px;" onclick="agrEliminarLimite('${limite.tienda}', '${limite.agregador}', ${limite.angulo_grados})">🗑️ Quitar este vértice del borde</button>`
         )
         .addTo(agrMap);
+      marker.on("dragend", (e) => {
+        const { lat, lng } = e.target.getLatLng();
+        agrMoverVerticeLimite(limite.tienda, limite.agregador, limite.angulo_grados, lat, lng);
+      });
       // Filas nuevas ya traen la dirección real que se probó de verdad
       // (guardada por buscar_limite_cobertura.py), y los vértices extendidos
       // ya traen la del punto del grid que los extendió -- filas viejas sin
@@ -1735,19 +1811,27 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
       // Vértice extra: punto del grid normal, más lejos (disponible,
       // puntosLejanos) o más cerca (no disponible, puntosCercanos) de lo que
       // el muestreo por ángulos alcanzó -- la dirección ya se conoce (no
-      // hace falta reverse geocoding).
+      // hace falta reverse geocoding). Este SÍ es una dirección real
+      // (punto.dir.id), así que arrastrarlo reubica el punto de verdad, con
+      // el mismo endpoint que usa el drag normal de un dot.
       const esCercano = (punto.dir.detalle || {})[agregador]?.estado === "no_disponible";
-      const marker = L.circleMarker(latlng, {
-        radius: 6, color: "#ffffff", weight: 2, fillColor: esCercano ? "#d03b3b" : color, fillOpacity: 1,
+      const marker = L.marker(latlng, {
+        icon: agrIconoVerticePoligono("#ffffff", esCercano ? "#d03b3b" : color, punto.rellenoAgresivo ? 8 : 12, !!punto.rellenoAgresivo, punto.rellenoAgresivo ? 0.55 : 1),
+        draggable: true,
       })
         .bindPopup(
           `<b>${AGR_NOMBRE_AGREGADOR[agregador] || agregador}</b><br>` +
             (esCercano
               ? `Punto ya NO disponible, más cerca de lo muestreado por ángulo`
               : `Punto ya disponible, más lejos de lo muestreado por ángulo`) +
-            `<br>Distancia: ${punto.radio.toFixed(2)}km<br>Dirección: ${punto.dir.direccion_text || "?"}`
+            `<br>Distancia: ${punto.radio.toFixed(2)}km<br>Dirección: ${punto.dir.direccion_text || "?"}<br>` +
+            `<i style="color:var(--text-muted);font-size:11px;">Arrastra para reubicar este punto</i>`
         )
         .addTo(agrMap);
+      marker.on("dragend", (e) => {
+        const { lat, lng } = e.target.getLatLng();
+        agrMoverVerticeDireccion(punto.dir, lat, lng);
+      });
       agrPoligonoLayers.push(marker);
     }
   });

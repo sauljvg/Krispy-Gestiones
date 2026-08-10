@@ -529,6 +529,28 @@ def eliminar_limite_route(
     return {"ok": True}
 
 
+class LimiteMoverIn(BaseModel):
+    lat: float
+    lng: float
+
+
+@router.put("/limites/{tienda}")
+def mover_limite_route(
+    tienda: str,
+    agregador: str,
+    angulo_grados: float,
+    body: LimiteMoverIn,
+    _user: dict = Depends(require_agregadores),
+):
+    """Arrastrar un vértice del borde para ajustarlo a mano, en vez de solo
+    poder borrarlo -- recalcula el límite (distancia real) desde la nueva
+    posición (pedido explícito del usuario 10/08)."""
+    resultado = agregadores_module.mover_limite(tienda, agregador, angulo_grados, body.lat, body.lng)
+    if resultado is None:
+        raise HTTPException(status_code=400, detail="Tienda no reconocida")
+    return resultado
+
+
 @router.post("/admin/direcciones/desactivar-busqueda-limite", dependencies=[Depends(require_api_key)])
 def admin_desactivar_busqueda_limite_route(tienda: str | None = None):
     """Al terminar la campaña de ángulos de una tienda (o de todas), apaga
