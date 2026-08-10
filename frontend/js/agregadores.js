@@ -572,9 +572,15 @@ function agrWireFiltroAgregador() {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".agr-filtro-btn").forEach((b) => b.classList.remove("activo"));
       btn.classList.add("activo");
-      agrFiltroAgregador = btn.dataset.agregador || null;
+      const nuevoFiltro = btn.dataset.agregador || null;
+      // Solo se resetea al cruzar la frontera "Todos" <-> un agregador
+      // concreto (esos sí usan categorías distintas, ver AGR_LEYENDA_*).
+      // Entre JustEat/Glovo/Uber Eats las categorías son las mismas
+      // (disponible/no_disponible/error/sin_datos), así que mantener oculto
+      // lo mismo sigue teniendo sentido (pedido explícito del usuario 10/08).
+      if (!agrFiltroAgregador !== !nuevoFiltro) agrEstadosOcultos.clear();
+      agrFiltroAgregador = nuevoFiltro;
       localStorage.setItem(AGR_FILTRO_AGREGADOR_KEY, agrFiltroAgregador || "");
-      agrEstadosOcultos.clear(); // las categorías cambian de significado al cambiar de filtro
       agrActualizarLeyenda();
       agrActualizarMarcadores();
       agrRecalcularContador();
@@ -766,7 +772,7 @@ function agrRenderMapaTodas(data, ajustarVista = true) {
   agrCentrosPorTienda = {};
   tiendas.forEach((t) => { agrCentrosPorTienda[t.tienda] = t; });
   agrDireccionesPorTienda = {};
-  direcciones.forEach((d) => { (agrDireccionesPorTienda[d.tienda] ||= []).push(d); });
+  direcciones.forEach((d) => { (agrDireccionesPorTienda[d._tiendaVisual || d.tienda] ||= []).push(d); });
 
   const lat0 = tiendas.reduce((s, t) => s + t.lat, 0) / tiendas.length;
   const lng0 = tiendas.reduce((s, t) => s + t.lng, 0) / tiendas.length;
@@ -888,10 +894,31 @@ async function agrCargarMapa() {
   // "todas").
   const res = await fetch(`${AGR_API}/mapa-datos-todas`, { credentials: "include" });
   const data = await res.json();
+
+  // Un punto guardado con tienda=X en la BD puede en realidad estar pegado a
+  // OTRA sucursal (grids solapados en zonas densas, ej. Princesa/Caleido o
+  // La Gavia/Plenilunio) -- para agrupar/filtrar en el mapa se usa la tienda
+  // REALMENTE más cercana (entre las 6, no solo las seleccionadas), no el
+  // campo `tienda` de la fila. No se toca `d.tienda` en sí (lo usan las
+  // llamadas al backend -- borrar, mover, chequeo manual -- que deben seguir
+  // apuntando a la fila real de la BD), solo esta agrupación visual.
+  const centrosTodos = {};
+  (data.tiendas || []).forEach((t) => { centrosTodos[t.tienda] = t; });
+  (data.direcciones || []).forEach((d) => {
+    d._tiendaVisual = d.tienda;
+    if (d.lat == null || d.lng == null) return;
+    let mejor = d.tienda, mejorDist = Infinity;
+    Object.entries(centrosTodos).forEach(([slug, c]) => {
+      const dist = agrDistanciaKm(c.lat, c.lng, d.lat, d.lng);
+      if (dist < mejorDist) { mejorDist = dist; mejor = slug; }
+    });
+    d._tiendaVisual = mejor;
+  });
+
   const seleccion = agrMapaTiendasSeleccionadas;
   const filtrado = {
     tiendas: (data.tiendas || []).filter((t) => seleccion.has(t.tienda)),
-    direcciones: (data.direcciones || []).filter((d) => seleccion.has(d.tienda)),
+    direcciones: (data.direcciones || []).filter((d) => seleccion.has(d._tiendaVisual)),
   };
   // El refresco automático (cada 30s) llama a agrCargarMapa() con la MISMA
   // selección de tiendas de siempre -- solo se reencuadra el mapa si esa
