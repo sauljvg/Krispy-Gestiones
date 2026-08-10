@@ -69,8 +69,8 @@ class LoginPinBody(BaseModel):
 def check_username_route(body: CheckUsernameBody):
     user = auth_module.get_user_by_username(body.username.strip())
     if user is None:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    return {"tiene_pin": user["pin"] is not None}
+        return {"existe": False, "tiene_pin": False}
+    return {"existe": True, "tiene_pin": user["pin"] is not None}
 
 
 @router.post("/set-pin")
