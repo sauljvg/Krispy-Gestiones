@@ -127,6 +127,14 @@ def ensure_tables():
     cols_chequeos = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_chequeos)")}
     if "url_captura" not in cols_chequeos:
         conn.execute("ALTER TABLE agregadores_chequeos ADD COLUMN url_captura TEXT")
+    # verificado_por: nombre del usuario cuando el chequeo lo puso a mano
+    # desde el dashboard (ver guardar_chequeo_manual) en vez del scraper --
+    # NULL para los del scraper. Sirve para distinguir en el popup del mapa
+    # un dato confirmado en vivo por una persona de uno automático (pedido
+    # explícito del usuario 10/08: quiere poder priorizar y confirmar puntos
+    # concretos a mano, sin esperar al scraper).
+    if "verificado_por" not in cols_chequeos:
+        conn.execute("ALTER TABLE agregadores_chequeos ADD COLUMN verificado_por TEXT")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS agregadores_alertas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1068,8 +1076,8 @@ def guardar_chequeo(data: dict) -> int:
     cur = conn.execute(
         """INSERT INTO agregadores_chequeos
            (tienda, agregador, direccion_id, timestamp, disponible, tiempo_entrega_min,
-            mensaje_bloqueo, error_texto)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            mensaje_bloqueo, error_texto, verificado_por)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             data["tienda"],
             data["agregador"],
@@ -1079,6 +1087,7 @@ def guardar_chequeo(data: dict) -> int:
             data.get("tiempo_entrega_min"),
             data.get("mensaje_bloqueo"),
             data.get("error_texto"),
+            data.get("verificado_por"),
         ),
     )
     conn.commit()
@@ -1521,6 +1530,7 @@ def get_mapa_datos(tienda: str):
                 "disponible": bool(c["disponible"]),
                 "tiempo_entrega_min": c["tiempo_entrega_min"],
                 "timestamp": c["timestamp"],
+                "verificado_por": c["verificado_por"],
             }
 
         resultado.append(

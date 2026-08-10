@@ -43,6 +43,13 @@ class ChequeoIn(BaseModel):
     timestamp: str | None = None
 
 
+class ChequeoManualIn(BaseModel):
+    tienda: str
+    agregador: str
+    direccion_id: int
+    disponible: bool
+
+
 class SesionIniciarIn(BaseModel):
     modo: str
     total_planeado: int | None = None
@@ -174,6 +181,33 @@ def eliminar_chequeo_route(chequeo_id: int, _user: dict = Depends(require_agrega
     if not agregadores_module.eliminar_chequeo(chequeo_id):
         raise HTTPException(status_code=404, detail="Chequeo no encontrado")
     return {"ok": True}
+
+
+@router.post("/chequeo-manual")
+def crear_chequeo_manual_route(body: ChequeoManualIn, user: dict = Depends(require_agregadores)):
+    """Como POST /chequeo (el que usa el scraper) pero con sesión de usuario
+    en vez de API key, sin campos de scraper (tiempo/mensaje/error) -- para
+    que el propio usuario pueda confirmar a mano, desde el dashboard, el
+    estado de un punto en un agregador concreto (pedido explícito del
+    usuario 10/08: quiere poder priorizar y verificar puntos puntuales sin
+    esperar al scraper). Reusa exactamente la misma lógica de alertas de
+    transición que el chequeo del scraper -- un "dejó de estar disponible"
+    confirmado a mano es tan real como uno automático."""
+    transicion = agregadores_module.hubo_transicion_a_no_disponible(body.direccion_id, body.agregador)
+    verificado_por = user.get("nombre") or user["username"]
+    chequeo_id = agregadores_module.guardar_chequeo(
+        {**body.model_dump(), "verificado_por": verificado_por}
+    )
+    if transicion:
+        agregadores_module.registrar_alerta(
+            tipo="paso_a_no_disponible",
+            mensaje=agregadores_module.formatear_alerta_transicion(
+                body.agregador, body.tienda, body.direccion_id, f"verificado a mano por {verificado_por}"
+            ),
+            tienda=body.tienda,
+            agregador=body.agregador,
+        )
+    return {"ok": True, "chequeo_id": chequeo_id, "transicion": transicion}
 
 
 @router.get("/transiciones")

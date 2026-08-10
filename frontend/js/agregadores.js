@@ -212,15 +212,63 @@ function agrPopupDireccion(dir, editable) {
       const hora = info.timestamp
         ? ` <span style="color:var(--text-muted);font-size:11px;">(${new Date(info.timestamp).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" })})</span>`
         : "";
-      return `${icono} ${nombreMostrar}${tiempo}${nota}${hora}`;
+      const manual = info.verificado_por
+        ? ` <span style="color:var(--text-muted);font-size:11px;">(👤 ${info.verificado_por})</span>`
+        : "";
+      return `${icono} ${nombreMostrar}${tiempo}${nota}${hora}${manual}`;
     })
     .join("<br>");
   const tiendaLinea = dir.tienda_nombre ? `<b>${dir.tienda_nombre}</b><br>` : "";
+  // Botones de verificación manual: solo tienen sentido con UN agregador
+  // filtrado (JustEat/Glovo/Uber Eats) -- si seleccionas ese agregador es
+  // justamente porque vas a confirmar tú mismo el estado de sus puntos, no
+  // tendría sentido escribir "disponible" a la vez en los 3 agregadores de
+  // golpe con un solo clic (pedido explícito del usuario 10/08: quiere
+  // poder priorizar y verificar puntos concretos a mano, sin esperar al
+  // scraper -- "si clico en Uber Eats es porque voy a cambiar el estado de
+  // los dots en Uber Eats").
+  const verificarHtml = editable && agrFiltroAgregador
+    ? `<div style="margin-top:6px;">
+         <button type="button" class="btn btn-ghost" style="font-size:12px;padding:3px 8px;" onclick="agrVerificarManual(${dir.id}, '${agrFiltroAgregador}', true)">✅ Marcar disponible</button>
+         <button type="button" class="btn btn-ghost" style="font-size:12px;padding:3px 8px;" onclick="agrVerificarManual(${dir.id}, '${agrFiltroAgregador}', false)">❌ Marcar no disponible</button>
+       </div>`
+    : "";
   const pieEditable = editable
     ? `<i style="color:var(--text-muted);font-size:11px;">Arrastra el punto para reubicarlo</i><br>
        <button type="button" class="btn btn-ghost" style="margin-top:6px;font-size:12px;padding:3px 8px;" onclick="agrEliminarPunto(${dir.id})">🗑️ Eliminar punto</button>`
     : "";
-  return `${tiendaLinea}<b>${dir.direccion_text || "Punto de test"}</b><br>${dir.distancia_km.toFixed(2)} km · ${dir.angulo_grados}°<br>${detalleHtml || "Sin datos aún"}<br>${pieEditable}`;
+  return `${tiendaLinea}<b>${dir.direccion_text || "Punto de test"}</b><br>${dir.distancia_km.toFixed(2)} km · ${dir.angulo_grados}°<br>${detalleHtml || "Sin datos aún"}<br>${verificarHtml}${pieEditable}`;
+}
+
+async function agrVerificarManual(direccionId, agregador, disponible) {
+  const dir = agrMarkersPorId[direccionId]?._agrDir;
+  const tienda = (dir && dir.tienda) || agrTiendaActual;
+  if (!tienda || tienda === AGR_TODAS) {
+    alert("Selecciona una tienda concreta (no \"Todas\") para verificar un punto a mano.");
+    return;
+  }
+  try {
+    const res = await agrFetchConTimeout(`${AGR_API}/chequeo-manual`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tienda, agregador, direccion_id: direccionId, disponible }),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("No se pudo guardar la verificación");
+    if (dir) {
+      dir.detalle = dir.detalle || {};
+      dir.detalle[agregador] = { estado: disponible ? "disponible" : "no_disponible", disponible, tiempo_entrega_min: null, timestamp: new Date().toISOString(), verificado_por: "tú" };
+      if (disponible) dir.disponible_count = (dir.disponible_count || 0) + 1;
+      else dir.no_disponible_count = (dir.no_disponible_count || 0) + 1;
+    }
+    agrActualizarMarcadores();
+    agrActualizarLeyenda();
+    agrRecalcularContador();
+    const marker = agrMarkersPorId[direccionId];
+    if (marker && marker.isPopupOpen()) marker.closePopup();
+  } catch (e) {
+    alert("No se pudo guardar la verificación manual. Inténtalo de nuevo.");
+  }
 }
 
 async function agrEliminarPunto(direccionId) {
