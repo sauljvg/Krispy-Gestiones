@@ -212,6 +212,25 @@ def ensure_tables():
         )
     """)
 
+    # El relleno automático entre vértices se quitó (ver agregadores.js,
+    # 10/08) porque no había forma fiable de distinguir un hueco real de uno
+    # con contaminación de otra sucursal -- pero el usuario SÍ puede verlo a
+    # ojo en el mapa ("estos dos dots verdes tienen un hueco entre medias, y
+    # sé que en realidad está todo cubierto"). Esta tabla guarda esa decisión
+    # manual: un puente entre dos direcciones concretas, por tienda y
+    # agregador, para que el polígono conecte esos dos puntos en línea recta
+    # sin dejar que un vértice intermedio más corto cree un hueco/pico.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agregadores_uniones (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tienda TEXT NOT NULL,
+            agregador TEXT NOT NULL,
+            direccion_id_a INTEGER NOT NULL,
+            direccion_id_b INTEGER NOT NULL,
+            creado_en TEXT NOT NULL
+        )
+    """)
+
     # total_planeado: cuántos chequeos individuales (tienda x agregador x
     # dirección) va a hacer la pasada en curso -- el scheduler lo calcula al
     # empezar (ver scheduler.py) y lo manda aquí para que el dashboard pueda
@@ -679,6 +698,42 @@ def eliminar_limite(tienda: str, agregador: str, angulo_grados: float) -> bool:
         "DELETE FROM agregadores_limites WHERE tienda=? AND agregador=? AND angulo_grados=?",
         (tienda, agregador, angulo_guardar),
     )
+    conn.commit()
+    conn.close()
+    return cur.rowcount > 0
+
+
+def crear_union(tienda: str, agregador: str, direccion_id_a: int, direccion_id_b: int) -> dict:
+    """Puente manual entre dos direcciones -- ver agregadores_uniones en
+    init_db. El usuario decide a ojo que el hueco entre esos dos puntos está
+    cubierto, en vez de que un algoritmo automático lo adivine mal."""
+    conn = get_connection()
+    creado_en = datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        "INSERT INTO agregadores_uniones (tienda, agregador, direccion_id_a, direccion_id_b, creado_en) VALUES (?, ?, ?, ?, ?)",
+        (tienda, agregador, direccion_id_a, direccion_id_b, creado_en),
+    )
+    conn.commit()
+    union_id = cur.lastrowid
+    conn.close()
+    return {"id": union_id, "tienda": tienda, "agregador": agregador, "direccion_id_a": direccion_id_a, "direccion_id_b": direccion_id_b, "creado_en": creado_en}
+
+
+def get_uniones(tienda: str, agregador: str = None) -> list[dict]:
+    conn = get_connection()
+    if agregador:
+        filas = conn.execute(
+            "SELECT * FROM agregadores_uniones WHERE tienda=? AND agregador=?", (tienda, agregador)
+        ).fetchall()
+    else:
+        filas = conn.execute("SELECT * FROM agregadores_uniones WHERE tienda=?", (tienda,)).fetchall()
+    conn.close()
+    return [dict(f) for f in filas]
+
+
+def eliminar_union(union_id: int) -> bool:
+    conn = get_connection()
+    cur = conn.execute("DELETE FROM agregadores_uniones WHERE id=?", (union_id,))
     conn.commit()
     conn.close()
     return cur.rowcount > 0

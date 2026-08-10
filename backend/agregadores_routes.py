@@ -551,6 +551,36 @@ def mover_limite_route(
     return resultado
 
 
+class UnionIn(BaseModel):
+    tienda: str
+    agregador: str
+    direccion_id_a: int
+    direccion_id_b: int
+
+
+@router.post("/uniones")
+def crear_union_route(body: UnionIn, _user: dict = Depends(require_agregadores)):
+    """Puente manual entre dos direcciones: el usuario ve dos dots
+    disponibles con un hueco/pico raro entre medias en el polígono y decide
+    a ojo que ahí también hay cobertura, sin depender de un relleno
+    automático poco fiable (ver agregadores_uniones, pedido explícito del
+    usuario 10/08: "haré clic sobre un punto y sobre un segundo punto y eso
+    va a unir el borde límite")."""
+    return agregadores_module.crear_union(body.tienda, body.agregador, body.direccion_id_a, body.direccion_id_b)
+
+
+@router.get("/uniones/{tienda}")
+def get_uniones_route(tienda: str, agregador: str | None = None, _user: dict = Depends(require_agregadores)):
+    return agregadores_module.get_uniones(tienda, agregador)
+
+
+@router.delete("/uniones/{union_id}")
+def eliminar_union_route(union_id: int, _user: dict = Depends(require_agregadores)):
+    if not agregadores_module.eliminar_union(union_id):
+        raise HTTPException(status_code=404, detail="Unión no encontrada")
+    return {"ok": True}
+
+
 @router.post("/admin/direcciones/desactivar-busqueda-limite", dependencies=[Depends(require_api_key)])
 def admin_desactivar_busqueda_limite_route(tienda: str | None = None):
     """Al terminar la campaña de ángulos de una tienda (o de todas), apaga

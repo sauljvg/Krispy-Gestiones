@@ -9,6 +9,8 @@ let agrTiendaMarkers = []; // iconos de tienda en el mapa -- se limpian y recrea
 let agrUltimaSeleccionMapa = null; // clave de qué tiendas estaban seleccionadas la última vez que se reencuadró el mapa -- ver agrCargarMapa
 let agrChart = null;
 let agrModoAnadir = false;
+let agrModoUnir = false;
+let agrUnionPendiente = null; // dir elegida como primer punto del puente, en espera del segundo clic
 let agrTiendaCentro = null;
 let agrCentrosPorTienda = {}; // slug -> {lat,lng}, usado en la vista "Todas"
 // Las 6 tiendas SIEMPRE, sin filtrar por chips activas -- agrCentrosPorTienda
@@ -278,6 +280,18 @@ function agrPopupDireccion(dir, editable) {
          <button type="button" class="btn btn-ghost" style="font-size:12px;padding:3px 8px;" onclick="agrVerificarManual(${dir.id}, '${agrFiltroAgregador}', false)">❌ Marcar no disponible</button>
        </div>`
     : "";
+  // Herramienta "unir puntos" (ver agregadores_uniones): con el modo activo
+  // y un agregador filtrado, el primer clic marca el punto de partida y el
+  // segundo clic en otro dot los une -- pensada para cuando el usuario ve a
+  // ojo dos dots disponibles con un hueco raro entre medias en el polígono
+  // (pedido explícito del usuario 10/08).
+  const unirHtml = editable && agrModoUnir && agrFiltroAgregador
+    ? agrUnionPendiente && agrUnionPendiente.id === dir.id
+      ? `<div style="margin-top:6px;color:var(--acento-calido);font-size:12px;">🔗 Punto de partida -- haz clic en el segundo</div>`
+      : agrUnionPendiente
+        ? `<div style="margin-top:6px;"><button type="button" class="btn btn-ghost" style="font-size:12px;padding:3px 8px;" onclick="agrCompletarUnion(${dir.id})">🔗 Unir con ${agrUnionPendiente.direccion_text || "el punto marcado"}</button></div>`
+        : `<div style="margin-top:6px;"><button type="button" class="btn btn-ghost" style="font-size:12px;padding:3px 8px;" onclick="agrIniciarUnion(${dir.id})">🔗 Unir con otro punto</button></div>`
+    : "";
   const textoEliminar = agrFiltroAgregador
     ? `🗑️ Eliminar solo en ${AGR_NOMBRE_AGREGADOR[agrFiltroAgregador] || agrFiltroAgregador}`
     : "🗑️ Eliminar punto (los 3 agregadores)";
@@ -285,7 +299,7 @@ function agrPopupDireccion(dir, editable) {
     ? `<i style="color:var(--text-muted);font-size:11px;">Arrastra el punto para reubicarlo</i><br>
        <button type="button" class="btn btn-ghost" style="margin-top:6px;font-size:12px;padding:3px 8px;" onclick="agrEliminarPunto(${dir.id})">${textoEliminar}</button>`
     : "";
-  return `${tiendaLinea}<b>${dir.direccion_text || "Punto de test"}</b><br>${dir.distancia_km.toFixed(2)} km · ${dir.angulo_grados}°<br>${detalleHtml || "Sin datos aún"}<br>${verificarHtml}${pieEditable}`;
+  return `${tiendaLinea}<b>${dir.direccion_text || "Punto de test"}</b><br>${dir.distancia_km.toFixed(2)} km · ${dir.angulo_grados}°<br>${detalleHtml || "Sin datos aún"}<br>${verificarHtml}${unirHtml}${pieEditable}`;
 }
 
 async function agrVerificarManual(direccionId, agregador, disponible) {
@@ -627,6 +641,48 @@ function agrToggleModoAnadir() {
   }
   if (agrMap) {
     document.getElementById("agr-map").style.cursor = agrModoAnadir ? "crosshair" : "";
+  }
+}
+
+function agrToggleModoUnir() {
+  agrModoUnir = !agrModoUnir;
+  agrUnionPendiente = null;
+  const btn = document.getElementById("agr-btn-unir");
+  if (btn) {
+    btn.classList.toggle("activo", agrModoUnir);
+    btn.textContent = agrModoUnir ? "✓ Clic en dos dots para unir…" : "🔗 Unir puntos";
+  }
+}
+
+async function agrIniciarUnion(direccionId) {
+  const dir = agrMarkersPorId[direccionId]?._agrDir;
+  if (!dir) return;
+  agrUnionPendiente = dir;
+  const marker = agrMarkersPorId[direccionId];
+  if (marker && marker.isPopupOpen()) marker.closePopup();
+  alert(`Punto de partida marcado: ${dir.direccion_text || "sin dirección"}.\nAhora haz clic en el segundo dot para unirlos.`);
+}
+
+async function agrCompletarUnion(direccionId) {
+  const dir = agrMarkersPorId[direccionId]?._agrDir;
+  if (!dir || !agrUnionPendiente || !agrFiltroAgregador) return;
+  if (dir.id === agrUnionPendiente.id) return;
+  const tienda = dir.tienda || agrTiendaActual;
+  try {
+    const res = await agrFetchConTimeout(`${AGR_API}/uniones`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tienda, agregador: agrFiltroAgregador, direccion_id_a: agrUnionPendiente.id, direccion_id_b: dir.id }),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("No se pudo guardar la unión");
+    const marker = agrMarkersPorId[direccionId];
+    if (marker && marker.isPopupOpen()) marker.closePopup();
+    agrActualizarPoligonoLimite();
+  } catch (e) {
+    alert("No se pudo unir los dos puntos. Inténtalo de nuevo.");
+  } finally {
+    agrUnionPendiente = null;
   }
 }
 
@@ -1553,7 +1609,7 @@ function agrCruceConBorde(a, b, bearingDeg) {
   return t;
 }
 
-function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
+function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uniones) {
   // Polígono "araña/radar": un vértice por ángulo, a la distancia real del
   // límite de cobertura en esa dirección concreta -- a diferencia del
   // envolvente convexo, esto SÍ puede representar huecos de cobertura (ej.
@@ -1738,6 +1794,46 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
     });
 
   const ordenados = [...base, ...puntosLejanos, ...puntosCercanos].sort((a, b) => a.bearingReal - b.bearingReal);
+
+  // Puentes manuales (ver agregadores_uniones en el backend): el usuario vio
+  // a ojo dos direcciones disponibles con un hueco/pico raro entre medias y
+  // decidió que ahí también hay cobertura -- se conectan en línea recta,
+  // quitando cualquier vértice intermedio en ese arco corto (nunca uno con
+  // esNoDisponible real: eso sí es evidencia directa de que no reparte, un
+  // puente manual no la puede pisar). Pedido explícito del usuario 10/08:
+  // "haré clic sobre un punto y sobre un segundo punto y eso va a unir el
+  // borde límite".
+  (uniones || []).forEach((u) => {
+    const dirA = (direccionesTienda || []).find((d) => d.id === u.direccion_id_a);
+    const dirB = (direccionesTienda || []).find((d) => d.id === u.direccion_id_b);
+    if (!dirA || !dirB || dirA.lat == null || dirB.lat == null || dirA.lng == null || dirB.lng == null) return;
+    const latlngA = [dirA.lat, dirA.lng], latlngB = [dirB.lat, dirB.lng];
+    const bearingA = agrAnguloDesde(centro, latlngA);
+    const bearingB = agrAnguloDesde(centro, latlngB);
+    let diff = bearingB - bearingA;
+    if (diff > 180) diff -= 360;
+    if (diff < -180) diff += 360;
+    const desde = diff >= 0 ? bearingA : bearingB;
+    const hasta = diff >= 0 ? bearingB : bearingA;
+    for (let i = ordenados.length - 1; i >= 0; i--) {
+      const v = ordenados[i];
+      if (v.esNoDisponible) continue;
+      const ang = v.bearingReal;
+      const enArco = desde <= hasta ? (ang > desde && ang < hasta) : (ang > desde || ang < hasta);
+      if (enArco) ordenados.splice(i, 1);
+    }
+    [[dirA, latlngA, bearingA], [dirB, latlngB, bearingB]].forEach(([dir, latlng, bearing]) => {
+      if (ordenados.some((v) => v.dir && v.dir.id === dir.id)) return;
+      ordenados.push({
+        radio: dir.distancia_km,
+        latlng, latlngReal: latlng, bearingReal: bearing,
+        local: agrProyeccionLocal(centro, latlng),
+        confirmado: true, union: true, dir,
+      });
+    });
+  });
+  ordenados.sort((a, b) => a.bearingReal - b.bearingReal);
+
   if (ordenados.length === 0) return null;
 
   // Relleno agresivo: un tramo de vértices SIN confirmar (solo una cota
@@ -1912,11 +2008,18 @@ async function agrActualizarPoligonoLimite() {
   // tienda), así que agrCentrosPorTienda ya refleja exactamente las chips
   // activas -- se dibuja el polígono de cada una de esas, en paralelo.
   const tiendas = Object.keys(agrCentrosPorTienda);
-  const porTienda = await Promise.all(
-    tiendas.map((tienda) =>
-      fetch(`${AGR_API}/limites/${tienda}`, { credentials: "include" }).then((r) => (r.ok ? r.json() : []))
-    )
-  );
+  const [porTienda, unionesPorTienda] = await Promise.all([
+    Promise.all(
+      tiendas.map((tienda) =>
+        fetch(`${AGR_API}/limites/${tienda}`, { credentials: "include" }).then((r) => (r.ok ? r.json() : []))
+      )
+    ),
+    Promise.all(
+      tiendas.map((tienda) =>
+        fetch(`${AGR_API}/uniones/${tienda}`, { credentials: "include" }).then((r) => (r.ok ? r.json() : []))
+      )
+    ),
+  ]);
 
   let totalVertices = 0;
   const anillosPorAgregador = {}; // nombre -> [anillo, anillo, ...] (uno por tienda con polígono cerrado) -- para la unión
@@ -1930,14 +2033,17 @@ async function agrActualizarPoligonoLimite() {
     const centro = agrCentrosPorTienda[tienda] || agrTiendaCentro;
     if (!centro) return;
     const limites = porTienda[i];
+    const uniones = unionesPorTienda[i];
     const direccionesTienda = agrDireccionesPorTienda[tienda];
     if (agrFiltroAgregador) {
       const limitesAgregador = limites.filter((l) => l.agregador === agrFiltroAgregador);
-      agregarAnillo(agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[agrFiltroAgregador] || "#0ca30c", direccionesTienda));
+      const unionesAgregador = uniones.filter((u) => u.agregador === agrFiltroAgregador);
+      agregarAnillo(agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[agrFiltroAgregador] || "#0ca30c", direccionesTienda, unionesAgregador));
     } else {
       Object.keys(AGR_NOMBRE_AGREGADOR).forEach((nombre) => {
         const limitesAgregador = limites.filter((l) => l.agregador === nombre);
-        agregarAnillo(agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[nombre] || "#888", direccionesTienda));
+        const unionesAgregador = uniones.filter((u) => u.agregador === nombre);
+        agregarAnillo(agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[nombre] || "#888", direccionesTienda, unionesAgregador));
       });
     }
   });

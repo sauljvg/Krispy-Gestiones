@@ -27,6 +27,7 @@
   .agr-estado-pill.alerta { background: color-mix(in srgb, var(--status-critical) 15%, transparent); color: var(--status-critical); }
   .agr-estado-pill.neutro { background: color-mix(in srgb, var(--text-muted) 15%, transparent); color: var(--text-muted); }
   #agr-btn-anadir.activo { background: color-mix(in srgb, var(--acento-calido) 20%, transparent); color: var(--acento-calido); border-color: var(--acento-calido); }
+  #agr-btn-unir.activo { background: color-mix(in srgb, var(--acento-calido) 20%, transparent); color: var(--acento-calido); border-color: var(--acento-calido); }
 
   .agr-panel { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
   .agr-panel h2 { font-size: 16px; margin: 0 0 12px; color: var(--text-secondary); }
@@ -259,6 +260,7 @@
       <span class="agr-tiendas-mapa-label">Tiendas:</span>
       <div id="agr-tiendas-mapa-chips" class="agr-tiendas-mapa-chips"></div>
       <button type="button" id="agr-btn-anadir" class="btn btn-ghost" onclick="agrToggleModoAnadir()">➕ Añadir punto</button>
+      <button type="button" id="agr-btn-unir" class="btn btn-ghost" onclick="agrToggleModoUnir()">🔗 Unir puntos</button>
       <span id="agr-actualizado" style="color:var(--text-muted); font-size:12px;"></span>
     </div>
 
@@ -380,6 +382,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/agregadores.js?v=20260810q"></script>
+<script src="js/agregadores.js?v=20260810r"></script>
 </body>
 </html>
