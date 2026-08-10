@@ -615,6 +615,7 @@ function agrWireFiltroAgregador() {
       agrActualizarMarcadores();
       agrRecalcularContador();
       agrActualizarPoligonoLimite();
+      agrActualizarPoligono9am(true); // el filtro cambió -- reencuadrar (ver agrActualizarPoligono9am)
     });
   });
 
