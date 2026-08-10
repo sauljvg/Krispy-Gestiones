@@ -35,11 +35,13 @@ HORARIOS_CIERRE_TIENDAS = {
 # Chrome real y visible mientras el daemon corre -- es esperado, no un bug.
 AGREGADORES = ["justeat", "glovo", "ubereats"]
 
-# No queremos "datos en vivo": el objetivo es un informe de "a esta hora bloquearon en esta
-# zona", no un dashboard en tiempo real. Por eso dos velocidades:
-#   - CERCANO: pocos puntos (1 km), frecuente — detecta rápido un bloqueo total real.
-#   - COMPLETO: los 48 puntos, con más margen — mapea la zona sin machacar el sitio (una
-#     pasada completa tarda ~30-40 min con las pausas anti-bot).
+# Dos cadencias (10 min / 60 min) sobre EL MISMO trabajo: cubrir puntos sin
+# datos aún, para seguir empujando el descubrimiento del borde de cobertura
+# (ver scheduler.py). Ya no hay un recorrido "completo" que re-chequee lo ya
+# confirmado -- eso es una necesidad de otra fase, una vez el borde esté
+# confirmado, no de esta (pedido explícito del usuario 10/08). Se mantienen
+# las dos cadencias tal cual por si conviene retomar una vigilancia periódica
+# más adelante sin tener que rehacer el scheduler entero.
 FRECUENCIA_CHEQUEO_CERCANO_MIN = 10
 FRECUENCIA_CHEQUEO_COMPLETO_MIN = 60
 

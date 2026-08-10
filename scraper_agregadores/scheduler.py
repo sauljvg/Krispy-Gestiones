@@ -1,19 +1,22 @@
-"""Scheduler APScheduler: dos velocidades de chequeo en horas punta.
+"""Scheduler APScheduler: descubrimiento de borde, dos velocidades.
 
-No buscamos datos "en vivo" sino un informe de cuándo y dónde nos bloquean:
-  - CERCANO (pocos puntos, 1 km): cada 10 min, reacción rápida a un bloqueo total real.
-  - COMPLETO (48 puntos): cada 60 min, mapea la zona de cobertura sin machacar los sitios.
+Cambio de estrategia (10/08): con cientos de puntos ya confirmados por tienda
+(el "límite" real añadido por buscar_limite_cobertura.py + los manuales), un
+recorrido completo re-chequeando TODO lo ya conocido en cada pasada se había
+vuelto enorme y dominaba el tiempo -- miles de chequeos redundantes cada 10-60
+min, cuando lo que de verdad hace falta ahora es seguir empujando el
+descubrimiento del borde. Por eso cada pasada (cercano y completo, dos
+cadencias, mismo trabajo) ya SOLO cubre los puntos SIN DATOS de las 6 tiendas
+(crucen tienda o no) -- nunca re-chequea un punto que ya tiene un resultado
+real de ese agregador. Volver a vigilar puntos ya confirmados (para detectar
+un bloqueo nuevo en una zona ya mapeada) es una necesidad de OTRA fase, una
+vez el borde esté confirmado -- no de esta.
 
 Los agregadores de una misma pasada corren en paralelo (sitios distintos, sin
 rate-limit cruzado); dentro de cada agregador las direcciones van secuenciales con pausa.
 Cada llamada a la API (POST /chequeo, etc.) usa su propia sesión HTTP — no hay estado
 compartido entre tareas paralelas, así que aquí no hay nada equivalente a los líos de
 concurrencia de SQLite que tuvimos cuando esto escribía a una DB local.
-
-Cada pasada (cercano o completo) va en DOS fases: primero cubre los puntos SIN
-DATOS de las 6 tiendas (crucen tienda o no), y solo después arranca el
-recorrido completo normal tienda por tienda -- así un hueco se cubre esté
-donde esté, sin depender de que le toque pronto por orden.
 """
 import asyncio
 import logging
@@ -60,19 +63,24 @@ async def _chequear_agregador_aislado(
 
 
 async def _calcular_total_planeado(cercano: bool) -> int | None:
-    """Cuenta cuántos chequeos individuales (tienda x agregador x dirección)
-    va a hacer la pasada completa (fase 2, la que domina el tiempo total --
-    la fase 1 de "solo huecos" normalmente no añade nada una vez la
-    cobertura está madura, ver _chequeo). Una llamada de conteo por tienda,
-    reusando el mismo endpoint que ya usa chequear_tienda -- nada nuevo del
-    lado del backend, solo se suma el tamaño de la lista que devuelve. Si
+    """Cuenta cuántos chequeos individuales (tienda x agregador x dirección
+    SIN DATOS de ese agregador) va a hacer la pasada -- el mismo conjunto que
+    _chequeo recorre de verdad, ahora que ya no hay fase de recorrido
+    completo. El "sin datos" es distinto por agregador (cada uno tiene su
+    propio hueco de cobertura, ver _con_datos_reales en backend), así que no
+    vale un solo conteo por tienda como antes -- hace falta uno por
+    (tienda, agregador). Sigue siendo barato: son las mismas llamadas que ya
+    hace chequear_tienda, solo que aquí únicamente se cuenta la longitud. Si
     falla, se sigue sin total (el dashboard mostrará "en curso" sin X/Y en
     vez de romper la pasada por esto)."""
     total = 0
     try:
         for tienda in config.TIENDAS_SCHEDULER:
-            direcciones = await api_client.obtener_direcciones(tienda, cercano=cercano)
-            total += len(direcciones) * len(config.AGREGADORES)
+            for agregador_nombre in config.AGREGADORES:
+                direcciones = await api_client.obtener_direcciones(
+                    tienda, cercano=cercano, agregador=agregador_nombre, solo_sin_datos=True
+                )
+                total += len(direcciones)
     except Exception as exc:
         logger.warning("No se pudo calcular el total planeado de la pasada: %r", exc)
         return None
@@ -99,28 +107,16 @@ async def _chequeo(modo: str, cercano: bool):
     estado_final = "completado"
 
     try:
-        # Fase 1: cubrir primero los puntos SIN DATOS de cualquier tienda,
-        # cruzando las 6 -- antes esto solo se priorizaba dentro de cada
-        # tienda (los huecos de la última tienda del recorrido podían tardar
-        # pasadas enteras en cubrirse si las anteriores iban bien). Ahora un
-        # hueco se cubre esté donde esté antes de empezar el recorrido
-        # completo normal. Con la cobertura ya completa esta fase no añade
-        # apenas nada (0 direcciones por tienda, chequear_tienda no hace nada).
+        # Cubrir los puntos SIN DATOS de cualquier tienda, cruzando las 6 --
+        # antes esto solo se priorizaba dentro de cada tienda (los huecos de
+        # la última tienda del recorrido podían tardar pasadas enteras en
+        # cubrirse si las anteriores iban bien). Ya NO hay recorrido completo
+        # después (ver docstring del módulo): un punto que ya tiene dato real
+        # de este agregador no se vuelve a tocar aquí.
         for tienda in config.TIENDAS_SCHEDULER:
             resultados = await asyncio.gather(
                 *(
                     _chequear_agregador_aislado(tienda, agregador_nombre, cercano, solo_sin_datos=True)
-                    for agregador_nombre in config.AGREGADORES
-                )
-            )
-            exitosos += sum(1 for r in resultados if r)
-            fallidos += sum(1 for r in resultados if not r)
-
-        # Fase 2: recorrido completo normal, tienda por tienda.
-        for tienda in config.TIENDAS_SCHEDULER:
-            resultados = await asyncio.gather(
-                *(
-                    _chequear_agregador_aislado(tienda, agregador_nombre, cercano)
                     for agregador_nombre in config.AGREGADORES
                 )
             )
