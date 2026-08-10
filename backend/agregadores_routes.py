@@ -360,6 +360,20 @@ def cerrar_sesion_route(sesion_id: int, body: SesionCerrarIn):
     return {"ok": True}
 
 
+class SesionTiendaActualIn(BaseModel):
+    tienda: str
+
+
+@router.put("/sesiones/{sesion_id}/tienda-actual", dependencies=[Depends(require_api_key)])
+def actualizar_tienda_actual_route(sesion_id: int, body: SesionTiendaActualIn):
+    """El daemon avisa aquí qué tienda está recorriendo AHORA MISMO dentro de
+    la pasada en curso (ver scheduler.py) -- para el contador en vivo del
+    dashboard (pedido explícito del usuario 10/08, solo visible para el
+    admin)."""
+    agregadores_module.actualizar_tienda_actual(sesion_id, body.tienda)
+    return {"ok": True}
+
+
 @router.post("/alertas", dependencies=[Depends(require_api_key)])
 def crear_alerta_route(body: AlertaIn):
     agregadores_module.registrar_alerta(body.tipo, body.mensaje, body.tienda, body.agregador)

@@ -8,6 +8,7 @@ let agrMarkersPorId = {};
 let agrTiendaMarkers = []; // iconos de tienda en el mapa -- se limpian y recrean en cada render para no acumularse ahora que agrMap ya no se destruye/recrea cada 30s
 let agrUltimaSeleccionMapa = null; // clave de qué tiendas estaban seleccionadas la última vez que se reencuadró el mapa -- ver agrCargarMapa
 let agrChart = null;
+let agrUsuarioActual = null;
 let agrModoAnadir = false;
 let agrModoUnir = false;
 let agrUnionPendiente = null; // dir elegida como primer punto del puente, en espera del segundo clic
@@ -2095,12 +2096,42 @@ function agrTextoProgreso(estado) {
   return modo.progreso_total ? ` (${modo.progreso_hechos}/${modo.progreso_total})` : ` (${modo.progreso_hechos})`;
 }
 
+function agrActualizarDaemonLive(estado) {
+  // Contador en vivo (qué tienda está recorriendo el daemon AHORA MISMO,
+  // cuántos dots lleva y cuántos le faltan) -- solo para el admin (usuario
+  // "saul"), pedido explícito del usuario 10/08. El resto de usuarios no ve
+  // ni el elemento (queda "hidden" en el HTML).
+  const live = document.getElementById("agr-daemon-live");
+  if (!live) return;
+  if (!agrUsuarioActual || agrUsuarioActual.username !== "saul") {
+    live.hidden = true;
+    return;
+  }
+  live.hidden = false;
+  const enCurso = [estado.cercano, estado.completo].filter((m) => m.en_curso);
+  if (enCurso.length === 0) {
+    live.className = "agr-estado-pill neutro";
+    live.textContent = "🔎 Daemon inactivo";
+    return;
+  }
+  const modo = enCurso.sort((a, b) => (b.progreso_hechos || 0) - (a.progreso_hechos || 0))[0];
+  const nombreTienda = modo.tienda_actual
+    ? agrCentrosPorTienda[modo.tienda_actual]?.nombre || modo.tienda_actual
+    : "arrancando…";
+  const hechos = modo.progreso_hechos ?? 0;
+  const total = modo.progreso_total;
+  const faltan = total != null ? Math.max(total - hechos, 0) : null;
+  live.className = "agr-estado-pill ok";
+  live.textContent = `🔎 ${nombreTienda} · ${hechos}${total != null ? `/${total}` : ""} hechos${faltan != null ? ` · faltan ${faltan}` : ""}`;
+}
+
 async function agrCargarEstado() {
   const pill = document.getElementById("agr-estado");
   try {
     const res = await fetch(`${AGR_API}/estado`, { credentials: "include" });
     const estado = await res.json();
     const progreso = agrTextoProgreso(estado);
+    agrActualizarDaemonLive(estado);
     if (!estado.es_horario_apertura) {
       pill.textContent = "⏸ Fuera de horario";
       pill.className = "agr-estado-pill neutro";
@@ -2134,6 +2165,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     window.location.href = "/";
     return;
   }
+  agrUsuarioActual = user;
   wireUserBar(user);
   agrWireFiltroAgregador();
   agrAplicarColapsoTabla();

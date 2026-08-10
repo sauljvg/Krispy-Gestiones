@@ -252,6 +252,13 @@ def ensure_tables():
     cols_sesiones = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_sesiones)")}
     if "total_planeado" not in cols_sesiones:
         conn.execute("ALTER TABLE agregadores_sesiones ADD COLUMN total_planeado INTEGER")
+    if "tienda_actual" not in cols_sesiones:
+        # Qué tienda está recorriendo el daemon AHORA MISMO dentro de la
+        # pasada en curso -- el scheduler la va actualizando según avanza el
+        # bucle por TIENDAS_SCHEDULER (ver scheduler.py), para un contador
+        # en vivo en el dashboard (solo visible para el admin, pedido
+        # explícito del usuario 10/08).
+        conn.execute("ALTER TABLE agregadores_sesiones ADD COLUMN tienda_actual TEXT")
     conn.commit()
     conn.close()
 
@@ -1595,6 +1602,13 @@ def iniciar_sesion(modo: str, total_planeado: int | None = None) -> int:
     return sesion_id
 
 
+def actualizar_tienda_actual(sesion_id: int, tienda: str) -> None:
+    conn = get_connection()
+    conn.execute("UPDATE agregadores_sesiones SET tienda_actual=? WHERE id=?", (tienda, sesion_id))
+    conn.commit()
+    conn.close()
+
+
 def cerrar_sesiones_huerfanas() -> int:
     """Mantenimiento puntual: cierra cualquier sesión que haya quedado
     'en_curso' sin fecha_fin (ver el comentario en iniciar_sesion -- ahora
@@ -1875,6 +1889,7 @@ def get_estado():
             "en_curso": en_curso,
             "progreso_hechos": hechos,
             "progreso_total": fila["total_planeado"] if en_curso else None,
+            "tienda_actual": fila["tienda_actual"] if en_curso else None,
         }
 
     resultado = {

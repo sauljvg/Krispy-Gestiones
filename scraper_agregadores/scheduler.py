@@ -114,6 +114,7 @@ async def _chequeo(modo: str, cercano: bool):
         # después (ver docstring del módulo): un punto que ya tiene dato real
         # de este agregador no se vuelve a tocar aquí.
         for tienda in config.TIENDAS_SCHEDULER:
+            await api_client.actualizar_tienda_actual(sesion_id, tienda)
             resultados = await asyncio.gather(
                 *(
                     _chequear_agregador_aislado(tienda, agregador_nombre, cercano, solo_sin_datos=True)
