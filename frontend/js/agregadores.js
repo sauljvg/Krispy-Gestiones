@@ -1540,14 +1540,30 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
       if (base.length < 2) return; // no hay borde todavía con el que comparar
       const latlng = [d.lat, d.lng];
       const bearing = agrAnguloDesde(centro, latlng);
-      const yaMuestreado = base.some((b) => {
+      const vecino = base.find((b) => {
         const diff = Math.abs(b.bearingReal - bearing);
         return Math.min(diff, 360 - diff) < TOLERANCIA_ANGULO_GRADOS;
       });
-      // Si ya hay un vértice medido (búsqueda de límite) casi en la misma
-      // dirección, se respeta ese dato -- viene de una búsqueda binaria
-      // real, más fiable que un único punto de grid.
-      if (yaMuestreado) return;
+      if (vecino) {
+        // Espejo del vecino-extiende de puntosLejanos, pero encogiendo. Antes
+        // esto simplemente "respetaba" el vértice medido y descartaba el
+        // punto -- pero los puntos origen=limite (los que probó de verdad
+        // buscar_limite_cobertura.py) caen SIEMPRE dentro de esta tolerancia
+        // del vértice que ellos mismos ayudaron a medir, así que un
+        // no_disponible real en uno de esos puntos se ignoraba en vez de
+        // corregir el vértice -- justo el caso más común y más grave
+        // (confirmado en vivo 10/08 con turf.booleanPointInPolygon: 31
+        // puntos "no_disponible DENTRO", la mayoría origen=limite).
+        if (d.distancia_km < vecino.radio) {
+          vecino.radio = d.distancia_km;
+          vecino.latlngReal = latlng;
+          vecino.latlng = latlng;
+          vecino.bearingReal = bearing;
+          vecino.local = agrProyeccionLocal(centro, latlng);
+          vecino.extendidoPor = d;
+        }
+        return;
+      }
       let borde = null;
       for (let i = 0; i < base.length; i++) {
         const a = base[i], b = base[(i + 1) % base.length];
