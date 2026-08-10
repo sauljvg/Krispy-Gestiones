@@ -1341,6 +1341,23 @@ def registrar_alerta(tipo: str, mensaje: str, tienda: str = None, agregador: str
 
 def iniciar_sesion(modo: str, total_planeado: int | None = None) -> int:
     conn = get_connection()
+    # Si el proceso del daemon se mató a media pasada (crash, reinicio manual,
+    # el kill de la tarea programada de las 22:00 pillando algo a medias...)
+    # esa sesión se queda "en_curso" para siempre -- nadie llama a
+    # cerrar_sesion. get_estado() la sigue viendo como "la última sesión" y
+    # cuenta TODOS los chequeos guardados desde su fecha_inicio como
+    # progreso, mezclando pasadas de reinicios distintos en un solo número
+    # disparatado (confirmado en vivo 10/08: "1944" sin total, acumulado de
+    # varias pasadas ya muertas). Con max_instances=1 en el scheduler nunca
+    # debería haber dos sesiones "en_curso" del mismo modo a la vez, así que
+    # cualquiera que quede así al empezar una nueva es, por definición, una
+    # huérfana de un proceso anterior -- se cierra aquí antes de abrir la
+    # siguiente.
+    conn.execute(
+        """UPDATE agregadores_sesiones SET fecha_fin=?, estado='interrumpido'
+           WHERE modo=? AND fecha_fin IS NULL""",
+        (datetime.now(timezone.utc).isoformat(), modo),
+    )
     cur = conn.execute(
         """INSERT INTO agregadores_sesiones (modo, fecha_inicio, estado, total_planeado)
            VALUES (?, ?, 'en_curso', ?)""",
@@ -1350,6 +1367,23 @@ def iniciar_sesion(modo: str, total_planeado: int | None = None) -> int:
     sesion_id = cur.lastrowid
     conn.close()
     return sesion_id
+
+
+def cerrar_sesiones_huerfanas() -> int:
+    """Mantenimiento puntual: cierra cualquier sesión que haya quedado
+    'en_curso' sin fecha_fin (ver el comentario en iniciar_sesion -- ahora
+    esto se evita solo hacia adelante, pero no arregla lo que ya estaba
+    huérfano en la BD antes de ese fix)."""
+    conn = get_connection()
+    cur = conn.execute(
+        """UPDATE agregadores_sesiones SET fecha_fin=?, estado='interrumpido'
+           WHERE fecha_fin IS NULL""",
+        (datetime.now(timezone.utc).isoformat(),),
+    )
+    conn.commit()
+    cerradas = cur.rowcount
+    conn.close()
+    return cerradas
 
 
 def cerrar_sesion(sesion_id: int, estado: str, exitosos: int, fallidos: int):

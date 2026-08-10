@@ -295,6 +295,11 @@ def limpiar_chequeos_error_route():
     return agregadores_module.borrar_chequeos_error_texto()
 
 
+@router.post("/sesiones/cerrar-huerfanas", dependencies=[Depends(require_api_key)])
+def cerrar_sesiones_huerfanas_route():
+    return {"sesiones_cerradas": agregadores_module.cerrar_sesiones_huerfanas()}
+
+
 @router.post("/estadisticas/reset", dependencies=[Depends(require_api_key)])
 def resetear_estadisticas_route():
     """Mantenimiento puntual: borra el histórico de chequeos y alertas de los
