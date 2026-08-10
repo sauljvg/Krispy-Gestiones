@@ -794,6 +794,78 @@ def _con_datos_reales(conn, resultado: list[dict], agregador: str) -> set:
     }
 
 
+def _radio_limite(fila) -> float | None:
+    """Mismo criterio que agrRadioDeLimite() en el frontend (agregadores.js):
+    limite_km si existe, si no un número aprovechable del texto de la nota
+    (">= 5.0km", "no disponible incluso a 0.77km"...). Se mantiene igual en
+    los dos sitios a propósito -- si un punto ya "cuenta" como cobertura
+    confirmada aquí, el polígono que ve el usuario en el mapa debe estar de
+    acuerdo, si no parecería que el scraper se salta puntos sin motivo
+    visible."""
+    if fila["limite_km"] is not None:
+        return fila["limite_km"]
+    m = re.search(r"(\d+\.?\d*)\s*km", fila["nota"] or "")
+    return float(m.group(1)) if m else None
+
+
+def _cobertura_confirmada_por_limite(conn, tienda: str, agregador: str, resultado: list[dict]) -> set:
+    """IDs de direcciones que caen DENTRO del polígono de límite real ya
+    confirmado de este agregador en esta tienda -- no hace falta comprobarlas
+    aunque no tengan chequeo propio: la búsqueda de límite (binaria, por
+    ángulo) ya demuestra que ese punto está en zona de reparto. Cada
+    agregador tiene su propio límite, así que un punto "sin datos" de JustEat
+    con el límite de JustEat ya confirmado ahí puede seguir siendo frontera
+    real para Glovo si el límite de Glovo no ha llegado tan lejos todavía --
+    por eso esto se calcula por agregador, no una vez por tienda (pedido
+    explícito del usuario 10/08, con un caso real: los mismos puntos grises
+    de JustEat, ya dentro de su borde confirmado, seguían siendo frontera
+    real de Glovo con un polígono bastante más pequeño)."""
+    info = TIENDAS.get(tienda)
+    if not info or not resultado:
+        return set()
+    limites = conn.execute(
+        "SELECT * FROM agregadores_limites WHERE tienda=? AND agregador=?", (tienda, agregador)
+    ).fetchall()
+    vertices = []
+    for fila in limites:
+        radio = _radio_limite(fila)
+        if radio is None:
+            continue
+        if fila["lat"] is not None and fila["lng"] is not None:
+            _, angulo = _distancia_y_angulo(info["lat"], info["lng"], fila["lat"], fila["lng"])
+        else:
+            angulo = fila["angulo_grados"] % 360
+        vertices.append((angulo, max(radio, 0.05)))
+    # Con menos de 3 vértices no hay polígono real que cierre -- sin límite
+    # fiable, todo sigue contando como "sin datos" (se prefiere comprobar de
+    # más a asumir cobertura sin base).
+    if len(vertices) < 3:
+        return set()
+    vertices.sort(key=lambda v: v[0])
+    n = len(vertices)
+
+    def radio_interpolado(bearing: float) -> float | None:
+        for i in range(n):
+            a_ang, a_rad = vertices[i]
+            b_ang, b_rad = vertices[(i + 1) % n]
+            b_ext = b_ang if b_ang > a_ang else b_ang + 360
+            ang = bearing if bearing >= a_ang else bearing + 360
+            if a_ang <= ang <= b_ext:
+                span = b_ext - a_ang
+                return a_rad if span <= 0 else a_rad + (b_rad - a_rad) * (ang - a_ang) / span
+        return None
+
+    confirmados = set()
+    for d in resultado:
+        if d["lat"] is None or d["lng"] is None:
+            continue
+        distancia, angulo = _distancia_y_angulo(info["lat"], info["lng"], d["lat"], d["lng"])
+        radio = radio_interpolado(angulo)
+        if radio is not None and distancia < radio:
+            confirmados.add(d["id"])
+    return confirmados
+
+
 def _priorizar_sin_datos(conn, resultado: list[dict], agregador: str) -> list[dict]:
     """Reordena para que las direcciones sin datos reales de este agregador
     vayan primero (ver _con_datos_reales). Se aplica en CADA tienda por
@@ -903,6 +975,7 @@ def get_o_crear_direcciones(
 
         if agregador and solo_sin_datos:
             con_datos = _con_datos_reales(conn, resultado, agregador)
+            con_datos |= _cobertura_confirmada_por_limite(conn, tienda, agregador, resultado)
             resultado = [r for r in resultado if r["id"] not in con_datos]
         elif agregador:
             resultado = _priorizar_sin_datos(conn, resultado, agregador)
