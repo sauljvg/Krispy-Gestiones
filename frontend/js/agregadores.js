@@ -648,8 +648,14 @@ function agrToggleModoUnir() {
   const btn = document.getElementById("agr-btn-unir");
   if (btn) {
     btn.classList.toggle("activo", agrModoUnir);
-    btn.textContent = agrModoUnir ? "✓ Clic en dos dots para unir…" : "🔗 Unir puntos";
+    btn.textContent = agrModoUnir ? "✓ Clic en dos puntos para unir…" : "🔗 Unir puntos";
   }
+  // El popup de los vértices del borde se genera como texto fijo al dibujar
+  // el polígono (a diferencia del de los dots, que es una función y se
+  // regenera solo) -- sin este redibujado, activar/desactivar el modo no se
+  // reflejaba en los vértices ya dibujados hasta el próximo refresco de 30s
+  // (confirmado por el usuario 10/08: "lo sigo viendo solo en los dots").
+  agrActualizarPoligonoLimite();
 }
 
 // Punto genérico para la herramienta de unir -- sirve igual para un dot del
