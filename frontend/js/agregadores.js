@@ -1016,7 +1016,7 @@ async function agrCargarMapa() {
   agrRenderMapaTodas(filtrado, ajustarVista);
   await agrActualizarPoligonoLimite();
   agrActualizarGuiasAngulo();
-  agrActualizarPoligono9am();
+  agrActualizarPoligono9am(ajustarVista);
 }
 
 function agrLimpiarTabla() {
@@ -1730,14 +1730,20 @@ function agrLimpiarPoligono9am() {
   agrPoligono9amLayers = [];
 }
 
-async function agrActualizarPoligono9am() {
+async function agrActualizarPoligono9am(ajustarVista) {
   if (!agrUsuarioActual || agrUsuarioActual.username !== "saul") return;
   const panel = document.getElementById("agr-panel-9am");
   if (panel) panel.hidden = false;
   if (!agrTiendaCentro && Object.keys(agrCentrosPorTienda).length === 0) return;
   const lat0 = agrTiendaCentro ? agrTiendaCentro.lat : Object.values(agrCentrosPorTienda).reduce((s, t) => s + t.lat, 0) / Object.keys(agrCentrosPorTienda).length;
   const lng0 = agrTiendaCentro ? agrTiendaCentro.lng : Object.values(agrCentrosPorTienda).reduce((s, t) => s + t.lng, 0) / Object.keys(agrCentrosPorTienda).length;
-  agrInitMap9am(lat0, lng0);
+  // Igual que el mapa principal: reencuadra solo cuando cambian de verdad
+  // las tiendas/agregador seleccionados (o es la primera vez), para no
+  // pisar el zoom/pan a mano cada 30s -- pero SÍ hace falta reencuadrar al
+  // cambiar de "Parque Sur" a "Todas", si no, el mapa se queda centrado en
+  // una sola tienda aunque ahora calcule las 6 (pedido explícito del
+  // usuario 10/08: "puedo ver el de todo Madrid?").
+  const esMapaNuevo = agrInitMap9am(lat0, lng0);
   if (!agrMap9am) return;
   agrLimpiarPoligono9am();
 
@@ -1764,6 +1770,14 @@ async function agrActualizarPoligono9am() {
       });
     });
   });
+
+  if (esMapaNuevo || ajustarVista) {
+    if (agrPoligono9amLayers.length > 0) {
+      agrMap9am.fitBounds(L.featureGroup(agrPoligono9amLayers).getBounds(), { padding: [20, 20] });
+    } else if (tiendas.length > 1) {
+      agrMap9am.fitBounds(L.latLngBounds(tiendas.map((t) => [agrCentrosPorTienda[t].lat, agrCentrosPorTienda[t].lng])), { padding: [40, 40] });
+    }
+  }
 }
 
 function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uniones) {
