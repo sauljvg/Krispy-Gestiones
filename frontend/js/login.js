@@ -23,13 +23,19 @@ document.getElementById("login-form-usuario").addEventListener("submit", async (
       body: JSON.stringify({ username }),
     });
     if (!res.ok) {
-      errorEl.textContent = "Usuario no encontrado.";
+      errorEl.textContent = "Error de conexión con el servidor.";
       errorEl.hidden = false;
       return;
     }
     const body = await res.json();
+    if (!body.existe) {
+      errorEl.textContent = "Usuario no encontrado.";
+      errorEl.hidden = false;
+      return;
+    }
+
     usuarioActual = username;
-    tienePinActual = body.tiene_pin;
+    tienePinActual = Boolean(body.tiene_pin);
 
     const hint = document.getElementById("login-pin-hint");
     const confirmWrap = document.getElementById("login-pin-confirm-wrap");
