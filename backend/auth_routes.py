@@ -39,7 +39,7 @@ def usuarios_en_linea_route(user: dict = Depends(get_current_user)):
     # A propósito atado al username literal (no a rol admin): es un vistazo
     # personal de Saúl, no una función general del portal para cualquier
     # administrador.
-    if user["username"] != "saul":
+    if user["username"].lower() != "saul":
         raise HTTPException(status_code=403, detail="No disponible")
     return {"usuarios": auth_module.get_usuarios_en_linea(excluir_usuario_id=user["id"])}
 
@@ -67,7 +67,8 @@ class LoginPinBody(BaseModel):
 
 @router.post("/check-username")
 def check_username_route(body: CheckUsernameBody):
-    user = auth_module.get_user_by_username(body.username.strip())
+    username_clean = body.username.strip().lower()
+    user = auth_module.get_user_by_username(username_clean)
     if user is None:
         return {"existe": False, "tiene_pin": False}
     return {"existe": True, "tiene_pin": user["pin"] is not None}
@@ -77,7 +78,8 @@ def check_username_route(body: CheckUsernameBody):
 def set_pin_route(body: SetPinBody):
     if not auth_module.pin_valido(body.pin):
         raise HTTPException(status_code=400, detail="El PIN debe ser de 4 dígitos")
-    ok = auth_module.set_pin_si_no_tiene(body.username.strip(), body.pin)
+    username_clean = body.username.strip().lower()
+    ok = auth_module.set_pin_si_no_tiene(username_clean, body.pin)
     if not ok:
         raise HTTPException(status_code=400, detail="Este usuario ya tiene un PIN configurado")
     return {"ok": True}
@@ -85,17 +87,18 @@ def set_pin_route(body: SetPinBody):
 
 @router.post("/login-pin")
 def login_pin_route(body: LoginPinBody, response: Response):
-    restante = auth_module.login_bloqueado_minutos(body.username)
+    username_clean = body.username.strip().lower()
+    restante = auth_module.login_bloqueado_minutos(username_clean)
     if restante is not None:
         raise HTTPException(
             status_code=429,
             detail=f"Demasiados intentos fallidos. Prueba de nuevo en {restante} minuto{'s' if restante != 1 else ''}.",
         )
-    user = auth_module.authenticate_pin(body.username.strip(), body.pin)
+    user = auth_module.authenticate_pin(username_clean, body.pin)
     if user is None:
-        auth_module.registrar_intento_fallido(body.username)
+        auth_module.registrar_intento_fallido(username_clean)
         raise HTTPException(status_code=401, detail="Usuario o PIN incorrectos")
-    auth_module.limpiar_intentos_login(body.username)
+    auth_module.limpiar_intentos_login(username_clean)
     token = auth_module.create_session(user["id"])
     response.set_cookie(
         COOKIE_NAME,
@@ -185,10 +188,11 @@ def list_users(_admin: dict = Depends(require_admin)):
 def create_user_route(body: NewUserBody, _admin: dict = Depends(require_admin)):
     if body.rol not in auth_module.ROLES:
         raise HTTPException(status_code=400, detail=f"rol debe ser uno de: {', '.join(auth_module.ROLES)}")
-    if not auth_module.username_disponible(body.username):
+    username_clean = body.username.strip().lower()
+    if not auth_module.username_disponible(username_clean):
         raise HTTPException(status_code=400, detail="Ese usuario ya existe (el usuario no distingue mayúsculas de minúsculas)")
     try:
-        user_id = auth_module.create_user(body.username, body.nombre, body.rol)
+        user_id = auth_module.create_user(username_clean, body.nombre, body.rol)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"No se pudo crear el usuario (¿username duplicado?): {exc}")
     if body.tiendas:
