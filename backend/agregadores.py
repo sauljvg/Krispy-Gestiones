@@ -192,6 +192,26 @@ def ensure_tables():
     if "direccion_text" not in cols_limites:
         conn.execute("ALTER TABLE agregadores_limites ADD COLUMN direccion_text TEXT")
 
+    # Cada punto del grid es una única fila (una ubicación física), compartida
+    # por los 3 agregadores -- pero la cobertura real de cada uno es
+    # independiente (un mismo punto puede repartir en JustEat y no en Glovo).
+    # Esta tabla deja "borrar un punto" ser una acción POR agregador (una capa
+    # cada uno) en vez de una baja global: ausencia de fila = activo (para no
+    # tener que rellenar 3 filas por cada punto ya existente), una fila con
+    # activo=0 = desactivado solo para ese agregador. La baja global de
+    # agregadores_direcciones.activo sigue existiendo aparte para cuando de
+    # verdad no hace falta el punto para NINGÚN agregador (pedido explícito
+    # del usuario 10/08: "puedo borrar uno en justeat pero no significa que
+    # deba borrarse en uber").
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agregadores_direcciones_estado (
+            direccion_id INTEGER NOT NULL,
+            agregador TEXT NOT NULL,
+            activo INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (direccion_id, agregador)
+        )
+    """)
+
     # total_planeado: cuántos chequeos individuales (tienda x agregador x
     # dirección) va a hacer la pasada en curso -- el scheduler lo calcula al
     # empezar (ver scheduler.py) y lo manda aquí para que el dashboard pueda
@@ -461,16 +481,29 @@ def formatear_alerta_transicion(agregador: str, tienda: str, direccion_id: int |
     return f"{agregador}: {ubicacion} dejó de estar disponible. {mensaje_bloqueo or ''}".strip()
 
 
-def eliminar_direccion(direccion_id: int) -> bool:
+def eliminar_direccion(direccion_id: int, agregador: str | None = None) -> bool:
     """Baja lógica (activo=0), no DELETE -- si se borrara la fila, el hueco
     (tienda, distancia, angulo) quedaría libre y get_o_crear_direcciones lo
-    volvería a generar (y geocodificar) en el siguiente chequeo."""
+    volvería a generar (y geocodificar) en el siguiente chequeo.
+
+    Sin `agregador`: baja global, como siempre (desaparece de los 3). Con
+    `agregador`: solo se desactiva esa capa (ver agregadores_direcciones_estado
+    en init_db) -- el punto sigue existiendo y comprobándose igual para los
+    otros dos."""
     conn = get_connection()
     fila = conn.execute("SELECT id FROM agregadores_direcciones WHERE id=?", (direccion_id,)).fetchone()
     if not fila:
         conn.close()
         return False
-    conn.execute("UPDATE agregadores_direcciones SET activo=0 WHERE id=?", (direccion_id,))
+    if agregador:
+        conn.execute(
+            """INSERT INTO agregadores_direcciones_estado (direccion_id, agregador, activo)
+               VALUES (?, ?, 0)
+               ON CONFLICT(direccion_id, agregador) DO UPDATE SET activo=0""",
+            (direccion_id, agregador),
+        )
+    else:
+        conn.execute("UPDATE agregadores_direcciones SET activo=0 WHERE id=?", (direccion_id,))
     conn.commit()
     conn.close()
     return True
@@ -980,6 +1013,20 @@ def get_o_crear_direcciones(
         for fila in extra:
             if fila["id"] not in ids_grid:
                 resultado.append(dict(fila))
+
+        if agregador:
+            # Puntos desactivados solo para ESTE agregador (ver
+            # agregadores_direcciones_estado) -- siguen existiendo y
+            # comprobándose para los otros dos, pero aquí no cuentan.
+            inactivos = {
+                row["direccion_id"]
+                for row in conn.execute(
+                    "SELECT direccion_id FROM agregadores_direcciones_estado WHERE agregador=? AND activo=0",
+                    (agregador,),
+                ).fetchall()
+            }
+            if inactivos:
+                resultado = [r for r in resultado if r["id"] not in inactivos]
 
         if agregador and solo_sin_datos:
             con_datos = _con_datos_reales(conn, resultado, agregador)
@@ -1502,6 +1549,20 @@ def get_mapa_datos(tienda: str):
         "SELECT * FROM agregadores_direcciones WHERE tienda=? AND activo=1", (tienda,)
     ).fetchall()
 
+    # Desactivaciones por agregador (ver agregadores_direcciones_estado) de
+    # TODAS las direcciones de esta tienda en una sola consulta, en vez de una
+    # por punto -- el mapa puede tener cientos de puntos.
+    inactivos_por_direccion: dict[int, list[str]] = {}
+    if direcciones:
+        ids = [d["id"] for d in direcciones]
+        marcadores = ",".join("?" * len(ids))
+        for row in conn.execute(
+            f"""SELECT direccion_id, agregador FROM agregadores_direcciones_estado
+                WHERE activo=0 AND direccion_id IN ({marcadores})""",
+            ids,
+        ).fetchall():
+            inactivos_por_direccion.setdefault(row["direccion_id"], []).append(row["agregador"])
+
     resultado = []
     for d in direcciones:
         ultimos_por_agregador = {}
@@ -1547,6 +1608,7 @@ def get_mapa_datos(tienda: str):
                 "error_count": error_count,
                 "total_agregadores": len(AGREGADORES),
                 "detalle": detalle,
+                "inactivo_para": inactivos_por_direccion.get(d["id"], []),
             }
         )
     conn.close()

@@ -395,10 +395,15 @@ def mover_direccion_route(direccion_id: int, body: DireccionMoverIn, _user: dict
 
 
 @router.delete("/direcciones/{direccion_id}")
-def eliminar_direccion_route(direccion_id: int, _user: dict = Depends(require_agregadores)):
-    """Quita un punto del grid (baja lógica) -- útil para tiendas donde no
-    hacen falta tantos puntos de test."""
-    if not agregadores_module.eliminar_direccion(direccion_id):
+def eliminar_direccion_route(
+    direccion_id: int,
+    agregador: str | None = None,
+    _user: dict = Depends(require_agregadores),
+):
+    """Quita un punto (baja lógica). Sin `agregador`: baja global (los 3).
+    Con `agregador`: solo desactiva esa capa -- el mismo punto sigue vivo
+    para los otros dos agregadores (ver agregadores_direcciones_estado)."""
+    if not agregadores_module.eliminar_direccion(direccion_id, agregador):
         raise HTTPException(status_code=404, detail="Dirección no encontrada")
     return {"ok": True}
 

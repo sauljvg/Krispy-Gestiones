@@ -98,6 +98,18 @@ const AGR_LEYENDA_AGREGADOR = [
   { cat: "sin_datos", label: "Sin datos" },
 ];
 
+function agrPuntoVisiblePorCapa(dir) {
+  // Cada agregador es una capa independiente (ver agregadores_direcciones_estado
+  // en el backend): un punto desactivado en JustEat sigue vivo para Glovo y
+  // Uber Eats. Con un agregador filtrado, se oculta si está desactivado en
+  // ESE. En "Todos" solo se oculta si está desactivado en los 3 -- si no,
+  // seguiría contando como visible para el/los agregador(es) donde sigue
+  // activo (pedido explícito del usuario 10/08).
+  const inactivo = dir.inactivo_para || [];
+  if (agrFiltroAgregador) return !inactivo.includes(agrFiltroAgregador);
+  return inactivo.length < Object.keys(AGR_NOMBRE_AGREGADOR).length;
+}
+
 function agrCategoriaDireccion(dir) {
   if (agrFiltroAgregador) {
     const info = (dir.detalle || {})[agrFiltroAgregador];
@@ -138,6 +150,7 @@ function agrToggleSoloManuales() {
 }
 
 function agrMarcadorVisible(dir) {
+  if (!agrPuntoVisiblePorCapa(dir)) return false;
   if (agrEstadosOcultos.has(agrCategoriaDireccion(dir))) return false;
   return agrPasaFiltroNuevos(dir);
 }
@@ -233,9 +246,12 @@ function agrPopupDireccion(dir, editable) {
          <button type="button" class="btn btn-ghost" style="font-size:12px;padding:3px 8px;" onclick="agrVerificarManual(${dir.id}, '${agrFiltroAgregador}', false)">❌ Marcar no disponible</button>
        </div>`
     : "";
+  const textoEliminar = agrFiltroAgregador
+    ? `🗑️ Eliminar solo en ${AGR_NOMBRE_AGREGADOR[agrFiltroAgregador] || agrFiltroAgregador}`
+    : "🗑️ Eliminar punto (los 3 agregadores)";
   const pieEditable = editable
     ? `<i style="color:var(--text-muted);font-size:11px;">Arrastra el punto para reubicarlo</i><br>
-       <button type="button" class="btn btn-ghost" style="margin-top:6px;font-size:12px;padding:3px 8px;" onclick="agrEliminarPunto(${dir.id})">🗑️ Eliminar punto</button>`
+       <button type="button" class="btn btn-ghost" style="margin-top:6px;font-size:12px;padding:3px 8px;" onclick="agrEliminarPunto(${dir.id})">${textoEliminar}</button>`
     : "";
   return `${tiendaLinea}<b>${dir.direccion_text || "Punto de test"}</b><br>${dir.distancia_km.toFixed(2)} km · ${dir.angulo_grados}°<br>${detalleHtml || "Sin datos aún"}<br>${verificarHtml}${pieEditable}`;
 }
@@ -273,15 +289,29 @@ async function agrVerificarManual(direccionId, agregador, disponible) {
 
 async function agrEliminarPunto(direccionId) {
   try {
-    const res = await fetch(`${AGR_API}/direcciones/${direccionId}`, { method: "DELETE", credentials: "include" });
+    // Con un agregador filtrado, borrar solo apaga esa capa (el punto sigue
+    // vivo para los otros dos) -- sin filtro ("Todos"), es la baja global de
+    // siempre (pedido explícito del usuario 10/08: cada agregador es una
+    // capa independiente, borrar en uno no debe borrar en los demás).
+    const url = agrFiltroAgregador
+      ? `${AGR_API}/direcciones/${direccionId}?agregador=${encodeURIComponent(agrFiltroAgregador)}`
+      : `${AGR_API}/direcciones/${direccionId}`;
+    const res = await fetch(url, { method: "DELETE", credentials: "include" });
     if (!res.ok) throw new Error("No se pudo eliminar");
     const marker = agrMarkersPorId[direccionId];
-    if (marker) {
+    if (!marker) return;
+    if (!agrFiltroAgregador) {
       agrMap.removeLayer(marker);
       delete agrMarkersPorId[direccionId];
       agrDireccionMarkers = agrDireccionMarkers.filter((m) => m !== marker);
-      agrRecalcularContador();
+    } else {
+      const dir = marker._agrDir;
+      dir.inactivo_para = [...new Set([...(dir.inactivo_para || []), agrFiltroAgregador])];
+      marker.setIcon(agrIconoDireccion(dir));
+      if (!agrMarcadorVisible(dir) && agrMap.hasLayer(marker)) agrMap.removeLayer(marker);
     }
+    agrActualizarLeyenda();
+    agrRecalcularContador();
   } catch (e) {
     alert("No se pudo eliminar el punto. Inténtalo de nuevo.");
   }
