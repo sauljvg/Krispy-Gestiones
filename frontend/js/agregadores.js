@@ -1561,6 +1561,14 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda) {
     // honesto: no sabemos qué pasa ahí, en vez de fingir que la cobertura
     // colapsa a cero justo en ese punto.
     .filter((l) => agrRadioDeLimite(l) != null)
+    // Un límite lejano (búsqueda binaria) marcado "disponible" puede en
+    // realidad haber respondido OTRA sucursal más cercana a ese punto -- el
+    // buscador solo filtra por marca "Krispy Kreme", no por sucursal (mismo
+    // problema que con los dots, ver agrEsTiendaMasCercana). Si el punto
+    // medido está más cerca de otra tienda, se descarta ese vértice en vez
+    // de inflar el polígono con cobertura ajena (pedido explícito del
+    // usuario 10/08).
+    .filter((l) => l.lat == null || l.lng == null || agrEsTiendaMasCercana(centro, l.lat, l.lng))
     .map((l) => {
       const radio = Math.max(agrRadioDeLimite(l), 0.05);
       // Filas guardadas antes de este cambio no tienen lat/lng reales -- se
