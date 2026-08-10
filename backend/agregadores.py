@@ -4,6 +4,7 @@ El scraper corre en un portátil aparte (necesita un navegador real, headed
 para Uber Eats — ver scraper_agregadores/ en la raíz del repo) y llama a la
 API en vivo (POST /api/agregadores/chequeo) con cada resultado; aquí solo se
 guarda y se sirve. Nada de esto toca Selenium ni el scraper de Reseñas."""
+import json
 import math
 import os
 import re
@@ -241,6 +242,23 @@ def ensure_tables():
             lng_b REAL NOT NULL,
             direccion_id_a INTEGER,
             direccion_id_b INTEGER,
+            creado_en TEXT NOT NULL
+        )
+    """)
+
+    # "Pincel": zona pintada a mano por el usuario (varios puntos formando un
+    # área, no solo dos) que se fusiona (turf.union en el frontend) con el
+    # polígono calculado -- para huecos DENTRO del polígono que "unir puntos"
+    # (un puente recto entre dos puntos del borde) no puede resolver, porque
+    # el hueco no está en el borde sino en medio de la figura (pedido
+    # explícito del usuario 10/08: "hay unas zonas que debemos poder rellenar
+    # dentro del mismo polígono").
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agregadores_rellenos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tienda TEXT NOT NULL,
+            agregador TEXT NOT NULL,
+            puntos TEXT NOT NULL,
             creado_en TEXT NOT NULL
         )
     """)
@@ -765,6 +783,48 @@ def get_uniones(tienda: str, agregador: str = None) -> list[dict]:
 def eliminar_union(union_id: int) -> bool:
     conn = get_connection()
     cur = conn.execute("DELETE FROM agregadores_uniones WHERE id=?", (union_id,))
+    conn.commit()
+    conn.close()
+    return cur.rowcount > 0
+
+
+def crear_relleno(tienda: str, agregador: str, puntos: list[list[float]]) -> dict:
+    """Zona pintada a mano (pincel, ver agregadores_rellenos en init_db):
+    lista de [lat, lng] que el frontend fusiona (turf.union) con el polígono
+    calculado, para huecos DENTRO de la figura que un puente recto entre dos
+    puntos del borde no puede resolver."""
+    conn = get_connection()
+    creado_en = datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        "INSERT INTO agregadores_rellenos (tienda, agregador, puntos, creado_en) VALUES (?, ?, ?, ?)",
+        (tienda, agregador, json.dumps(puntos), creado_en),
+    )
+    conn.commit()
+    relleno_id = cur.lastrowid
+    conn.close()
+    return {"id": relleno_id, "tienda": tienda, "agregador": agregador, "puntos": puntos, "creado_en": creado_en}
+
+
+def get_rellenos(tienda: str, agregador: str = None) -> list[dict]:
+    conn = get_connection()
+    if agregador:
+        filas = conn.execute(
+            "SELECT * FROM agregadores_rellenos WHERE tienda=? AND agregador=?", (tienda, agregador)
+        ).fetchall()
+    else:
+        filas = conn.execute("SELECT * FROM agregadores_rellenos WHERE tienda=?", (tienda,)).fetchall()
+    conn.close()
+    resultado = []
+    for f in filas:
+        d = dict(f)
+        d["puntos"] = json.loads(d["puntos"])
+        resultado.append(d)
+    return resultado
+
+
+def eliminar_relleno(relleno_id: int) -> bool:
+    conn = get_connection()
+    cur = conn.execute("DELETE FROM agregadores_rellenos WHERE id=?", (relleno_id,))
     conn.commit()
     conn.close()
     return cur.rowcount > 0

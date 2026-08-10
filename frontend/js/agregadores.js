@@ -13,6 +13,10 @@ let agrUsuarioActual = null;
 let agrModoAnadir = false;
 let agrModoUnir = false;
 let agrUnionPendiente = null; // dir elegida como primer punto del puente, en espera del segundo clic
+let agrModoPincel = false;
+let agrPincelPuntos = []; // [[lat,lng], ...] trazo en curso, se convierte en agregadores_rellenos al terminar
+let agrPincelPreview = null; // L.polygon de vista previa mientras se dibuja
+let agrPincelMarkers = []; // circleMarkers de cada punto clicado del trazo
 let agrTiendaCentro = null;
 let agrCentrosPorTienda = {}; // slug -> {lat,lng}, usado en la vista "Todas"
 // Las 6 tiendas SIEMPRE, sin filtrar por chips activas -- agrCentrosPorTienda
@@ -183,6 +187,7 @@ function agrInitMap(lat, lng) {
   // MISMO mapa persistente, cada vuelta añadiría un listener más y un clic
   // acabaría creando varios puntos duplicados a la vez.
   agrMap.on("click", (e) => {
+    if (agrModoPincel) { agrPincelClick(e.latlng.lat, e.latlng.lng); return; }
     if (!agrModoAnadir) return;
     agrAnadirPunto(e.latlng.lat, e.latlng.lng);
   });
@@ -705,6 +710,78 @@ async function agrUnionElegirPunto(lat, lng, tienda, etiqueta, direccionId) {
     alert("No se pudo unir los dos puntos. Inténtalo de nuevo.");
   } finally {
     agrUnionPendiente = null;
+  }
+}
+
+function agrToggleModoPincel() {
+  agrModoPincel = !agrModoPincel;
+  agrPincelCancelar(); // limpia cualquier trazo a medio dibujar del uso anterior
+  const btn = document.getElementById("agr-btn-pincel");
+  if (btn) {
+    btn.classList.toggle("activo", agrModoPincel);
+    btn.textContent = agrModoPincel ? "✓ Clic para pintar el hueco…" : "🖌️ Pincel: rellenar hueco";
+  }
+  if (document.getElementById("agr-map")) {
+    document.getElementById("agr-map").style.cursor = agrModoPincel ? "crosshair" : "";
+  }
+  if (agrModoPincel && !agrFiltroAgregador) {
+    alert("Elige primero un agregador concreto (JustEat/Glovo/Uber Eats) arriba -- el relleno se guarda por agregador.");
+  }
+}
+
+// Cada clic en el mapa (con el pincel activo) añade un vértice al trazo --
+// no hace falta que caiga sobre un dot o vértice existente, a diferencia de
+// "unir puntos": el pincel pinta un ÁREA libre para tapar huecos que están
+// DENTRO del polígono, no en el borde (pedido explícito del usuario 10/08:
+// "hay unas zonas que debemos poder rellenar dentro del mismo polígono...
+// pero no se como unirlas con los mismos puntos").
+function agrPincelClick(lat, lng) {
+  if (!agrFiltroAgregador) return;
+  agrPincelPuntos.push([lat, lng]);
+  const marker = L.circleMarker([lat, lng], { radius: 4, color: "#1a1a1a", weight: 1, fillColor: "#ffcc00", fillOpacity: 1 }).addTo(agrMap);
+  agrPincelMarkers.push(marker);
+  if (agrPincelPreview) { agrMap.removeLayer(agrPincelPreview); agrPincelPreview = null; }
+  if (agrPincelPuntos.length >= 2) {
+    agrPincelPreview = L.polygon(agrPincelPuntos, {
+      color: "#ffcc00", weight: 2, dashArray: "6,6", fillColor: "#ffcc00", fillOpacity: 0.15,
+    }).addTo(agrMap);
+  }
+  const span = document.getElementById("agr-pincel-n");
+  if (span) span.textContent = agrPincelPuntos.length;
+  const controles = document.getElementById("agr-pincel-controles");
+  if (controles) controles.hidden = agrPincelPuntos.length < 3;
+}
+
+function agrPincelCancelar() {
+  agrPincelPuntos = [];
+  agrPincelMarkers.forEach((m) => agrMap && agrMap.removeLayer(m));
+  agrPincelMarkers = [];
+  if (agrPincelPreview) { agrMap && agrMap.removeLayer(agrPincelPreview); agrPincelPreview = null; }
+  const controles = document.getElementById("agr-pincel-controles");
+  if (controles) controles.hidden = true;
+  const span = document.getElementById("agr-pincel-n");
+  if (span) span.textContent = "0";
+}
+
+async function agrPincelTerminar() {
+  if (agrPincelPuntos.length < 3 || !agrFiltroAgregador) return;
+  const tienda = agrTiendaMasCercana(agrPincelPuntos[0][0], agrPincelPuntos[0][1]) || agrTiendaActual;
+  if (!tienda || tienda === AGR_TODAS) {
+    alert("No se pudo determinar a qué tienda pertenece esta zona. Selecciona una sola tienda en los chips de arriba y vuelve a intentarlo.");
+    return;
+  }
+  try {
+    const res = await agrFetchConTimeout(`${AGR_API}/rellenos`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tienda, agregador: agrFiltroAgregador, puntos: agrPincelPuntos }),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("No se pudo guardar el relleno");
+    agrPincelCancelar();
+    agrActualizarPoligonoLimite();
+  } catch (e) {
+    alert("No se pudo guardar el relleno. Inténtalo de nuevo.");
   }
 }
 
@@ -1784,7 +1861,7 @@ async function agrActualizarPoligono9am(ajustarVista) {
   }
 }
 
-function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uniones) {
+function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uniones, rellenos) {
   // Polígono "araña/radar": un vértice por ángulo, a la distancia real del
   // límite de cobertura en esa dirección concreta -- a diferencia del
   // envolvente convexo, esto SÍ puede representar huecos de cobertura (ej.
@@ -2042,17 +2119,50 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
   // individual pero seguimos calculando el anillo más abajo para la unión.
   const ocultarDetalle = agrMostrarUnionActivo();
 
+  // Pincel (ver agregadores_rellenos): el usuario pintó a mano una o varias
+  // zonas DENTRO del polígono que "unir puntos" no puede tapar (un puente
+  // solo conecta dos vértices del borde en línea recta -- un hueco en medio
+  // de la figura no está en el borde). Se fusiona cada zona pintada con el
+  // contorno calculado vía turf.union, así el hueco desaparece del dibujo
+  // sin tocar ningún vértice/dato real (pedido explícito del usuario 10/08:
+  // "hay unas zonas que debemos poder rellenar dentro del mismo polígono").
+  let coordenadasPoligono = vertices.map((v) => v.latlng);
+  if ((rellenos || []).length > 0 && coordenadasPoligono.length >= 3) {
+    try {
+      let base = turf.polygon([[
+        ...coordenadasPoligono.map(([lat, lng]) => [lng, lat]),
+        [coordenadasPoligono[0][1], coordenadasPoligono[0][0]],
+      ]]);
+      rellenos.forEach((r) => {
+        if (!r.puntos || r.puntos.length < 3) return;
+        try {
+          const anilloParche = r.puntos.map(([lat, lng]) => [lng, lat]);
+          anilloParche.push(anilloParche[0]);
+          const combinado = turf.union(base, turf.polygon([anilloParche]));
+          if (combinado) base = combinado;
+        } catch (e) {
+          // Geometría del parche inválida (auto-intersección, etc.) -- se
+          // ignora ese relleno concreto en vez de romper todo el polígono.
+        }
+      });
+      const geom = base.geometry.type === "Polygon" ? base.geometry.coordinates[0] : base.geometry.coordinates[0][0];
+      coordenadasPoligono = geom.slice(0, -1).map(([lng, lat]) => [lat, lng]);
+    } catch (e) {
+      // Si turf falla por completo, se dibuja el polígono sin rellenos.
+    }
+  }
+
   // Con menos de 3 vértices no hay figura que cerrar (un polígono real
   // necesita al menos un triángulo) -- pero los puntos ya comprobados SÍ se
   // muestran igual, para no dejar la tienda "en blanco" mientras la
   // búsqueda de límite todavía va por su segundo o tercer ángulo (visto en
   // vivo 09/08: con 2 de 8 ángulos guardados no aparecía nada en el mapa).
   let poligono = null;
-  if (vertices.length >= 3 && !ocultarDetalle) {
+  if (coordenadasPoligono.length >= 3 && !ocultarDetalle) {
     // weight bajado de 4 a 2: con cientos de vértices y picos finos, un
     // trazo grueso hacía el borde ilegible ("picos gordos", pedido
     // explícito del usuario 10/08).
-    poligono = L.polygon(vertices.map((v) => v.latlng), {
+    poligono = L.polygon(coordenadasPoligono, {
       color, weight: 2, opacity: 1, fillColor: color, fillOpacity: 0.28,
     }).addTo(agrMap);
     agrPoligonoLayers.push(poligono);
@@ -2154,8 +2264,8 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
   // poder calcular la unión real de varias tiendas con turf.union -- solo
   // tiene sentido si hay polígono de verdad (3+ vértices) y cerrado (el
   // primer punto repetido al final).
-  const anillo = vertices.length >= 3
-    ? [...vertices.map((v) => [v.latlng[1], v.latlng[0]]), [vertices[0].latlng[1], vertices[0].latlng[0]]]
+  const anillo = coordenadasPoligono.length >= 3
+    ? [...coordenadasPoligono.map(([lat, lng]) => [lng, lat]), [coordenadasPoligono[0][1], coordenadasPoligono[0][0]]]
     : null;
 
   return { n: vertices.length, anillo, agregador };
@@ -2179,7 +2289,7 @@ async function agrActualizarPoligonoLimite() {
   // tienda), así que agrCentrosPorTienda ya refleja exactamente las chips
   // activas -- se dibuja el polígono de cada una de esas, en paralelo.
   const tiendas = Object.keys(agrCentrosPorTienda);
-  const [porTienda, unionesPorTienda] = await Promise.all([
+  const [porTienda, unionesPorTienda, rellenosPorTienda] = await Promise.all([
     Promise.all(
       tiendas.map((tienda) =>
         fetch(`${AGR_API}/limites/${tienda}`, { credentials: "include" }).then((r) => (r.ok ? r.json() : []))
@@ -2188,6 +2298,11 @@ async function agrActualizarPoligonoLimite() {
     Promise.all(
       tiendas.map((tienda) =>
         fetch(`${AGR_API}/uniones/${tienda}`, { credentials: "include" }).then((r) => (r.ok ? r.json() : []))
+      )
+    ),
+    Promise.all(
+      tiendas.map((tienda) =>
+        fetch(`${AGR_API}/rellenos/${tienda}`, { credentials: "include" }).then((r) => (r.ok ? r.json() : []))
       )
     ),
   ]);
@@ -2205,16 +2320,19 @@ async function agrActualizarPoligonoLimite() {
     if (!centro) return;
     const limites = porTienda[i];
     const uniones = unionesPorTienda[i];
+    const rellenos = rellenosPorTienda[i];
     const direccionesTienda = agrDireccionesPorTienda[tienda];
     if (agrFiltroAgregador) {
       const limitesAgregador = limites.filter((l) => l.agregador === agrFiltroAgregador);
       const unionesAgregador = uniones.filter((u) => u.agregador === agrFiltroAgregador);
-      agregarAnillo(agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[agrFiltroAgregador] || "#0ca30c", direccionesTienda, unionesAgregador));
+      const rellenosAgregador = rellenos.filter((r) => r.agregador === agrFiltroAgregador);
+      agregarAnillo(agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[agrFiltroAgregador] || "#0ca30c", direccionesTienda, unionesAgregador, rellenosAgregador));
     } else {
       Object.keys(AGR_NOMBRE_AGREGADOR).forEach((nombre) => {
         const limitesAgregador = limites.filter((l) => l.agregador === nombre);
         const unionesAgregador = uniones.filter((u) => u.agregador === nombre);
-        agregarAnillo(agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[nombre] || "#888", direccionesTienda, unionesAgregador));
+        const rellenosAgregador = rellenos.filter((r) => r.agregador === nombre);
+        agregarAnillo(agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[nombre] || "#888", direccionesTienda, unionesAgregador, rellenosAgregador));
       });
     }
   });

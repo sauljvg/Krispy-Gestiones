@@ -604,6 +604,37 @@ def eliminar_union_route(union_id: int, _user: dict = Depends(require_agregadore
     return {"ok": True}
 
 
+class RellenoIn(BaseModel):
+    tienda: str
+    agregador: str
+    puntos: list[list[float]]
+
+
+@router.post("/rellenos")
+def crear_relleno_route(body: RellenoIn, _user: dict = Depends(require_agregadores)):
+    """Pincel: zona pintada a mano (varios puntos formando un área) que se
+    fusiona con el polígono calculado (turf.union en el frontend), para
+    huecos DENTRO de la figura -- un puente recto entre dos puntos del borde
+    (ver /uniones) no puede rellenar un hueco que no está en el borde
+    (pedido explícito del usuario 10/08: "hay unas zonas que debemos poder
+    rellenar dentro del mismo polígono")."""
+    if len(body.puntos) < 3:
+        raise HTTPException(status_code=400, detail="Hacen falta al menos 3 puntos")
+    return agregadores_module.crear_relleno(body.tienda, body.agregador, body.puntos)
+
+
+@router.get("/rellenos/{tienda}")
+def get_rellenos_route(tienda: str, agregador: str | None = None, _user: dict = Depends(require_agregadores)):
+    return agregadores_module.get_rellenos(tienda, agregador)
+
+
+@router.delete("/rellenos/{relleno_id}")
+def eliminar_relleno_route(relleno_id: int, _user: dict = Depends(require_agregadores)):
+    if not agregadores_module.eliminar_relleno(relleno_id):
+        raise HTTPException(status_code=404, detail="Relleno no encontrado")
+    return {"ok": True}
+
+
 @router.post("/admin/direcciones/desactivar-busqueda-limite", dependencies=[Depends(require_api_key)])
 def admin_desactivar_busqueda_limite_route(tienda: str | None = None):
     """Al terminar la campaña de ángulos de una tienda (o de todas), apaga
