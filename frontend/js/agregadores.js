@@ -1794,12 +1794,10 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
   if (!limites || limites.length === 0) return null;
   const agregador = limites[0].agregador;
 
-  // Dots reales (chequeos) de esta tienda, ya descartados los que en
-  // realidad pertenecen a otra sucursal más cercana (ver más abajo,
-  // agrEsTiendaMasCercana).
-  const direccionesPropias = (direccionesTienda || []).filter(
-    (d) => d.lat == null || d.lng == null || agrEsTiendaMasCercana(centro, d.lat, d.lng)
-  );
+  // Todos los dots de esta tienda contribuyen al polígono -- se restauró el
+  // algoritmo del 10/08 09:00 que no filtraba por tienda más cercana
+  // (pedido explícito del usuario 10/08 tarde).
+  const direccionesPropias = (direccionesTienda || []);
 
   const base = [...limites]
     // "sin datos (todo falló)" no aporta ni siquiera una cota aproximada --
@@ -1808,22 +1806,14 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
     // honesto: no sabemos qué pasa ahí, en vez de fingir que la cobertura
     // colapsa a cero justo en ese punto.
     .filter((l) => agrRadioDeLimite(l) != null)
-    // Un límite lejano (búsqueda binaria) marcado "disponible" puede en
-    // realidad haber respondido OTRA sucursal más cercana a ese punto -- el
-    // buscador solo filtra por marca "Krispy Kreme", no por sucursal (mismo
-    // problema que con los dots, ver agrEsTiendaMasCercana). Si es de verdad
-    // la tienda más cercana de las 6, SÍ cuenta aunque esté lejos (pedido
-    // explícito del usuario 10/08: "si de verdad reparte hasta ahí, aunque
-    // sean 9km, hay que tomarlo en cuenta"). Las filas antiguas (de cuando
-    // se armaron los grids) sin lat/lng guardado no se pueden verificar --
-    // en vez de dejarlas pasar sin comprobar (bug real: eran justo los
-    // "picos que no llevan a nada", de otra tienda pero sin forma de
-    // saberlo), se descartan directamente.
-    .filter((l) => l.lat != null && l.lng != null && agrEsTiendaMasCercana(centro, l.lat, l.lng))
+    // Se restauró el algoritmo del 10/08 09:00: todos los vértices base
+    // cuentan, incluidos los sin lat/lng guardado (se reconstruyen
+    // geométricamente desde el ángulo nominal) -- pedido explícito del
+    // usuario 10/08 tarde.
     .map((l) => {
       const radio = Math.max(agrRadioDeLimite(l), 0.05);
-      const latlngReal = [l.lat, l.lng];
-      const latlng = latlngReal;
+      const latlngReal = l.lat != null && l.lng != null ? [l.lat, l.lng] : null;
+      const latlng = latlngReal || agrMoverPunto(centro.lat, centro.lng, l.angulo_grados, radio);
       const bearingReal = agrAnguloDesde(centro, latlng);
       return {
         angulo: l.angulo_grados,
@@ -1853,19 +1843,10 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
   // verde disponible quedaba fuera del polígono aunque el radio
   // "interpolado" dijera que no -- por eso se usa la intersección
   // geométrica real con el segmento, no una interpolación lineal).
-  // Antes eran 3° -- con la campaña de 32 ángulos (11.25° entre vértices
-  // medidos) eso reclama ±3° a cada lado de cada uno de los 32, casi 200° de
-  // los 360° totales ya "ocupados". Con cientos de puntos de grid/límite/
-  // manual, la inmensa mayoría de ellos caía dentro de esa franja y se
-  // fundía con el vértice medido más cercano en vez de aportar su propio
-  // vértice -- el polígono quedaba "atado" casi siempre a exactamente los 32
-  // vértices originales (confirmado en vivo 10/08: tras el fix de encoger,
-  // seguían saliendo 32 vértices finales, cero insertados). Bajado a 0.5°
-  // (~25-50m de separación real, según distancia) para que el polígono vaya
-  // "por libre" y cada dirección realmente distinta aporte su propio dato,
-  // reservando la fusión solo para el caso real que la motivó: dos sondeos
-  // casi literalmente en el mismo sitio.
-  const TOLERANCIA_ANGULO_GRADOS = 0.5;
+  // Tolerancia restaurada a 3° (algoritmo de las 9:00 del 10/08) --
+  // pedido explícito del usuario 10/08 tarde: volver al mapa de las 9am
+  // como principal.
+  const TOLERANCIA_ANGULO_GRADOS = 3;
   // direccionesPropias ya se calculó arriba (se reutiliza también para
   // contrastar los vértices base contra dots reales).
   const puntosLejanos = [];
