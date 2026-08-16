@@ -256,6 +256,32 @@ def mapear_datos_a_candidato(datos: dict):
     return campos, extra
 
 
+def _compartidos_por_candidato(conn, candidato_ids):
+    """Para cada candidato de la lista, quién ya lo tiene compartido -- une
+    los dos caminos de compartir (candidato_compartidos, directo desde
+    Reclutamiento, e informe_compartidos, que también guarda candidato_id
+    desde que existe el enlace automático con el test) para poder avisar
+    "ya compartido con X" sin importar por cuál de los dos caminos se hizo."""
+    if not candidato_ids:
+        return {}
+    placeholders = ",".join("?" * len(candidato_ids))
+    rows = conn.execute(f"""
+        SELECT candidato_id, usuario_id, usuario_nombre FROM (
+            SELECT cc.candidato_id AS candidato_id, cc.usuario_id AS usuario_id, u.nombre AS usuario_nombre
+            FROM candidato_compartidos cc JOIN usuarios u ON u.id = cc.usuario_id
+            WHERE cc.candidato_id IN ({placeholders})
+            UNION
+            SELECT ic.candidato_id AS candidato_id, ic.usuario_id AS usuario_id, u.nombre AS usuario_nombre
+            FROM informe_compartidos ic JOIN usuarios u ON u.id = ic.usuario_id
+            WHERE ic.candidato_id IN ({placeholders})
+        )
+    """, candidato_ids + candidato_ids).fetchall()
+    mapa = {}
+    for r in rows:
+        mapa.setdefault(r["candidato_id"], []).append({"usuario_id": r["usuario_id"], "nombre": r["usuario_nombre"]})
+    return mapa
+
+
 def get_candidato(candidato_id):
     conn = get_connection()
     row = conn.execute("SELECT * FROM candidatos WHERE id = ?", (candidato_id,)).fetchone()
@@ -263,6 +289,7 @@ def get_candidato(candidato_id):
         conn.close()
         return None
     candidato = _row_to_dict(row)
+    candidato["compartidos"] = _compartidos_por_candidato(conn, [candidato_id]).get(candidato_id, [])
     archivos = conn.execute(
         "SELECT id, nombre_original, subido_en FROM candidato_archivos WHERE candidato_id = ? ORDER BY subido_en DESC",
         (candidato_id,),
@@ -404,8 +431,12 @@ def list_candidatos(empresa=None, estado=None, q=None, vacante_id=None, sin_vaca
         {where}
         ORDER BY c.actualizado_en DESC
     """, params).fetchall()
+    candidatos = [_row_to_dict(r) for r in rows]
+    mapa_compartidos = _compartidos_por_candidato(conn, [c["id"] for c in candidatos])
     conn.close()
-    return [_row_to_dict(r) for r in rows]
+    for c in candidatos:
+        c["compartidos"] = mapa_compartidos.get(c["id"], [])
+    return candidatos
 
 
 def normalizar_nombre(s):

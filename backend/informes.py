@@ -592,6 +592,17 @@ def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=N
         f"ORDER BY {order_sql} LIMIT ? OFFSET ?",
         params + [page_size, offset],
     ).fetchall()
+
+    ids_pagina = [row["id"] for row in rows]
+    compartidos_por_respuesta = {}
+    if ids_pagina:
+        placeholders = ",".join("?" * len(ids_pagina))
+        for r in conn.execute(f"""
+            SELECT ic.respuesta_id AS respuesta_id, u.nombre AS usuario_nombre
+            FROM informe_compartidos ic JOIN usuarios u ON u.id = ic.usuario_id
+            WHERE ic.respuesta_id IN ({placeholders})
+        """, ids_pagina).fetchall():
+            compartidos_por_respuesta.setdefault(r["respuesta_id"], []).append(r["usuario_nombre"])
     conn.close()
 
     respuestas = []
@@ -609,6 +620,7 @@ def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=N
             "datos": datos,
             "tiene_cv": row["cv_ruta"] is not None,
             "cv_nombre": row["cv_nombre_original"],
+            "compartido_con": compartidos_por_respuesta.get(row["id"], []),
         })
 
     return {

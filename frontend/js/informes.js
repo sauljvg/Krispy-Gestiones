@@ -622,6 +622,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btn-compartir-cancelar").addEventListener("click", cerrarModalCompartir);
   document.getElementById("btn-compartir-confirmar").addEventListener("click", async () => {
     const usuarioId = Number(document.getElementById("compartir-usuario-select").value);
+    const usuario = usuariosParaCompartir.find((u) => u.id === usuarioId);
+    if (usuario && lastData) {
+      const yaCompartidos = lastData.respuestas.filter(
+        (r) => selectedIds.has(r.id) && (r.compartido_con || []).includes(usuario.nombre)
+      );
+      if (yaCompartidos.length > 0) {
+        const nombres = yaCompartidos.map((r) => r.datos["Nombre y apellido"] || r.datos["Nombre"] || `#${r.id}`).join(", ");
+        if (!confirm(`${nombres} ya estaba(n) compartido(s) con ${usuario.nombre}. ¿Compartir de nuevo?`)) return;
+      }
+    }
     const res = await fetch(`${AUTH_API_BASE}/informes/compartir`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

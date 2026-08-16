@@ -598,6 +598,10 @@ function renderForm() {
     ? `<div id="candidato-foto-wrap-cont">${candidatoEditando.tiene_foto ? fotoPreviewHTML(candidatoEditando.id) : ""}</div>`
     : "";
 
+  const compartidoFichaHTML = esEdicion && (candidatoEditando.compartidos || []).length > 0
+    ? `<p class="staff-hint">🔗 Compartido con: ${escapeHTML(candidatoEditando.compartidos.map((x) => x.nombre).join(", "))}</p>`
+    : "";
+
   const resultadoTestHTML = esEdicion && candidatoEditando.informe_tipo_clave
     ? (() => {
         const params = new URLSearchParams({
@@ -629,6 +633,7 @@ function renderForm() {
     <div class="candidato-form">
       <h3>${esEdicion ? "Editar candidato" : "Nuevo candidato"}</h3>
       ${fotoFormHTML}
+      ${compartidoFichaHTML}
       ${resultadoTestHTML}
       ${subirCvHTML}
       <div id="single-candidato-wrap">
@@ -1055,6 +1060,10 @@ function candidatoMiniCardHTML(c) {
   const fotoHTML = c.tiene_foto
     ? `<img class="candidato-mini-foto" src="${AUTH_API_BASE}/reclutamiento/candidatos/${c.id}/foto" alt="">`
     : `<span class="candidato-mini-foto candidato-mini-foto-vacia">${escapeHTML((c.nombre_completo || "?").trim()[0] || "?")}</span>`;
+  const compartidos = c.compartidos || [];
+  const compartidoHTML = compartidos.length > 0
+    ? `<p class="candidato-mini-compartido">🔗 Compartido con: ${escapeHTML(compartidos.map((x) => x.nombre).join(", "))}</p>`
+    : "";
   return `
     <div class="candidato-mini-card ${seleccionada ? "seleccionada" : ""}" data-candidato-id="${c.id}">
       <div class="candidato-mini-card-fila">
@@ -1064,6 +1073,7 @@ function candidatoMiniCardHTML(c) {
           <p>${escapeHTML(c.puesto_solicitado || "")}</p>
           <p>${escapeHTML(linea2)}</p>
           <p style="color:var(--text-muted);">${escapeHTML(vacanteTxt)}</p>
+          ${compartidoHTML}
         </div>
       </div>
     </div>`;
@@ -1149,6 +1159,16 @@ async function confirmarCompartirCandidatos() {
   const usuarioId = Number(document.getElementById("compartir-candidatos-usuario-select").value);
   const ids = [...candidatosSeleccionadosIds];
   if (!usuarioId || ids.length === 0) return;
+  const usuario = usuariosParaCompartirCandidatos.find((u) => u.id === usuarioId);
+  if (usuario) {
+    const yaCompartidos = ultimosCandidatosCargados.filter(
+      (c) => ids.includes(c.id) && (c.compartidos || []).some((x) => x.usuario_id === usuarioId)
+    );
+    if (yaCompartidos.length > 0) {
+      const nombres = yaCompartidos.map((c) => c.nombre_completo || `#${c.id}`).join(", ");
+      if (!confirm(`${nombres} ya estaba(n) compartido(s) con ${usuario.nombre}. ¿Compartir de nuevo?`)) return;
+    }
+  }
   await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/compartir`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
