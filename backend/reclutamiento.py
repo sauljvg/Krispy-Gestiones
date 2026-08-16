@@ -257,6 +257,12 @@ def _row_to_dict(row):
     # informes.py) -- solo si hay foto o no; la propia foto se sirve por su
     # endpoint dedicado (GET /candidatos/{id}/foto).
     d["tiene_foto"] = bool(d.pop("foto_ruta", None))
+    # Si ya respondió al test, por definición ya hubo contacto -- no tiene
+    # sentido seguir mostrando "Sin contactar" y obligar a marcarlo a mano.
+    # No se pisa una escalada manual a "respondio" (contacto humano
+    # confirmado aparte del test).
+    if d.get("respuesta_id") and d.get("contacto_estado") == "sin_contactar":
+        d["contacto_estado"] = "contactado"
     return d
 
 

@@ -366,12 +366,12 @@ function renderTable() {
   thead.innerHTML =
     `<th><input type="checkbox" id="check-all"></th>` +
     columnasVisibles.map((c) => `<th title="${escapeHTML(c)}" draggable="true" data-col="${escapeHTML(c)}">${escapeHTML(c)}</th>`).join("") +
-    `<th>CV</th>`;
+    `<th>Compartido con</th><th>CV</th>`;
   wireDragColumnas(thead);
 
   const tbody = document.getElementById("tipo-detail-tbody");
   if (data.respuestas.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="${columnasVisibles.length + 2}">Todavía no hay respuestas importadas. Usa "Importar Excel" arriba.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${columnasVisibles.length + 3}">Todavía no hay respuestas importadas. Usa "Importar Excel" arriba.</td></tr>`;
   } else {
     tbody.innerHTML = data.respuestas
       .map((r) => {
@@ -379,15 +379,16 @@ function renderTable() {
         const cvBtn = r.tiene_cv
           ? `<a href="${AUTH_API_BASE}/informes/respuestas/${r.id}/cv" target="_blank" class="btn btn-ghost btn-cv">📄 Ver</a>`
           : "";
-        const compartida = r.compartido_con && r.compartido_con.length > 0;
-        const tituloFila = compartida ? `Ya compartido con: ${r.compartido_con.join(", ")}` : "";
-        return `<tr data-id="${r.id}" class="${compartida ? "fila-compartida" : ""}" title="${escapeHTML(tituloFila)}">
+        const compartidoCon = r.compartido_con || [];
+        const compartida = compartidoCon.length > 0;
+        return `<tr data-id="${r.id}" class="${compartida ? "fila-compartida" : ""}">
           <td><input type="checkbox" class="row-check" data-id="${r.id}" ${checked}></td>
           ${columnasVisibles.map((c) => {
             const valor = r.datos[c] ?? "";
             const mostrar = data.columnas_fecha.includes(c) ? formatFechaCorta(valor) : valor;
             return `<td title="${escapeHTML(valor)}">${escapeHTML(mostrar)}</td>`;
           }).join("")}
+          <td class="col-compartido-con" title="${escapeHTML(compartidoCon.join(", "))}">${compartida ? `🔗 ${escapeHTML(compartidoCon.join(", "))}` : ""}</td>
           <td>
             ${cvBtn}
             <label class="btn btn-ghost btn-cv btn-upload">⬆
@@ -624,13 +625,29 @@ document.addEventListener("DOMContentLoaded", async () => {
     const usuarioId = Number(document.getElementById("compartir-usuario-select").value);
     const usuario = usuariosParaCompartir.find((u) => u.id === usuarioId);
     if (usuario && lastData) {
-      const yaCompartidos = lastData.respuestas.filter(
-        (r) => selectedIds.has(r.id) && (r.compartido_con || []).includes(usuario.nombre)
-      );
-      if (yaCompartidos.length > 0) {
-        const nombres = yaCompartidos.map((r) => r.datos["Nombre y apellido"] || r.datos["Nombre"] || `#${r.id}`).join(", ");
-        if (!confirm(`${nombres} ya estaba(n) compartido(s) con ${usuario.nombre}. ¿Compartir de nuevo?`)) return;
+      // Dos casos distintos: re-compartir con la MISMA persona (probable
+      // duplicado sin querer) o compartir con OTRA persona cuando ya está
+      // compartido con alguien más (puede ser intencional -- varios
+      // gerentes interesados en el mismo candidato -- pero conviene avisar
+      // por si acaso).
+      const mismoDestinatario = [];
+      const otroDestinatario = [];
+      lastData.respuestas.forEach((r) => {
+        if (!selectedIds.has(r.id)) return;
+        const con = r.compartido_con || [];
+        if (con.length === 0) return;
+        const nombre = r.datos["Nombre y apellido"] || r.datos["Nombre"] || `#${r.id}`;
+        if (con.includes(usuario.nombre)) mismoDestinatario.push(nombre);
+        else otroDestinatario.push(`${nombre} (ya con ${con.join(", ")})`);
+      });
+      const partes = [];
+      if (mismoDestinatario.length) {
+        partes.push(`${mismoDestinatario.join(", ")} ya estaba(n) compartido(s) con ${usuario.nombre}.`);
       }
+      if (otroDestinatario.length) {
+        partes.push(`${otroDestinatario.join(", ")} ya está(n) compartido(s) con otra persona. ¿Compartir también con ${usuario.nombre}?`);
+      }
+      if (partes.length && !confirm(`${partes.join(" ")}\n¿Continuar?`)) return;
     }
     const res = await fetch(`${AUTH_API_BASE}/informes/compartir`, {
       method: "POST",

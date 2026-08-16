@@ -200,6 +200,9 @@ function fmtFechaHora(iso) {
 // comparten varios candidatos de una sola acción comparten fecha exacta y
 // contraparte, así que forman un grupo. claveOtro = campo que identifica a la
 // otra persona (quién lo compartió, o con quién se compartió).
+let modoSeleccionCompartidos = false;
+let compartidosSeleccionadosIds = new Set();
+
 function agruparPorTanda(items, claveOtro) {
   const grupos = [];
   let actual = null;
@@ -222,7 +225,7 @@ async function actualizarCandidatoInline(candidatoId, campos) {
   });
 }
 
-function candidatoCardHTML(item, permitirDejarDeCompartir) {
+function candidatoCardHTML(item, permitirDejarDeCompartir, permitirSeleccion) {
   const entries = Object.entries(item.datos).filter(([k]) => k.toLowerCase() !== "nombre");
   const cvBtn = item.tiene_cv
     ? `<a href="${AUTH_API_BASE}/informes/respuestas/${item.respuesta_id}/cv" target="_blank" rel="noopener" class="btn btn-primary">📄 Ver CV</a>`
@@ -251,9 +254,12 @@ function candidatoCardHTML(item, permitirDejarDeCompartir) {
          data-destinatario-id="${item.destinatario_id ?? ""}">✕ Dejar de compartir</button>`
     : "";
   const metaTxt = item.hoja ? `${item.tipo_nombre} · hoja "${item.hoja}"` : item.tipo_nombre;
+  const checkboxHTML = permitirSeleccion && candId
+    ? `<input type="checkbox" class="candidato-compartido-check" data-candidato-id="${candId}" ${compartidosSeleccionadosIds.has(candId) ? "checked" : ""} style="margin-right:6px;">`
+    : "";
   return `
     <div class="candidato-card">
-      <h3>${escapeHTML(nombreCandidato(item.datos))} ${estadoHTML} ${resultadoBadgeHTML(item.test_resultado)}</h3>
+      <h3>${checkboxHTML}${escapeHTML(nombreCandidato(item.datos))} ${estadoHTML} ${resultadoBadgeHTML(item.test_resultado)}</h3>
       <p class="candidato-meta">${escapeHTML(metaTxt)}</p>
       <div class="candidato-datos">
         ${entries.map(([k, v]) => `<div><div class="campo-nombre">${escapeHTML(k)}</div><div>${escapeHTML(v)}</div></div>`).join("")}
@@ -266,7 +272,7 @@ function candidatoCardHTML(item, permitirDejarDeCompartir) {
 // Cada tanda es un <details> desplegable. `etiquetaOtro` describe la relación
 // ("Compartido por" / "Compartido con") y `abierta` deja la más reciente
 // abierta por defecto para que no haya que hacer clic para ver lo último.
-function grupoHTML(grupo, etiquetaOtro, abierta, permitirDejarDeCompartir) {
+function grupoHTML(grupo, etiquetaOtro, abierta, permitirDejarDeCompartir, permitirSeleccion) {
   const n = grupo.items.length;
   return `
     <details class="tanda" ${abierta ? "open" : ""}>
@@ -275,17 +281,29 @@ function grupoHTML(grupo, etiquetaOtro, abierta, permitirDejarDeCompartir) {
         <span class="tanda-meta">${n} candidato${n === 1 ? "" : "s"} · ${escapeHTML(etiquetaOtro)} <b>${escapeHTML(grupo.otro || "")}</b></span>
       </summary>
       <div class="tanda-body">
-        ${grupo.items.map((it) => candidatoCardHTML(it, permitirDejarDeCompartir)).join("")}
+        ${grupo.items.map((it) => candidatoCardHTML(it, permitirDejarDeCompartir, permitirSeleccion)).join("")}
       </div>
     </details>`;
 }
 
-function seccionHTML(titulo, grupos, etiquetaOtro, vacioMsg, permitirDejarDeCompartir) {
+function seccionHTML(titulo, grupos, etiquetaOtro, vacioMsg, permitirDejarDeCompartir, permitirSeleccion) {
+  // "Unir a la misma solicitud" solo tiene sentido en "Compartidos por ti"
+  // -- para el caso de compartir el mismo grupo de candidatos en tandas
+  // distintas (p.ej. unos a las 8:46 y otros a las 8:59 al mismo gerente) y
+  // querer agruparlos bajo un único proceso después.
+  const barraSeleccion = permitirSeleccion ? `
+    <div class="compartidos-seleccion-bar">
+      <button type="button" id="btn-modo-seleccion-compartidos" class="btn btn-ghost">${modoSeleccionCompartidos ? "✕ Cancelar selección" : "☑ Seleccionar"}</button>
+      ${modoSeleccionCompartidos ? `
+        <span id="compartidos-seleccion-contador" class="staff-hint">${compartidosSeleccionadosIds.size} seleccionado(s)</span>
+        <button type="button" id="btn-unir-compartidos" class="btn btn-primary" ${compartidosSeleccionadosIds.size === 0 ? "disabled" : ""}>🔗 Unir a la misma solicitud...</button>
+      ` : ""}
+    </div>` : "";
   if (grupos.length === 0) {
-    return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2><p class="staff-hint">${escapeHTML(vacioMsg)}</p>`;
+    return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2>${barraSeleccion}<p class="staff-hint">${escapeHTML(vacioMsg)}</p>`;
   }
-  return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2>` +
-    grupos.map((g, i) => grupoHTML(g, etiquetaOtro, i === 0, permitirDejarDeCompartir)).join("");
+  return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2>${barraSeleccion}` +
+    grupos.map((g, i) => grupoHTML(g, etiquetaOtro, i === 0, permitirDejarDeCompartir, permitirSeleccion && modoSeleccionCompartidos)).join("");
 }
 
 async function dejarDeCompartirClick(btn) {
@@ -316,6 +334,26 @@ function wireCompartidosInteractivos(wrap) {
   wrap.querySelectorAll(".btn-dejar-compartir").forEach((el) => {
     el.addEventListener("click", () => dejarDeCompartirClick(el));
   });
+  wrap.querySelectorAll(".candidato-compartido-check").forEach((el) => {
+    el.addEventListener("change", () => {
+      const id = Number(el.dataset.candidatoId);
+      if (el.checked) compartidosSeleccionadosIds.add(id);
+      else compartidosSeleccionadosIds.delete(id);
+      loadCompartidos();
+    });
+  });
+  const btnModo = document.getElementById("btn-modo-seleccion-compartidos");
+  if (btnModo) {
+    btnModo.addEventListener("click", () => {
+      modoSeleccionCompartidos = !modoSeleccionCompartidos;
+      compartidosSeleccionadosIds.clear();
+      loadCompartidos();
+    });
+  }
+  const btnUnir = document.getElementById("btn-unir-compartidos");
+  if (btnUnir) {
+    btnUnir.addEventListener("click", () => abrirModalAsignarVacante("compartidos"));
+  }
 }
 
 async function loadCompartidos() {
@@ -333,13 +371,14 @@ async function loadCompartidos() {
     gruposConmigo,
     "compartido por",
     "Todavía no te han compartido ningún candidato.",
+    false,
     false
   );
 
   // La sección "Compartidos por ti" solo tiene sentido enseñarla si esta
   // persona ha compartido algo alguna vez (a un gerente no le aparecerá).
   if (gruposPorMi.length > 0) {
-    html += seccionHTML("Compartidos por ti", gruposPorMi, "compartido con", "", true);
+    html += seccionHTML("Compartidos por ti", gruposPorMi, "compartido con", "", true, true);
   }
 
   wrap.innerHTML = html;
@@ -1298,13 +1337,27 @@ async function confirmarCompartirCandidatos() {
   if (!usuarioId || ids.length === 0) return;
   const usuario = usuariosParaCompartirCandidatos.find((u) => u.id === usuarioId);
   if (usuario) {
-    const yaCompartidos = ultimosCandidatosCargados.filter(
-      (c) => ids.includes(c.id) && (c.compartidos || []).some((x) => x.usuario_id === usuarioId)
-    );
-    if (yaCompartidos.length > 0) {
-      const nombres = yaCompartidos.map((c) => c.nombre_completo || `#${c.id}`).join(", ");
-      if (!confirm(`${nombres} ya estaba(n) compartido(s) con ${usuario.nombre}. ¿Compartir de nuevo?`)) return;
+    // Igual que en Informes: distingue re-compartir con la MISMA persona
+    // (probable duplicado) de compartir con OTRA cuando ya estaba
+    // compartido con alguien más (puede ser intencional, pero se avisa).
+    const mismoDestinatario = [];
+    const otroDestinatario = [];
+    ultimosCandidatosCargados.forEach((c) => {
+      if (!ids.includes(c.id)) return;
+      const compartidos = c.compartidos || [];
+      if (compartidos.length === 0) return;
+      const nombre = c.nombre_completo || `#${c.id}`;
+      if (compartidos.some((x) => x.usuario_id === usuarioId)) mismoDestinatario.push(nombre);
+      else otroDestinatario.push(`${nombre} (ya con ${compartidos.map((x) => x.nombre).join(", ")})`);
+    });
+    const partes = [];
+    if (mismoDestinatario.length) {
+      partes.push(`${mismoDestinatario.join(", ")} ya estaba(n) compartido(s) con ${usuario.nombre}.`);
     }
+    if (otroDestinatario.length) {
+      partes.push(`${otroDestinatario.join(", ")} ya está(n) compartido(s) con otra persona. ¿Compartir también con ${usuario.nombre}?`);
+    }
+    if (partes.length && !confirm(`${partes.join(" ")}\n¿Continuar?`)) return;
   }
   await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/compartir`, {
     method: "POST",
@@ -1319,8 +1372,15 @@ async function confirmarCompartirCandidatos() {
 // pensado para agrupar bajo el mismo proceso a gente que se fue
 // compartiendo suelta en momentos distintos (p.ej. a Heber a las 16:22 y
 // otros 3 a las 17:00) y que en realidad son la misma solicitud.
-async function abrirModalAsignarVacante() {
-  if (candidatosSeleccionadosIds.size === 0) return;
+// origen "grid" = selección múltiple de "Base de candidatos"; "compartidos"
+// = selección en "Compartidos por ti" (para unir bajo la misma solicitud
+// candidatos compartidos al mismo gerente en tandas distintas).
+let origenAsignarVacante = "grid";
+
+async function abrirModalAsignarVacante(origen = "grid") {
+  origenAsignarVacante = origen;
+  const ids = origen === "compartidos" ? compartidosSeleccionadosIds : candidatosSeleccionadosIds;
+  if (ids.size === 0) return;
   const select = document.getElementById("asignar-vacante-select");
   select.innerHTML =
     `<option value="">— Sin vacante —</option>` +
@@ -1337,7 +1397,7 @@ function cerrarModalAsignarVacante() {
 async function confirmarAsignarVacante() {
   const valor = document.getElementById("asignar-vacante-select").value;
   const vacanteId = valor ? Number(valor) : null;
-  const ids = [...candidatosSeleccionadosIds];
+  const ids = [...(origenAsignarVacante === "compartidos" ? compartidosSeleccionadosIds : candidatosSeleccionadosIds)];
   if (ids.length === 0) return;
   await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/vacante-multiple`, {
     method: "PUT",
@@ -1345,8 +1405,14 @@ async function confirmarAsignarVacante() {
     body: JSON.stringify({ candidato_ids: ids, vacante_id: vacanteId }),
   });
   cerrarModalAsignarVacante();
-  toggleModoSeleccion();
-  await loadCandidatos();
+  if (origenAsignarVacante === "compartidos") {
+    modoSeleccionCompartidos = false;
+    compartidosSeleccionadosIds.clear();
+    await loadCompartidos();
+  } else {
+    toggleModoSeleccion();
+    await loadCandidatos();
+  }
 }
 
 async function renderCandidatosTabs() {
@@ -1507,7 +1573,7 @@ async function initBaseCandidatos(user) {
   document.getElementById("btn-compartir-seleccionados").addEventListener("click", abrirModalCompartirCandidatos);
   document.getElementById("btn-compartir-candidatos-cancelar").addEventListener("click", cerrarModalCompartirCandidatos);
   document.getElementById("btn-compartir-candidatos-confirmar").addEventListener("click", confirmarCompartirCandidatos);
-  document.getElementById("btn-asignar-vacante-seleccionados").addEventListener("click", abrirModalAsignarVacante);
+  document.getElementById("btn-asignar-vacante-seleccionados").addEventListener("click", () => abrirModalAsignarVacante("grid"));
   document.getElementById("btn-asignar-vacante-cancelar").addEventListener("click", cerrarModalAsignarVacante);
   document.getElementById("btn-asignar-vacante-confirmar").addEventListener("click", confirmarAsignarVacante);
   document.getElementById("btn-fusionar-vacante-cancelar").addEventListener("click", cerrarModalFusionarVacante);
