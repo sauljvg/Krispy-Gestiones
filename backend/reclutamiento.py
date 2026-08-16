@@ -146,6 +146,26 @@ def ensure_reclutamiento_tables():
             UNIQUE(candidato_id, usuario_id)
         )
     """)
+    # Compartir a nivel de SOLICITUD (vacante), no de candidato suelto -- el
+    # problema que resuelve: si compartes 5 candidatos uno a uno (o en
+    # momentos distintos) a Heber, candidato_compartidos genera 5 "slots"
+    # separados sin relación entre sí, y si mañana se añade un candidato más
+    # a esa vacante, habría que acordarse de compartirlo también. Añadir un
+    # usuario aquí como responsable de la vacante le da acceso a TODOS sus
+    # candidatos de golpe, presentes y futuros -- un único sitio donde tanto
+    # quien comparte como los gerentes ven todo junto (ver
+    # get_vacantes_compartidas_con/por). usuario_tiene_acceso_candidato
+    # también lo consulta para la ficha individual.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS vacante_compartidos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vacante_id INTEGER NOT NULL REFERENCES vacantes(id) ON DELETE CASCADE,
+            usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+            compartido_por TEXT,
+            compartido_en TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(vacante_id, usuario_id)
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -173,6 +193,21 @@ def list_vacantes(empresa=None, estado=None):
     return [dict(r) for r in rows]
 
 
+def get_gerentes_de_vacante(vacante_id, conn=None):
+    propia = conn is None
+    if propia:
+        conn = get_connection()
+    rows = conn.execute("""
+        SELECT vc.usuario_id AS usuario_id, u.nombre AS nombre
+        FROM vacante_compartidos vc JOIN usuarios u ON u.id = vc.usuario_id
+        WHERE vc.vacante_id = ?
+        ORDER BY u.nombre
+    """, (vacante_id,)).fetchall()
+    if propia:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
 def get_vacante(vacante_id):
     conn = get_connection()
     row = conn.execute("SELECT * FROM vacantes WHERE id = ?", (vacante_id,)).fetchone()
@@ -180,9 +215,104 @@ def get_vacante(vacante_id):
         conn.close()
         return None
     vacante = dict(row)
+    vacante["gerentes"] = get_gerentes_de_vacante(vacante_id, conn)
     conn.close()
     vacante["candidatos"] = list_candidatos(vacante_id=vacante_id)
     return vacante
+
+
+def compartir_vacante(vacante_id, usuario_ids: list[int], compartido_por):
+    """Asigna a uno o más gerentes/responsables como encargados de TODA la
+    solicitud -- a diferencia de compartir_candidatos_directo (candidato a
+    candidato), esto da acceso a todos sus candidatos de una vez, presentes
+    y los que se añadan después (ver usuario_tiene_acceso_candidato)."""
+    if not usuario_ids:
+        return
+    conn = get_connection()
+    for usuario_id in usuario_ids:
+        conn.execute(
+            """
+            INSERT INTO vacante_compartidos (vacante_id, usuario_id, compartido_por)
+            VALUES (?, ?, ?)
+            ON CONFLICT(vacante_id, usuario_id)
+            DO UPDATE SET compartido_por = excluded.compartido_por, compartido_en = datetime('now')
+            """,
+            (vacante_id, usuario_id, compartido_por),
+        )
+    conn.commit()
+    conn.close()
+
+
+def dejar_de_compartir_vacante(vacante_id, usuario_id):
+    conn = get_connection()
+    conn.execute(
+        "DELETE FROM vacante_compartidos WHERE vacante_id = ? AND usuario_id = ?", (vacante_id, usuario_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def usuario_tiene_acceso_vacante(usuario_id, vacante_id):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT 1 FROM vacante_compartidos WHERE vacante_id = ? AND usuario_id = ?", (vacante_id, usuario_id)
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+def get_vacantes_compartidas_con(usuario_id, empresa=None):
+    """Vacantes donde este usuario es responsable -- para "Compartidos
+    conmigo", en vez de fichas sueltas agrupadas por cuándo se compartieron,
+    aquí se ve la solicitud completa con TODOS sus candidatos juntos."""
+    conn = get_connection()
+    clauses = ["vc.usuario_id = ?"]
+    params = [usuario_id]
+    if empresa:
+        clauses.append("v.empresa = ?")
+        params.append(empresa)
+    rows = conn.execute(f"""
+        SELECT v.*, vc.compartido_en, vc.compartido_por
+        FROM vacante_compartidos vc JOIN vacantes v ON v.id = vc.vacante_id
+        WHERE {' AND '.join(clauses)}
+        ORDER BY vc.compartido_en DESC
+    """, params).fetchall()
+    resultado = []
+    for r in rows:
+        vacante = dict(r)
+        vacante["gerentes"] = get_gerentes_de_vacante(vacante["id"], conn)
+        resultado.append(vacante)
+    conn.close()
+    for vacante in resultado:
+        vacante["candidatos"] = list_candidatos(vacante_id=vacante["id"])
+    return resultado
+
+
+def get_vacantes_compartidas_por(username, empresa=None):
+    """Vacantes que ESTE usuario ha compartido con algún gerente -- una fila
+    por vacante (no una por gerente), con la lista completa de a quiénes se
+    la compartió."""
+    conn = get_connection()
+    clauses = ["vc.compartido_por = ?"]
+    params = [username]
+    if empresa:
+        clauses.append("v.empresa = ?")
+        params.append(empresa)
+    rows = conn.execute(f"""
+        SELECT DISTINCT v.*
+        FROM vacante_compartidos vc JOIN vacantes v ON v.id = vc.vacante_id
+        WHERE {' AND '.join(clauses)}
+        ORDER BY v.id DESC
+    """, params).fetchall()
+    resultado = []
+    for r in rows:
+        vacante = dict(r)
+        vacante["gerentes"] = get_gerentes_de_vacante(vacante["id"], conn)
+        resultado.append(vacante)
+    conn.close()
+    for vacante in resultado:
+        vacante["candidatos"] = list_candidatos(vacante_id=vacante["id"])
+    return resultado
 
 
 def crear_vacante(empresa, puesto, centro=None, notas=None, creado_por=None):
@@ -226,9 +356,12 @@ def actualizar_vacante(vacante_id, campos: dict):
 
 def eliminar_vacante(vacante_id):
     """Borra la vacante pero conserva los candidatos ya creados (quedan
-    "sin vacante asignada" en vez de perderse)."""
+    "sin vacante asignada" en vez de perderse). SQLite no aplica ON DELETE
+    CASCADE salvo que se active PRAGMA foreign_keys (no está activado en
+    esta conexión), así que vacante_compartidos se limpia a mano."""
     conn = get_connection()
     conn.execute("UPDATE candidatos SET vacante_id = NULL WHERE vacante_id = ?", (vacante_id,))
+    conn.execute("DELETE FROM vacante_compartidos WHERE vacante_id = ?", (vacante_id,))
     conn.execute("DELETE FROM vacantes WHERE id = ?", (vacante_id,))
     conn.commit()
     conn.close()
@@ -245,6 +378,20 @@ def fusionar_vacantes(origen_id, destino_id):
         return
     conn = get_connection()
     conn.execute("UPDATE candidatos SET vacante_id = ? WHERE vacante_id = ?", (destino_id, origen_id))
+    # Los responsables de origen también deberían seguir teniendo acceso
+    # tras la fusión -- se copian a destino (ON CONFLICT por si alguien ya
+    # era responsable de ambas). SQLite no aplica ON DELETE CASCADE en esta
+    # conexión, así que además se limpian a mano antes de borrar origen.
+    for row in conn.execute("SELECT usuario_id, compartido_por FROM vacante_compartidos WHERE vacante_id = ?", (origen_id,)).fetchall():
+        conn.execute(
+            """
+            INSERT INTO vacante_compartidos (vacante_id, usuario_id, compartido_por)
+            VALUES (?, ?, ?)
+            ON CONFLICT(vacante_id, usuario_id) DO NOTHING
+            """,
+            (destino_id, row["usuario_id"], row["compartido_por"]),
+        )
+    conn.execute("DELETE FROM vacante_compartidos WHERE vacante_id = ?", (origen_id,))
     conn.execute("DELETE FROM vacantes WHERE id = ?", (origen_id,))
     conn.commit()
     conn.close()
@@ -324,6 +471,17 @@ def get_candidato(candidato_id):
         return None
     candidato = _row_to_dict(row)
     candidato["compartidos"] = _compartidos_por_candidato(conn, [candidato_id]).get(candidato_id, [])
+    # puesto/centro de la vacante (si tiene) -- un responsable de vacante sin
+    # el módulo completo no tiene la lista de vacantes cargada en el
+    # frontend para resolver el nombre por su cuenta, así que se manda ya
+    # resuelto (evita además que el <select> de la ficha "pierda" la vacante
+    # asignada al no encontrarla en una lista vacía y la desasigne sin
+    # querer al guardar).
+    if candidato.get("vacante_id"):
+        vacante_row = conn.execute("SELECT puesto, centro FROM vacantes WHERE id = ?", (candidato["vacante_id"],)).fetchone()
+        if vacante_row:
+            candidato["vacante_puesto"] = vacante_row["puesto"]
+            candidato["vacante_centro"] = vacante_row["centro"]
     archivos = conn.execute(
         "SELECT id, nombre_original, subido_en FROM candidato_archivos WHERE candidato_id = ? ORDER BY subido_en DESC",
         (candidato_id,),
@@ -726,10 +884,13 @@ def get_candidatos_compartidos_directo_por(username, empresa=None):
 
 def usuario_tiene_acceso_candidato(usuario_id, candidato_id):
     """Puerta para quien NO tiene el módulo Informes/Reclutamiento completo
-    (gerentes, area managers) pero sí recibió este candidato en concreto —
-    por el nuevo "compartir directo" (candidato_compartidos) o por el camino
-    de siempre desde Informes (informe_compartidos, que también guarda
-    candidato_id desde que existe el enlace automático con el test)."""
+    (gerentes, area managers) pero sí tiene acceso a este candidato en
+    concreto -- por "compartir directo" (candidato_compartidos), por el
+    camino de siempre desde Informes (informe_compartidos, que también
+    guarda candidato_id desde que existe el enlace automático con el test),
+    o porque es responsable de la VACANTE a la que pertenece este candidato
+    (vacante_compartidos) -- este último da acceso a toda la solicitud de
+    una vez, no solo a los candidatos compartidos uno a uno."""
     conn = get_connection()
     row = conn.execute(
         "SELECT 1 FROM candidato_compartidos WHERE candidato_id = ? AND usuario_id = ?", (candidato_id, usuario_id)
@@ -738,6 +899,12 @@ def usuario_tiene_acceso_candidato(usuario_id, candidato_id):
         row = conn.execute(
             "SELECT 1 FROM informe_compartidos WHERE candidato_id = ? AND usuario_id = ?", (candidato_id, usuario_id)
         ).fetchone()
+    if row is None:
+        row = conn.execute("""
+            SELECT 1 FROM candidatos c
+            JOIN vacante_compartidos vc ON vc.vacante_id = c.vacante_id
+            WHERE c.id = ? AND vc.usuario_id = ?
+        """, (candidato_id, usuario_id)).fetchone()
     conn.close()
     return row is not None
 

@@ -356,17 +356,48 @@ function wireCompartidosInteractivos(wrap) {
   }
 }
 
+// Una vacante compartida da acceso a TODOS sus candidatos de una vez
+// (presentes y futuros) en vez de un "slot" suelto por cada candidato
+// compartido individualmente -- ver reclutamiento.compartir_vacante. Se
+// muestra como una sola tarjeta con todos sus candidatos dentro, reusando
+// candidatoMiniCardHTML (mismo formato que la Base de candidatos).
+function vacanteCompartidaHTML(vacante) {
+  const gerentesTxt = (vacante.gerentes || []).map((g) => escapeHTML(g.nombre)).join(", ") || "—";
+  const n = vacante.candidatos.length;
+  return `
+    <div class="vacante-compartida-card">
+      <h3>📁 ${escapeHTML(vacante.puesto)}${vacante.centro ? ` · ${escapeHTML(vacante.centro)}` : ""} <span class="badge-vacante-estado badge-${vacante.estado}">${VACANTE_ESTADO_LABELS[vacante.estado]}</span></h3>
+      <p class="staff-hint">👥 Responsables: ${gerentesTxt} · ${n} candidato${n === 1 ? "" : "s"}</p>
+      <div class="candidatos-grid">${vacante.candidatos.map((c) => candidatoMiniCardHTML(c, { ocultarVacante: true })).join("")}</div>
+    </div>`;
+}
+
+function vacantesCompartidasSeccionHTML(titulo, vacantes, vacioMsg) {
+  if (vacantes.length === 0) {
+    return vacioMsg ? `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2><p class="staff-hint">${escapeHTML(vacioMsg)}</p>` : "";
+  }
+  return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2><div class="vacantes-compartidas-lista">${vacantes.map(vacanteCompartidaHTML).join("")}</div>`;
+}
+
 async function loadCompartidos() {
   const wrap = document.getElementById("compartidos-list");
-  const [conmigo, porMi] = await Promise.all([
+  const [conmigo, porMi, vacantesConmigo, vacantesPorMi] = await Promise.all([
     fetch(`${AUTH_API_BASE}/informes/compartidos?empresa=${EMPRESA}`).then((r) => (r.ok ? r.json() : [])),
     fetch(`${AUTH_API_BASE}/informes/compartidos-por-mi?empresa=${EMPRESA}`).then((r) => (r.ok ? r.json() : [])),
+    fetch(`${AUTH_API_BASE}/reclutamiento/vacantes-compartidas-conmigo?empresa=${EMPRESA}`).then((r) => (r.ok ? r.json() : [])),
+    fetch(`${AUTH_API_BASE}/reclutamiento/vacantes-compartidas-por-mi?empresa=${EMPRESA}`).then((r) => (r.ok ? r.json() : [])),
   ]);
 
   const gruposConmigo = agruparPorTanda(conmigo, "compartido_por");
   const gruposPorMi = agruparPorTanda(porMi, "destinatario_nombre");
 
-  let html = seccionHTML(
+  // Las vacantes compartidas van primero -- es la forma recomendada de ver
+  // todo agrupado; los "Compartidos" sueltos por candidato (tandas) quedan
+  // debajo, para candidatos que aún no se asignaron a ninguna solicitud.
+  let html = vacantesCompartidasSeccionHTML("Solicitudes compartidas contigo", vacantesConmigo, "");
+  html += vacantesCompartidasSeccionHTML("Solicitudes que has compartido", vacantesPorMi, "");
+
+  html += seccionHTML(
     "Compartidos conmigo",
     gruposConmigo,
     "compartido por",
@@ -383,6 +414,18 @@ async function loadCompartidos() {
 
   wrap.innerHTML = html;
   wireCompartidosInteractivos(wrap);
+  wrap.querySelectorAll(".vacante-compartida-card .candidato-mini-card").forEach((card) => {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest(".candidato-mini-contacto-select")) return;
+      abrirEdicionCandidato(card.dataset.candidatoId);
+    });
+  });
+  wrap.querySelectorAll(".vacante-compartida-card .candidato-mini-contacto-select").forEach((select) => {
+    select.addEventListener("click", (e) => e.stopPropagation());
+    select.addEventListener("change", async () => {
+      await actualizarCandidatoInline(select.dataset.candidatoId, { contacto_estado: select.value });
+    });
+  });
 }
 
 // ---------------------------------------------------------------------
@@ -464,6 +507,13 @@ function vacanteFormHTML() {
         <div class="form-field form-field-full"><label>Notas</label><textarea id="vacante-notas" style="min-height:50px;">${v ? escapeHTML(v.notas || "") : ""}</textarea></div>
       </div>
       ${v ? `<p class="staff-hint">Solicitada el ${escapeHTML(fmtFechaHora(v.fecha_solicitud))}${v.fecha_cierre ? ` · cerrada el ${escapeHTML(fmtFechaHora(v.fecha_cierre))}` : ""}</p>` : ""}
+      ${v ? `<p class="staff-hint">
+        👥 Responsables: ${(v.gerentes || []).length
+          ? v.gerentes.map((g) => `${escapeHTML(g.nombre)} <button type="button" class="btn-quitar-gerente" data-usuario-id="${g.usuario_id}" title="Quitar como responsable">✕</button>`).join(", ")
+          : "(nadie todavía)"}
+        <button type="button" id="btn-compartir-vacante" class="btn-mini">＋ Añadir</button>
+      </p>
+      <p class="staff-hint" style="margin-top:-8px;">Un responsable ve TODOS los candidatos de esta solicitud, aunque se añadan después -- no hace falta compartirlos uno a uno.</p>` : ""}
       <div class="form-actions">
         <button type="button" id="btn-guardar-vacante" class="btn btn-primary">Guardar</button>
         ${v && v.candidatos.length ? `<button type="button" id="btn-whatsapp-vacante" class="btn btn-ghost">💬 Mensaje a los candidatos de esta vacante</button>` : ""}
@@ -482,6 +532,10 @@ function renderVacanteForm() {
   if (vacanteEditando) {
     document.getElementById("btn-eliminar-vacante").addEventListener("click", eliminarVacanteActual);
     document.getElementById("btn-fusionar-vacante").addEventListener("click", abrirModalFusionarVacante);
+    document.getElementById("btn-compartir-vacante").addEventListener("click", abrirModalCompartirVacante);
+    wrap.querySelectorAll(".btn-quitar-gerente").forEach((btn) => {
+      btn.addEventListener("click", () => quitarGerenteVacante(Number(btn.dataset.usuarioId)));
+    });
     const btnWhatsapp = document.getElementById("btn-whatsapp-vacante");
     if (btnWhatsapp) btnWhatsapp.addEventListener("click", () => abrirCampanaWhatsapp(vacanteEditando.candidatos));
   }
@@ -577,6 +631,55 @@ async function confirmarFusionarVacante() {
   await loadCandidatos();
 }
 
+// Compartir la SOLICITUD completa con uno o más gerentes/responsables --
+// distinto de compartir candidatos sueltos uno a uno: da acceso a toda la
+// vacante de una vez, presentes y futuros (ver
+// reclutamiento.compartir_vacante en el backend). Así, si comparto 5
+// candidatos de la misma vacante a Heber, no quedan 5 "slots" sueltos --
+// Heber ve la solicitud completa en un único sitio, igual que yo.
+async function abrirModalCompartirVacante() {
+  if (!vacanteEditando) return;
+  if (usuariosParaCompartirCandidatos.length === 0) {
+    usuariosParaCompartirCandidatos = await fetch(`${AUTH_API_BASE}/informes/usuarios-para-compartir`).then((r) => r.json());
+  }
+  const yaResponsables = new Set((vacanteEditando.gerentes || []).map((g) => g.usuario_id));
+  const select = document.getElementById("compartir-vacante-select");
+  select.innerHTML = usuariosParaCompartirCandidatos
+    .filter((u) => !yaResponsables.has(u.id))
+    .map((u) => `<option value="${u.id}">${escapeHTML(u.nombre)} (${escapeHTML(u.username)} · ${escapeHTML(u.rol)})</option>`)
+    .join("");
+  if (!select.options.length) {
+    alert("Ya todos los usuarios disponibles son responsables de esta solicitud.");
+    return;
+  }
+  document.getElementById("compartir-vacante-modal").classList.add("visible");
+}
+
+function cerrarModalCompartirVacante() {
+  document.getElementById("compartir-vacante-modal").classList.remove("visible");
+}
+
+async function confirmarCompartirVacante() {
+  const usuarioId = Number(document.getElementById("compartir-vacante-select").value);
+  if (!usuarioId || !vacanteEditando) return;
+  await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}/compartir`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ usuario_ids: [usuarioId] }),
+  });
+  cerrarModalCompartirVacante();
+  vacanteEditando = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}`).then((r) => r.json());
+  renderVacanteForm();
+}
+
+async function quitarGerenteVacante(usuarioId) {
+  if (!vacanteEditando) return;
+  if (!confirm("¿Quitar a esta persona como responsable de la solicitud? Dejará de ver sus candidatos (salvo que se los hayas compartido también uno a uno).")) return;
+  await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}/compartir/${usuarioId}`, { method: "DELETE" });
+  vacanteEditando = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}`).then((r) => r.json());
+  renderVacanteForm();
+}
+
 function abrirNuevaVacante() {
   vacanteEditando = null;
   renderVacanteForm();
@@ -616,14 +719,23 @@ const CAMPOS_FORM = [
 let candidatoEditando = null; // null = alta nueva; objeto = editando existente
 let extraFieldsState = {};
 
-function vacanteSelectHTML(selectedId, elementId) {
+function vacanteSelectHTML(selectedId, elementId, fallbackLabel) {
   const opciones = vacantesTodasCache
     .map((v) => {
       const sufijo = v.estado !== "abierta" ? ` (${VACANTE_ESTADO_LABELS[v.estado].toLowerCase()})` : "";
       return `<option value="${v.id}" ${v.id === selectedId ? "selected" : ""}>${escapeHTML(v.puesto)}${v.centro ? ` · ${escapeHTML(v.centro)}` : ""}${sufijo}</option>`;
     })
     .join("");
-  return `<select id="${elementId}"><option value="">— Sin vacante —</option>${opciones}</select>`;
+  // Quien abre una ficha sin tener cargada la lista completa de vacantes
+  // (p.ej. un gerente sin el módulo completo, que solo ve lo que le
+  // compartieron) no encontraría su vacante actual en `opciones` -- sin
+  // este fallback, el <select> caería en "— Sin vacante —" y guardar
+  // cualquier otro campo desasignaría la vacante sin querer.
+  const yaEstaEnLaLista = vacantesTodasCache.some((v) => v.id === selectedId);
+  const fallbackOption = selectedId && !yaEstaEnLaLista && fallbackLabel
+    ? `<option value="${selectedId}" selected>${escapeHTML(fallbackLabel)}</option>`
+    : "";
+  return `<select id="${elementId}"><option value="">— Sin vacante —</option>${fallbackOption}${opciones}</select>`;
 }
 
 // Al abrir "Nuevo candidato" mientras el filtro de vacante está fijado en
@@ -757,7 +869,13 @@ function renderForm() {
         <div class="form-grid">
           <div class="form-field">
             <label>Vacante asociada</label>
-            ${vacanteSelectHTML(esEdicion ? candidatoEditando.vacante_id : vacantePreseleccionada(), "candidato-vacante-form")}
+            ${vacanteSelectHTML(
+              esEdicion ? candidatoEditando.vacante_id : vacantePreseleccionada(),
+              "candidato-vacante-form",
+              esEdicion && candidatoEditando.vacante_puesto
+                ? `${candidatoEditando.vacante_puesto}${candidatoEditando.vacante_centro ? ` · ${candidatoEditando.vacante_centro}` : ""}`
+                : null
+            )}
           </div>
           ${CAMPOS_FORM.map(campoFormHTML).join("")}
           ${esEdicion ? `
@@ -1223,8 +1341,13 @@ function testEstadoBadgeHTML(c) {
   return "";
 }
 
-function candidatoMiniCardHTML(c) {
+function candidatoMiniCardHTML(c, opts = {}) {
   const linea2 = [c.telefono, c.email].filter(Boolean).join(" · ");
+  // ocultarVacante: dentro de una tarjeta de "vacante compartida" ya se ve
+  // el puesto/centro en la cabecera del grupo, repetirlo en cada candidato
+  // es ruido -- además, quien ve esta vista puede no tener vacantesTodasCache
+  // cargada (gerente sin el módulo completo) y buscar ahí daría siempre
+  // "Sin vacante asignada" aunque sí la tenga.
   const vacante = vacantesTodasCache.find((v) => v.id === c.vacante_id);
   const vacanteTxt = vacante ? `📁 ${vacante.puesto}${vacante.centro ? ` · ${vacante.centro}` : ""}` : "Sin vacante asignada";
   const seleccionada = modoSeleccionCandidatos && candidatosSeleccionadosIds.has(c.id);
@@ -1244,7 +1367,7 @@ function candidatoMiniCardHTML(c) {
           <h4>${checkbox}${escapeHTML(c.nombre_completo || "(sin nombre)")} ${estadoBadgeHTML(c.estado)} ${resultadoBadgeHTML(c.test_resultado)} ${!c.telefono || !c.email ? `<span title="Faltan datos de contacto (${!c.telefono ? "teléfono" : ""}${!c.telefono && !c.email ? " y " : ""}${!c.email ? "email" : ""})">⚠️</span>` : ""}</h4>
           <p>${escapeHTML(c.puesto_solicitado || "")}</p>
           <p>${escapeHTML(linea2)}</p>
-          <p style="color:var(--text-muted);">${escapeHTML(vacanteTxt)}</p>
+          ${opts.ocultarVacante ? "" : `<p style="color:var(--text-muted);">${escapeHTML(vacanteTxt)}</p>`}
           ${compartidoHTML}
           ${testEstadoBadgeHTML(c)}
           <div class="candidato-mini-contacto-fila">${contactoEstadoSelectHTML(c.id, c.contacto_estado)}</div>
@@ -1578,6 +1701,8 @@ async function initBaseCandidatos(user) {
   document.getElementById("btn-asignar-vacante-confirmar").addEventListener("click", confirmarAsignarVacante);
   document.getElementById("btn-fusionar-vacante-cancelar").addEventListener("click", cerrarModalFusionarVacante);
   document.getElementById("btn-fusionar-vacante-confirmar").addEventListener("click", confirmarFusionarVacante);
+  document.getElementById("btn-compartir-vacante-cancelar").addEventListener("click", cerrarModalCompartirVacante);
+  document.getElementById("btn-compartir-vacante-confirmar").addEventListener("click", confirmarCompartirVacante);
   document.getElementById("candidatos-estado-masivo").addEventListener("change", (e) => cambiarEstadoSeleccionados(e.target.value));
   document.getElementById("vacantes-filtro-estado").addEventListener("change", refreshVacantes);
   document.getElementById("candidatos-filtro-vacante").addEventListener("change", () => {

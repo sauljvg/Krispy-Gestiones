@@ -94,6 +94,11 @@
   }
   .candidatos-toolbar input { flex: 1; min-width: 160px; }
   .candidatos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .vacantes-compartidas-lista { margin-bottom: 10px; }
+  .vacante-compartida-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
+  .vacante-compartida-card h3 { margin: 0 0 4px; font-size: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .vacante-compartida-card .candidatos-grid { margin-top: 10px; margin-bottom: 0; }
+  .btn-quitar-gerente { background: none; border: none; color: var(--status-critical); cursor: pointer; padding: 0 2px; font-size: 12px; }
   .candidato-mini-card {
     background: var(--surface-page); border: 1px solid var(--border); border-radius: 12px; padding: 14px;
     cursor: pointer; transition: border-color 0.15s;
@@ -259,8 +264,14 @@
         <button id="btn-mailto-seleccionados" class="btn btn-ghost btn-mailto" type="button" hidden></button>
       </div>
       <div id="candidatos-grid" class="candidatos-grid"></div>
-      <div id="form-wrap"></div>
     </div>
+
+    <!-- Fuera de reclu-candidatos-wrap a propósito: quien no tiene el
+         módulo completo (un gerente al que solo se le compartió una
+         vacante o unos candidatos) también necesita poder abrir la ficha
+         completa desde "Compartidos", y ese wrap permanece oculto para
+         ellos. -->
+    <div id="form-wrap"></div>
 
     <div id="compartidos-list"></div>
   </div>
@@ -295,6 +306,17 @@
     <div class="modal-actions">
       <button type="button" class="btn btn-ghost" id="btn-fusionar-vacante-cancelar">Cancelar</button>
       <button type="button" class="btn btn-primary" id="btn-fusionar-vacante-confirmar">Fusionar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="compartir-vacante-modal">
+  <div class="modal-box">
+    <h3>Añadir responsable de la solicitud...</h3>
+    <select id="compartir-vacante-select"></select>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="btn-compartir-vacante-cancelar">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btn-compartir-vacante-confirmar">Añadir</button>
     </div>
   </div>
 </div>

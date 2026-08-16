@@ -149,6 +149,40 @@ def fusionar_vacantes_route(vacante_id: int, body: FusionarVacanteIn, _user: dic
     return {"ok": True}
 
 
+class CompartirVacanteIn(BaseModel):
+    usuario_ids: list[int]
+
+
+@router.post("/vacantes/{vacante_id}/compartir")
+def compartir_vacante_route(vacante_id: int, body: CompartirVacanteIn, user: dict = Depends(require_informes)):
+    """Asigna uno o más gerentes/responsables a TODA la solicitud -- a
+    diferencia de /candidatos/compartir (candidato a candidato), esto da
+    acceso a todos sus candidatos de una vez, presentes y futuros."""
+    if reclutamiento_module.get_vacante(vacante_id) is None:
+        raise HTTPException(status_code=404, detail="Vacante no encontrada")
+    reclutamiento_module.compartir_vacante(vacante_id, body.usuario_ids, user["username"])
+    return {"ok": True}
+
+
+@router.delete("/vacantes/{vacante_id}/compartir/{usuario_id}")
+def dejar_de_compartir_vacante_route(vacante_id: int, usuario_id: int, _user: dict = Depends(require_informes)):
+    reclutamiento_module.dejar_de_compartir_vacante(vacante_id, usuario_id)
+    return {"ok": True}
+
+
+@router.get("/vacantes-compartidas-conmigo")
+def vacantes_compartidas_conmigo_route(empresa: str | None = None, user: dict = Depends(get_current_user)):
+    """Igual que /candidatos/compartir a nivel de solicitud: vacantes de las
+    que este usuario es responsable, con TODOS sus candidatos juntos --
+    accesible sin el módulo completo, igual que /informes/compartidos."""
+    return reclutamiento_module.get_vacantes_compartidas_con(user["id"], empresa=empresa)
+
+
+@router.get("/vacantes-compartidas-por-mi")
+def vacantes_compartidas_por_mi_route(empresa: str | None = None, user: dict = Depends(get_current_user)):
+    return reclutamiento_module.get_vacantes_compartidas_por(user["username"], empresa=empresa)
+
+
 @router.get("/candidatos")
 def list_candidatos_route(
     empresa: str | None = None,
