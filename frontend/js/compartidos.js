@@ -937,32 +937,61 @@ async function previsualizarLote() {
   const items = data.candidatos || [];
   const encontrados = items.filter((it) => it.candidato_id);
   const noEncontrados = items.length - encontrados.length;
+  // Cuando la detección de páginas coincide en número con los candidatos
+  // extraídos (division_disponible), a cada uno se le adjunta solo SU
+  // rango de páginas en vez del PDF de lote entero -- el rango detectado se
+  // muestra editable por si falla en algún caso concreto.
   resultadoWrap.innerHTML = `
     ${avisoExtraccionHTML(data.metodo, items.length)}
-    <p class="staff-hint">${encontrados.length} coincidencia${encontrados.length === 1 ? "" : "s"} encontrada${encontrados.length === 1 ? "" : "s"} de ${items.length}${noEncontrados ? ` (${noEncontrados} sin ficha con ese nombre exacto -- no se les adjunta nada)` : ""}.</p>
+    <p class="staff-hint">${encontrados.length} coincidencia${encontrados.length === 1 ? "" : "s"} encontrada${encontrados.length === 1 ? "" : "s"} de ${items.length}${noEncontrados ? ` (${noEncontrados} sin ficha con ese nombre exacto -- no se les adjunta nada)` : ""}.
+    ${data.division_disponible ? "Se ha detectado en qué páginas está cada uno -- se adjunta solo esa parte del PDF (puedes corregir el rango si hace falta)." : "No se pudo dividir el PDF de forma fiable -- se adjuntará el PDF completo a cada ficha encontrada, como antes."}</p>
     <ul class="lote-lista">
-      ${items.map((it) => `<li class="${it.candidato_id ? "lote-ok" : "lote-sin-match"}">${it.candidato_id ? "✓" : "✗"} ${escapeHTML(it.nombre)}</li>`).join("")}
+      ${items.map((it, i) => `
+        <li class="${it.candidato_id ? "lote-ok" : "lote-sin-match"}">
+          ${it.candidato_id ? "✓" : "✗"} ${escapeHTML(it.nombre)}
+          ${it.candidato_id && data.division_disponible ? `
+            <span class="lote-paginas">
+              págs. <input type="number" min="1" class="lote-pagina-inicio" data-idx="${i}" value="${it.pagina_inicio}" style="width:44px;">
+              a <input type="number" min="1" class="lote-pagina-fin" data-idx="${i}" value="${it.pagina_fin}" style="width:44px;">
+            </span>` : ""}
+        </li>`).join("")}
     </ul>
     ${encontrados.length ? `<button type="button" id="btn-confirmar-lote" class="btn btn-primary">Adjuntar PDF a las ${encontrados.length} fichas encontradas</button>` : ""}
     <div id="lote-progreso"></div>`;
   if (encontrados.length) {
-    document.getElementById("btn-confirmar-lote").addEventListener("click", () => confirmarAdjuntarLote(encontrados));
+    document.getElementById("btn-confirmar-lote").addEventListener("click", () => confirmarAdjuntarLote(items));
   }
 }
 
-async function confirmarAdjuntarLote(encontrados) {
+async function confirmarAdjuntarLote(items) {
   const btn = document.getElementById("btn-confirmar-lote");
   const progreso = document.getElementById("lote-progreso");
   btn.disabled = true;
-  let hechos = 0;
-  for (const it of encontrados) {
-    const formData = new FormData();
-    formData.append("file", loteArchivoPendiente);
-    await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${it.candidato_id}/archivos`, { method: "POST", body: formData }).catch(() => {});
-    hechos++;
-    progreso.textContent = `Adjuntando... ${hechos} de ${encontrados.length}`;
+  progreso.textContent = "Recortando y adjuntando...";
+  const mapeo = items
+    .map((it, i) => {
+      if (!it.candidato_id) return null;
+      const inputInicio = document.querySelector(`.lote-pagina-inicio[data-idx="${i}"]`);
+      const inputFin = document.querySelector(`.lote-pagina-fin[data-idx="${i}"]`);
+      return {
+        candidato_id: it.candidato_id,
+        pagina_inicio: inputInicio ? Number(inputInicio.value) : it.pagina_inicio || null,
+        pagina_fin: inputFin ? Number(inputFin.value) : it.pagina_fin || null,
+      };
+    })
+    .filter(Boolean);
+  const formData = new FormData();
+  formData.append("file", loteArchivoPendiente);
+  formData.append("mapeo", JSON.stringify(mapeo));
+  const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/adjuntar-pdf-lote/confirmar`, { method: "POST", body: formData });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    progreso.textContent = err.detail || "No se pudo adjuntar el PDF.";
+    btn.disabled = false;
+    return;
   }
-  progreso.textContent = `Listo: PDF adjuntado a ${hechos} fichas. Ya puedes usar "🔄 Re-extraer con IA" en cada una si hace falta.`;
+  const data = await res.json();
+  progreso.textContent = `Listo: PDF adjuntado a ${data.adjuntados} ficha(s). Ya puedes usar "🔄 Re-extraer con IA" en cada una si hace falta.`;
   btn.remove();
   await loadCandidatos();
 }

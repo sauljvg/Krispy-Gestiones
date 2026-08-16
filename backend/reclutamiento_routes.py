@@ -1,7 +1,8 @@
+import json
 import mimetypes
 import os
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -287,11 +288,13 @@ async def adjuntar_pdf_lote_route(empresa: str = "kk", file: UploadFile = File(.
     """Vista previa para el caso de "subí un PDF con 50 CVs, se crearon las
     50 fichas, pero el PDF en sí nunca se guardó en ninguna" -- lee el mismo
     PDF, extrae los nombres, y por cada uno busca si YA existe una ficha con
-    ese nombre exacto (ver buscar_candidato_por_nombre). No adjunta nada
-    todavía: el frontend enseña la lista de coincidencias encontradas/no
-    encontradas y el propio PDF se re-envía después, uno por uno, al
-    endpoint normal de adjuntar archivo -- así nunca se crea ningún
-    candidato nuevo desde aquí."""
+    ese nombre exacto (ver buscar_candidato_por_nombre). También calcula en
+    qué páginas está cada candidato (detectar_paginas_por_candidato) para
+    poder adjuntar solo SU parte del PDF en vez del lote entero -- si el
+    número de rangos detectado no coincide con el número de candidatos
+    extraídos, se marca division_disponible=false para ese caso y se deja
+    que el frontend recorte a mano o adjunte el PDF completo como antes. No
+    adjunta nada todavía: eso lo hace /candidatos/adjuntar-pdf-lote/confirmar."""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Sube el PDF con todos los candidatos")
     contenido = await file.read()
@@ -299,12 +302,58 @@ async def adjuntar_pdf_lote_route(empresa: str = "kk", file: UploadFile = File(.
         candidatos, metodo = cv_extraction.extraer_cv(contenido)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+    try:
+        rangos = cv_extraction.detectar_paginas_por_candidato(contenido)
+    except Exception:
+        rangos = []
+    division_disponible = len(rangos) == len(candidatos)
     resultado = []
-    for c in candidatos:
+    for i, c in enumerate(candidatos):
         nombre = (c.get("nombre_completo") or "").strip()
         candidato_id = reclutamiento_module.buscar_candidato_por_nombre(empresa, nombre) if nombre else None
-        resultado.append({"nombre": nombre or "(sin nombre detectado)", "candidato_id": candidato_id})
-    return {"ok": True, "metodo": metodo, "candidatos": resultado}
+        item = {"nombre": nombre or "(sin nombre detectado)", "candidato_id": candidato_id}
+        if division_disponible:
+            item["pagina_inicio"], item["pagina_fin"] = rangos[i]
+        resultado.append(item)
+    return {"ok": True, "metodo": metodo, "candidatos": resultado, "division_disponible": division_disponible, "total_paginas": len(rangos) if not division_disponible else None}
+
+
+@router.post("/candidatos/adjuntar-pdf-lote/confirmar")
+async def adjuntar_pdf_lote_confirmar_route(
+    file: UploadFile = File(...),
+    mapeo: str = Form(...),
+    _user: dict = Depends(require_informes),
+):
+    """Recorta y adjunta -- recibe el PDF de lote UNA sola vez (en vez de
+    subirlo N veces, una por candidato, como hacía antes el frontend) más la
+    lista [{candidato_id, pagina_inicio, pagina_fin}] (rangos ya revisados o
+    corregidos a mano en la vista previa). Si a algún candidato le falta el
+    rango de páginas (detección no disponible para ese caso), se le adjunta
+    el PDF completo -- mismo comportamiento que la herramienta original."""
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Sube el PDF con todos los candidatos")
+    try:
+        items = json.loads(mapeo)
+    except (json.JSONDecodeError, TypeError):
+        raise HTTPException(status_code=400, detail="mapeo inválido")
+    contenido = await file.read()
+    adjuntados = 0
+    for item in items:
+        candidato_id = item.get("candidato_id")
+        if not candidato_id:
+            continue
+        pagina_inicio = item.get("pagina_inicio")
+        pagina_fin = item.get("pagina_fin")
+        if pagina_inicio and pagina_fin:
+            try:
+                recorte = cv_extraction.recortar_pdf(contenido, int(pagina_inicio), int(pagina_fin))
+            except Exception:
+                recorte = contenido
+        else:
+            recorte = contenido
+        reclutamiento_module.agregar_archivo(candidato_id, file.filename, recorte)
+        adjuntados += 1
+    return {"ok": True, "adjuntados": adjuntados}
 
 
 @router.post("/candidatos/{candidato_id}/archivos")

@@ -261,7 +261,7 @@ def _extraer_de_texto(texto_crudo: str) -> dict:
     return extraido
 
 
-def _segmentar_paginas_por_candidato(reader) -> list[str]:
+def _segmentar_paginas_por_candidato(reader) -> list[dict]:
     """Sin IA no hay forma fiable de "entender" dónde termina un CV y
     empieza el siguiente en un PDF por lotes. Primero se comprueba si el
     documento entero usa la marca "Nombre NN%" de exportaciones de ATS (ver
@@ -281,15 +281,19 @@ def _segmentar_paginas_por_candidato(reader) -> list[str]:
 
     segmentos = []
     actual = []
-    for texto_pagina, lineas, marcador in zip(textos_paginas, primeras_lineas_por_pagina, marcadores_por_pagina):
+    actual_inicio = 0
+    for i, (texto_pagina, lineas, marcador) in enumerate(zip(textos_paginas, primeras_lineas_por_pagina, marcadores_por_pagina)):
         es_candidato_nuevo = bool(marcador) if usar_solo_marcador else bool(_adivinar_nombre(lineas[:8]))
         if es_candidato_nuevo and actual:
-            segmentos.append("\n".join(actual))
+            # Páginas 1-indexadas (para hablar con el usuario, no con el
+            # propio pypdf) -- pagina_fin es la última página INCLUIDA.
+            segmentos.append({"texto": "\n".join(actual), "pagina_inicio": actual_inicio + 1, "pagina_fin": i})
             actual = [texto_pagina]
+            actual_inicio = i
         else:
             actual.append(texto_pagina)
     if actual:
-        segmentos.append("\n".join(actual))
+        segmentos.append({"texto": "\n".join(actual), "pagina_inicio": actual_inicio + 1, "pagina_fin": len(textos_paginas)})
     return segmentos
 
 
@@ -337,7 +341,37 @@ def _extraer_local(pdf_bytes: bytes) -> list[dict]:
 
     reader = PdfReader(io.BytesIO(pdf_bytes))
     segmentos = _segmentar_paginas_por_candidato(reader)
-    return [_extraer_de_texto(seg) for seg in segmentos]
+    return [_extraer_de_texto(seg["texto"]) for seg in segmentos]
+
+
+def detectar_paginas_por_candidato(pdf_bytes: bytes) -> list[tuple[int, int]]:
+    """Rangos de página (1-indexado, ambos extremos incluidos) de cada
+    candidato detectado en un PDF por lotes -- usa la misma heurística de
+    segmentación que el extractor local (ver _segmentar_paginas_por_candidato)
+    sin importar si el nombre/campos de cada uno se sacaron con Gemini o en
+    local, para poder recortar el PDF físicamente y adjuntar a cada ficha
+    solo sus páginas (ver /candidatos/adjuntar-pdf-lote)."""
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    segmentos = _segmentar_paginas_por_candidato(reader)
+    return [(s["pagina_inicio"], s["pagina_fin"]) for s in segmentos]
+
+
+def recortar_pdf(pdf_bytes: bytes, pagina_inicio: int, pagina_fin: int) -> bytes:
+    """Extrae un rango de páginas (1-indexado, ambos extremos incluidos) del
+    PDF como un PDF nuevo e independiente -- usado para separar el CV de un
+    candidato concreto dentro de un PDF por lotes en vez de adjuntarle el
+    lote entero (ver /candidatos/adjuntar-pdf-lote/confirmar)."""
+    from pypdf import PdfReader, PdfWriter
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    writer = PdfWriter()
+    for pagina in reader.pages[pagina_inicio - 1:pagina_fin]:
+        writer.add_page(pagina)
+    salida = io.BytesIO()
+    writer.write(salida)
+    return salida.getvalue()
 
 
 def extraer_cv(pdf_bytes: bytes) -> tuple[list[dict], str]:
