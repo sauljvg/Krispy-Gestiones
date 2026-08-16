@@ -65,6 +65,11 @@ class EstadoMultipleIn(BaseModel):
     estado: str
 
 
+class VacanteMultipleIn(BaseModel):
+    candidato_ids: list[int]
+    vacante_id: int | None = None
+
+
 class CompartirCandidatosIn(BaseModel):
     candidato_ids: list[int]
     usuario_id: int
@@ -128,6 +133,20 @@ def eliminar_vacante_route(vacante_id: int, _user: dict = Depends(require_inform
     return {"ok": True}
 
 
+class FusionarVacanteIn(BaseModel):
+    destino_id: int
+
+
+@router.post("/vacantes/{vacante_id}/fusionar")
+def fusionar_vacantes_route(vacante_id: int, body: FusionarVacanteIn, _user: dict = Depends(require_informes)):
+    if reclutamiento_module.get_vacante(vacante_id) is None or reclutamiento_module.get_vacante(body.destino_id) is None:
+        raise HTTPException(status_code=404, detail="Vacante no encontrada")
+    if vacante_id == body.destino_id:
+        raise HTTPException(status_code=400, detail="Elige una solicitud distinta como destino")
+    reclutamiento_module.fusionar_vacantes(vacante_id, body.destino_id)
+    return {"ok": True}
+
+
 @router.get("/candidatos")
 def list_candidatos_route(
     empresa: str | None = None,
@@ -173,6 +192,14 @@ def actualizar_estado_multiple_route(body: EstadoMultipleIn, _user: dict = Depen
     if body.estado not in reclutamiento_module.ESTADOS:
         raise HTTPException(status_code=400, detail=f"Estado inválido: {body.estado}")
     reclutamiento_module.actualizar_estado_multiple(body.candidato_ids, body.estado)
+    return {"ok": True}
+
+
+@router.put("/candidatos/vacante-multiple")
+def actualizar_vacante_multiple_route(body: VacanteMultipleIn, _user: dict = Depends(require_informes)):
+    if body.vacante_id is not None and reclutamiento_module.get_vacante(body.vacante_id) is None:
+        raise HTTPException(status_code=404, detail="Vacante no encontrada")
+    reclutamiento_module.actualizar_vacante_multiple(body.candidato_ids, body.vacante_id)
     return {"ok": True}
 
 

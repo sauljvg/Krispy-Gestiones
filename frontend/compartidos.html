@@ -242,6 +242,7 @@
           <option value="descartado">Descartado</option>
         </select>
         <button id="btn-compartir-seleccionados" class="btn btn-ghost" type="button">Compartir con...</button>
+        <button id="btn-asignar-vacante-seleccionados" class="btn btn-ghost" type="button">Asignar a solicitud...</button>
         <button id="btn-whatsapp-seleccionados" class="btn btn-ghost btn-whatsapp" type="button" hidden></button>
         <button id="btn-mailto-seleccionados" class="btn btn-ghost btn-mailto" type="button" hidden></button>
       </div>
@@ -260,6 +261,28 @@
     <div class="modal-actions">
       <button type="button" class="btn btn-ghost" id="btn-compartir-candidatos-cancelar">Cancelar</button>
       <button type="button" class="btn btn-primary" id="btn-compartir-candidatos-confirmar">Compartir</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="asignar-vacante-modal">
+  <div class="modal-box">
+    <h3>Asignar a solicitud...</h3>
+    <select id="asignar-vacante-select"></select>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="btn-asignar-vacante-cancelar">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btn-asignar-vacante-confirmar">Asignar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="fusionar-vacante-modal">
+  <div class="modal-box">
+    <h3>Fusionar con otra solicitud...</h3>
+    <select id="fusionar-vacante-select"></select>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="btn-fusionar-vacante-cancelar">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btn-fusionar-vacante-confirmar">Fusionar</button>
     </div>
   </div>
 </div>

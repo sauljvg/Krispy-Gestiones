@@ -416,6 +416,7 @@ function vacanteFormHTML() {
       <div class="form-actions">
         <button type="button" id="btn-guardar-vacante" class="btn btn-primary">Guardar</button>
         ${v && v.candidatos.length ? `<button type="button" id="btn-whatsapp-vacante" class="btn btn-ghost">💬 Mensaje a los candidatos de esta vacante</button>` : ""}
+        ${v ? `<button type="button" id="btn-fusionar-vacante" class="btn btn-ghost">🔗 Fusionar con otra solicitud...</button>` : ""}
         ${v ? `<button type="button" id="btn-eliminar-vacante" class="btn btn-ghost">Eliminar vacante</button>` : ""}
         <button type="button" id="btn-cerrar-vacante-form" class="btn btn-ghost">Cancelar</button>
       </div>
@@ -429,6 +430,7 @@ function renderVacanteForm() {
   document.getElementById("btn-cerrar-vacante-form").addEventListener("click", cerrarVacanteForm);
   if (vacanteEditando) {
     document.getElementById("btn-eliminar-vacante").addEventListener("click", eliminarVacanteActual);
+    document.getElementById("btn-fusionar-vacante").addEventListener("click", abrirModalFusionarVacante);
     const btnWhatsapp = document.getElementById("btn-whatsapp-vacante");
     if (btnWhatsapp) btnWhatsapp.addEventListener("click", () => abrirCampanaWhatsapp(vacanteEditando.candidatos));
   }
@@ -478,6 +480,47 @@ async function eliminarVacanteActual() {
     alert(`No se pudo eliminar la vacante (error ${res.status}).`);
     return;
   }
+  cerrarVacanteForm();
+  await refreshVacantes();
+  await loadCandidatos();
+}
+
+// Fusionar dos solicitudes que en realidad son el mismo proceso -- mueve
+// todos los candidatos de la vacante actual a la elegida y borra la actual.
+function abrirModalFusionarVacante() {
+  if (!vacanteEditando) return;
+  const select = document.getElementById("fusionar-vacante-select");
+  select.innerHTML = vacantesTodasCache
+    .filter((v) => v.id !== vacanteEditando.id)
+    .map((v) => `<option value="${v.id}">${escapeHTML(v.puesto)}${v.centro ? ` · ${escapeHTML(v.centro)}` : ""}</option>`)
+    .join("");
+  if (!select.options.length) {
+    alert("No hay otra solicitud con la que fusionar esta.");
+    return;
+  }
+  document.getElementById("fusionar-vacante-modal").classList.add("visible");
+}
+
+function cerrarModalFusionarVacante() {
+  document.getElementById("fusionar-vacante-modal").classList.remove("visible");
+}
+
+async function confirmarFusionarVacante() {
+  const destinoId = Number(document.getElementById("fusionar-vacante-select").value);
+  if (!destinoId || !vacanteEditando) return;
+  const destino = vacantesTodasCache.find((v) => v.id === destinoId);
+  if (!confirm(`Se moverán todos los candidatos de "${vacanteEditando.puesto}" a "${destino ? destino.puesto : "la solicitud elegida"}" y se eliminará "${vacanteEditando.puesto}". ¿Continuar?`)) return;
+  const res = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}/fusionar`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ destino_id: destinoId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || `No se pudo fusionar (error ${res.status}).`);
+    return;
+  }
+  cerrarModalFusionarVacante();
   cerrarVacanteForm();
   await refreshVacantes();
   await loadCandidatos();
@@ -1107,6 +1150,7 @@ function actualizarBotonWhatsappSeleccionados() {
   const btnWhatsapp = document.getElementById("btn-whatsapp-seleccionados");
   const btnMailto = document.getElementById("btn-mailto-seleccionados");
   const btnCompartir = document.getElementById("btn-compartir-seleccionados");
+  const btnAsignarVacante = document.getElementById("btn-asignar-vacante-seleccionados");
   const btnSeleccionarTodos = document.getElementById("btn-seleccionar-todos-candidatos");
   const btnQuitarSeleccion = document.getElementById("btn-deseleccionar-todos-candidatos");
   const estadoMasivo = document.getElementById("candidatos-estado-masivo");
@@ -1121,6 +1165,7 @@ function actualizarBotonWhatsappSeleccionados() {
   btnMailto.hidden = sinSeleccion;
   btnMailto.innerHTML = `${ICONO_MAILTO}Email (${n})`;
   btnCompartir.disabled = sinSeleccion;
+  btnAsignarVacante.disabled = sinSeleccion;
   estadoMasivo.disabled = sinSeleccion;
   // "Seleccionar todos" toma TODOS los candidatos cargados actualmente en la
   // pantalla (respetando el filtro de vacante/búsqueda aplicado), no solo
@@ -1199,6 +1244,40 @@ async function confirmarCompartirCandidatos() {
   });
   cerrarModalCompartirCandidatos();
   toggleModoSeleccion();
+}
+
+// Asignar en lote una solicitud (vacante) a los candidatos seleccionados --
+// pensado para agrupar bajo el mismo proceso a gente que se fue
+// compartiendo suelta en momentos distintos (p.ej. a Heber a las 16:22 y
+// otros 3 a las 17:00) y que en realidad son la misma solicitud.
+async function abrirModalAsignarVacante() {
+  if (candidatosSeleccionadosIds.size === 0) return;
+  const select = document.getElementById("asignar-vacante-select");
+  select.innerHTML =
+    `<option value="">— Sin vacante —</option>` +
+    vacantesTodasCache
+      .map((v) => `<option value="${v.id}">${escapeHTML(v.puesto)}${v.centro ? ` · ${escapeHTML(v.centro)}` : ""}</option>`)
+      .join("");
+  document.getElementById("asignar-vacante-modal").classList.add("visible");
+}
+
+function cerrarModalAsignarVacante() {
+  document.getElementById("asignar-vacante-modal").classList.remove("visible");
+}
+
+async function confirmarAsignarVacante() {
+  const valor = document.getElementById("asignar-vacante-select").value;
+  const vacanteId = valor ? Number(valor) : null;
+  const ids = [...candidatosSeleccionadosIds];
+  if (ids.length === 0) return;
+  await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/vacante-multiple`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ candidato_ids: ids, vacante_id: vacanteId }),
+  });
+  cerrarModalAsignarVacante();
+  toggleModoSeleccion();
+  await loadCandidatos();
 }
 
 async function renderCandidatosTabs() {
@@ -1339,6 +1418,11 @@ async function initBaseCandidatos(user) {
   document.getElementById("btn-compartir-seleccionados").addEventListener("click", abrirModalCompartirCandidatos);
   document.getElementById("btn-compartir-candidatos-cancelar").addEventListener("click", cerrarModalCompartirCandidatos);
   document.getElementById("btn-compartir-candidatos-confirmar").addEventListener("click", confirmarCompartirCandidatos);
+  document.getElementById("btn-asignar-vacante-seleccionados").addEventListener("click", abrirModalAsignarVacante);
+  document.getElementById("btn-asignar-vacante-cancelar").addEventListener("click", cerrarModalAsignarVacante);
+  document.getElementById("btn-asignar-vacante-confirmar").addEventListener("click", confirmarAsignarVacante);
+  document.getElementById("btn-fusionar-vacante-cancelar").addEventListener("click", cerrarModalFusionarVacante);
+  document.getElementById("btn-fusionar-vacante-confirmar").addEventListener("click", confirmarFusionarVacante);
   document.getElementById("candidatos-estado-masivo").addEventListener("change", (e) => cambiarEstadoSeleccionados(e.target.value));
   document.getElementById("vacantes-filtro-estado").addEventListener("change", refreshVacantes);
   document.getElementById("candidatos-filtro-vacante").addEventListener("change", () => {

@@ -222,6 +222,22 @@ def eliminar_vacante(vacante_id):
     conn.close()
 
 
+def fusionar_vacantes(origen_id, destino_id):
+    """Junta dos solicitudes que en realidad son el mismo proceso -- p.ej.
+    candidatos que se fueron compartiendo sueltos con el mismo gerente en
+    momentos distintos y acabaron sin agrupar bajo una única vacante. Mueve
+    todos los candidatos de origen a destino y borra origen; destino
+    conserva su fecha_solicitud/notas tal cual (no se intenta fusionar ese
+    contenido, solo la lista de candidatos)."""
+    if origen_id == destino_id:
+        return
+    conn = get_connection()
+    conn.execute("UPDATE candidatos SET vacante_id = ? WHERE vacante_id = ?", (destino_id, origen_id))
+    conn.execute("DELETE FROM vacantes WHERE id = ?", (origen_id,))
+    conn.commit()
+    conn.close()
+
+
 def _row_to_dict(row):
     d = dict(row)
     d["extra_fields"] = json.loads(d.get("extra_fields") or "{}")
@@ -549,6 +565,24 @@ def actualizar_estado_multiple(candidato_ids: list[int], estado: str):
     conn.execute(
         f"UPDATE candidatos SET estado = ?, actualizado_en = datetime('now') WHERE id IN ({placeholders})",
         [estado, *candidato_ids],
+    )
+    conn.commit()
+    conn.close()
+
+
+def actualizar_vacante_multiple(candidato_ids: list[int], vacante_id):
+    """Asigna en un solo paso una solicitud (vacante) a varios candidatos ya
+    existentes -- pensado para agrupar bajo el mismo proceso a gente que se
+    fue compartiendo suelta en momentos distintos (ver fusionar_vacantes
+    para el caso de dos solicitudes ya creadas por separado). vacante_id
+    puede ser None para "quitar de la vacante"."""
+    if not candidato_ids:
+        return
+    conn = get_connection()
+    placeholders = ", ".join("?" for _ in candidato_ids)
+    conn.execute(
+        f"UPDATE candidatos SET vacante_id = ?, actualizado_en = datetime('now') WHERE id IN ({placeholders})",
+        [vacante_id, *candidato_ids],
     )
     conn.commit()
     conn.close()
