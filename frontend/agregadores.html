@@ -27,6 +27,8 @@
   .agr-estado-pill.alerta { background: color-mix(in srgb, var(--status-critical) 15%, transparent); color: var(--status-critical); }
   .agr-estado-pill.neutro { background: color-mix(in srgb, var(--text-muted) 15%, transparent); color: var(--text-muted); }
   #agr-btn-anadir.activo { background: color-mix(in srgb, var(--acento-calido) 20%, transparent); color: var(--acento-calido); border-color: var(--acento-calido); }
+  #agr-btn-unir.activo { background: color-mix(in srgb, var(--acento-calido) 20%, transparent); color: var(--acento-calido); border-color: var(--acento-calido); }
+  #agr-btn-pincel.activo { background: color-mix(in srgb, var(--acento-calido) 20%, transparent); color: var(--acento-calido); border-color: var(--acento-calido); }
 
   .agr-panel { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
   .agr-panel h2 { font-size: 16px; margin: 0 0 12px; color: var(--text-secondary); }
@@ -39,6 +41,7 @@
     color: var(--text-secondary); font-size: 12px; font-weight: 600; vertical-align: middle;
   }
   #agr-map { height: 70vh; min-height: 480px; border-radius: 8px; overflow: hidden; }
+  #agr-map-9am { height: 60vh; min-height: 400px; border-radius: 8px; overflow: hidden; filter: grayscale(0.15); }
 
   .agr-filtro-agregador { display: flex; gap: 6px; flex-wrap: wrap; }
   .agr-filtro-btn {
@@ -47,7 +50,7 @@
     font-weight: 600; cursor: pointer;
   }
   .agr-filtro-btn.activo[data-agregador=""] { background: var(--acento-calido); color: #fff; border-color: var(--acento-calido); }
-  .agr-filtro-btn.activo[data-agregador="justeat"] { background: #ff8000; color: #fff; border-color: #ff8000; }
+  .agr-filtro-btn.activo[data-agregador="justeat"] { background: #e8590c; color: #fff; border-color: #e8590c; }
   .agr-filtro-btn.activo[data-agregador="glovo"] { background: #ffc244; color: #4a3300; border-color: #ffc244; }
   .agr-filtro-btn.activo[data-agregador="ubereats"] { background: #06c167; color: #fff; border-color: #06c167; }
 
@@ -57,9 +60,20 @@
     font-weight: 600; cursor: pointer;
   }
   .agr-filtro-btn-cobertura.activo[data-agregador=""] { background: var(--acento-calido); color: #fff; border-color: var(--acento-calido); }
-  .agr-filtro-btn-cobertura.activo[data-agregador="justeat"] { background: #ff8000; color: #fff; border-color: #ff8000; }
+  .agr-filtro-btn-cobertura.activo[data-agregador="justeat"] { background: #e8590c; color: #fff; border-color: #e8590c; }
   .agr-filtro-btn-cobertura.activo[data-agregador="glovo"] { background: #ffc244; color: #4a3300; border-color: #ffc244; }
   .agr-filtro-btn-cobertura.activo[data-agregador="ubereats"] { background: #06c167; color: #fff; border-color: #06c167; }
+
+  .agr-tiendas-mapa { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 8px; }
+  .agr-tiendas-mapa-label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+  .agr-tiendas-mapa-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .agr-tienda-chip {
+    padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-muted); font-size: 12px;
+    font-weight: 600; cursor: pointer; opacity: 0.55;
+  }
+  .agr-tienda-chip.activo { background: var(--acento-calido); color: #fff; border-color: var(--acento-calido); opacity: 1; }
+  .agr-tienda-chip-todas { border-style: dashed; }
 
   .agr-bottom-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; }
   @media (max-width: 900px) { .agr-bottom-grid { grid-template-columns: 1fr; } }
@@ -69,6 +83,13 @@
   .agr-leyenda-item:hover { background: var(--surface-page); }
   .agr-leyenda-item.oculto { opacity: 0.4; text-decoration: line-through; }
   .agr-leyenda-n { color: var(--text-muted); font-weight: 700; }
+
+  .agr-guia-angulo-label {
+    background: transparent; border: none; pointer-events: none;
+    font-size: 11px; font-weight: 700; color: #444;
+    text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff;
+    text-align: center; white-space: nowrap;
+  }
 
   .agr-marker-dot { background: transparent; border: none; }
   .agr-marker-dot span {
@@ -142,6 +163,8 @@
   }
   .agr-drill-copiar:hover { background: var(--surface-page); }
   .agr-resumen-nota { font-size: 0.72rem; color: var(--text-muted); margin: -6px 0 12px; line-height: 1.4; }
+  .agr-toggle-nuevos { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--text-muted); margin: 4px 0; cursor: pointer; user-select: none; }
+  .agr-toggle-nuevos input { cursor: pointer; }
 
   #agr-resumen-titulo { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   #agr-resumen-titulo h2 { margin: 0; }
@@ -201,7 +224,7 @@
   #agr-transiciones .agr-trans-meta { display: flex; flex-direction: column; gap: 4px; }
   #agr-transiciones .agr-trans-hora { color: var(--text-muted); font-size: 0.72rem; font-weight: 600; }
   #agr-transiciones .agr-trans-agregador { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.70rem; font-weight: 600; }
-  #agr-transiciones .agr-trans-agregador.justeat { background: color-mix(in srgb, #ff8000 20%, transparent); color: #ff8000; }
+  #agr-transiciones .agr-trans-agregador.justeat { background: color-mix(in srgb, #e8590c 20%, transparent); color: #e8590c; }
   #agr-transiciones .agr-trans-agregador.glovo { background: color-mix(in srgb, #ffc244 20%, transparent); color: #cc9900; }
   #agr-transiciones .agr-trans-agregador.ubereats { background: color-mix(in srgb, #06c167 20%, transparent); color: #06c167; }
   #agr-transiciones .agr-trans-direccion { color: var(--text-primary); font-weight: 500; }
@@ -213,7 +236,6 @@
   #agr-transiciones .agr-trans-borrar { background: none; border: none; padding: 0; font-family: inherit; color: var(--status-critical); }
   #agr-transiciones .agr-trans-borrar:disabled { opacity: 0.6; cursor: default; }
 
-  #agr-mapa-cobertura { height: 60vh; min-height: 400px; border-radius: 8px; overflow: hidden; margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -237,9 +259,16 @@
   <div class="agr-wrap">
     <div class="agr-toolbar">
       <span id="agr-estado" class="agr-estado-pill neutro">…</span>
-      <label for="agr-tienda-select">Tienda:</label>
-      <select id="agr-tienda-select"></select>
+      <span id="agr-daemon-live" class="agr-estado-pill neutro" hidden></span>
+      <span class="agr-tiendas-mapa-label">Tiendas:</span>
+      <div id="agr-tiendas-mapa-chips" class="agr-tiendas-mapa-chips"></div>
       <button type="button" id="agr-btn-anadir" class="btn btn-ghost" onclick="agrToggleModoAnadir()">➕ Añadir punto</button>
+      <button type="button" id="agr-btn-unir" class="btn btn-ghost" onclick="agrToggleModoUnir()">🔗 Unir puntos</button>
+      <button type="button" id="agr-btn-pincel" class="btn btn-ghost" onclick="agrToggleModoPincel()">🖌️ Pincel: rellenar hueco</button>
+      <span id="agr-pincel-controles" hidden style="display:flex; gap:6px; align-items:center;">
+        <button type="button" class="btn btn-primario" style="font-size:12px;padding:4px 10px;" onclick="agrPincelTerminar()">✅ Rellenar (<span id="agr-pincel-n">0</span> puntos)</button>
+        <button type="button" class="btn btn-ghost" style="font-size:12px;padding:4px 10px;" onclick="agrPincelCancelar()">✕ Cancelar</button>
+      </span>
       <span id="agr-actualizado" style="color:var(--text-muted); font-size:12px;"></span>
     </div>
 
@@ -253,8 +282,37 @@
           <button type="button" class="agr-filtro-btn" data-agregador="ubereats">Uber Eats</button>
         </div>
       </div>
+      <label class="agr-toggle-nuevos">
+        <input type="checkbox" id="agr-solo-nuevos" onchange="agrToggleSoloNuevos()">
+        Solo dots nuevos desde que active esto (oculta los puntos ya existentes, no afecta a los manuales)
+      </label>
+      <label class="agr-toggle-nuevos">
+        <input type="checkbox" id="agr-solo-manuales" onchange="agrToggleSoloManuales()">
+        Solo dots manuales (los que has añadido tú a mano)
+      </label>
+      <label class="agr-toggle-nuevos">
+        <input type="checkbox" id="agr-mostrar-poligono" checked onchange="agrToggleMostrarPoligono()">
+        Mostrar polígono de límite real (forma real de cobertura por dirección)
+      </label>
+      <label class="agr-toggle-nuevos">
+        <input type="checkbox" id="agr-mostrar-union" onchange="agrToggleMostrarUnion()">
+        Mostrar cobertura combinada (unión de todas las tiendas visibles, por agregador)
+      </label>
+      <label class="agr-toggle-nuevos">
+        <input type="checkbox" id="agr-mostrar-compas" onchange="agrToggleCompas()">
+        Mostrar compás de ángulos (líneas cada 15° desde la tienda, para ubicar huecos al añadir puntos -- solo con una tienda seleccionada)
+      </label>
+      <p class="agr-resumen-nota" id="agr-cobertura-nota"></p>
       <div id="agr-map"></div>
       <div id="agr-leyenda" class="agr-leyenda"></div>
+    </div>
+
+    <div class="agr-panel agr-panel-mapa" id="agr-panel-9am" hidden>
+      <div class="agr-panel-mapa-header">
+        <h2>Mapa a las 9:00 (referencia, algoritmo de antes de los cambios de hoy)</h2>
+      </div>
+      <p class="agr-resumen-nota">Mismos datos en vivo, pero calculados con el algoritmo del polígono tal como estaba a las 9:00 (sin filtro de tienda más cercana, tolerancia de 3°, sin corregir el hueco de "no disponible"). Solo para comparar visualmente -- de solo lectura, no se puede editar aquí.</p>
+      <div id="agr-map-9am"></div>
     </div>
 
     <div class="agr-bottom-grid">
@@ -324,21 +382,6 @@
       </div>
     </div>
 
-    <div class="agr-panel">
-      <div class="agr-panel-mapa-header">
-        <h2>Superficie de cobertura real <span id="agr-cobertura-contador" class="agr-contador"></span></h2>
-        <div class="agr-filtro-agregador" id="agr-filtro-cobertura">
-          <button type="button" class="agr-filtro-btn-cobertura activo" data-agregador="">Todos</button>
-          <button type="button" class="agr-filtro-btn-cobertura" data-agregador="justeat">JustEat</button>
-          <button type="button" class="agr-filtro-btn-cobertura" data-agregador="glovo">Glovo</button>
-          <button type="button" class="agr-filtro-btn-cobertura" data-agregador="ubereats">Uber Eats</button>
-        </div>
-      </div>
-      <p class="agr-resumen-nota" id="agr-cobertura-nota">
-        Polígono que une los puntos más alejados donde el agregador SÍ reparte (verde) — la superficie de cobertura real, frente a los puntos donde no reparte (amarillo). Usa el último estado conocido de cada punto, no solo las últimas 24h.
-      </p>
-      <div id="agr-mapa-cobertura"></div>
-    </div>
   </div>
 </div>
 
@@ -355,6 +398,6 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/agregadores.js?v=20260807h"></script>
+<script src="js/agregadores.js?v=20260810aa"></script>
 </body>
 </html>

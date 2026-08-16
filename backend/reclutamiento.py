@@ -732,6 +732,120 @@ def quitar_foto(candidato_id):
     conn.close()
 
 
+def info_fotos_perfil() -> dict:
+    """Diagnóstico de solo lectura: cuántas fotos de perfil hay y cuánto
+    pesan en total -- para confirmar que son de verdad las que están
+    llenando el volumen antes de borrarlas."""
+    conn = get_connection()
+    filas = conn.execute("SELECT foto_ruta FROM candidatos WHERE foto_ruta IS NOT NULL").fetchall()
+    conn.close()
+    total_bytes = 0
+    n = 0
+    for fila in filas:
+        ruta = fila["foto_ruta"]
+        if ruta and os.path.isfile(ruta):
+            total_bytes += os.path.getsize(ruta)
+            n += 1
+    return {"fotos": n, "bytes": total_bytes, "mb": round(total_bytes / 1024 / 1024, 1)}
+
+
+def quitar_todas_las_fotos() -> dict:
+    """Borra el ARCHIVO de foto de perfil de todos los candidatos y limpia
+    foto_ruta -- no toca CVs, notas, ni ningún otro dato de la ficha (mismo
+    criterio que quitar_foto() para un candidato, aplicado a todos)."""
+    conn = get_connection()
+    ids = [row["id"] for row in conn.execute("SELECT id FROM candidatos WHERE foto_ruta IS NOT NULL")]
+    conn.close()
+    borrados = 0
+    bytes_liberados = 0
+    for candidato_id in ids:
+        ruta = get_foto_ruta(candidato_id)
+        if ruta and os.path.isfile(ruta):
+            try:
+                bytes_liberados += os.path.getsize(ruta)
+                os.remove(ruta)
+                borrados += 1
+            except OSError:
+                pass
+        conn = get_connection()
+        conn.execute("UPDATE candidatos SET foto_ruta = NULL WHERE id = ?", (candidato_id,))
+        conn.commit()
+        conn.close()
+    return {"borrados": borrados, "bytes_liberados": bytes_liberados}
+
+
+def info_archivos_duplicados() -> dict:
+    """Diagnóstico de solo lectura: candidato_archivos cuyo contenido (hash)
+    coincide con el de otro archivo distinto -- p.ej. un PDF con varias
+    fichas juntas adjuntado a cada candidato como "copia propia" (ver
+    'Adjuntar PDF a fichas existentes'), que guarda una copia física
+    completa por cada ficha en vez de compartir el mismo archivo. No borra
+    nada, solo mide cuánto se podría ahorrar deduplicando."""
+    import hashlib
+
+    conn = get_connection()
+    filas = conn.execute("SELECT id, candidato_id, nombre_original, ruta FROM candidato_archivos").fetchall()
+    conn.close()
+
+    por_hash = {}
+    for fila in filas:
+        ruta = fila["ruta"]
+        if not ruta or not os.path.isfile(ruta):
+            continue
+        try:
+            with open(ruta, "rb") as f:
+                h = hashlib.sha256(f.read()).hexdigest()
+        except OSError:
+            continue
+        tamano = os.path.getsize(ruta)
+        por_hash.setdefault(h, []).append({
+            "archivo_id": fila["id"], "candidato_id": fila["candidato_id"],
+            "nombre_original": fila["nombre_original"], "ruta": ruta, "bytes": tamano,
+        })
+
+    grupos_duplicados = [copias for copias in por_hash.values() if len(copias) > 1]
+    bytes_recuperables = sum(copias[0]["bytes"] * (len(copias) - 1) for copias in grupos_duplicados)
+    return {
+        "grupos_duplicados": len(grupos_duplicados),
+        "copias_de_mas": sum(len(c) - 1 for c in grupos_duplicados),
+        "bytes_recuperables": bytes_recuperables,
+        "mb_recuperables": round(bytes_recuperables / 1024 / 1024, 1),
+        "detalle": grupos_duplicados[:20],
+    }
+
+
+def deduplicar_archivos() -> dict:
+    """Aplica lo que mide info_archivos_duplicados(): por cada grupo de
+    archivos con el mismo contenido, deja UNA sola copia física en disco y
+    actualiza el resto de filas de candidato_archivos para que apunten a
+    esa misma ruta -- cada candidato SIGUE teniendo su adjunto exactamente
+    igual (mismo nombre_original, mismo contenido al verlo/descargarlo),
+    solo deja de haber 49 copias idénticas de los mismos bytes en disco."""
+    info = info_archivos_duplicados()
+    conn = get_connection()
+    borrados = 0
+    bytes_liberados = 0
+    for grupo in info["detalle"]:
+        canonica = grupo[0]["ruta"]
+        for copia in grupo[1:]:
+            if copia["ruta"] == canonica:
+                continue
+            conn.execute(
+                "UPDATE candidato_archivos SET ruta = ? WHERE id = ?",
+                (canonica, copia["archivo_id"]),
+            )
+            try:
+                if os.path.isfile(copia["ruta"]):
+                    bytes_liberados += os.path.getsize(copia["ruta"])
+                    os.remove(copia["ruta"])
+                    borrados += 1
+            except OSError:
+                pass
+    conn.commit()
+    conn.close()
+    return {"archivos_deduplicados": borrados, "bytes_liberados": bytes_liberados}
+
+
 def registrar_archivo_existente(candidato_id, nombre_original, ruta):
     """Como agregar_archivo, pero para un fichero que YA está guardado en
     disco (el CV que Informes guarda en su propia carpeta al compartir una
@@ -752,6 +866,79 @@ def get_archivo(archivo_id):
     row = conn.execute("SELECT * FROM candidato_archivos WHERE id = ?", (archivo_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def _carpetas_huerfanas():
+    """Carpetas de UPLOADS_DIR/{candidato_id}/ cuyo candidato_id ya no existe
+    en la tabla `candidatos` -- eliminar_candidato() sí borra los archivos de
+    cada candidato al eliminarlo, pero solo por lo que hay en
+    candidato_archivos en ese momento; si algo se coló por otra vía (borrado
+    directo en DB, migración, bug ya corregido...) la carpeta entera se queda
+    huérfana en disco para siempre. Solo lectura -- no borra nada."""
+    if not os.path.isdir(UPLOADS_DIR):
+        return []
+    conn = get_connection()
+    ids_vivos = {row["id"] for row in conn.execute("SELECT id FROM candidatos")}
+    conn.close()
+
+    huerfanas = []
+    for nombre_carpeta in os.listdir(UPLOADS_DIR):
+        ruta_carpeta = os.path.join(UPLOADS_DIR, nombre_carpeta)
+        if not os.path.isdir(ruta_carpeta):
+            continue
+        try:
+            candidato_id = int(nombre_carpeta)
+        except ValueError:
+            continue
+        if candidato_id in ids_vivos:
+            continue
+        huerfanas.append(ruta_carpeta)
+    return huerfanas
+
+
+def info_archivos_huerfanos() -> dict:
+    """Diagnóstico de solo lectura: tamaño total de las carpetas huérfanas
+    (ver _carpetas_huerfanas) sin borrar nada, para decidir con datos reales."""
+    detalle = []
+    total_bytes = 0
+    for ruta_carpeta in _carpetas_huerfanas():
+        tamano_carpeta = 0
+        n_archivos = 0
+        for raiz, _, nombres in os.walk(ruta_carpeta):
+            for nombre in nombres:
+                try:
+                    tamano_carpeta += os.path.getsize(os.path.join(raiz, nombre))
+                    n_archivos += 1
+                except OSError:
+                    pass
+        detalle.append({"carpeta": ruta_carpeta, "archivos": n_archivos, "bytes": tamano_carpeta})
+        total_bytes += tamano_carpeta
+    return {"carpetas_huerfanas": len(detalle), "bytes": total_bytes, "mb": round(total_bytes / 1024 / 1024, 1), "detalle": detalle}
+
+
+def borrar_archivos_huerfanos() -> dict:
+    """Borra las carpetas huérfanas (ver _carpetas_huerfanas) -- re-consulta
+    la lista de ids vivos en el momento de borrar, no reusa un resultado
+    anterior, para no borrar por error una carpeta de un candidato creado
+    justo entre el diagnóstico y el borrado."""
+    import shutil
+
+    borrados = 0
+    bytes_liberados = 0
+    for ruta_carpeta in _carpetas_huerfanas():
+        for raiz, _, nombres in os.walk(ruta_carpeta):
+            for nombre in nombres:
+                ruta = os.path.join(raiz, nombre)
+                try:
+                    bytes_liberados += os.path.getsize(ruta)
+                    borrados += 1
+                except OSError:
+                    pass
+        try:
+            shutil.rmtree(ruta_carpeta)
+        except OSError:
+            pass
+    return {"borrados": borrados, "bytes_liberados": bytes_liberados}
 
 
 ensure_reclutamiento_tables()

@@ -32,6 +32,68 @@ async def crear_direccion_calculada(tienda: str, distancia_km: float, angulo_gra
             return await resp.json()
 
 
+async def reasignar_punto_otra_tienda(tienda: str, lat: float, lng: float, direccion_text: str | None) -> dict:
+    """Cuando la búsqueda de límite de UNA tienda descubre un punto
+    disponible que en realidad está más cerca de OTRA (ver 'contaminado'
+    en buscar_limite_cobertura.py), se guarda aquí como punto suelto de la
+    tienda correcta -- el backend evita duplicados si ya hay uno muy
+    próximo guardado."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direcciones/reasignada"
+    body = {"tienda": tienda, "lat": lat, "lng": lng, "direccion_text": direccion_text}
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=body, headers=_headers(), timeout=30) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+
+async def buscar_chequeo_cercano(lat: float, lng: float, agregador: str) -> dict | None:
+    """Busca un chequeo real ya hecho (de cualquier tienda) muy cerca de
+    este punto para reutilizarlo en vez de repetir el mismo scrape --
+    evita que tiendas vecinas con zonas de solape (o rondas sucesivas de
+    la misma tienda) vuelvan a probar la misma dirección real por
+    separado. None si no hay nada reutilizable a menos de 100m."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/chequeo-cercano"
+    params = {"lat": lat, "lng": lng, "agregador": agregador}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params=params, headers=_headers(), timeout=15) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+
+async def guardar_limite(
+    tienda: str, agregador: str, angulo_grados: float, limite_km: float | None, nota: str | None,
+    lat: float | None = None, lng: float | None = None, direccion_text: str | None = None,
+):
+    """Guarda el resultado de buscar_limite_cobertura.py para una dirección
+    -- el dashboard lo lee para dibujar el polígono real de cobertura
+    (forma de estrella, un vértice por ángulo).
+
+    lat/lng/direccion_text: la dirección REAL que se probó (tras la espiral
+    de _punto_geocodificado_valido), para que el vértice se dibuje donde de
+    verdad se comprobó la entrega y no en el punto geométrico puro centro-
+    ángulo-distancia, que puede caer en medio de un parque sin calle."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/limites"
+    body = {
+        "tienda": tienda, "agregador": agregador, "angulo_grados": angulo_grados, "limite_km": limite_km, "nota": nota,
+        "lat": lat, "lng": lng, "direccion_text": direccion_text,
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=body, headers=_headers(), timeout=15) as resp:
+            resp.raise_for_status()
+
+
+async def obtener_limites(tienda: str, agregador: str) -> list[dict]:
+    """Ángulos ya completados para tienda/agregador -- para que
+    buscar_limite_cobertura.py pueda saltárselos al relanzar en vez de
+    rehacerlos desde cero cada vez (confirmado en vivo 08/08: cada relanzamiento
+    por un fix repetía 0° de parquesur entero, sin avanzar nunca al resto)."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/limites/{tienda}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params={"agregador": agregador}, headers=_headers(), timeout=15) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+
 async def eliminar_direccion(direccion_id: int):
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direccion/{direccion_id}"
     async with aiohttp.ClientSession() as session:
@@ -99,14 +161,15 @@ async def subir_captura(chequeo_id: int, ruta_local: str):
         logger.error("No se pudo subir la captura de transición (chequeo %s): %s", chequeo_id, exc)
 
 
-async def iniciar_sesion(modo: str) -> int:
+async def iniciar_sesion(modo: str, total_planeado: int | None = None) -> int:
     if config.MODO_LOCAL:
         logger.info("[MODO_LOCAL] sesión no iniciada en KG (modo=%s)", modo)
         return -1
 
     url = f"{config.KG_API_BASE_URL}/api/agregadores/sesiones"
+    body = {"modo": modo, "total_planeado": total_planeado}
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json={"modo": modo}, headers=_headers(), timeout=15) as resp:
+        async with session.post(url, json=body, headers=_headers(), timeout=15) as resp:
             resp.raise_for_status()
             data = await resp.json()
             return data["id"]
@@ -125,6 +188,20 @@ async def cerrar_sesion(sesion_id: int, estado: str, exitosos: int, fallidos: in
     async with aiohttp.ClientSession() as session:
         async with session.put(url, json=body, headers=_headers(), timeout=15) as resp:
             resp.raise_for_status()
+
+
+async def actualizar_tienda_actual(sesion_id: int, tienda: str):
+    if config.MODO_LOCAL or sesion_id == -1:
+        return
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/sesiones/{sesion_id}/tienda-actual"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.put(url, json={"tienda": tienda}, headers=_headers(), timeout=15) as resp:
+                resp.raise_for_status()
+    except Exception as exc:
+        # Contador informativo para el dashboard -- si falla no debe tumbar
+        # la pasada real de chequeos.
+        logger.warning("No se pudo avisar de la tienda actual (%s): %r", tienda, exc)
 
 
 async def registrar_alerta(tipo: str, mensaje: str, tienda: str = None, agregador: str = None):

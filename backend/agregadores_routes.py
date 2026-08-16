@@ -43,8 +43,16 @@ class ChequeoIn(BaseModel):
     timestamp: str | None = None
 
 
+class ChequeoManualIn(BaseModel):
+    tienda: str
+    agregador: str
+    direccion_id: int
+    disponible: bool
+
+
 class SesionIniciarIn(BaseModel):
     modo: str
+    total_planeado: int | None = None
 
 
 class SesionCerrarIn(BaseModel):
@@ -175,6 +183,33 @@ def eliminar_chequeo_route(chequeo_id: int, _user: dict = Depends(require_agrega
     return {"ok": True}
 
 
+@router.post("/chequeo-manual")
+def crear_chequeo_manual_route(body: ChequeoManualIn, user: dict = Depends(require_agregadores)):
+    """Como POST /chequeo (el que usa el scraper) pero con sesión de usuario
+    en vez de API key, sin campos de scraper (tiempo/mensaje/error) -- para
+    que el propio usuario pueda confirmar a mano, desde el dashboard, el
+    estado de un punto en un agregador concreto (pedido explícito del
+    usuario 10/08: quiere poder priorizar y verificar puntos puntuales sin
+    esperar al scraper). Reusa exactamente la misma lógica de alertas de
+    transición que el chequeo del scraper -- un "dejó de estar disponible"
+    confirmado a mano es tan real como uno automático."""
+    transicion = agregadores_module.hubo_transicion_a_no_disponible(body.direccion_id, body.agregador)
+    verificado_por = user.get("nombre") or user["username"]
+    chequeo_id = agregadores_module.guardar_chequeo(
+        {**body.model_dump(), "verificado_por": verificado_por}
+    )
+    if transicion:
+        agregadores_module.registrar_alerta(
+            tipo="paso_a_no_disponible",
+            mensaje=agregadores_module.formatear_alerta_transicion(
+                body.agregador, body.tienda, body.direccion_id, f"verificado a mano por {verificado_por}"
+            ),
+            tienda=body.tienda,
+            agregador=body.agregador,
+        )
+    return {"ok": True, "chequeo_id": chequeo_id, "transicion": transicion}
+
+
 @router.get("/transiciones")
 def transiciones_route(
     tienda: str | None = None, horas: int = 24, _user: dict = Depends(require_agregadores)
@@ -226,6 +261,64 @@ def podar_direcciones_route():
     return agregadores_module.podar_grid_reducido()
 
 
+@router.get("/admin/almacenamiento/info", dependencies=[Depends(require_api_key)])
+def info_almacenamiento_route():
+    """Diagnóstico del volumen entero (DB + backups + todas las carpetas de
+    subida del backend, no solo agregadores) -- para saber qué se está
+    comiendo el espacio de verdad antes de borrar nada."""
+    return agregadores_module.info_almacenamiento()
+
+
+@router.get("/admin/almacenamiento/candidatos-huerfanos", dependencies=[Depends(require_api_key)])
+def info_candidatos_huerfanos_route():
+    import reclutamiento
+    return reclutamiento.info_archivos_huerfanos()
+
+
+@router.post("/admin/almacenamiento/candidatos-huerfanos/borrar", dependencies=[Depends(require_api_key)])
+def borrar_candidatos_huerfanos_route():
+    import reclutamiento
+    return reclutamiento.borrar_archivos_huerfanos()
+
+
+@router.get("/admin/almacenamiento/candidatos-duplicados", dependencies=[Depends(require_api_key)])
+def info_candidatos_duplicados_route():
+    import reclutamiento
+    return reclutamiento.info_archivos_duplicados()
+
+
+@router.post("/admin/almacenamiento/candidatos-duplicados/deduplicar", dependencies=[Depends(require_api_key)])
+def deduplicar_candidatos_route():
+    import reclutamiento
+    return reclutamiento.deduplicar_archivos()
+
+
+@router.get("/admin/almacenamiento/fotos-perfil", dependencies=[Depends(require_api_key)])
+def info_fotos_perfil_route():
+    import reclutamiento
+    return reclutamiento.info_fotos_perfil()
+
+
+@router.post("/admin/almacenamiento/fotos-perfil/borrar", dependencies=[Depends(require_api_key)])
+def borrar_fotos_perfil_route():
+    import reclutamiento
+    return reclutamiento.quitar_todas_las_fotos()
+
+
+@router.get("/admin/capturas/info", dependencies=[Depends(require_api_key)])
+def info_capturas_route():
+    """Diagnóstico: número de archivos y tamaño total en CAPTURAS_DIR."""
+    return agregadores_module.info_capturas()
+
+
+@router.post("/admin/capturas/limpiar-inactivas", dependencies=[Depends(require_api_key)])
+def limpiar_capturas_inactivas_route():
+    """Mantenimiento puntual: borra los ARCHIVOS de captura (no las filas ni
+    ningún dato) de chequeos ligados a direcciones ya desactivadas -- para
+    liberar espacio en el volumen sin tocar nada de lo que sigue activo."""
+    return agregadores_module.limpiar_capturas_direcciones_inactivas()
+
+
 @router.post("/alertas/limpiar-excepcion-vacia", dependencies=[Depends(require_api_key)])
 def limpiar_alertas_excepcion_vacia_route():
     return agregadores_module.borrar_alertas_excepcion_vacia()
@@ -234,6 +327,11 @@ def limpiar_alertas_excepcion_vacia_route():
 @router.post("/chequeos/limpiar-errores-tecnicos", dependencies=[Depends(require_api_key)])
 def limpiar_chequeos_error_route():
     return agregadores_module.borrar_chequeos_error_texto()
+
+
+@router.post("/sesiones/cerrar-huerfanas", dependencies=[Depends(require_api_key)])
+def cerrar_sesiones_huerfanas_route():
+    return {"sesiones_cerradas": agregadores_module.cerrar_sesiones_huerfanas()}
 
 
 @router.post("/estadisticas/reset", dependencies=[Depends(require_api_key)])
@@ -253,12 +351,26 @@ def resetear_estadisticas_hoy_route():
 
 @router.post("/sesiones", dependencies=[Depends(require_api_key)])
 def iniciar_sesion_route(body: SesionIniciarIn):
-    return {"id": agregadores_module.iniciar_sesion(body.modo)}
+    return {"id": agregadores_module.iniciar_sesion(body.modo, body.total_planeado)}
 
 
 @router.put("/sesiones/{sesion_id}", dependencies=[Depends(require_api_key)])
 def cerrar_sesion_route(sesion_id: int, body: SesionCerrarIn):
     agregadores_module.cerrar_sesion(sesion_id, body.estado, body.chequeos_exitosos, body.chequeos_fallidos)
+    return {"ok": True}
+
+
+class SesionTiendaActualIn(BaseModel):
+    tienda: str
+
+
+@router.put("/sesiones/{sesion_id}/tienda-actual", dependencies=[Depends(require_api_key)])
+def actualizar_tienda_actual_route(sesion_id: int, body: SesionTiendaActualIn):
+    """El daemon avisa aquí qué tienda está recorriendo AHORA MISMO dentro de
+    la pasada en curso (ver scheduler.py) -- para el contador en vivo del
+    dashboard (pedido explícito del usuario 10/08, solo visible para el
+    admin)."""
+    agregadores_module.actualizar_tienda_actual(sesion_id, body.tienda)
     return {"ok": True}
 
 
@@ -297,10 +409,15 @@ def mover_direccion_route(direccion_id: int, body: DireccionMoverIn, _user: dict
 
 
 @router.delete("/direcciones/{direccion_id}")
-def eliminar_direccion_route(direccion_id: int, _user: dict = Depends(require_agregadores)):
-    """Quita un punto del grid (baja lógica) -- útil para tiendas donde no
-    hacen falta tantos puntos de test."""
-    if not agregadores_module.eliminar_direccion(direccion_id):
+def eliminar_direccion_route(
+    direccion_id: int,
+    agregador: str | None = None,
+    _user: dict = Depends(require_agregadores),
+):
+    """Quita un punto (baja lógica). Sin `agregador`: baja global (los 3).
+    Con `agregador`: solo desactiva esa capa -- el mismo punto sigue vivo
+    para los otros dos agregadores (ver agregadores_direcciones_estado)."""
+    if not agregadores_module.eliminar_direccion(direccion_id, agregador):
         raise HTTPException(status_code=404, detail="Dirección no encontrada")
     return {"ok": True}
 
@@ -321,6 +438,212 @@ def crear_direccion_calculada_route(body: DireccionCalculadaIn):
     if resultado is None:
         raise HTTPException(status_code=400, detail="Tienda no reconocida")
     return resultado
+
+
+class DireccionReasignadaIn(BaseModel):
+    tienda: str
+    lat: float
+    lng: float
+    direccion_text: str | None = None
+
+
+@router.post("/admin/direcciones/reasignada", dependencies=[Depends(require_api_key)])
+def crear_direccion_reasignada_route(body: DireccionReasignadaIn):
+    """Para buscar_limite_cobertura.py: cuando la búsqueda de límite de UNA
+    tienda descubre un punto disponible que en realidad está más cerca de
+    OTRA, se guarda aquí como punto suelto de la tienda correcta (con
+    dedup si ya existe uno muy próximo) en vez de perder el dato."""
+    resultado = agregadores_module.agregar_o_reusar_direccion_otra_tienda(body.tienda, body.lat, body.lng, body.direccion_text)
+    if resultado is None:
+        raise HTTPException(status_code=400, detail="Tienda no reconocida")
+    return resultado
+
+
+@router.get("/admin/chequeo-cercano", dependencies=[Depends(require_api_key)])
+def chequeo_cercano_route(lat: float, lng: float, agregador: str):
+    """Para buscar_limite_cobertura.py: busca un chequeo real ya hecho (de
+    cualquier tienda) muy cerca de este punto para poder reutilizarlo en
+    vez de repetir el mismo scrape -- evita que tiendas vecinas con zonas
+    de solape (o rondas sucesivas) vuelvan a probar la misma dirección."""
+    return agregadores_module.buscar_chequeo_cercano(lat, lng, agregador)
+
+
+class LimiteIn(BaseModel):
+    tienda: str
+    agregador: str
+    angulo_grados: float
+    limite_km: float | None = None
+    nota: str | None = None
+    lat: float | None = None
+    lng: float | None = None
+    direccion_text: str | None = None
+
+
+@router.post("/admin/limites", dependencies=[Depends(require_api_key)])
+def guardar_limite_route(body: LimiteIn):
+    """Guarda el límite real de cobertura de una dirección (buscar_limite_
+    cobertura.py llama esto al terminar cada ángulo) -- el dashboard lee
+    esto para dibujar el polígono real en forma de estrella."""
+    return agregadores_module.guardar_limite(
+        body.tienda, body.agregador, body.angulo_grados, body.limite_km, body.nota,
+        lat=body.lat, lng=body.lng, direccion_text=body.direccion_text,
+    )
+
+
+@router.get("/limites/{tienda}")
+def get_limites_route(tienda: str, agregador: str | None = None, _user: dict = Depends(require_agregadores)):
+    """Límites guardados de una tienda, ordenados por ángulo -- para
+    dibujar el polígono real de cobertura en el dashboard."""
+    return agregadores_module.get_limites(tienda, agregador)
+
+
+@router.get("/geocodificar-inverso")
+def geocodificar_inverso_route(lat: float, lng: float, _user: dict = Depends(require_agregadores)):
+    """Reverse geocoding bajo demanda para mostrar la dirección real de un
+    vértice del polígono de cobertura al abrir su popup en el dashboard --
+    no se guarda en BD, solo se calcula al vuelo (agregadores_limites no
+    guarda direccion_text, solo ángulo + km)."""
+    texto_plano, componentes = agregadores_module._geocodificar(lat, lng)
+    direccion = agregadores_module._construir_direccion(componentes) or texto_plano
+    return {"direccion": direccion}
+
+
+@router.get("/admin/limites/{tienda}", dependencies=[Depends(require_api_key)])
+def admin_get_limites_route(tienda: str, agregador: str | None = None):
+    """Igual que get_limites_route pero con API key -- para que
+    buscar_limite_cobertura.py pueda saltarse ángulos ya completados al
+    relanzar, en vez de rehacerlos desde cero cada vez."""
+    return agregadores_module.get_limites(tienda, agregador)
+
+
+@router.delete("/admin/limites/{tienda}", dependencies=[Depends(require_api_key)])
+def admin_eliminar_limite_route(tienda: str, agregador: str, angulo_grados: float):
+    """Borra un vértice de límite (no baja lógica -- ver eliminar_limite).
+    Para limpiar vértices contaminados por cercanía a otra sucursal, o para
+    forzar que un ángulo se recalcule en el próximo relanzamiento."""
+    if not agregadores_module.eliminar_limite(tienda, agregador, angulo_grados):
+        raise HTTPException(status_code=404, detail="Límite no encontrado")
+    return {"ok": True}
+
+
+@router.delete("/limites/{tienda}")
+def eliminar_limite_route(
+    tienda: str,
+    agregador: str,
+    angulo_grados: float,
+    _user: dict = Depends(require_agregadores),
+):
+    """Igual que admin_eliminar_limite_route pero con sesión de usuario --
+    para poder quitar a mano, desde el propio popup del vértice en el mapa,
+    un punto del borde que se ve claramente mal (contaminado, muy alejado
+    del resto) sin tener que usar la API key (pedido explícito del usuario
+    10/08: quiere poder "estilizar" el borde tocando esos vértices)."""
+    if not agregadores_module.eliminar_limite(tienda, agregador, angulo_grados):
+        raise HTTPException(status_code=404, detail="Límite no encontrado")
+    return {"ok": True}
+
+
+class LimiteMoverIn(BaseModel):
+    lat: float
+    lng: float
+
+
+@router.put("/limites/{tienda}")
+def mover_limite_route(
+    tienda: str,
+    agregador: str,
+    angulo_grados: float,
+    body: LimiteMoverIn,
+    _user: dict = Depends(require_agregadores),
+):
+    """Arrastrar un vértice del borde para ajustarlo a mano, en vez de solo
+    poder borrarlo -- recalcula el límite (distancia real) desde la nueva
+    posición (pedido explícito del usuario 10/08)."""
+    resultado = agregadores_module.mover_limite(tienda, agregador, angulo_grados, body.lat, body.lng)
+    if resultado is None:
+        raise HTTPException(status_code=400, detail="Tienda no reconocida")
+    return resultado
+
+
+class UnionIn(BaseModel):
+    tienda: str
+    agregador: str
+    lat_a: float
+    lng_a: float
+    lat_b: float
+    lng_b: float
+    direccion_id_a: int | None = None
+    direccion_id_b: int | None = None
+
+
+@router.post("/uniones")
+def crear_union_route(body: UnionIn, _user: dict = Depends(require_agregadores)):
+    """Puente manual entre dos puntos: el usuario ve dos dots disponibles (o
+    dos vértices ya calculados del borde) con un hueco/pico raro entre
+    medias y decide a ojo que ahí también hay cobertura, sin depender de un
+    relleno automático poco fiable (ver agregadores_uniones, pedido
+    explícito del usuario 10/08: "haré clic sobre un punto y sobre un
+    segundo punto y eso va a unir el borde límite"). Por lat/lng en vez de
+    direccion_id porque los vértices del borde no siempre tienen una fila de
+    dirección real detrás."""
+    return agregadores_module.crear_union(
+        body.tienda, body.agregador, body.lat_a, body.lng_a, body.lat_b, body.lng_b,
+        body.direccion_id_a, body.direccion_id_b,
+    )
+
+
+@router.get("/uniones/{tienda}")
+def get_uniones_route(tienda: str, agregador: str | None = None, _user: dict = Depends(require_agregadores)):
+    return agregadores_module.get_uniones(tienda, agregador)
+
+
+@router.delete("/uniones/{union_id}")
+def eliminar_union_route(union_id: int, _user: dict = Depends(require_agregadores)):
+    if not agregadores_module.eliminar_union(union_id):
+        raise HTTPException(status_code=404, detail="Unión no encontrada")
+    return {"ok": True}
+
+
+class RellenoIn(BaseModel):
+    tienda: str
+    agregador: str
+    puntos: list[list[float]]
+
+
+@router.post("/rellenos")
+def crear_relleno_route(body: RellenoIn, _user: dict = Depends(require_agregadores)):
+    """Pincel: zona pintada a mano (varios puntos formando un área) que se
+    fusiona con el polígono calculado (turf.union en el frontend), para
+    huecos DENTRO de la figura -- un puente recto entre dos puntos del borde
+    (ver /uniones) no puede rellenar un hueco que no está en el borde
+    (pedido explícito del usuario 10/08: "hay unas zonas que debemos poder
+    rellenar dentro del mismo polígono")."""
+    if len(body.puntos) < 3:
+        raise HTTPException(status_code=400, detail="Hacen falta al menos 3 puntos")
+    return agregadores_module.crear_relleno(body.tienda, body.agregador, body.puntos)
+
+
+@router.get("/rellenos/{tienda}")
+def get_rellenos_route(tienda: str, agregador: str | None = None, _user: dict = Depends(require_agregadores)):
+    return agregadores_module.get_rellenos(tienda, agregador)
+
+
+@router.delete("/rellenos/{relleno_id}")
+def eliminar_relleno_route(relleno_id: int, _user: dict = Depends(require_agregadores)):
+    if not agregadores_module.eliminar_relleno(relleno_id):
+        raise HTTPException(status_code=404, detail="Relleno no encontrado")
+    return {"ok": True}
+
+
+@router.post("/admin/direcciones/desactivar-busqueda-limite", dependencies=[Depends(require_api_key)])
+def admin_desactivar_busqueda_limite_route(tienda: str | None = None):
+    """Al terminar la campaña de ángulos de una tienda (o de todas), apaga
+    en bloque los puntos de sondeo que sirvieron solo para encontrar el
+    límite (origen='limite') -- el límite en sí ya quedó guardado aparte en
+    agregadores_limites, así que el daemon no necesita seguir revisando esos
+    puntos cada día. Baja lógica: se pueden reactivar si hiciera falta."""
+    n = agregadores_module.desactivar_puntos_busqueda_limite(tienda)
+    return {"ok": True, "desactivados": n}
 
 
 @router.delete("/admin/direccion/{direccion_id}", dependencies=[Depends(require_api_key)])

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -10,6 +11,37 @@ from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 
 logger = logging.getLogger(__name__)
+
+
+def _avisar_captcha_pendiente(agregador: str, segundos_espera: int) -> None:
+    """Aviso nativo de Windows (globo + sonido) cuando aparece un captcha que
+    necesita resolución manual -- para no tener que estar mirando la terminal
+    esperando a que salga el mensaje. No resuelve nada, solo avisa a un
+    humano de que tiene que actuar él (ver _comprobar_challenge)."""
+    try:
+        import winsound
+
+        winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+    except Exception:
+        pass
+
+    mensaje = f"{agregador}: resuelve el captcha en la ventana del navegador ({segundos_espera}s)"
+    try:
+        subprocess.Popen(
+            [
+                "powershell", "-NoProfile", "-Command",
+                "Add-Type -AssemblyName System.Windows.Forms; "
+                "$n = New-Object System.Windows.Forms.NotifyIcon; "
+                "$n.Icon = [System.Drawing.SystemIcons]::Warning; "
+                "$n.Visible = $true; "
+                f"$n.ShowBalloonTip(15000, 'Captcha pendiente', '{mensaje}', "
+                "[System.Windows.Forms.ToolTipIcon]::Warning); "
+                "Start-Sleep -Seconds 16; $n.Dispose()",
+            ],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except Exception:
+        logger.warning("No se pudo lanzar el aviso nativo de captcha (sigue esperando igual)")
 
 SCREENSHOTS_DIR = Path(__file__).resolve().parent.parent / "logs" / "screenshots"
 
@@ -28,7 +60,11 @@ CHALLENGE_KEYWORDS = (
     # tienen sentido fuera de una pantalla de challenge real.
     "comprobación de seguridad automatizada",
     "no soy un robot",
-    "recaptcha",
+    # "recaptcha" (sin más) SE QUITÓ el 08/08: confirmado en vivo que Uber Eats
+    # mete el aviso legal "Este sitio está protegido por reCAPTCHA..." en el
+    # footer de TODA página, real challenge o no -- disparaba la alarma
+    # siempre, en cada chequeo, sin que hubiera nada que resolver. La frase
+    # específica del widget real ("no soy un robot") ya cubre el caso real.
 )
 
 _STEALTH = Stealth()
@@ -74,9 +110,16 @@ class BaseAggregatorScraper:
     url_base: str = ""
 
     # Si el sitio muestra un challenge anti-bot en modo headless, se reintenta una vez
-    # con una ventana visible para que un humano lo resuelva a mano (solo tiene sentido
-    # cuando el scraper se ejecuta de forma interactiva en la máquina local).
-    permitir_resolucion_manual: bool = True
+    # con una ventana visible para que un humano lo resuelva a mano -- pero SOLO tiene
+    # sentido cuando alguien ha lanzado el scraper a mano sabiendo que va a estar
+    # pendiente. Por defecto False: el daemon/scheduler/scripts de background NUNCA
+    # deben abrir ventanas ni disparar notificaciones sin que nadie lo esté esperando
+    # (confirmado en vivo 08/08: sys.stdin.isatty() daba falso positivo incluso en un
+    # proceso lanzado en background, así que "hay terminal" no basta como filtro --
+    # cada intento de challenge reintentaba con ventana + notificación, decenas de
+    # veces, sin que hubiera un humano real delante). Los scripts interactivos que sí
+    # quieran este flujo lo activan ellos mismos (ver _check_ubereats_rapido.py).
+    permitir_resolucion_manual: bool = False
 
     # Si nadie responde en este tiempo, se da por perdido el intento manual y se falla de
     # forma controlada en vez de bloquear el proceso para siempre.
@@ -85,6 +128,20 @@ class BaseAggregatorScraper:
     # Algunos sitios (p.ej. Uber Eats) bloquean Chromium headless vía Cloudflare incluso
     # con stealth aplicado, pero dejan pasar una ventana visible sin intervención humana.
     iniciar_headless: bool = True
+
+    # Confirmado en vivo 08/08: con iniciar_headless=False pero la ventana mandada fuera
+    # de pantalla (ver _run_once), Uber Eats seguía bloqueando con challenge el 100% de
+    # las veces -- "no headless" no basta, hace falta que la ventana esté genuinamente
+    # en pantalla (misma huella que un usuario real). En cuanto se dejó en pantalla de
+    # verdad, dejó de bloquear. Así que para este sitio la ventana se queda siempre
+    # visible, no solo durante una resolución manual.
+    mantener_visible: bool = False
+
+    # Setup del usuario (08/08): pantalla principal 1920x1080 a la izquierda (x=0),
+    # segunda pantalla 1920x1080 a la derecha (x=1920) -- ahí quiere la ventana visible,
+    # junto a la ventana de Claude, en vez de tapando la pantalla principal.
+    posicion_ventana_visible: str = "1930,40"
+    tamano_ventana_visible: str = "900,1000"
 
     def __init__(self, timeout_seg: int = 30, retry_max: int = 3):
         self.timeout_ms = timeout_seg * 1000
@@ -165,14 +222,18 @@ class BaseAggregatorScraper:
 
     async def _run_once(self, tienda_nombre: str, direccion: str, headless: bool) -> ResultadoChequeo:
         args = ["--disable-blink-features=AutomationControlled"]
-        if not headless and not self._modo_resolucion_manual:
-            # Uber Eats necesita una ventana "real" (no headless) para no toparse con
-            # Cloudflare, pero eso no significa que tenga que taparte la pantalla mientras
-            # trabajas: se coloca fuera del área visible. Sigue siendo una ventana normal
-            # a ojos del sitio (misma huella que una visible), solo que no la ves. Si la
-            # ventana visible es para que la resuelva un humano (challenge anti-bot), se
-            # deja donde se ve -- ocultarla ahí rompería la resolución manual.
-            args.append("--window-position=-32000,-32000")
+        if not headless:
+            if self._modo_resolucion_manual or self.mantener_visible:
+                # Ventana genuinamente en pantalla, en la segunda pantalla (derecha),
+                # junto a la ventana de Claude -- ni tapa la pantalla principal ni
+                # queda fuera de vista (que es lo que hacía que Uber Eats la bloqueara).
+                args.append(f"--window-position={self.posicion_ventana_visible}")
+                args.append(f"--window-size={self.tamano_ventana_visible}")
+            else:
+                # Se manda fuera del área visible para no taparte la pantalla mientras
+                # trabajas -- solo vale para sitios donde de verdad no importa que la
+                # ventana esté fuera de pantalla (Uber Eats no entra aquí, ver arriba).
+                args.append("--window-position=-32000,-32000")
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(
                 headless=headless,
@@ -192,11 +253,15 @@ class BaseAggregatorScraper:
                 # No necesitamos ver nada: solo leemos texto/atributos del DOM. Bloquear
                 # imágenes, fuentes y vídeo reduce el peso de cada página bastante (promos,
                 # carruseles, iconos) sin tocar el HTML/CSS que el scraper sí necesita leer.
-                # EXCEPCIÓN: en modo resolución manual la ventana es justo para que un
-                # humano vea y resuelva un challenge anti-bot -- si se bloquean sus
-                # recursos, el propio widget del captcha no puede pintarse (confirmado
-                # visualmente: salía un rectángulo de color liso en vez del reto real).
-                if not self._modo_resolucion_manual:
+                # EXCEPCIÓN: en modo resolución manual (o mantener_visible, p.ej. Uber
+                # Eats) la ventana es justo para que un humano pueda ver un challenge
+                # anti-bot si aparece -- si se bloquean sus recursos, el propio widget
+                # del captcha no puede pintarse. Confirmado en vivo 08/08: con
+                # mantener_visible=True pero esta excepción atada solo a
+                # _modo_resolucion_manual, el captcha seguía saliendo con las imágenes
+                # rotas en el primer intento (antes de que _modo_resolucion_manual se
+                # active, que solo pasa en el REINTENTO tras un ChallengeDetectedError).
+                if not self._modo_resolucion_manual and not self.mantener_visible:
                     await context.route("**/*", _bloquear_recursos_pesados)
                 # Estos sitios tienen carruseles/banners promocionales en autoplay. Playwright
                 # espera a que un elemento esté "estable" (que deje de moverse) antes de hacer
@@ -264,12 +329,29 @@ class BaseAggregatorScraper:
         (nadie va a pulsar Enter). En ese caso falla directo, de forma controlada.
         """
         try:
-            texto = (await page.locator("body").inner_text(timeout=3000)).lower()
+            # page.evaluate con document.body.innerText (no locator().inner_text()
+            # de Playwright) -- confirmado en vivo el 08/08 que el método de
+            # Playwright puede leer texto de dentro de <script> (JSON de traducciones
+            # interno de Uber Eats con la palabra "cloudflare" y "comprobación de
+            # seguridad automatizada" de verdad, pero nunca visibles para un humano),
+            # disparando falsos positivos constantes. document.body.innerText es el
+            # mismo algoritmo que usa un navegador real para lo que el usuario ve.
+            texto = (await page.evaluate("() => document.body.innerText")).lower()
         except Exception:
             return
 
-        if not any(palabra in texto for palabra in CHALLENGE_KEYWORDS):
+        coincidencias = [palabra for palabra in CHALLENGE_KEYWORDS if palabra in texto]
+        if not coincidencias:
             return
+
+        # Guarda captura + qué frase exacta disparó la detección -- antes esto
+        # simplemente lanzaba la excepción sin dejar rastro visual, así que un
+        # falso positivo (o uno real) no se podía diagnosticar después.
+        ruta_captura = await self.screenshot_on_error(page, "challenge")
+        logger.warning(
+            "%s: texto de challenge detectado (%s) -- captura: %s",
+            self.nombre_agregador, coincidencias, ruta_captura,
+        )
 
         try:
             hay_terminal = sys.stdin.isatty()
@@ -289,6 +371,7 @@ class BaseAggregatorScraper:
             f"ventana del navegador. Resuélvela manualmente y pulsa Enter aquí en los próximos "
             f"{self.timeout_resolucion_manual_seg}s para continuar...\n"
         )
+        _avisar_captcha_pendiente(self.nombre_agregador, self.timeout_resolucion_manual_seg)
         try:
             await asyncio.wait_for(
                 asyncio.to_thread(input), timeout=self.timeout_resolucion_manual_seg
