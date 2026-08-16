@@ -112,6 +112,15 @@
     font-size: 15px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;
   }
   .candidato-mini-compartido { color: var(--status-good) !important; font-size: 11px !important; }
+  .aviso-datos-faltantes {
+    background: color-mix(in srgb, var(--status-critical) 12%, var(--surface-1));
+    border: 1px solid color-mix(in srgb, var(--status-critical) 40%, transparent);
+    border-radius: 8px; padding: 8px 12px; font-size: 13px; margin: 0 0 12px;
+  }
+  .respuestas-test-detalle { margin: 0 0 12px; }
+  .respuestas-test-detalle summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+  .respuestas-test-lista { margin-top: 8px; padding: 10px 12px; background: var(--surface-page); border-radius: 8px; max-height: 260px; overflow-y: auto; }
+  .respuestas-test-lista p { margin: 4px 0; font-size: 13px; }
   .candidato-foto-preview-wrap { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
   .candidato-foto-preview { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; border: 1px solid var(--border); }
   .candidato-whatsapp-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; cursor: default; }

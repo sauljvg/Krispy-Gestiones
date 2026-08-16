@@ -301,7 +301,8 @@ def get_candidato(candidato_id):
     # al que llevar al usuario.
     if candidato.get("respuesta_id"):
         info = conn.execute("""
-            SELECT t.clave AS tipo_clave, t.empresa, r.hoja, json_extract(r.datos_json, '$.RESULTADO') AS test_resultado
+            SELECT t.clave AS tipo_clave, t.empresa, r.hoja, r.datos_json,
+                   json_extract(r.datos_json, '$.RESULTADO') AS test_resultado
             FROM informe_respuestas r JOIN informe_tipos t ON t.id = r.tipo_id
             WHERE r.id = ?
         """, (candidato["respuesta_id"],)).fetchone()
@@ -310,6 +311,12 @@ def get_candidato(candidato_id):
             candidato["informe_hoja"] = info["hoja"]
             candidato["informe_empresa"] = info["empresa"]
             candidato["test_resultado"] = info["test_resultado"]
+            # Las preguntas/respuestas del test enlazado (Dashboard de
+            # Informes) -- hoy se capta esta info al compartir/enlazar pero
+            # se queda sin ver en la ficha del candidato; se expone aquí tal
+            # cual (pregunta -> respuesta) para mostrarla de forma
+            # de solo lectura.
+            candidato["respuesta_datos"] = json.loads(info["datos_json"])
     conn.close()
     candidato["archivos"] = [dict(a) for a in archivos]
     return candidato

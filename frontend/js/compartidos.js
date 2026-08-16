@@ -602,6 +602,27 @@ function renderForm() {
     ? `<p class="staff-hint">🔗 Compartido con: ${escapeHTML(candidatoEditando.compartidos.map((x) => x.nombre).join(", "))}</p>`
     : "";
 
+  const faltanDatos = esEdicion && !candidatoEditando.telefono && !candidatoEditando.email
+    ? "Faltan el teléfono y el email"
+    : esEdicion && !candidatoEditando.telefono
+    ? "Falta el teléfono"
+    : esEdicion && !candidatoEditando.email
+    ? "Falta el email"
+    : null;
+  const avisoDatosHTML = faltanDatos ? `<p class="aviso-datos-faltantes">⚠️ ${faltanDatos} de este candidato.</p>` : "";
+
+  const respuestaTestHTML = esEdicion && candidatoEditando.respuesta_datos
+    ? `<details class="respuestas-test-detalle">
+        <summary>📋 Respuestas del test</summary>
+        <div class="respuestas-test-lista">
+          ${Object.entries(candidatoEditando.respuesta_datos)
+            .filter(([, valor]) => valor !== null && valor !== "")
+            .map(([pregunta, valor]) => `<p><strong>${escapeHTML(pregunta)}:</strong> ${escapeHTML(valor)}</p>`)
+            .join("")}
+        </div>
+      </details>`
+    : "";
+
   const resultadoTestHTML = esEdicion && candidatoEditando.informe_tipo_clave
     ? (() => {
         const params = new URLSearchParams({
@@ -634,7 +655,9 @@ function renderForm() {
       <h3>${esEdicion ? "Editar candidato" : "Nuevo candidato"}</h3>
       ${fotoFormHTML}
       ${compartidoFichaHTML}
+      ${avisoDatosHTML}
       ${resultadoTestHTML}
+      ${respuestaTestHTML}
       ${subirCvHTML}
       <div id="single-candidato-wrap">
         <div class="form-grid">
@@ -1069,7 +1092,7 @@ function candidatoMiniCardHTML(c) {
       <div class="candidato-mini-card-fila">
         ${fotoHTML}
         <div class="candidato-mini-card-info">
-          <h4>${checkbox}${escapeHTML(c.nombre_completo || "(sin nombre)")} ${estadoBadgeHTML(c.estado)} ${resultadoBadgeHTML(c.test_resultado)}</h4>
+          <h4>${checkbox}${escapeHTML(c.nombre_completo || "(sin nombre)")} ${estadoBadgeHTML(c.estado)} ${resultadoBadgeHTML(c.test_resultado)} ${!c.telefono || !c.email ? `<span title="Faltan datos de contacto (${!c.telefono ? "teléfono" : ""}${!c.telefono && !c.email ? " y " : ""}${!c.email ? "email" : ""})">⚠️</span>` : ""}</h4>
           <p>${escapeHTML(c.puesto_solicitado || "")}</p>
           <p>${escapeHTML(linea2)}</p>
           <p style="color:var(--text-muted);">${escapeHTML(vacanteTxt)}</p>
