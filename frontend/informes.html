@@ -73,7 +73,21 @@
 
   #tipo-detail-table td, #tipo-detail-table th {
     max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    text-align: center;
   }
+  #tipo-detail-table td:first-child, #tipo-detail-table th:first-child {
+    position: sticky; left: 0; z-index: 5;
+    background: var(--surface-1);
+    box-shadow: 2px 0 4px -2px rgba(0,0,0,0.15);
+  }
+  #tipo-detail-table tbody tr { cursor: pointer; }
+  #tipo-detail-table tbody tr:hover td { background: var(--surface-page); }
+  #tipo-detail-table tbody tr:hover td:first-child { background: var(--surface-page); }
+  #tipo-detail-table tbody tr.fila-compartida td { background: color-mix(in srgb, var(--status-good) 12%, var(--surface-1)); }
+  #tipo-detail-table tbody tr.fila-compartida:hover td { background: color-mix(in srgb, var(--status-good) 20%, var(--surface-1)); }
+  #tipo-detail-table th[draggable="true"] { cursor: grab; }
+  #tipo-detail-table th.col-arrastrando { opacity: 0.4; }
+  #tipo-detail-table th.col-drop-target { box-shadow: inset 2px 0 0 var(--acento); }
 </style>
 </head>
 <body>
@@ -162,11 +176,12 @@
           <input type="date" id="f-fecha-hasta">
         </div>
         <div class="campo" id="f-no-aptos-wrap" hidden>
-          <label>&nbsp;</label>
-          <label style="display:flex; align-items:center; gap:6px; font-size:13px; white-space:nowrap; padding:7px 0;">
-            <input type="checkbox" id="f-excluir-no-aptos">
-            Excluir "No aptos"
-          </label>
+          <label for="f-filtro-aptos">Aptos</label>
+          <select id="f-filtro-aptos">
+            <option value="todos">Todos</option>
+            <option value="excluir_no_aptos">Excluir "No aptos"</option>
+            <option value="solo_no_aptos">Solo "No aptos"</option>
+          </select>
         </div>
         <div class="campo">
           <button type="button" id="btn-limpiar-filtros" class="btn btn-ghost">✕ Limpiar</button>

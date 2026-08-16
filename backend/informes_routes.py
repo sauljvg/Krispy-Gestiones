@@ -170,7 +170,7 @@ def respuestas_route(
     fecha_col: str | None = None,
     fecha_desde: str | None = None,
     fecha_hasta: str | None = None,
-    excluir_no_aptos: bool = False,
+    filtro_aptos: str = "todos",
     _user: dict = Depends(require_tipo_acceso),
 ):
     try:
@@ -178,7 +178,7 @@ def respuestas_route(
             tipo_clave, hoja=hoja, page=page, page_size=page_size, q=q,
             orden=orden, orden_dir=orden_dir,
             fecha_col=fecha_col, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
-            excluir_no_aptos=excluir_no_aptos,
+            filtro_aptos=filtro_aptos,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))

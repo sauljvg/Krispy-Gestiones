@@ -83,6 +83,46 @@ function moverColumna(col, delta) {
   renderTable();
 }
 
+// Arrastrar las cabeceras de la tabla para reordenar columnas — alternativa
+// más directa a los botones ↑↓ del panel "Columnas" (que se mantienen, esto
+// no los sustituye). Drag-and-drop nativo HTML5, sin librerías: se
+// re-vincula en cada renderTable() porque el <thead> se reconstruye entero
+// cada vez, igual que ya hace todo lo demás en esta tabla.
+function wireDragColumnas(thead) {
+  let colArrastrada = null;
+  thead.querySelectorAll("th[draggable='true']").forEach((th) => {
+    th.addEventListener("dragstart", (e) => {
+      colArrastrada = th.dataset.col;
+      th.classList.add("col-arrastrando");
+      e.dataTransfer.effectAllowed = "move";
+    });
+    th.addEventListener("dragend", () => {
+      th.classList.remove("col-arrastrando");
+      thead.querySelectorAll("th.col-drop-target").forEach((el) => el.classList.remove("col-drop-target"));
+    });
+    th.addEventListener("dragover", (e) => {
+      if (!colArrastrada || colArrastrada === th.dataset.col) return;
+      e.preventDefault();
+      th.classList.add("col-drop-target");
+    });
+    th.addEventListener("dragleave", () => th.classList.remove("col-drop-target"));
+    th.addEventListener("drop", (e) => {
+      e.preventDefault();
+      th.classList.remove("col-drop-target");
+      const destino = th.dataset.col;
+      if (!colArrastrada || colArrastrada === destino) return;
+      const i = colOrder.indexOf(colArrastrada);
+      if (i === -1) return;
+      colOrder.splice(i, 1);
+      const j = colOrder.indexOf(destino);
+      colOrder.splice(j, 0, colArrastrada);
+      guardarOrdenColumnas();
+      renderColumnasPanel();
+      renderTable();
+    });
+  });
+}
+
 function renderColumnasPanel() {
   const list = document.getElementById("columnas-checklist");
   list.innerHTML = colOrder
@@ -113,6 +153,18 @@ function escapeHTML(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";
   return div.innerHTML;
+}
+
+// Las fechas se guardan en datos_json como ISO ("2026-08-16" o
+// "2026-08-16T10:30:00") — aquí solo se cambia cómo se MUESTRAN en la
+// tabla (DD/MM/AA), el valor crudo se conserva en el title (tooltip) y es
+// el que se sigue usando para ordenar/filtrar, así que no hace falta tocar
+// el backend para esto.
+function formatFechaCorta(valor) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(valor ?? ""));
+  if (!m) return valor ?? "";
+  const [, anio, mes, dia] = m;
+  return `${dia}/${mes}/${anio.slice(2)}`;
 }
 
 async function loadTipos() {
@@ -155,8 +207,9 @@ function currentFiltros() {
     if (desde) params.set("fecha_desde", desde);
     if (hasta) params.set("fecha_hasta", hasta);
   }
-  if (document.getElementById("f-excluir-no-aptos").checked) {
-    params.set("excluir_no_aptos", "true");
+  const filtroAptos = document.getElementById("f-filtro-aptos").value;
+  if (filtroAptos && filtroAptos !== "todos") {
+    params.set("filtro_aptos", filtroAptos);
   }
   params.set("page_size", "500");
   return params;
@@ -312,8 +365,9 @@ function renderTable() {
   const thead = document.getElementById("tipo-detail-thead");
   thead.innerHTML =
     `<th><input type="checkbox" id="check-all"></th>` +
-    columnasVisibles.map((c) => `<th title="${escapeHTML(c)}">${escapeHTML(c)}</th>`).join("") +
+    columnasVisibles.map((c) => `<th title="${escapeHTML(c)}" draggable="true" data-col="${escapeHTML(c)}">${escapeHTML(c)}</th>`).join("") +
     `<th>CV</th>`;
+  wireDragColumnas(thead);
 
   const tbody = document.getElementById("tipo-detail-tbody");
   if (data.respuestas.length === 0) {
@@ -325,11 +379,14 @@ function renderTable() {
         const cvBtn = r.tiene_cv
           ? `<a href="${AUTH_API_BASE}/informes/respuestas/${r.id}/cv" target="_blank" class="btn btn-ghost btn-cv">📄 Ver</a>`
           : "";
-        return `<tr data-id="${r.id}">
+        const compartida = r.compartido_con && r.compartido_con.length > 0;
+        const tituloFila = compartida ? `Ya compartido con: ${r.compartido_con.join(", ")}` : "";
+        return `<tr data-id="${r.id}" class="${compartida ? "fila-compartida" : ""}" title="${escapeHTML(tituloFila)}">
           <td><input type="checkbox" class="row-check" data-id="${r.id}" ${checked}></td>
           ${columnasVisibles.map((c) => {
             const valor = r.datos[c] ?? "";
-            return `<td title="${escapeHTML(valor)}">${escapeHTML(valor)}</td>`;
+            const mostrar = data.columnas_fecha.includes(c) ? formatFechaCorta(valor) : valor;
+            return `<td title="${escapeHTML(valor)}">${escapeHTML(mostrar)}</td>`;
           }).join("")}
           <td>
             ${cvBtn}
@@ -358,6 +415,19 @@ function renderTable() {
       if (cb.checked) selectedIds.add(id);
       else selectedIds.delete(id);
       renderCompartirBar();
+    });
+  });
+
+  // Clic en cualquier parte de la fila marca/desmarca su checkbox — salvo
+  // en los propios controles de CV (enlace "Ver" / subir), que ya tienen su
+  // propia acción y no deben además cambiar la selección.
+  tbody.querySelectorAll("tr[data-id]").forEach((row) => {
+    row.addEventListener("click", (e) => {
+      if (e.target.closest(".row-check, .btn-cv, .input-cv-upload")) return;
+      const cb = row.querySelector(".row-check");
+      if (!cb) return;
+      cb.checked = !cb.checked;
+      cb.dispatchEvent(new Event("change"));
     });
   });
 
@@ -497,7 +567,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   ["f-buscar"].forEach((id) => {
     document.getElementById(id).addEventListener("input", () => loadRespuestas());
   });
-  ["f-orden", "f-orden-dir", "f-fecha-desde", "f-fecha-hasta", "f-excluir-no-aptos"].forEach((id) => {
+  ["f-orden", "f-orden-dir", "f-fecha-desde", "f-fecha-hasta", "f-filtro-aptos"].forEach((id) => {
     document.getElementById(id).addEventListener("change", () => loadRespuestas());
   });
 
@@ -507,7 +577,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("f-orden-dir").value = "asc";
     document.getElementById("f-fecha-desde").value = "";
     document.getElementById("f-fecha-hasta").value = "";
-    document.getElementById("f-excluir-no-aptos").checked = false;
+    document.getElementById("f-filtro-aptos").value = "todos";
     loadRespuestas();
   });
 

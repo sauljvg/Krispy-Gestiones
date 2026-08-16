@@ -546,7 +546,7 @@ def _detect_date_columns(columnas):
 
 
 def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=None, orden_dir="asc",
-                    fecha_col=None, fecha_desde=None, fecha_hasta=None, excluir_no_aptos=False):
+                    fecha_col=None, fecha_desde=None, fecha_hasta=None, filtro_aptos="todos"):
     tipo = get_tipo(tipo_clave)
     if tipo is None:
         raise ValueError(f"Tipo de informe desconocido: {tipo_clave}")
@@ -571,11 +571,13 @@ def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=N
     if fecha_col and fecha_hasta:
         clauses.append("json_extract(datos_json, ?) <= ?")
         params.extend([f"$.\"{fecha_col}\"", fecha_hasta])
-    if excluir_no_aptos:
+    if filtro_aptos == "excluir_no_aptos":
         # RESULTADO viene del Excel de Valores y Competencias como "❌ No
         # apto" — otros tipos de informe no tienen esta columna, así que se
         # deja pasar cuando es NULL en vez de excluir de más.
         clauses.append("(json_extract(datos_json, '$.RESULTADO') IS NULL OR json_extract(datos_json, '$.RESULTADO') NOT LIKE '%No apto%')")
+    elif filtro_aptos == "solo_no_aptos":
+        clauses.append("json_extract(datos_json, '$.RESULTADO') LIKE '%No apto%'")
     where = "WHERE " + " AND ".join(clauses)
 
     order_sql = "id DESC"
