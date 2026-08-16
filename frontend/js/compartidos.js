@@ -106,6 +106,18 @@ function onCambiaTestCampana() {
     textarea.value = `${textarea.value}\n\n{enlace}`;
   }
   actualizarEnlacesCampana();
+  // No hay forma de saber si el mensaje se llega a enviar de verdad (es un
+  // enlace wa.me que el propio usuario confirma en WhatsApp) -- elegir un
+  // test aquí es la mejor aproximación disponible de "se intentó contactar
+  // a este grupo", y es lo que permite luego el filtro "Recordatorio a
+  // pendientes" (invitado pero sin respuesta_id todavía).
+  if (select.value) {
+    fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/marcar-invitados-test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ candidato_ids: campanaCandidatos.map((c) => c.id), encuesta_id: Number(select.value) }),
+    });
+  }
 }
 
 function cerrarCampanaWhatsapp() {
@@ -715,6 +727,12 @@ function renderForm() {
               <select id="candidato-estado-form">
                 ${ESTADOS.map((e) => `<option value="${e}" ${e === candidatoEditando.estado ? "selected" : ""}>${ESTADO_LABELS[e]}</option>`).join("")}
               </select>
+            </div>
+            <div class="form-field">
+              <label>Estado del contacto ${testEstadoBadgeHTML(candidatoEditando)}</label>
+              <select id="candidato-contacto-estado-form">
+                ${Object.entries(CONTACTO_ESTADO_LABELS).map(([v, l]) => `<option value="${v}" ${(candidatoEditando.contacto_estado || "sin_contactar") === v ? "selected" : ""}>${l}</option>`).join("")}
+              </select>
             </div>` : ""}
           <div class="form-field form-field-full">
             <label>Notas</label>
@@ -1045,6 +1063,7 @@ async function guardarCandidato() {
   let candidatoId;
   if (candidatoEditando) {
     campos.estado = document.getElementById("candidato-estado-form").value;
+    campos.contacto_estado = document.getElementById("candidato-contacto-estado-form").value;
     const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(campos),
     });
@@ -1117,6 +1136,25 @@ let ultimosCandidatosCargados = [];
 let candidatosFiltroEstado = "";
 let usuariosParaCompartirCandidatos = [];
 
+const CONTACTO_ESTADO_LABELS = { sin_contactar: "Sin contactar", contactado: "Contactado", respondio: "Respondió" };
+
+function contactoEstadoSelectHTML(candidatoId, contactoEstado) {
+  const opciones = Object.entries(CONTACTO_ESTADO_LABELS)
+    .map(([val, label]) => `<option value="${val}" ${(contactoEstado || "sin_contactar") === val ? "selected" : ""}>${label}</option>`)
+    .join("");
+  return `<select class="candidato-mini-contacto-select" data-candidato-id="${candidatoId}" title="Estado del contacto">${opciones}</select>`;
+}
+
+// Estado del TEST (no del contacto humano): invitado_test_en se marca al
+// elegir un test en la campaña de WhatsApp (ver onCambiaTestCampana) --
+// aproximación de "se intentó enviar", ya que no hay forma de confirmar el
+// envío real (enlace wa.me manual). respuesta_id enlazado = ya respondió.
+function testEstadoBadgeHTML(c) {
+  if (c.respuesta_id) return `<span class="candidato-mini-test-estado test-respondido">✅ Respondió al test</span>`;
+  if (c.invitado_test_en) return `<span class="candidato-mini-test-estado test-pendiente">⏳ Esperando respuesta al test</span>`;
+  return "";
+}
+
 function candidatoMiniCardHTML(c) {
   const linea2 = [c.telefono, c.email].filter(Boolean).join(" · ");
   const vacante = vacantesTodasCache.find((v) => v.id === c.vacante_id);
@@ -1140,6 +1178,8 @@ function candidatoMiniCardHTML(c) {
           <p>${escapeHTML(linea2)}</p>
           <p style="color:var(--text-muted);">${escapeHTML(vacanteTxt)}</p>
           ${compartidoHTML}
+          ${testEstadoBadgeHTML(c)}
+          <div class="candidato-mini-contacto-fila">${contactoEstadoSelectHTML(c.id, c.contacto_estado)}</div>
         </div>
       </div>
     </div>`;
@@ -1311,7 +1351,8 @@ function renderCandidatosGrid() {
     ? ultimosCandidatosCargados.map(candidatoMiniCardHTML).join("")
     : `<p class="staff-hint">Todavía no hay candidatos en la base de datos.</p>`;
   grid.querySelectorAll(".candidato-mini-card").forEach((card) => {
-    card.addEventListener("click", () => {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest(".candidato-mini-contacto-select")) return;
       const id = Number(card.dataset.candidatoId);
       if (modoSeleccionCandidatos) {
         if (candidatosSeleccionadosIds.has(id)) candidatosSeleccionadosIds.delete(id);
@@ -1321,6 +1362,12 @@ function renderCandidatosGrid() {
       } else {
         abrirEdicionCandidato(card.dataset.candidatoId);
       }
+    });
+  });
+  grid.querySelectorAll(".candidato-mini-contacto-select").forEach((select) => {
+    select.addEventListener("click", (e) => e.stopPropagation());
+    select.addEventListener("change", async () => {
+      await actualizarCandidatoInline(select.dataset.candidatoId, { contacto_estado: select.value });
     });
   });
 }
@@ -1336,6 +1383,18 @@ async function loadCandidatos() {
   ultimosCandidatosCargados = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos?${params}`).then((r) => (r.ok ? r.json() : []));
   renderCandidatosGrid();
   renderCandidatosTabs();
+}
+
+// Toma a todos los candidatos cargados actualmente (según el filtro activo
+// de vacante/búsqueda) que tienen un test invitado pero sin respuesta_id
+// todavía, y abre la campaña de WhatsApp ya lista solo con ellos.
+function abrirRecordatorioPendientes() {
+  const pendientes = ultimosCandidatosCargados.filter((c) => c.invitado_test_en && !c.respuesta_id);
+  if (pendientes.length === 0) {
+    alert("No hay candidatos con un test pendiente de respuesta en la lista actual.");
+    return;
+  }
+  abrirCampanaWhatsapp(pendientes);
 }
 
 function abrirCampanaWhatsappSeleccionados() {
@@ -1409,6 +1468,7 @@ async function initBaseCandidatos(user) {
   document.getElementById("btn-nuevo-candidato").addEventListener("click", abrirNuevoCandidato);
   document.getElementById("btn-revincular-tests").addEventListener("click", revincularTests);
   document.getElementById("btn-adjuntar-lote").addEventListener("click", abrirAdjuntarLote);
+  document.getElementById("btn-recordatorio-pendientes").addEventListener("click", abrirRecordatorioPendientes);
   document.getElementById("btn-nueva-vacante").addEventListener("click", abrirNuevaVacante);
   document.getElementById("btn-modo-seleccion").addEventListener("click", toggleModoSeleccion);
   document.getElementById("btn-seleccionar-todos-candidatos").addEventListener("click", seleccionarTodosCandidatos);

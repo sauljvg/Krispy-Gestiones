@@ -11,6 +11,12 @@ ESTADOS = ["pendiente", "entrevistado", "contratado", "descartado"]
 
 VACANTE_ESTADOS = ["abierta", "cubierta", "cancelada"]
 
+# Estado del contacto humano (llamada/WhatsApp) con el candidato -- se marca
+# a mano, distinto de "estado" (que es la fase del proceso de selección) y
+# de invitado_test_en/respuesta_id (que es sobre el TEST, no sobre hablar
+# con la persona).
+CONTACTO_ESTADOS = ["sin_contactar", "contactado", "respondio"]
+
 # Campos "conocidos" del candidato — el resto de datos (de un CV, de un
 # Excel de Informes o de un alta manual) se guarda en extra_fields (JSON),
 # igual que el patrón extraFields de BBDD SV.
@@ -110,6 +116,12 @@ def ensure_reclutamiento_tables():
         conn.execute("ALTER TABLE candidatos ADD COLUMN vacante_id INTEGER REFERENCES vacantes(id)")
     if "foto_ruta" not in cols_candidatos:
         conn.execute("ALTER TABLE candidatos ADD COLUMN foto_ruta TEXT")
+    if "invitado_test_en" not in cols_candidatos:
+        conn.execute("ALTER TABLE candidatos ADD COLUMN invitado_test_en TEXT")
+    if "invitado_test_encuesta_id" not in cols_candidatos:
+        conn.execute("ALTER TABLE candidatos ADD COLUMN invitado_test_encuesta_id INTEGER")
+    if "contacto_estado" not in cols_candidatos:
+        conn.execute("ALTER TABLE candidatos ADD COLUMN contacto_estado TEXT NOT NULL DEFAULT 'sin_contactar'")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS candidato_archivos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -543,6 +555,9 @@ def actualizar_candidato(candidato_id, campos: dict):
     if "vacante_id" in campos:
         sets.append("vacante_id = ?")
         params.append(campos.pop("vacante_id"))
+    if "contacto_estado" in campos:
+        sets.append("contacto_estado = ?")
+        params.append(campos.pop("contacto_estado"))
     for campo in CAMPOS:
         if campo in campos:
             sets.append(f"{campo} = ?")
@@ -583,6 +598,25 @@ def actualizar_vacante_multiple(candidato_ids: list[int], vacante_id):
     conn.execute(
         f"UPDATE candidatos SET vacante_id = ?, actualizado_en = datetime('now') WHERE id IN ({placeholders})",
         [vacante_id, *candidato_ids],
+    )
+    conn.commit()
+    conn.close()
+
+
+def marcar_invitados_test(candidato_ids: list[int], encuesta_id: int):
+    """Registra que se les acaba de generar un enlace de test por WhatsApp a
+    estos candidatos -- no hay forma de saber si de verdad se envió (el
+    envío es manual, fuera del sistema, ver abrirCampanaWhatsapp), así que
+    esto es una aproximación de "se intentó contactar", suficiente para
+    poder distinguir luego "invitado pero sin respuesta todavía" (para el
+    recordatorio) de "nunca se le mandó nada"."""
+    if not candidato_ids:
+        return
+    conn = get_connection()
+    placeholders = ", ".join("?" for _ in candidato_ids)
+    conn.execute(
+        f"UPDATE candidatos SET invitado_test_en = datetime('now'), invitado_test_encuesta_id = ? WHERE id IN ({placeholders})",
+        [encuesta_id, *candidato_ids],
     )
     conn.commit()
     conn.close()

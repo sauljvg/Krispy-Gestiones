@@ -121,6 +121,14 @@
   .respuestas-test-detalle summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
   .respuestas-test-lista { margin-top: 8px; padding: 10px 12px; background: var(--surface-page); border-radius: 8px; max-height: 260px; overflow-y: auto; }
   .respuestas-test-lista p { margin: 4px 0; font-size: 13px; }
+  .candidato-mini-test-estado { display: block; font-size: 11px; margin: 4px 0 0; }
+  .candidato-mini-test-estado.test-respondido { color: var(--status-good); }
+  .candidato-mini-test-estado.test-pendiente { color: var(--text-secondary); }
+  .candidato-mini-contacto-fila { margin-top: 6px; }
+  .candidato-mini-contacto-select {
+    font-size: 11px; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-secondary);
+  }
   .candidato-foto-preview-wrap { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
   .candidato-foto-preview { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; border: 1px solid var(--border); }
   .candidato-whatsapp-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; cursor: default; }
@@ -227,6 +235,7 @@
         <button id="btn-modo-seleccion" class="btn btn-ghost" type="button">☑ Selección múltiple</button>
         <button id="btn-revincular-tests" class="btn btn-ghost" type="button" title="Busca de nuevo entre las respuestas de test ya enviadas por si alguna coincide con un candidato que no tenía enlace">🔗 Buscar tests ya respondidos</button>
         <button id="btn-adjuntar-lote" class="btn btn-ghost" type="button" title="Para un PDF con varios CVs juntos que ya usaste para crear estas fichas -- adjunta el PDF a cada ficha existente por nombre, sin duplicar a nadie">🗂️ Adjuntar PDF a fichas existentes</button>
+        <button id="btn-recordatorio-pendientes" class="btn btn-ghost" type="button" title="Abre la campaña de WhatsApp ya rellena solo con quienes tienen un test pendiente de responder">🔔 Recordatorio a pendientes</button>
         <button id="btn-nuevo-candidato" class="btn btn-primary" type="button">＋ Nuevo candidato</button>
       </div>
       <div id="adjuntar-lote-wrap"></div>

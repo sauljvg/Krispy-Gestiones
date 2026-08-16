@@ -90,6 +90,7 @@ class CandidatoUpdateIn(BaseModel):
     fecha_solicitud: str | None = None
     estado: str | None = None
     notas: str | None = None
+    contacto_estado: str | None = None
     extra_fields: dict[str, str] | None = None
 
 
@@ -203,6 +204,17 @@ def actualizar_vacante_multiple_route(body: VacanteMultipleIn, _user: dict = Dep
     return {"ok": True}
 
 
+class MarcarInvitadosTestIn(BaseModel):
+    candidato_ids: list[int]
+    encuesta_id: int
+
+
+@router.post("/candidatos/marcar-invitados-test")
+def marcar_invitados_test_route(body: MarcarInvitadosTestIn, _user: dict = Depends(require_informes)):
+    reclutamiento_module.marcar_invitados_test(body.candidato_ids, body.encuesta_id)
+    return {"ok": True}
+
+
 @router.post("/candidatos/compartir")
 def compartir_candidatos_route(body: CompartirCandidatosIn, user: dict = Depends(require_informes)):
     reclutamiento_module.compartir_candidatos_directo(body.candidato_ids, body.usuario_id, user["username"])
@@ -238,6 +250,8 @@ def actualizar_candidato_route(candidato_id: int, body: CandidatoUpdateIn, _user
         raise HTTPException(status_code=404, detail="Candidato no encontrado")
     if body.estado is not None and body.estado not in reclutamiento_module.ESTADOS:
         raise HTTPException(status_code=400, detail=f"Estado inválido: {body.estado}")
+    if body.contacto_estado is not None and body.contacto_estado not in reclutamiento_module.CONTACTO_ESTADOS:
+        raise HTTPException(status_code=400, detail=f"Estado de contacto inválido: {body.contacto_estado}")
     # exclude_unset (no "filtrar los None") para poder distinguir "el cliente
     # no mandó este campo, no lo toques" de "el cliente mandó explícitamente
     # null" — necesario para poder desasignar vacante_id (null explícito) sin
