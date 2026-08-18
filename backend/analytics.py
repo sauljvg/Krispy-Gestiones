@@ -3,9 +3,9 @@ import math
 import re
 from collections import Counter
 
+import personal as personal_module
 from db import get_connection
 from request_context import tiendas_permitidas_actual
-from staff_names import STORE_STAFF
 
 
 def _compile_patterns(names_dict):
@@ -18,16 +18,20 @@ def _compile_patterns(names_dict):
     }
 
 
-# Cada tienda tiene su propio diccionario de nombres — el mismo nombre de
-# pila puede ser gente distinta en tiendas distintas, así que no se mezclan.
-_STORE_PATTERNS = {
-    tienda: {
-        "current": _compile_patterns(data["current"]),
-        "former": _compile_patterns(data["former"]),
-        "all": _compile_patterns({**data["current"], **data["former"]}),
+def _store_patterns():
+    """Cada tienda tiene su propio diccionario de nombres — el mismo nombre
+    de pila puede ser gente distinta en tiendas distintas, así que no se
+    mezclan. Se reconstruye en cada llamada desde personal.py (tabla
+    editable desde el dashboard) en vez de cachearse: la tabla es pequeña y
+    así una alta/salida de personal se refleja sin reiniciar el servidor."""
+    return {
+        tienda: {
+            "current": _compile_patterns(data["current"]),
+            "former": _compile_patterns(data["former"]),
+            "all": _compile_patterns({**data["current"], **data["former"]}),
+        }
+        for tienda, data in personal_module.build_store_staff().items()
     }
-    for tienda, data in STORE_STAFF.items()
-}
 
 STOPWORDS = {
     "que", "de", "la", "el", "en", "y", "a", "los", "las", "un", "una", "es",
@@ -237,7 +241,8 @@ def get_staff_mentions(tienda, where="", params=None):
     escribió), por palabra completa y sin distinguir mayúsculas/acentos.
     Devuelve personal actual y personal que ya no trabaja ahí por separado.
     """
-    if tienda not in _STORE_PATTERNS:
+    store_patterns = _store_patterns()
+    if tienda not in store_patterns:
         return {"actuales": [], "anteriores": []}
 
     text_where, text_params = _combine_where("texto IS NOT NULL", where, params)
@@ -247,7 +252,7 @@ def get_staff_mentions(tienda, where="", params=None):
     rows = cur.fetchall()
     conn.close()
 
-    patterns = _STORE_PATTERNS[tienda]
+    patterns = store_patterns[tienda]
     actuales = _tally_staff(rows, patterns["current"])
     anteriores = _tally_staff(rows, patterns["former"])
     for entry in actuales + anteriores:
@@ -266,9 +271,10 @@ def get_staff_mentions_all_stores(where="", params=None):
     actuales, anteriores = [], []
     conn = get_connection()
     cur = conn.cursor()
+    store_patterns = _store_patterns()
     permitidas = tiendas_permitidas_actual.get()
     tiendas_a_recorrer = (
-        {t: p for t, p in _STORE_PATTERNS.items() if t in permitidas} if permitidas else _STORE_PATTERNS
+        {t: p for t, p in store_patterns.items() if t in permitidas} if permitidas else store_patterns
     )
     for tienda, patterns in tiendas_a_recorrer.items():
         clauses = ["tienda = ?", "texto IS NOT NULL"] + ([extra] if extra else [])
@@ -291,7 +297,7 @@ def get_staff_mentions_all_stores(where="", params=None):
 def staff_matching_review_ids(tienda, canonical_name, where="", params=None):
     """IDs de reseñas cuyo TEXTO menciona a `canonical_name` (palabra completa)
     dentro de la plantilla de personal de `tienda`."""
-    pattern = _STORE_PATTERNS.get(tienda, {}).get("all", {}).get(canonical_name)
+    pattern = _store_patterns().get(tienda, {}).get("all", {}).get(canonical_name)
     if pattern is None:
         return []
     text_where, text_params = _combine_where("texto IS NOT NULL", where, params)

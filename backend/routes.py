@@ -4,11 +4,13 @@ import sys
 import tempfile
 import zipfile
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
 import analytics
+import personal as personal_module
+from auth_routes import require_admin
 from db import dict_rows, get_connection, get_ultima_importacion_takeout, set_ultima_importacion_takeout
 from request_context import tiendas_permitidas_actual
 from utils import paginate, read_transactions_xlsx, rows_to_csv, rows_to_xlsx
@@ -503,6 +505,73 @@ def import_takeout(file: UploadFile = File(...)):
         return {"ok": True, "total_nuevas": total_nuevas, "tiendas": report}
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+class PersonalIn(BaseModel):
+    tienda: str
+    nombre_canonico: str
+    variantes: list[str] = []
+    fecha_inicio: str | None = None
+
+
+class PersonalEditIn(BaseModel):
+    nombre_canonico: str
+    variantes: list[str]
+
+
+class SugerirVariantesIn(BaseModel):
+    nombre: str
+
+
+class SalidaPersonalIn(BaseModel):
+    asignacion_id: int
+    fecha: str
+    tipo: str  # "baja" | "traslado"
+    tienda_destino: str | None = None
+
+
+@router.get("/personal")
+def listar_personal_route(tienda: str | None = None, _admin: dict = Depends(require_admin)):
+    return {"personal": personal_module.list_personal(tienda)}
+
+
+@router.post("/personal")
+def crear_personal_route(body: PersonalIn, _admin: dict = Depends(require_admin)):
+    try:
+        return personal_module.crear_personal(body.tienda, body.nombre_canonico, body.variantes, body.fecha_inicio)
+    except personal_module.PersonalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/personal/sugerir-variantes")
+def sugerir_variantes_route(body: SugerirVariantesIn, _admin: dict = Depends(require_admin)):
+    try:
+        return {"variantes": personal_module.sugerir_variantes(body.nombre)}
+    except personal_module.PersonalError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@router.patch("/personal/{personal_id}")
+def editar_personal_route(personal_id: int, body: PersonalEditIn, _admin: dict = Depends(require_admin)):
+    try:
+        personal_module.actualizar_personal(personal_id, body.nombre_canonico, body.variantes)
+        return {"ok": True}
+    except personal_module.PersonalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/personal/salida")
+def salida_personal_route(body: SalidaPersonalIn, _admin: dict = Depends(require_admin)):
+    try:
+        return personal_module.dar_salida(body.asignacion_id, body.fecha, body.tipo, body.tienda_destino)
+    except personal_module.PersonalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.delete("/personal/{personal_id}")
+def eliminar_personal_route(personal_id: int, _admin: dict = Depends(require_admin)):
+    personal_module.eliminar_personal(personal_id)
+    return {"ok": True}
 
 
 @router.get("/import/takeout/ultima")
