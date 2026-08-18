@@ -123,6 +123,7 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     const codigoCorto = String(currentTest.id).padStart(4, "0");
     document.getElementById("test-enlace-publico").value = `${location.origin}/encuesta.html?slug=${codigoCorto}`;
     document.getElementById("test-enlace-corto").value = currentTest.enlace_corto || "";
+    document.getElementById("test-evitar-duplicados").checked = !!currentTest.evitar_duplicados;
     document.getElementById("fondo-preview").hidden = !currentTest.tiene_fondo;
     if (currentTest.tiene_fondo) {
       document.getElementById("fondo-preview").src = `${AUTH_API_BASE}/encuestas/encuestas/${testId}/fondo?t=${Date.now()}`;
@@ -143,6 +144,7 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("test-tipo-informe").value = "";
     document.getElementById("test-enlace-publico").value = "";
     document.getElementById("test-enlace-corto").value = "";
+    document.getElementById("test-evitar-duplicados").checked = false;
     document.getElementById("fondo-preview").hidden = true;
     document.getElementById("btn-publicar-test").hidden = true;
     document.getElementById("btn-despublicar-test").hidden = true;
@@ -164,7 +166,7 @@ function cerrarEditor() {
 async function guardarTest() {
   const titulo = document.getElementById("test-titulo").value.trim();
   if (!titulo) {
-    alert("El título es obligatorio.");
+    mostrarAviso("El título es obligatorio.");
     return;
   }
   if (!currentTestId) {
@@ -175,7 +177,7 @@ async function guardarTest() {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert(err.detail || "No se pudo crear el test.");
+      mostrarAviso(err.detail || "No se pudo crear el test.");
       return;
     }
     const data = await res.json();
@@ -189,6 +191,7 @@ async function guardarTest() {
     tipo_informe_clave: destino.startsWith("informe:") ? destino.slice("informe:".length) : null,
     tipo_entrevista_empresa: destino.startsWith("entrevista:") ? destino.slice("entrevista:".length) : null,
     enlace_corto: document.getElementById("test-enlace-corto").value.trim() || null,
+    evitar_duplicados: document.getElementById("test-evitar-duplicados").checked,
   };
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}`, {
     method: "PUT",
@@ -197,7 +200,7 @@ async function guardarTest() {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || "No se pudo guardar el test.");
+    mostrarAviso(err.detail || "No se pudo guardar el test.");
     return;
   }
   await loadTests();
@@ -211,7 +214,7 @@ async function publicarTest(publicar) {
 }
 
 async function eliminarTest() {
-  if (!confirm("¿Eliminar este test y todas sus respuestas? Esta acción no se puede deshacer.")) return;
+  if (!(await pedirConfirmacion("¿Eliminar este test y todas sus respuestas? Esta acción no se puede deshacer."))) return;
   await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}`, { method: "DELETE" });
   cerrarEditor();
   await loadTests();
@@ -223,7 +226,7 @@ async function subirFondo(file) {
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/fondo`, { method: "POST", body: formData });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || "No se pudo subir la imagen.");
+    mostrarAviso(err.detail || "No se pudo subir la imagen.");
     return;
   }
   await abrirEditor(currentTestId, { scroll: false });
@@ -534,7 +537,7 @@ function renderPaginas() {
   );
   wrap.querySelectorAll(".btn-pagina-borrar").forEach((btn) =>
     btn.addEventListener("click", async () => {
-      if (!confirm("¿Eliminar esta página y sus preguntas?")) return;
+      if (!(await pedirConfirmacion("¿Eliminar esta página y sus preguntas?"))) return;
       await fetch(`${AUTH_API_BASE}/encuestas/paginas/${btn.dataset.paginaId}`, { method: "DELETE" });
       await abrirEditor(currentTestId, { scroll: false });
     })
@@ -553,7 +556,7 @@ function renderPaginas() {
   );
   wrap.querySelectorAll(".btn-pregunta-borrar").forEach((btn) =>
     btn.addEventListener("click", async () => {
-      if (!confirm("¿Eliminar esta pregunta?")) return;
+      if (!(await pedirConfirmacion("¿Eliminar esta pregunta?"))) return;
       await fetch(`${AUTH_API_BASE}/encuestas/preguntas/${btn.dataset.preguntaId}`, { method: "DELETE" });
       await abrirEditor(currentTestId, { scroll: false });
     })
@@ -576,7 +579,7 @@ function renderPaginas() {
       const item = wrap.querySelector(`.pregunta-item[data-pregunta-id="${preguntaId}"]`);
       const etiqueta = item.querySelector(".pregunta-edit-etiqueta").value.trim();
       if (!etiqueta) {
-        alert("Escribe el enunciado de la pregunta.");
+        mostrarAviso("Escribe el enunciado de la pregunta.");
         return;
       }
       const obligatoria = item.querySelector(".pregunta-edit-obligatoria").checked;
@@ -585,7 +588,7 @@ function renderPaginas() {
       const opciones = editorOpciones ? leerOpciones(editorOpciones) : [];
       const opcionesDescarta = editorOpciones ? leerOpcionesDescarta(editorOpciones) : [];
       if (editorOpciones && opciones.length < 2) {
-        alert("Escribe al menos 2 opciones.");
+        mostrarAviso("Escribe al menos 2 opciones.");
         return;
       }
       const res = await fetch(`${AUTH_API_BASE}/encuestas/preguntas/${preguntaId}`, {
@@ -598,7 +601,7 @@ function renderPaginas() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        alert(err.detail || "No se pudo guardar la pregunta.");
+        mostrarAviso(err.detail || "No se pudo guardar la pregunta.");
         return;
       }
       editandoPreguntas.delete(preguntaId);
@@ -623,7 +626,7 @@ function renderPaginas() {
       const obligatoria = wrap.querySelector(`.nueva-pregunta-obligatoria[data-pagina-id="${paginaId}"]`).checked;
       const mostrarDashboard = wrap.querySelector(`.nueva-pregunta-dashboard[data-pagina-id="${paginaId}"]`).checked;
       if (!etiqueta) {
-        alert("Escribe el enunciado de la pregunta.");
+        mostrarAviso("Escribe el enunciado de la pregunta.");
         return;
       }
       const slot = wrap.querySelector(`.nueva-pregunta-opciones[data-pagina-id="${paginaId}"]`);
@@ -631,7 +634,7 @@ function renderPaginas() {
       const opciones = editorOpciones ? leerOpciones(editorOpciones) : [];
       const opcionesDescarta = editorOpciones ? leerOpcionesDescarta(editorOpciones) : [];
       if (editorOpciones && opciones.length < 2) {
-        alert("Escribe al menos 2 opciones.");
+        mostrarAviso("Escribe al menos 2 opciones.");
         return;
       }
       const res = await fetch(`${AUTH_API_BASE}/encuestas/paginas/${paginaId}/preguntas`, {
@@ -644,7 +647,7 @@ function renderPaginas() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        alert(err.detail || "No se pudo añadir la pregunta.");
+        mostrarAviso(err.detail || "No se pudo añadir la pregunta.");
         return;
       }
       await abrirEditor(currentTestId, { scroll: false });
@@ -763,10 +766,10 @@ async function actualizarEnVivoDetalle() {
 }
 
 async function reiniciarEmbudo() {
-  if (!confirm("Esto borra todas las aperturas y abandonos registrados de este test (por ejemplo, pruebas que hayas hecho tú mismo). No afecta a las respuestas ya enviadas. ¿Continuar?")) return;
+  if (!(await pedirConfirmacion("Esto borra todas las aperturas y abandonos registrados de este test (por ejemplo, pruebas que hayas hecho tú mismo). No afecta a las respuestas ya enviadas. ¿Continuar?"))) return;
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/sesiones`, { method: "DELETE" });
   if (!res.ok) {
-    alert("No se pudo reiniciar (error " + res.status + ").");
+    mostrarAviso("No se pudo reiniciar (error " + res.status + ").");
     return;
   }
   await verEmbudo({ forzarRecarga: true });
@@ -889,7 +892,7 @@ async function verRespuestas() {
 }
 
 async function borrarRespuesta(respuestaId) {
-  if (!confirm("¿Eliminar esta respuesta? No se puede deshacer.")) return;
+  if (!(await pedirConfirmacion("¿Eliminar esta respuesta? No se puede deshacer."))) return;
   await fetch(`${AUTH_API_BASE}/encuestas/encuestas/respuestas/${respuestaId}`, { method: "DELETE" });
   document.getElementById("respuestas-wrap").hidden = true;
   await verRespuestas();

@@ -37,6 +37,8 @@
     background: var(--surface-page); color: var(--text-primary); font-size: 14px; font-family: inherit; box-sizing: border-box;
   }
   #test-color-boton { width: 90px; height: 44px; padding: 4px; cursor: pointer; }
+  .editor-field label.chk { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-primary); padding: 9px 0; cursor: pointer; }
+  .editor-field label.chk input { width: auto; }
   .editor-fields-row { display: flex; gap: 12px; flex-wrap: wrap; }
   .editor-fields-row .editor-field { flex: 1; min-width: 160px; }
   .editor-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 20px; }
@@ -170,6 +172,13 @@
           <label for="test-enlace-corto">Enlace corto (ej. TinyURL, opcional)</label>
           <input type="text" id="test-enlace-corto" placeholder="https://tinyurl.com/...">
         </div>
+        <div class="editor-field">
+          <label>&nbsp;</label>
+          <label class="chk" id="test-evitar-duplicados-label">
+            <input type="checkbox" id="test-evitar-duplicados">
+            No permitir responder más de una vez (por IP, nombre, teléfono o email)
+          </label>
+        </div>
       </div>
       <div class="editor-field">
         <label for="test-mensaje-final">Mensaje final (al terminar el test)</label>
@@ -218,6 +227,7 @@
   </div>
 </div>
 <script src="js/theme.js?v=20260724a"></script>
+<script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260724a"></script>
 <script src="js/topbar-menu.js?v=20260727a"></script>
 <script src="js/tests.js?v=20260730a"></script>

@@ -55,6 +55,14 @@ def ensure_encuestas_tables():
         # recordatorios en vez del "enlace público" largo — puramente
         # informativo, el backend no lo usa para resolver la encuesta.
         conn.execute("ALTER TABLE encuestas ADD COLUMN enlace_corto TEXT")
+    if "evitar_duplicados" not in cols_encuestas:
+        # Casilla en Ajustes de cada test: si está activa, guardar_respuesta
+        # rechaza una respuesta nueva cuando coincide con una anterior de la
+        # MISMA encuesta por IP, nombre completo, teléfono o email (ver
+        # _es_respuesta_duplicada) -- pensado para que la misma persona no
+        # pueda responder dos veces. Por defecto desactivada (0), para no
+        # cambiar el comportamiento de los tests ya existentes.
+        conn.execute("ALTER TABLE encuestas ADD COLUMN evitar_duplicados INTEGER NOT NULL DEFAULT 0")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS encuesta_paginas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -335,6 +343,7 @@ def _generar_slug_unico(conn, titulo, excluir_id=None):
 def _row_encuesta(r):
     d = dict(r)
     d["tiene_fondo"] = d.pop("fondo_ruta", None) is not None
+    d["evitar_duplicados"] = bool(d["evitar_duplicados"])
     return d
 
 
@@ -439,13 +448,14 @@ def create_encuesta(titulo):
     return encuesta_id
 
 
-def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None):
+def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None, evitar_duplicados=False):
     conn = get_connection()
     conn.execute(
         "UPDATE encuestas SET titulo = ?, mensaje_final = ?, color_boton = ?, tipo_informe_clave = ?, "
-        "tipo_entrevista_empresa = ?, enlace_corto = ? WHERE id = ?",
+        "tipo_entrevista_empresa = ?, enlace_corto = ?, evitar_duplicados = ? WHERE id = ?",
         (titulo.strip(), mensaje_final.strip(), color_boton.strip(), tipo_informe_clave or None,
-         tipo_entrevista_empresa or None, (enlace_corto or "").strip() or None, encuesta_id),
+         tipo_entrevista_empresa or None, (enlace_corto or "").strip() or None,
+         1 if evitar_duplicados else 0, encuesta_id),
     )
     conn.commit()
     conn.close()
@@ -666,6 +676,41 @@ def _detectar_dispositivo(user_agent):
     return "Desconocido"
 
 
+def _normalizar_telefono(v):
+    return re.sub(r"\D", "", v or "")
+
+
+def _es_respuesta_duplicada(conn, encuesta_id, ip, campos_contacto):
+    """Compara esta respuesta contra TODAS las anteriores de la misma
+    encuesta por IP, nombre completo, teléfono o email -- suelen ser datos
+    únicos por persona, así que coincidir en cualquiera de ellos es buena
+    señal de que es la MISMA persona respondiendo otra vez. Solo se llama
+    si el test tiene la casilla "evitar_duplicados" activada (ver Ajustes
+    en tests.js)."""
+    nombre = (campos_contacto.get("nombre_completo") or "").strip().lower()
+    telefono = _normalizar_telefono(campos_contacto.get("telefono"))
+    email = (campos_contacto.get("email") or "").strip().lower()
+    if not (nombre or telefono or email or ip):
+        return False
+    filas = conn.execute(
+        "SELECT ip, datos_json FROM encuesta_respuestas WHERE encuesta_id = ?", (encuesta_id,)
+    ).fetchall()
+    for fila in filas:
+        if ip and fila["ip"] == ip:
+            return True
+        campos_previos, _ = reclutamiento_module.mapear_datos_a_candidato(json.loads(fila["datos_json"]))
+        nombre_previo = (campos_previos.get("nombre_completo") or "").strip().lower()
+        telefono_previo = _normalizar_telefono(campos_previos.get("telefono"))
+        email_previo = (campos_previos.get("email") or "").strip().lower()
+        if nombre and nombre == nombre_previo:
+            return True
+        if telefono and telefono == telefono_previo:
+            return True
+        if email and email == email_previo:
+            return True
+    return False
+
+
 def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, token=None):
     """respuestas_por_pregunta: {pregunta_id (str o int): valor}. Se guarda
     tal cual (por id) para la vista de administración, y además se arma un
@@ -734,6 +779,12 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
         fila_por_etiqueta[clave] = valor
         if mostrar_dashboard_por_id[pid]:
             columnas_extra.add(clave)
+
+    if row["evitar_duplicados"]:
+        campos_contacto, _ = reclutamiento_module.mapear_datos_a_candidato(fila_por_etiqueta)
+        if _es_respuesta_duplicada(conn, encuesta_id, ip, campos_contacto):
+            conn.close()
+            raise ValueError("Ya has respondido este test anteriormente. Si crees que es un error, contacta con quien te lo compartió.")
 
     dispositivo = _detectar_dispositivo(user_agent)
     cur = conn.execute(
