@@ -1089,8 +1089,8 @@ const BoletinBuilder = (function () {
     bloques.splice(antes ? iDestino : iDestino + 1, 0, item);
   }
 
-  function eliminarBloque(id) {
-    if (!confirm("¿Eliminar este bloque? Esta acción no se puede deshacer.")) return;
+  async function eliminarBloque(id) {
+    if (!(await pedirConfirmacion("¿Eliminar este bloque? Esta acción no se puede deshacer."))) return;
     bloques = bloques.filter((b) => b.id !== id);
     render();
   }
@@ -1104,10 +1104,10 @@ const BoletinBuilder = (function () {
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  function aplicarPlantilla(nombre) {
+  async function aplicarPlantilla(nombre) {
     const fabrica = PLANTILLAS[nombre];
     if (!fabrica) return;
-    if (bloques.length > 0 && !confirm("Esto reemplaza el contenido actual del boletín por la plantilla elegida. ¿Continuar?")) return;
+    if (bloques.length > 0 && !(await pedirConfirmacion("Esto reemplaza el contenido actual del boletín por la plantilla elegida. ¿Continuar?"))) return;
     bloques = fabrica();
     render();
   }
@@ -1127,12 +1127,12 @@ const BoletinBuilder = (function () {
     try {
       res = await fetch(`${AUTH_API_BASE}/boletines/posts/${postId}/imagenes`, { method: "POST", body: formData });
     } catch (e) {
-      alert("No se pudo subir la imagen (revisa tu conexión).");
+      mostrarAviso("No se pudo subir la imagen (revisa tu conexión).");
       return;
     }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert(err.detail || "No se pudo subir la imagen.");
+      mostrarAviso(err.detail || "No se pudo subir la imagen.");
       return;
     }
     const data = await res.json();

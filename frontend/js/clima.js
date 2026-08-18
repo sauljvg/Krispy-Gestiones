@@ -451,11 +451,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("check-nueva-oleada").checked = false;
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert(err.detail || "Fallo al importar el Excel.");
+      mostrarAviso(err.detail || "Fallo al importar el Excel.");
       return;
     }
     const result = await res.json();
-    alert(`Importación completa: ${result.nuevas} respuestas nuevas, ${result.ya_existian} ya existían (de ${result.total_en_excel} filas).`);
+    mostrarAviso(`Importación completa: ${result.nuevas} respuestas nuevas, ${result.ya_existian} ya existían (de ${result.total_en_excel} filas).`);
     await loadOleadas();
   });
 

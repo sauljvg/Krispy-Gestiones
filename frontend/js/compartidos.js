@@ -347,14 +347,14 @@ function seccionHTML(seccionId, titulo, grupos, etiquetaOtro, vacioMsg, permitir
 }
 
 async function dejarDeCompartirClick(btn) {
-  if (!confirm("¿Dejar de compartir este candidato? La persona ya no lo verá en su Reclutamiento.")) return;
+  if (!(await pedirConfirmacion("¿Dejar de compartir este candidato? La persona ya no lo verá en su Reclutamiento."))) return;
   const url = btn.dataset.directo === "1"
     ? `${AUTH_API_BASE}/reclutamiento/candidatos/${btn.dataset.candidatoId}/compartir/${btn.dataset.destinatarioId}`
     : `${AUTH_API_BASE}/informes/compartir/${btn.dataset.respuestaId}/${btn.dataset.destinatarioId}`;
   btn.disabled = true;
   const res = await fetch(url, { method: "DELETE" });
   if (!res.ok) {
-    alert("No se pudo dejar de compartir. Inténtalo de nuevo.");
+    mostrarAviso("No se pudo dejar de compartir. Inténtalo de nuevo.");
     btn.disabled = false;
     return;
   }
@@ -363,7 +363,7 @@ async function dejarDeCompartirClick(btn) {
 
 async function eliminarGrupoClick(btn, grupo) {
   const n = grupo.items.length;
-  if (!confirm(`¿Dejar de compartir los ${n} candidato${n === 1 ? "" : "s"} de este grupo? La persona ya no los verá en su Reclutamiento.`)) return;
+  if (!(await pedirConfirmacion(`¿Dejar de compartir los ${n} candidato${n === 1 ? "" : "s"} de este grupo? La persona ya no los verá en su Reclutamiento.`))) return;
   btn.disabled = true;
   await Promise.all(grupo.items.map((it) => {
     const url = String(it.compartido_id).startsWith("candidato-")
@@ -626,7 +626,7 @@ function cerrarVacanteForm() {
 async function guardarVacante() {
   const puesto = document.getElementById("vacante-puesto").value.trim();
   if (!puesto) {
-    alert("Escribe el puesto de la vacante.");
+    mostrarAviso("Escribe el puesto de la vacante.");
     return;
   }
   const centro = document.getElementById("vacante-centro").value.trim() || null;
@@ -646,7 +646,7 @@ async function guardarVacante() {
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || `No se pudo guardar la vacante (error ${res.status}).`);
+    mostrarAviso(err.detail || `No se pudo guardar la vacante (error ${res.status}).`);
     return;
   }
   cerrarVacanteForm();
@@ -655,10 +655,10 @@ async function guardarVacante() {
 
 async function eliminarVacanteActual() {
   if (!vacanteEditando) return;
-  if (!confirm(`¿Eliminar la vacante "${vacanteEditando.puesto}"? Los candidatos ya creados no se borran, quedarán sin vacante asignada.`)) return;
+  if (!(await pedirConfirmacion(`¿Eliminar la vacante "${vacanteEditando.puesto}"? Los candidatos ya creados no se borran, quedarán sin vacante asignada.`))) return;
   const res = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}`, { method: "DELETE" });
   if (!res.ok) {
-    alert(`No se pudo eliminar la vacante (error ${res.status}).`);
+    mostrarAviso(`No se pudo eliminar la vacante (error ${res.status}).`);
     return;
   }
   cerrarVacanteForm();
@@ -676,7 +676,7 @@ function abrirModalFusionarVacante() {
     .map((v) => `<option value="${v.id}">${escapeHTML(v.puesto)}${v.centro ? ` · ${escapeHTML(v.centro)}` : ""}</option>`)
     .join("");
   if (!select.options.length) {
-    alert("No hay otra solicitud con la que fusionar esta.");
+    mostrarAviso("No hay otra solicitud con la que fusionar esta.");
     return;
   }
   document.getElementById("fusionar-vacante-modal").classList.add("visible");
@@ -690,7 +690,7 @@ async function confirmarFusionarVacante() {
   const destinoId = Number(document.getElementById("fusionar-vacante-select").value);
   if (!destinoId || !vacanteEditando) return;
   const destino = vacantesTodasCache.find((v) => v.id === destinoId);
-  if (!confirm(`Se moverán todos los candidatos de "${vacanteEditando.puesto}" a "${destino ? destino.puesto : "la solicitud elegida"}" y se eliminará "${vacanteEditando.puesto}". ¿Continuar?`)) return;
+  if (!(await pedirConfirmacion(`Se moverán todos los candidatos de "${vacanteEditando.puesto}" a "${destino ? destino.puesto : "la solicitud elegida"}" y se eliminará "${vacanteEditando.puesto}". ¿Continuar?`))) return;
   const res = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}/fusionar`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -698,7 +698,7 @@ async function confirmarFusionarVacante() {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || `No se pudo fusionar (error ${res.status}).`);
+    mostrarAviso(err.detail || `No se pudo fusionar (error ${res.status}).`);
     return;
   }
   cerrarModalFusionarVacante();
@@ -725,7 +725,7 @@ async function abrirModalCompartirVacante() {
     .map((u) => `<option value="${u.id}">${escapeHTML(u.nombre)} (${escapeHTML(u.username)} · ${escapeHTML(u.rol)})</option>`)
     .join("");
   if (!select.options.length) {
-    alert("Ya todos los usuarios disponibles son responsables de esta solicitud.");
+    mostrarAviso("Ya todos los usuarios disponibles son responsables de esta solicitud.");
     return;
   }
   document.getElementById("compartir-vacante-modal").classList.add("visible");
@@ -750,7 +750,7 @@ async function confirmarCompartirVacante() {
 
 async function quitarGerenteVacante(usuarioId) {
   if (!vacanteEditando) return;
-  if (!confirm("¿Quitar a esta persona como responsable de la solicitud? Dejará de ver sus candidatos (salvo que se los hayas compartido también uno a uno).")) return;
+  if (!(await pedirConfirmacion("¿Quitar a esta persona como responsable de la solicitud? Dejará de ver sus candidatos (salvo que se los hayas compartido también uno a uno)."))) return;
   await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}/compartir/${usuarioId}`, { method: "DELETE" });
   vacanteEditando = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}`).then((r) => r.json());
   renderVacanteForm();
@@ -1088,7 +1088,7 @@ async function crearCandidatosMultiples() {
   const seleccionados = Array.from(document.querySelectorAll(".revision-multiple-check:checked"))
     .map((el) => candidatosPorRevisar[Number(el.dataset.idx)]);
   if (seleccionados.length === 0) {
-    alert("Selecciona al menos un candidato.");
+    mostrarAviso("Selecciona al menos un candidato.");
     return;
   }
   const vacanteValor = document.getElementById("revision-vacante-select").value;
@@ -1106,7 +1106,7 @@ async function crearCandidatosMultiples() {
     if (!res.ok) errores++;
   }
   if (errores > 0) {
-    alert(`No se pudieron crear ${errores} de ${seleccionados.length} candidatos. Revisa la conexión e inténtalo de nuevo.`);
+    mostrarAviso(`No se pudieron crear ${errores} de ${seleccionados.length} candidatos. Revisa la conexión e inténtalo de nuevo.`);
     btn.disabled = false;
     btn.textContent = "Crear candidatos seleccionados";
     return;
@@ -1331,7 +1331,7 @@ async function guardarCandidato() {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert(err.detail || `No se pudo guardar el candidato (error ${res.status}).`);
+      mostrarAviso(err.detail || `No se pudo guardar el candidato (error ${res.status}).`);
       return;
     }
     candidatoId = candidatoEditando.id;
@@ -1342,7 +1342,7 @@ async function guardarCandidato() {
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
-      alert(err.detail || `No se pudo crear el candidato (error ${resp.status}).`);
+      mostrarAviso(err.detail || `No se pudo crear el candidato (error ${resp.status}).`);
       return;
     }
     const data = await resp.json();
@@ -1367,10 +1367,10 @@ async function guardarCandidato() {
 
 async function eliminarCandidatoActual() {
   if (!candidatoEditando) return;
-  if (!confirm(`¿Seguro que quieres eliminar a ${candidatoEditando.nombre_completo || "este candidato"}? Esta acción no se puede deshacer.`)) return;
+  if (!(await pedirConfirmacion(`¿Seguro que quieres eliminar a ${candidatoEditando.nombre_completo || "este candidato"}? Esta acción no se puede deshacer.`))) return;
   const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}`, { method: "DELETE" });
   if (!res.ok) {
-    alert(`No se pudo eliminar el candidato (error ${res.status}).`);
+    mostrarAviso(`No se pudo eliminar el candidato (error ${res.status}).`);
     return;
   }
   cerrarForm();
@@ -1558,7 +1558,7 @@ async function confirmarCompartirCandidatos() {
     if (otroDestinatario.length) {
       partes.push(`${otroDestinatario.join(", ")} pasará(n) a ser de ${usuario.nombre} (deja de verlo(s) quien lo(s) tenía antes).`);
     }
-    if (partes.length && !confirm(`${partes.join(" ")}\n¿Continuar?`)) return;
+    if (partes.length && !(await pedirConfirmacion(`${partes.join(" ")}\n¿Continuar?`))) return;
   }
   await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/compartir`, {
     method: "POST",
@@ -1657,7 +1657,7 @@ async function confirmarCambiarDestinatario() {
     body: JSON.stringify({ items, nuevo_usuario_id: nuevoUsuarioId }),
   });
   if (!res.ok) {
-    alert("No se pudo cambiar el destinatario. Inténtalo de nuevo.");
+    mostrarAviso("No se pudo cambiar el destinatario. Inténtalo de nuevo.");
     return;
   }
   cerrarModalCambiarDestinatario();
@@ -1737,7 +1737,7 @@ async function loadCandidatos() {
 function abrirRecordatorioPendientes() {
   const pendientes = ultimosCandidatosCargados.filter((c) => c.invitado_test_en && !c.respuesta_id);
   if (pendientes.length === 0) {
-    alert("No hay candidatos con un test pendiente de respuesta en la lista actual.");
+    mostrarAviso("No hay candidatos con un test pendiente de respuesta en la lista actual.");
     return;
   }
   abrirCampanaWhatsapp(pendientes);
@@ -1821,11 +1821,11 @@ function confirmarAbrirEmail() {
 async function abrirCampanaEmail(candidatos) {
   const conEmail = candidatos.filter((c) => c.email);
   if (conEmail.length === 0) {
-    alert("Ninguno de los candidatos seleccionados tiene email guardado.");
+    mostrarAviso("Ninguno de los candidatos seleccionados tiene email guardado.");
     return;
   }
   if (conEmail.length < candidatos.length) {
-    alert(`${candidatos.length - conEmail.length} de ${candidatos.length} candidatos no tienen email guardado y se quedarán fuera del correo.`);
+    mostrarAviso(`${candidatos.length - conEmail.length} de ${candidatos.length} candidatos no tienen email guardado y se quedarán fuera del correo.`);
   }
   campanaEmailCandidatos = conEmail;
   campanaEmailEnlaceTest = "";
@@ -1882,11 +1882,11 @@ async function revincularTests() {
   try {
     const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/revincular-tests`, { method: "POST" });
     if (!res.ok) {
-      alert("No se pudo completar la búsqueda (error " + res.status + ").");
+      mostrarAviso("No se pudo completar la búsqueda (error " + res.status + ").");
       return;
     }
     const data = await res.json();
-    alert(data.enlazados === 0
+    mostrarAviso(data.enlazados === 0
       ? "No se encontró ninguna coincidencia nueva."
       : `Se enlazaron ${data.enlazados} candidato${data.enlazados === 1 ? "" : "s"} con su test ya respondido.`);
     loadCandidatos();

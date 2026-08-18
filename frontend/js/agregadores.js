@@ -320,7 +320,7 @@ async function agrVerificarManual(direccionId, agregador, disponible) {
   const dir = agrMarkersPorId[direccionId]?._agrDir;
   const tienda = (dir && dir.tienda) || agrTiendaActual;
   if (!tienda || tienda === AGR_TODAS) {
-    alert("Selecciona una tienda concreta (no \"Todas\") para verificar un punto a mano.");
+    mostrarAviso("Selecciona una tienda concreta (no \"Todas\") para verificar un punto a mano.");
     return;
   }
   try {
@@ -351,7 +351,7 @@ async function agrVerificarManual(direccionId, agregador, disponible) {
     const marker = agrMarkersPorId[direccionId];
     if (marker && marker.isPopupOpen()) marker.closePopup();
   } catch (e) {
-    alert("No se pudo guardar la verificación manual. Inténtalo de nuevo.");
+    mostrarAviso("No se pudo guardar la verificación manual. Inténtalo de nuevo.");
   }
 }
 
@@ -370,7 +370,7 @@ async function agrMoverVerticeLimite(tienda, agregador, anguloGrados, lat, lng) 
     if (!res.ok) throw new Error("No se pudo mover el vértice");
     agrActualizarPoligonoLimite();
   } catch (e) {
-    alert("No se pudo mover el vértice del borde. Inténtalo de nuevo.");
+    mostrarAviso("No se pudo mover el vértice del borde. Inténtalo de nuevo.");
     agrActualizarPoligonoLimite(); // vuelve a la posición guardada de verdad
   }
 }
@@ -393,7 +393,7 @@ async function agrMoverVerticeDireccion(dir, lat, lng) {
     dir.direccion_text = actualizado.direccion_text;
     agrActualizarPoligonoLimite();
   } catch (e) {
-    alert("No se pudo mover el punto. Inténtalo de nuevo.");
+    mostrarAviso("No se pudo mover el punto. Inténtalo de nuevo.");
     agrActualizarPoligonoLimite();
   }
 }
@@ -405,14 +405,14 @@ async function agrEliminarLimite(tienda, agregador, anguloGrados) {
   // permite quitar uno puntual que se vea claramente mal (contaminado, muy
   // alejado del resto) sin tener que usar la API key a mano (pedido
   // explícito del usuario 10/08).
-  if (!confirm("¿Quitar este vértice del borde? No es una dirección normal -- esto borra la medición de límite de ese ángulo, no un punto del mapa.")) return;
+  if (!(await pedirConfirmacion("¿Quitar este vértice del borde? No es una dirección normal -- esto borra la medición de límite de ese ángulo, no un punto del mapa."))) return;
   try {
     const url = `${AGR_API}/limites/${tienda}?${new URLSearchParams({ agregador, angulo_grados: anguloGrados })}`;
     const res = await fetch(url, { method: "DELETE", credentials: "include" });
     if (!res.ok) throw new Error("No se pudo eliminar el vértice");
     agrActualizarPoligonoLimite();
   } catch (e) {
-    alert("No se pudo quitar el vértice. Inténtalo de nuevo.");
+    mostrarAviso("No se pudo quitar el vértice. Inténtalo de nuevo.");
   }
 }
 
@@ -443,7 +443,7 @@ async function agrEliminarPunto(direccionId) {
     agrRecalcularContador();
     agrActualizarPoligonoLimite(); // si este punto estiraba/recortaba el borde (puntosLejanos/Cercanos), se recalcula ya
   } catch (e) {
-    alert("No se pudo eliminar el punto. Inténtalo de nuevo.");
+    mostrarAviso("No se pudo eliminar el punto. Inténtalo de nuevo.");
   }
 }
 
@@ -482,7 +482,7 @@ async function agrAnadirPunto(lat, lng) {
     agrRecalcularContador();
   } catch (e) {
     agrMap.removeLayer(provisional);
-    alert("No se pudo añadir el punto. Inténtalo de nuevo.");
+    mostrarAviso("No se pudo añadir el punto. Inténtalo de nuevo.");
   }
 }
 
@@ -503,7 +503,7 @@ async function agrGuardarReubicacion(dir, marker, lat, lng) {
     marker.setLatLng([dir.lat, dir.lng]);
     marker.setPopupContent(agrPopupDireccion(dir, true));
   } catch (e) {
-    alert("No se pudo guardar la reubicación. Inténtalo de nuevo.");
+    mostrarAviso("No se pudo guardar la reubicación. Inténtalo de nuevo.");
     marker.setLatLng([dir.lat, dir.lng]);
     marker.setPopupContent(agrPopupDireccion(dir, true));
   }
@@ -685,7 +685,7 @@ async function agrUnionElegirPunto(lat, lng, tienda, etiqueta, direccionId) {
   if (!agrUnionPendiente) {
     agrUnionPendiente = { lat, lng, tienda, etiqueta, direccionId };
     if (agrMap) agrMap.closePopup();
-    alert(`Punto de partida marcado: ${etiqueta}.\nAhora haz clic en "🔗 Unir aquí" en el segundo punto.`);
+    mostrarAviso(`Punto de partida marcado: ${etiqueta}.\nAhora haz clic en "🔗 Unir aquí" en el segundo punto.`);
     return;
   }
   if (agrUnionPendiente.lat === lat && agrUnionPendiente.lng === lng) return; // el mismo punto
@@ -707,7 +707,7 @@ async function agrUnionElegirPunto(lat, lng, tienda, etiqueta, direccionId) {
     if (agrMap) agrMap.closePopup();
     agrActualizarPoligonoLimite();
   } catch (e) {
-    alert("No se pudo unir los dos puntos. Inténtalo de nuevo.");
+    mostrarAviso("No se pudo unir los dos puntos. Inténtalo de nuevo.");
   } finally {
     agrUnionPendiente = null;
   }
@@ -725,7 +725,7 @@ function agrToggleModoPincel() {
     document.getElementById("agr-map").style.cursor = agrModoPincel ? "crosshair" : "";
   }
   if (agrModoPincel && !agrFiltroAgregador) {
-    alert("Elige primero un agregador concreto (JustEat/Glovo/Uber Eats) arriba -- el relleno se guarda por agregador.");
+    mostrarAviso("Elige primero un agregador concreto (JustEat/Glovo/Uber Eats) arriba -- el relleno se guarda por agregador.");
   }
 }
 
@@ -767,7 +767,7 @@ async function agrPincelTerminar() {
   if (agrPincelPuntos.length < 3 || !agrFiltroAgregador) return;
   const tienda = agrTiendaMasCercana(agrPincelPuntos[0][0], agrPincelPuntos[0][1]) || agrTiendaActual;
   if (!tienda || tienda === AGR_TODAS) {
-    alert("No se pudo determinar a qué tienda pertenece esta zona. Selecciona una sola tienda en los chips de arriba y vuelve a intentarlo.");
+    mostrarAviso("No se pudo determinar a qué tienda pertenece esta zona. Selecciona una sola tienda en los chips de arriba y vuelve a intentarlo.");
     return;
   }
   try {
@@ -781,7 +781,7 @@ async function agrPincelTerminar() {
     agrPincelCancelar();
     agrActualizarPoligonoLimite();
   } catch (e) {
-    alert("No se pudo guardar el relleno. Inténtalo de nuevo.");
+    mostrarAviso("No se pudo guardar el relleno. Inténtalo de nuevo.");
   }
 }
 
@@ -1437,7 +1437,7 @@ async function agrCargarAlertas() {
 }
 
 async function agrEliminarTransicion(chequeoId, boton) {
-  if (!confirm("¿Borrar este registro? Es para casos confirmados como error (p.ej. dirección o captura equivocada) -- no se puede deshacer.")) {
+  if (!(await pedirConfirmacion("¿Borrar este registro? Es para casos confirmados como error (p.ej. dirección o captura equivocada) -- no se puede deshacer."))) {
     return;
   }
   boton.disabled = true;
@@ -1449,7 +1449,7 @@ async function agrEliminarTransicion(chequeoId, boton) {
   } catch (err) {
     boton.disabled = false;
     boton.textContent = "🗑 Es un error, borrar";
-    alert("No se pudo borrar. Inténtalo de nuevo.");
+    mostrarAviso("No se pudo borrar. Inténtalo de nuevo.");
   }
 }
 

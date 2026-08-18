@@ -388,7 +388,7 @@ async function loadUsers(currentUserId) {
         body: JSON.stringify({ modulos }),
       });
       if (!res.ok) {
-        alert("No se pudieron guardar los módulos.");
+        mostrarAviso("No se pudieron guardar los módulos.");
         return;
       }
       loadUsers(currentUserId);
@@ -408,7 +408,7 @@ async function loadUsers(currentUserId) {
         body: JSON.stringify({ tiendas }),
       });
       if (!res.ok) {
-        alert("No se pudieron guardar las tiendas.");
+        mostrarAviso("No se pudieron guardar las tiendas.");
         return;
       }
       loadUsers(currentUserId);
@@ -428,7 +428,7 @@ async function loadUsers(currentUserId) {
         body: JSON.stringify({ tipos_informes }),
       });
       if (!res.ok) {
-        alert("No se pudieron guardar los informes.");
+        mostrarAviso("No se pudieron guardar los informes.");
         return;
       }
       loadUsers(currentUserId);
@@ -448,7 +448,7 @@ async function loadUsers(currentUserId) {
         body: JSON.stringify({ centros }),
       });
       if (!res.ok) {
-        alert("No se pudieron guardar los centros de Clima Laboral.");
+        mostrarAviso("No se pudieron guardar los centros de Clima Laboral.");
         return;
       }
       loadUsers(currentUserId);
@@ -465,7 +465,7 @@ async function loadUsers(currentUserId) {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        alert(body.detail || "No se pudo cambiar el rol.");
+        mostrarAviso(body.detail || "No se pudo cambiar el rol.");
       }
       loadUsers(currentUserId);
     });
@@ -477,7 +477,7 @@ async function loadUsers(currentUserId) {
       const input = tbody.querySelector(`.pin-input[data-id="${id}"]`);
       const pin = input.value.trim();
       if (!/^\d{4}$/.test(pin)) {
-        alert("El PIN debe ser de 4 dígitos.");
+        mostrarAviso("El PIN debe ser de 4 dígitos.");
         return;
       }
       const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}/pin`, {
@@ -486,9 +486,9 @@ async function loadUsers(currentUserId) {
         body: JSON.stringify({ pin }),
       });
       if (!res.ok) {
-        alert("No se pudo guardar el PIN.");
+        mostrarAviso("No se pudo guardar el PIN.");
       } else {
-        alert("PIN actualizado.");
+        mostrarAviso("PIN actualizado.");
       }
     });
   });
@@ -496,10 +496,10 @@ async function loadUsers(currentUserId) {
   tbody.querySelectorAll(".btn-reset-pin").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = btn.dataset.id;
-      if (!confirm("¿Borrar el PIN de este usuario? La próxima vez que entre, tendrá que crear uno nuevo.")) return;
+      if (!(await pedirConfirmacion("¿Borrar el PIN de este usuario? La próxima vez que entre, tendrá que crear uno nuevo."))) return;
       const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}/reset-pin`, { method: "POST" });
       if (!res.ok) {
-        alert("No se pudo resetear el PIN.");
+        mostrarAviso("No se pudo resetear el PIN.");
         return;
       }
       loadUsers(currentUserId);
@@ -508,11 +508,11 @@ async function loadUsers(currentUserId) {
 
   tbody.querySelectorAll(".btn-delete-user").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!confirm("¿Eliminar este usuario?")) return;
+      if (!(await pedirConfirmacion("¿Eliminar este usuario?"))) return;
       const id = btn.dataset.id;
       const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}`, { method: "DELETE" });
       if (!res.ok) {
-        alert("No se pudo eliminar el usuario.");
+        mostrarAviso("No se pudo eliminar el usuario.");
       } else {
         loadUsers(currentUserId);
       }
@@ -532,10 +532,10 @@ function wireBackup() {
     if (!file) return;
     errorEl.hidden = true;
     okEl.hidden = true;
-    if (!confirm(
+    if (!(await pedirConfirmacion(
       "Esto SOBREESCRIBE toda la base de datos actual (Test, Informes, Boletines, Reclutamiento, etc.) con el " +
       "contenido de este archivo. Todo lo que se haya recibido después de esta copia se perderá. ¿Continuar?"
-    )) {
+    ))) {
       e.target.value = "";
       return;
     }
@@ -581,10 +581,10 @@ function wireRetencion() {
 
   btnPurgar.addEventListener("click", async () => {
     const meses = Number(mesesInput.value) || 12;
-    if (!confirm(`Esto borra PERMANENTEMENTE ${ultimaLista.length} ficha(s) de candidato, sus notas y archivos subidos. No se puede deshacer. ¿Continuar?`)) return;
+    if (!(await pedirConfirmacion(`Esto borra PERMANENTEMENTE ${ultimaLista.length} ficha(s) de candidato, sus notas y archivos subidos. No se puede deshacer. ¿Continuar?`))) return;
     const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/purgar-descartados?meses=${meses}`, { method: "POST" });
     if (!res.ok) {
-      alert("No se pudo completar el borrado.");
+      mostrarAviso("No se pudo completar el borrado.");
       return;
     }
     const data = await res.json();

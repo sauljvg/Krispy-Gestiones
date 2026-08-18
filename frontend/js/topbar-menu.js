@@ -274,8 +274,8 @@ document.addEventListener("DOMContentLoaded", () => {
   panel.querySelector(".david-cerrar").addEventListener("click", () => {
     panel.hidden = true;
   });
-  panel.querySelector(".david-vaciar").addEventListener("click", () => {
-    if (!confirm("¿Vaciar toda la conversación con David?")) return;
+  panel.querySelector(".david-vaciar").addEventListener("click", async () => {
+    if (!(await pedirConfirmacion("¿Vaciar toda la conversación con David?"))) return;
     historial = [];
     sessionStorage.removeItem(STORAGE_KEY);
     reconstruirMensajes();

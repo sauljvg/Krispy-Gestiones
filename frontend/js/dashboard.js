@@ -112,7 +112,7 @@ async function uploadTransaccionesFile(file) {
   const res = await fetch(conEmpresaURL(`${API_BASE}/transactions/upload?mes=${encodeURIComponent(mes)}`), { method: "POST", body: formData });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    alert(`No se pudo procesar el Excel: ${body.detail || res.statusText}`);
+    mostrarAviso(`No se pudo procesar el Excel: ${body.detail || res.statusText}`);
     return;
   }
   await loadStoreRanking();
@@ -127,13 +127,13 @@ async function uploadTakeoutZip(file) {
     const res = await fetch(conEmpresaURL(`${API_BASE}/import/takeout`), { method: "POST", body: formData });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-      alert(`No se pudo importar el Takeout: ${body.detail || res.statusText || `error HTTP ${res.status}`}`);
+      mostrarAviso(`No se pudo importar el Takeout: ${body.detail || res.statusText || `error HTTP ${res.status}`}`);
       return;
     }
     const lineas = body.tiendas
       .map((t) => `${t.tienda}: +${t.nuevas} nuevas (total ${t.total_ahora}${t.total_google ? `/${t.total_google}` : ""})`)
       .join("\n");
-    alert(`Importación completa — ${body.total_nuevas} reseñas nuevas en total.\n\n${lineas}`);
+    mostrarAviso(`Importación completa — ${body.total_nuevas} reseñas nuevas en total.\n\n${lineas}`);
     // Se actualiza primero y por separado: si loadStores/loadStoreRanking/
     // refreshAll fallan por lo que sea, no debe arrastrar consigo la fecha
     // de última importación (que sí se guardó bien en el servidor).
@@ -501,7 +501,7 @@ function renderVariantesSugeridas() {
 async function sugerirVariantesPersonal() {
   const nombre = document.getElementById("personal-nuevo-nombre").value.trim();
   if (!nombre) {
-    alert("Escribe primero el nombre.");
+    mostrarAviso("Escribe primero el nombre.");
     return;
   }
   const boton = document.getElementById("btn-sugerir-variantes");
@@ -522,7 +522,7 @@ async function sugerirVariantesPersonal() {
     personalVariantesSeleccionadas = new Set(personalVariantesSugeridas);
     renderVariantesSugeridas();
   } catch (err) {
-    alert(`No se pudieron sugerir variantes: ${err.message}\n\nPuedes escribirlas a mano en "Otras variantes".`);
+    mostrarAviso(`No se pudieron sugerir variantes: ${err.message}\n\nPuedes escribirlas a mano en "Otras variantes".`);
   } finally {
     boton.disabled = false;
     boton.textContent = "✨ Sugerir variantes con IA";
@@ -534,7 +534,7 @@ async function sugerirVariantesPersonal() {
 // Cancelar = son personas distintas, seguir y crear/trasladar aparte.
 function confirmarEsMismaPersona(duplicados) {
   const nombres = duplicados.map((d) => d.nombre_canonico).join(", ");
-  return confirm(
+  return pedirConfirmacion(
     `Ya hay alguien con ese nombre en esa tienda (${nombres}). ¿Es la misma persona?\n\n` +
     `Aceptar = sí, fusionar en una sola ficha (sus reseñas se cuentan juntas).\n` +
     `Cancelar = no, son personas distintas, añadir aparte.`
@@ -550,14 +550,14 @@ async function enviarCreacionPersonal(payload) {
   if (res.status === 409) {
     const err = await res.json().catch(() => ({}));
     const duplicados = err.detail?.duplicados || [];
-    if (confirmarEsMismaPersona(duplicados)) {
+    if (await confirmarEsMismaPersona(duplicados)) {
       return enviarCreacionPersonal({ ...payload, fusionar_con_personal_id: duplicados[0].personal_id });
     }
     return enviarCreacionPersonal({ ...payload, confirmar_duplicado: true });
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(`No se pudo añadir: ${err.detail || res.status}`);
+    mostrarAviso(`No se pudo añadir: ${err.detail || res.status}`);
     return false;
   }
   return true;
@@ -572,14 +572,14 @@ async function enviarSalidaPersonal(payload) {
   if (res.status === 409) {
     const err = await res.json().catch(() => ({}));
     const duplicados = err.detail?.duplicados || [];
-    if (confirmarEsMismaPersona(duplicados)) {
+    if (await confirmarEsMismaPersona(duplicados)) {
       return enviarSalidaPersonal({ ...payload, fusionar_con_personal_id: duplicados[0].personal_id });
     }
     return enviarSalidaPersonal({ ...payload, confirmar_duplicado: true });
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(`No se pudo registrar la salida: ${err.detail || res.status}`);
+    mostrarAviso(`No se pudo registrar la salida: ${err.detail || res.status}`);
     return false;
   }
   return true;
@@ -589,7 +589,7 @@ async function crearPersonalNuevo() {
   const tienda = document.getElementById("personal-nuevo-tienda").value;
   const nombre = document.getElementById("personal-nuevo-nombre").value.trim();
   if (!tienda || !nombre) {
-    alert("Elige la tienda y escribe el nombre de la persona.");
+    mostrarAviso("Elige la tienda y escribe el nombre de la persona.");
     return;
   }
   const extra = document.getElementById("personal-nuevo-variantes-extra").value
@@ -630,7 +630,7 @@ function wirePersonalListado() {
       const nombre = fila.querySelector(".personal-editar-nombre").value.trim();
       const variantes = fila.querySelector(".personal-editar-variantes").value.split(",").map((v) => v.trim()).filter(Boolean);
       if (!nombre) {
-        alert("El nombre no puede quedar vacío.");
+        mostrarAviso("El nombre no puede quedar vacío.");
         return;
       }
       const res = await fetch(`${API_BASE}/personal/${btnGuardarEdicion.dataset.personalId}`, {
@@ -640,7 +640,7 @@ function wirePersonalListado() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        alert(`No se pudo guardar: ${err.detail || res.status}`);
+        mostrarAviso(`No se pudo guardar: ${err.detail || res.status}`);
         return;
       }
       personalEditandoAsignacionId = null;
@@ -668,11 +668,11 @@ function wirePersonalListado() {
       const fecha = form.querySelector(".salida-fecha").value;
       const tienda_destino = tipo === "traslado" ? form.querySelector(".salida-tienda-destino").value : null;
       if (!fecha) {
-        alert("Indica la fecha de salida.");
+        mostrarAviso("Indica la fecha de salida.");
         return;
       }
       if (tipo === "traslado" && !tienda_destino) {
-        alert("Elige la tienda de destino del traslado.");
+        mostrarAviso("Elige la tienda de destino del traslado.");
         return;
       }
       const ok = await enviarSalidaPersonal({
@@ -711,7 +711,7 @@ function wirePersonalListado() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        alert(`No se pudo fusionar: ${err.detail || res.status}`);
+        mostrarAviso(`No se pudo fusionar: ${err.detail || res.status}`);
         return;
       }
       personalFusionandoAsignacionId = null;
@@ -721,7 +721,7 @@ function wirePersonalListado() {
     }
     const btnEliminar = e.target.closest(".btn-personal-eliminar");
     if (btnEliminar) {
-      if (!confirm("¿Borrar a esta persona y todo su historial? Pensado solo para altas hechas por error.")) return;
+      if (!(await pedirConfirmacion("¿Borrar a esta persona y todo su historial? Pensado solo para altas hechas por error."))) return;
       await fetch(`${API_BASE}/personal/${btnEliminar.dataset.personalId}`, { method: "DELETE" });
       await loadPersonalModal();
       loadStaffMentions().catch((err) => console.error("Fallo refrescando ranking de personal:", err));
@@ -1014,7 +1014,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!file) return;
     uploadTakeoutZip(file).catch((err) => {
       console.error("Fallo importando Takeout:", err);
-      alert("Fallo importando el Takeout — revisa la consola del navegador.");
+      mostrarAviso("Fallo importando el Takeout — revisa la consola del navegador.");
     });
     e.target.value = "";
   });

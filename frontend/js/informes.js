@@ -294,7 +294,7 @@ function renderHojasPanel() {
   });
   list.querySelectorAll(".btn-eliminar-hoja").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!confirm(`¿Eliminar por completo la hoja "${btn.dataset.hoja}"? Esto borra sus datos, no es reversible.`)) return;
+      if (!(await pedirConfirmacion(`¿Eliminar por completo la hoja "${btn.dataset.hoja}"? Esto borra sus datos, no es reversible.`))) return;
       await fetch(`${AUTH_API_BASE}/informes/${currentTipo}/hojas/eliminar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -442,7 +442,7 @@ function renderTable() {
       const res = await fetch(`${AUTH_API_BASE}/informes/respuestas/${id}/cv`, { method: "POST", body: formData });
       e.target.value = "";
       if (!res.ok) {
-        alert("No se pudo subir el CV.");
+        mostrarAviso("No se pudo subir el CV.");
         return;
       }
       loadRespuestas();
@@ -529,14 +529,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     e.target.value = "";
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert(err.detail || "Fallo al importar el Excel.");
+      mostrarAviso(err.detail || "Fallo al importar el Excel.");
       return;
     }
     const result = await res.json();
     const detalle = Object.entries(result.hojas)
       .map(([hoja, r]) => `${hoja}: ${r.nuevas} nueva(s), ${r.ya_existian} ya existían (de ${r.total_en_excel})`)
       .join("\n");
-    alert(`Importación completa:\n${detalle}`);
+    mostrarAviso(`Importación completa:\n${detalle}`);
     await loadTipos();
     await loadHojas();
     await loadRespuestas();
@@ -559,7 +559,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert(err.detail || "No se pudo crear el tipo.");
+      mostrarAviso(err.detail || "No se pudo crear el tipo.");
       return;
     }
     await loadTipos();
@@ -647,7 +647,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (otroDestinatario.length) {
         partes.push(`${otroDestinatario.join(", ")} pasará(n) a ser de ${usuario.nombre} (deja de verlo(s) quien lo(s) tenía antes).`);
       }
-      if (partes.length && !confirm(`${partes.join(" ")}\n¿Continuar?`)) return;
+      if (partes.length && !(await pedirConfirmacion(`${partes.join(" ")}\n¿Continuar?`))) return;
     }
     const res = await fetch(`${AUTH_API_BASE}/informes/compartir`, {
       method: "POST",
@@ -655,11 +655,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       body: JSON.stringify({ respuesta_ids: Array.from(selectedIds), usuario_id: usuarioId }),
     });
     if (!res.ok) {
-      alert("No se pudo compartir.");
+      mostrarAviso("No se pudo compartir.");
       return;
     }
     cerrarModalCompartir();
-    alert(`Compartido con éxito (${selectedIds.size} candidato(s)).`);
+    mostrarAviso(`Compartido con éxito (${selectedIds.size} candidato(s)).`);
     selectedIds.clear();
     loadRespuestas();
   });

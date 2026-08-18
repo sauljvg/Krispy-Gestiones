@@ -331,7 +331,7 @@ function validarPagina(pagina) {
     const valor = respuestas[q.id];
     const sinResponder = Array.isArray(valor) && q.tipo !== "prioridad" ? valor.length === 0 : !valor;
     if (q.obligatoria && sinResponder) {
-      alert("Por favor, responde todas las preguntas obligatorias (*) antes de continuar.");
+      mostrarAviso("Por favor, responde todas las preguntas obligatorias (*) antes de continuar.");
       return false;
     }
   }
@@ -353,7 +353,7 @@ async function enviarRespuestas() {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || "No se pudo enviar el formulario. Inténtalo de nuevo.");
+    mostrarAviso(err.detail || "No se pudo enviar el formulario. Inténtalo de nuevo.");
     btn.disabled = false;
     btn.textContent = "Enviar";
     return;

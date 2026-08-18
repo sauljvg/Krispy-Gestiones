@@ -349,7 +349,7 @@ function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquet
   if (alEliminar) {
     lista.querySelectorAll(".btn-eliminar-auditoria").forEach((btn) => {
       btn.addEventListener("click", async () => {
-        if (!confirm("¿Eliminar este registro de salida? Esta acción no se puede deshacer.")) return;
+        if (!(await pedirConfirmacion("¿Eliminar este registro de salida? Esta acción no se puede deshacer."))) return;
         await alEliminar(Number(btn.dataset.id));
       });
     });
@@ -371,7 +371,7 @@ function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquet
         const nuevo = prompt("Motivo de la salida:", actual);
         if (nuevo === null) return;
         if (!nuevo.trim()) {
-          alert("El motivo no puede quedar vacío.");
+          mostrarAviso("El motivo no puede quedar vacío.");
           return;
         }
         await alEditarMotivo(Number(btn.dataset.id), nuevo.trim());
@@ -466,7 +466,7 @@ function renderAuditoriaG(items, auditoriaF) {
       const select = lista.querySelector(`.select-vincular-salida[data-idx="${idx}"]`);
       const salidaId = Number(select.value);
       if (!salidaId) {
-        alert("Elige a qué salida corresponde esta respuesta.");
+        mostrarAviso("Elige a qué salida corresponde esta respuesta.");
         return;
       }
       await vincularRespuestaSalida(items[idx].respuesta_id, salidaId);
@@ -476,9 +476,9 @@ function renderAuditoriaG(items, auditoriaF) {
     btn.addEventListener("click", () => registrarSalidaDesdeAuditoria(items[Number(btn.dataset.idx)]));
   });
   lista.querySelectorAll(".btn-eliminar-respuesta").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       const item = items[Number(btn.dataset.idx)];
-      if (!confirm(`¿Eliminar la respuesta de "${item.nombre}"? Esta acción no se puede deshacer.`)) return;
+      if (!(await pedirConfirmacion(`¿Eliminar la respuesta de "${item.nombre}"? Esta acción no se puede deshacer.`))) return;
       eliminarRespuesta(item.respuesta_id);
     });
   });
@@ -490,7 +490,7 @@ async function eliminarRespuesta(respuestaId) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || "No se pudo eliminar la respuesta.");
+    mostrarAviso(err.detail || "No se pudo eliminar la respuesta.");
     return;
   }
   await loadEvolucion(currentCentro);
@@ -504,7 +504,7 @@ async function vincularRespuestaSalida(respuestaId, salidaId) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || "No se pudo vincular la respuesta a esa salida.");
+    mostrarAviso(err.detail || "No se pudo vincular la respuesta a esa salida.");
     return;
   }
   await loadEvolucion(currentCentro);
@@ -523,7 +523,7 @@ async function registrarSalidaDesdeAuditoria(item) {
   );
   if (motivo === null) return;
   if (!motivo.trim()) {
-    alert("El motivo es obligatorio para registrar la salida.");
+    mostrarAviso("El motivo es obligatorio para registrar la salida.");
     return;
   }
   await crearSalidaManual(centro, item.nombre, fecha, motivo.trim(), null);
@@ -537,7 +537,7 @@ async function crearSalidaManual(centro, nombre, fechaBaja, motivo, email) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || "No se pudo registrar la salida.");
+    mostrarAviso(err.detail || "No se pudo registrar la salida.");
     return;
   }
   await loadEvolucion(currentCentro);
@@ -551,7 +551,7 @@ async function editarEmailSalida(salidaId, email) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || "No se pudo guardar el email.");
+    mostrarAviso(err.detail || "No se pudo guardar el email.");
     return;
   }
   await loadEvolucion(currentCentro);
@@ -565,7 +565,7 @@ async function editarMotivoSalida(salidaId, motivo) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || "No se pudo guardar el motivo.");
+    mostrarAviso(err.detail || "No se pudo guardar el motivo.");
     return;
   }
   await loadEvolucion(currentCentro);
@@ -575,7 +575,7 @@ async function eliminarSalida(salidaId) {
   const res = await fetch(`${AUTH_API_BASE}/entrevistas/${currentOleada}/salidas/${salidaId}`, { method: "DELETE" });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || "No se pudo eliminar el registro.");
+    mostrarAviso(err.detail || "No se pudo eliminar el registro.");
     return;
   }
   await loadEvolucion(currentCentro);
@@ -734,7 +734,7 @@ function wireEdicionInline(tr, cfg) {
   btnGuardar.addEventListener("click", async () => {
     const valor = cfg.leerValor(input);
     if (!valor) {
-      alert(cfg.vacioMsg);
+      mostrarAviso(cfg.vacioMsg);
       return;
     }
     const respuestaId = tr.dataset.id;
@@ -745,7 +745,7 @@ function wireEdicionInline(tr, cfg) {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert(err.detail || cfg.errorMsg);
+      mostrarAviso(err.detail || cfg.errorMsg);
       return;
     }
     // Cambiar el centro o el motivo afecta al recuento de "Motivos de
@@ -911,11 +911,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("check-nueva-oleada").checked = false;
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert(err.detail || "Fallo al importar el Excel.");
+      mostrarAviso(err.detail || "Fallo al importar el Excel.");
       return;
     }
     const result = await res.json();
-    alert(`Importación completa: ${result.nuevas} respuestas nuevas, ${result.actualizadas} actualizadas, ${result.ya_existian} ya existían (de ${result.total_en_excel} filas).`);
+    mostrarAviso(`Importación completa: ${result.nuevas} respuestas nuevas, ${result.actualizadas} actualizadas, ${result.ya_existian} ya existían (de ${result.total_en_excel} filas).`);
     await loadOleadas();
   });
 
@@ -926,7 +926,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const motivo = document.getElementById("salida-manual-motivo").value.trim();
     const email = document.getElementById("salida-manual-email").value.trim();
     if (!centro || !nombre || !fecha || !motivo) {
-      alert("Completa centro, nombre, fecha de baja y motivo.");
+      mostrarAviso("Completa centro, nombre, fecha de baja y motivo.");
       return;
     }
     await crearSalidaManual(centro, nombre, fecha, motivo, email);
