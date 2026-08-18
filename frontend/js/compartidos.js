@@ -44,6 +44,7 @@ function soloDigitos(tel) {
 let campanaCandidatos = [];
 let campanaTestsAbiertos = [];
 let campanaEnlaceTest = "";
+let usuarioActual = null; // se fija en initBaseCandidatos -- para firmar el email con el nombre de quien lo envía
 
 async function cargarTestsAbiertosCampana() {
   try {
@@ -1750,9 +1751,74 @@ function abrirCampanaWhatsappSeleccionados() {
 // Igual que el recordatorio de Entrevista de Salida: nunca se envía nada
 // desde el servidor, se arma un enlace mailto: con todos los correos en
 // copia oculta (bcc) y se abre el cliente de correo del propio usuario, que
-// es quien de verdad manda el email desde su cuenta.
-function abrirMailtoSeleccionados() {
-  const candidatos = ultimosCandidatosCargados.filter((c) => candidatosSeleccionadosIds.has(c.id));
+// es quien de verdad manda el email desde su cuenta. A diferencia del
+// mailto directo de antes, ahora pasa por un panel editable (igual que la
+// campaña de WhatsApp) porque el asunto/cuerpo estándar de RRHH incluye el
+// enlace a un test -- hace falta elegir cuál antes de mandarlo, y conviene
+// poder revisar/ajustar el texto (p.ej. la ciudad) antes de que se abra el
+// cliente de correo.
+let campanaEmailCandidatos = [];
+let campanaEmailTestsAbiertos = [];
+let campanaEmailEnlaceTest = "";
+
+function asuntoEmailPorDefecto() {
+  return EMPRESA === "saona" ? "Proceso de Selección - SAONA" : "Proceso de Selección - Krispy Kreme España";
+}
+
+function plantillaEmailPorDefecto() {
+  const marca = EMPRESA === "saona" ? "SAONA" : "Krispy Kreme";
+  const firmante = usuarioActual?.nombre || "";
+  return `Hola, somos ${marca} y hemos considerado tu candidatura para nuestras tiendas.
+
+Es muy importante que realices el siguiente Test (haciendo clic tienes el enlace): {enlace} — una vez finalizado, te enviaremos confirmación con todos los datos del día, hora y ubicación de la entrevista.
+
+Si tienes alguna duda, escríbeme respondiendo este mail.
+Muchas gracias, un saludo, espero verte pronto
+
+${firmante}
+
+Equipo RRHH ${marca}`;
+}
+
+function campanaEmailTestSelectHTML() {
+  if (campanaEmailTestsAbiertos.length === 0) return "";
+  return `
+    <div class="form-field form-field-full" style="margin-bottom:10px;">
+      <label>Adjuntar enlace de un test (opcional)</label>
+      <select id="campana-email-test">
+        <option value="">— Sin enlace de test —</option>
+        ${campanaEmailTestsAbiertos.map((t) => `<option value="${String(t.id).padStart(4, "0")}">${escapeHTML(t.titulo)}</option>`).join("")}
+      </select>
+    </div>`;
+}
+
+function onCambiaTestCampanaEmail() {
+  const select = document.getElementById("campana-email-test");
+  campanaEmailEnlaceTest = select.value ? `${location.origin}/encuesta.html?slug=${select.value}` : "";
+  if (select.value) {
+    fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/marcar-invitados-test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ candidato_ids: campanaEmailCandidatos.map((c) => c.id), encuesta_id: Number(select.value) }),
+    });
+  }
+}
+
+function cerrarCampanaEmail() {
+  campanaEmailCandidatos = [];
+  campanaEmailEnlaceTest = "";
+  document.getElementById("campana-email-wrap").innerHTML = "";
+}
+
+function confirmarAbrirEmail() {
+  const asunto = document.getElementById("campana-email-asunto").value.trim();
+  const cuerpo = document.getElementById("campana-email-cuerpo").value.replaceAll("{enlace}", campanaEmailEnlaceTest);
+  const destinatarios = campanaEmailCandidatos.map((c) => c.email).join(",");
+  window.location.href = `mailto:?bcc=${encodeURIComponent(destinatarios)}&subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+  cerrarCampanaEmail();
+}
+
+async function abrirCampanaEmail(candidatos) {
   const conEmail = candidatos.filter((c) => c.email);
   if (conEmail.length === 0) {
     alert("Ninguno de los candidatos seleccionados tiene email guardado.");
@@ -1761,12 +1827,41 @@ function abrirMailtoSeleccionados() {
   if (conEmail.length < candidatos.length) {
     alert(`${candidatos.length - conEmail.length} de ${candidatos.length} candidatos no tienen email guardado y se quedarán fuera del correo.`);
   }
-  const destinatarios = conEmail.map((c) => c.email).join(",");
-  const asunto = encodeURIComponent("Krispy Kreme España — sobre tu candidatura");
-  const cuerpo = encodeURIComponent(
-    `Hola,\n\nTe escribimos sobre tu candidatura. ¿Podrías confirmarnos tu disponibilidad para una entrevista?\n\nUn saludo,\nEquipo RRHH`
-  );
-  window.location.href = `mailto:?bcc=${encodeURIComponent(destinatarios)}&subject=${asunto}&body=${cuerpo}`;
+  campanaEmailCandidatos = conEmail;
+  campanaEmailEnlaceTest = "";
+  campanaEmailTestsAbiertos = await cargarTestsAbiertosCampana();
+  const wrap = document.getElementById("campana-email-wrap");
+  wrap.innerHTML = `
+    <div class="vacante-form">
+      <h3>${ICONO_MAILTO} Enviar email</h3>
+      <p class="staff-hint">
+        Se abrirá tu cliente de correo con estos ${conEmail.length} destinatario${conEmail.length === 1 ? "" : "s"} en copia oculta (BCC) — revisa/edita el asunto y el cuerpo antes de continuar.
+        ${campanaEmailTestsAbiertos.length ? `Usa <code>{enlace}</code> donde quieras que vaya el enlace del test que elijas abajo.` : ""}
+      </p>
+      ${campanaEmailTestSelectHTML()}
+      <div class="form-field form-field-full" style="margin-bottom:10px;">
+        <label>Asunto</label>
+        <input type="text" id="campana-email-asunto" value="${escapeHTML(asuntoEmailPorDefecto())}">
+      </div>
+      <div class="form-field form-field-full" style="margin-bottom:10px;">
+        <label>Cuerpo</label>
+        <textarea id="campana-email-cuerpo" style="min-height:200px;">${escapeHTML(plantillaEmailPorDefecto())}</textarea>
+      </div>
+      <div class="form-actions">
+        <button type="button" id="btn-email-abrir" class="btn btn-primary">${ICONO_MAILTO} Abrir correo</button>
+        <button type="button" id="btn-cerrar-campana-email" class="btn btn-ghost">Cerrar</button>
+      </div>
+    </div>`;
+  document.getElementById("btn-cerrar-campana-email").addEventListener("click", cerrarCampanaEmail);
+  document.getElementById("btn-email-abrir").addEventListener("click", confirmarAbrirEmail);
+  const testSelect = document.getElementById("campana-email-test");
+  if (testSelect) testSelect.addEventListener("change", onCambiaTestCampanaEmail);
+  wrap.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function abrirMailtoSeleccionados() {
+  const candidatos = ultimosCandidatosCargados.filter((c) => candidatosSeleccionadosIds.has(c.id));
+  abrirCampanaEmail(candidatos);
 }
 
 async function abrirEdicionCandidato(candidatoId) {
@@ -1802,6 +1897,7 @@ async function revincularTests() {
 }
 
 async function initBaseCandidatos(user) {
+  usuarioActual = user;
   const modulos = user.modulos || [];
   const tieneAcceso = modulos.includes("informes") || modulos.includes("saona_informes");
   const wrap = document.getElementById("reclu-candidatos-wrap");
