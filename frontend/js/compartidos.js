@@ -196,26 +196,51 @@ function fmtFechaHora(iso) {
   return `${parseInt(d, 10)} ${MESES_CORTOS[parseInt(m, 10) - 1]} ${y}${hhmm ? `, ${hhmm}` : ""}`;
 }
 
-// Agrupa una lista (ya ordenada por fecha desc) en "tandas": cada vez que se
-// comparten varios candidatos de una sola acción comparten fecha exacta y
-// contraparte, así que forman un grupo. claveOtro = campo que identifica a la
-// otra persona (quién lo compartió, o con quién se compartió).
+// Agrupa una lista (ya ordenada por fecha desc) en "tandas". Con
+// porVacante=true (solo "Compartidos por ti"), si el candidato ya tiene
+// vacante asignada, la tanda se identifica por esa vacante en vez de por la
+// fecha exacta -- así, aunque se compartieran en momentos distintos, dos
+// candidatos de la misma solicitud quedan bajo el mismo grupo (y ese grupo
+// se llama como la vacante, ver tandaTituloHTML). Sin vacante (o en
+// "Compartidos conmigo") se sigue agrupando por fecha+contraparte como
+// antes. claveOtro = campo que identifica a la otra persona (quién lo
+// compartió, o con quién se compartió).
 let modoSeleccionCompartidos = false;
 let compartidosSeleccionadosIds = new Set();
 let compartidosPorMiCache = []; // items crudos de "Compartidos por ti" (para armar el payload de cambiar destinatario)
+let gruposPorMiCache = []; // tandas ya agrupadas de "Compartidos por ti" (para el botón "Dejar de compartir todo el grupo")
+let tandasAbiertas = new Set(); // claves de <details> que el usuario ha dejado abiertas -- se respeta entre re-renders
+let tandasSeccionInicializada = new Set(); // qué secciones ("conmigo"/"por-mi") ya recibieron su apertura por defecto
 
-function agruparPorTanda(items, claveOtro) {
-  const grupos = [];
-  let actual = null;
+function agruparPorTanda(items, claveOtro, porVacante) {
+  const mapa = new Map();
   for (const it of items) {
-    const clave = `${it.compartido_en}|${it[claveOtro] || ""}`;
-    if (!actual || actual.clave !== clave) {
-      actual = { clave, compartido_en: it.compartido_en, otro: it[claveOtro], items: [] };
-      grupos.push(actual);
+    const otro = it[claveOtro] || "";
+    const clave = porVacante && it.vacante_id ? `vacante-${it.vacante_id}|${otro}` : `fecha-${it.compartido_en}|${otro}`;
+    if (!mapa.has(clave)) {
+      mapa.set(clave, { clave, vacanteId: porVacante ? it.vacante_id || null : null, compartido_en: it.compartido_en, otro, items: [] });
     }
-    actual.items.push(it);
+    const grupo = mapa.get(clave);
+    grupo.items.push(it);
+    if (it.compartido_en > grupo.compartido_en) grupo.compartido_en = it.compartido_en;
   }
-  return grupos;
+  // Los items llegan ordenados por fecha desc, pero al agrupar por vacante
+  // un grupo puede "moverse" en el tiempo -- se reordena por la fecha más
+  // reciente de cada grupo para que el más nuevo siga arriba.
+  return [...mapa.values()].sort((a, b) => (a.compartido_en < b.compartido_en ? 1 : a.compartido_en > b.compartido_en ? -1 : 0));
+}
+
+// Nombre que se muestra en la cabecera de la tanda: si está agrupada por
+// vacante, el puesto/centro de esa vacante (se resuelve de
+// vacantesTodasCache, ya cargada para el desplegable de filtro); si no, la
+// fecha de siempre.
+function tandaTituloHTML(grupo) {
+  if (grupo.vacanteId) {
+    const v = vacantesTodasCache.find((v) => v.id === grupo.vacanteId);
+    const nombre = v ? `${v.puesto}${v.centro ? ` · ${v.centro}` : ""}` : "(vacante)";
+    return `<span class="tanda-fecha">📁 ${escapeHTML(nombre)}</span>`;
+  }
+  return `<span class="tanda-fecha">${escapeHTML(fmtFechaHora(grupo.compartido_en))}</span>`;
 }
 
 async function actualizarCandidatoInline(candidatoId, campos) {
@@ -270,24 +295,29 @@ function candidatoCardHTML(item, permitirDejarDeCompartir, permitirSeleccion) {
     </div>`;
 }
 
-// Cada tanda es un <details> desplegable. `etiquetaOtro` describe la relación
-// ("Compartido por" / "Compartido con") y `abierta` deja la más reciente
-// abierta por defecto para que no haya que hacer clic para ver lo último.
+// Cada tanda es un <details> desplegable, identificada por `grupo.clave`
+// para poder recordar si el usuario la dejó abierta entre re-renders (ver
+// tandasAbiertas) -- antes se perdía el estado en cuanto se marcaba un
+// checkbox, porque cada cambio de selección repinta toda la lista.
 function grupoHTML(grupo, etiquetaOtro, abierta, permitirDejarDeCompartir, permitirSeleccion) {
   const n = grupo.items.length;
+  const eliminarGrupoBtn = permitirDejarDeCompartir
+    ? `<button type="button" class="btn btn-ghost btn-eliminar-grupo" data-clave="${escapeHTML(grupo.clave)}">🗑 Dejar de compartir todo el grupo</button>`
+    : "";
   return `
-    <details class="tanda" ${abierta ? "open" : ""}>
+    <details class="tanda" data-clave="${escapeHTML(grupo.clave)}" ${abierta ? "open" : ""}>
       <summary class="tanda-summary">
-        <span class="tanda-fecha">${escapeHTML(fmtFechaHora(grupo.compartido_en))}</span>
+        ${tandaTituloHTML(grupo)}
         <span class="tanda-meta">${n} candidato${n === 1 ? "" : "s"} · ${escapeHTML(etiquetaOtro)} <b>${escapeHTML(grupo.otro || "")}</b></span>
       </summary>
       <div class="tanda-body">
+        ${eliminarGrupoBtn}
         ${grupo.items.map((it) => candidatoCardHTML(it, permitirDejarDeCompartir, permitirSeleccion)).join("")}
       </div>
     </details>`;
 }
 
-function seccionHTML(titulo, grupos, etiquetaOtro, vacioMsg, permitirDejarDeCompartir, permitirSeleccion) {
+function seccionHTML(seccionId, titulo, grupos, etiquetaOtro, vacioMsg, permitirDejarDeCompartir, permitirSeleccion) {
   // "Unir a la misma solicitud" solo tiene sentido en "Compartidos por ti"
   // -- para el caso de compartir el mismo grupo de candidatos en tandas
   // distintas (p.ej. unos a las 8:46 y otros a las 8:59 al mismo gerente) y
@@ -304,8 +334,15 @@ function seccionHTML(titulo, grupos, etiquetaOtro, vacioMsg, permitirDejarDeComp
   if (grupos.length === 0) {
     return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2>${barraSeleccion}<p class="staff-hint">${escapeHTML(vacioMsg)}</p>`;
   }
+  // La primera vez que se pinta esta sección (por sesión de página), se dejan
+  // abiertas todas las tandas -- así se ve todo de un vistazo, y a partir de
+  // ahí se respeta lo que el usuario haya colapsado/expandido a mano.
+  if (!tandasSeccionInicializada.has(seccionId)) {
+    grupos.forEach((g) => tandasAbiertas.add(g.clave));
+    tandasSeccionInicializada.add(seccionId);
+  }
   return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2>${barraSeleccion}` +
-    grupos.map((g, i) => grupoHTML(g, etiquetaOtro, i === 0, permitirDejarDeCompartir, permitirSeleccion && modoSeleccionCompartidos)).join("");
+    grupos.map((g) => grupoHTML(g, etiquetaOtro, tandasAbiertas.has(g.clave), permitirDejarDeCompartir, permitirSeleccion && modoSeleccionCompartidos)).join("");
 }
 
 async function dejarDeCompartirClick(btn) {
@@ -320,6 +357,20 @@ async function dejarDeCompartirClick(btn) {
     btn.disabled = false;
     return;
   }
+  await loadCompartidos();
+}
+
+async function eliminarGrupoClick(btn, grupo) {
+  const n = grupo.items.length;
+  if (!confirm(`¿Dejar de compartir los ${n} candidato${n === 1 ? "" : "s"} de este grupo? La persona ya no los verá en su Reclutamiento.`)) return;
+  btn.disabled = true;
+  await Promise.all(grupo.items.map((it) => {
+    const url = String(it.compartido_id).startsWith("candidato-")
+      ? `${AUTH_API_BASE}/reclutamiento/candidatos/${it.candidato_id}/compartir/${it.destinatario_id}`
+      : `${AUTH_API_BASE}/informes/compartir/${it.respuesta_id}/${it.destinatario_id}`;
+    return fetch(url, { method: "DELETE" });
+  }));
+  tandasAbiertas.delete(grupo.clave);
   await loadCompartidos();
 }
 
@@ -360,6 +411,21 @@ function wireCompartidosInteractivos(wrap) {
   if (btnCambiarDestinatario) {
     btnCambiarDestinatario.addEventListener("click", abrirModalCambiarDestinatario);
   }
+  wrap.querySelectorAll(".btn-eliminar-grupo").forEach((el) => {
+    el.addEventListener("click", () => {
+      const grupo = gruposPorMiCache.find((g) => g.clave === el.dataset.clave);
+      if (grupo) eliminarGrupoClick(el, grupo);
+    });
+  });
+  // Recuerda qué tandas deja el usuario abiertas/cerradas a mano, para que
+  // no se le cierren al marcar un checkbox (cada cambio de selección
+  // repinta toda la lista -- ver el listener de .candidato-compartido-check).
+  wrap.querySelectorAll(".tanda").forEach((det) => {
+    det.addEventListener("toggle", () => {
+      if (det.open) tandasAbiertas.add(det.dataset.clave);
+      else tandasAbiertas.delete(det.dataset.clave);
+    });
+  });
 }
 
 // Una vacante compartida da acceso a TODOS sus candidatos de una vez
@@ -394,9 +460,10 @@ async function loadCompartidos() {
     fetch(`${AUTH_API_BASE}/reclutamiento/vacantes-compartidas-por-mi?empresa=${EMPRESA}`).then((r) => (r.ok ? r.json() : [])),
   ]);
 
-  const gruposConmigo = agruparPorTanda(conmigo, "compartido_por");
-  const gruposPorMi = agruparPorTanda(porMi, "destinatario_nombre");
+  const gruposConmigo = agruparPorTanda(conmigo, "compartido_por", false);
+  const gruposPorMi = agruparPorTanda(porMi, "destinatario_nombre", true);
   compartidosPorMiCache = porMi;
+  gruposPorMiCache = gruposPorMi;
 
   // Las vacantes compartidas van primero -- es la forma recomendada de ver
   // todo agrupado; los "Compartidos" sueltos por candidato (tandas) quedan
@@ -405,6 +472,7 @@ async function loadCompartidos() {
   html += vacantesCompartidasSeccionHTML("Solicitudes que has compartido", vacantesPorMi, "");
 
   html += seccionHTML(
+    "conmigo",
     "Compartidos conmigo",
     gruposConmigo,
     "compartido por",
@@ -416,7 +484,7 @@ async function loadCompartidos() {
   // La sección "Compartidos por ti" solo tiene sentido enseñarla si esta
   // persona ha compartido algo alguna vez (a un gerente no le aparecerá).
   if (gruposPorMi.length > 0) {
-    html += seccionHTML("Compartidos por ti", gruposPorMi, "compartido con", "", true, true);
+    html += seccionHTML("por-mi", "Compartidos por ti", gruposPorMi, "compartido con", "", true, true);
   }
 
   wrap.innerHTML = html;
@@ -1782,5 +1850,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (!user) return;
   wireUserBar(user);
   aplicarBrandingEmpresa();
-  await Promise.all([loadCompartidos(), initBaseCandidatos(user)]);
+  // initBaseCandidatos primero (no en paralelo): carga vacantesTodasCache,
+  // que loadCompartidos necesita para poner el nombre de la vacante en las
+  // tandas de "Compartidos por ti" -- si fueran en paralelo, la primera
+  // pintada podría no tener todavía los nombres.
+  await initBaseCandidatos(user);
+  await loadCompartidos();
 });

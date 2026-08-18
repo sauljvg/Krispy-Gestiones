@@ -850,6 +850,7 @@ def _candidato_directo_como_item(row, incluir_destinatario=False):
         "telefono": row["telefono"],
         "puesto_solicitado": row["puesto_solicitado"],
         "test_resultado": row["test_resultado"],
+        "vacante_id": row["vacante_id"],
     }
     if incluir_destinatario:
         item["destinatario_id"] = row["destinatario_id"]
@@ -923,7 +924,8 @@ def get_compartidos_por(username, empresa=None):
                r.id AS respuesta_id, r.datos_json, r.hoja, r.cv_ruta, r.cv_nombre_original,
                t.nombre AS tipo_nombre, t.clave AS tipo_clave,
                cand.estado AS candidato_estado, cand.notas AS candidato_notas,
-               cand.telefono AS candidato_telefono, cand.puesto_solicitado AS candidato_puesto
+               cand.telefono AS candidato_telefono, cand.puesto_solicitado AS candidato_puesto,
+               cand.vacante_id AS candidato_vacante_id
         FROM informe_compartidos c
         JOIN informe_respuestas r ON r.id = c.respuesta_id
         JOIN informe_tipos t ON t.id = r.tipo_id
@@ -945,6 +947,7 @@ def get_compartidos_por(username, empresa=None):
             "respuesta_id": row["respuesta_id"],
             "datos": datos,
             "hoja": row["hoja"],
+            "vacante_id": row["candidato_vacante_id"],
             "tiene_cv": row["cv_ruta"] is not None,
             "cv_nombre": row["cv_nombre_original"],
             "tipo_nombre": row["tipo_nombre"],
