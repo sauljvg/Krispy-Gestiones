@@ -704,9 +704,22 @@ def _candidato_id_para_respuesta(respuesta_id, compartido_por):
 
 
 def compartir_respuestas(respuesta_ids, usuario_id, compartido_por):
+    """Comparte cada respuesta con `usuario_id` -- igual que
+    reclutamiento.compartir_candidatos_directo, esto es EXCLUSIVO: si el
+    candidato ligado a la respuesta ya estaba compartido con otra persona
+    (por este camino o por el directo de Reclutamiento), se le quita el
+    acceso a esa persona antes de dárselo al nuevo destinatario."""
     conn = get_connection()
     for rid in respuesta_ids:
         candidato_id = _candidato_id_para_respuesta(rid, compartido_por)
+        conn.execute(
+            "DELETE FROM candidato_compartidos WHERE candidato_id = ? AND usuario_id != ?",
+            (candidato_id, usuario_id),
+        )
+        conn.execute(
+            "DELETE FROM informe_compartidos WHERE candidato_id = ? AND usuario_id != ?",
+            (candidato_id, usuario_id),
+        )
         # Upsert en vez de INSERT OR IGNORE: si ya se había compartido antes,
         # volver a compartir debe refrescar la fecha (y quién lo hizo), para
         # que el orden de Reclutamiento refleje la última vez que se compartió.

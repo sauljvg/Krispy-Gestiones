@@ -625,11 +625,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     const usuarioId = Number(document.getElementById("compartir-usuario-select").value);
     const usuario = usuariosParaCompartir.find((u) => u.id === usuarioId);
     if (usuario && lastData) {
-      // Dos casos distintos: re-compartir con la MISMA persona (probable
-      // duplicado sin querer) o compartir con OTRA persona cuando ya está
-      // compartido con alguien más (puede ser intencional -- varios
-      // gerentes interesados en el mismo candidato -- pero conviene avisar
-      // por si acaso).
+      // Compartir es EXCLUSIVO (ver informes.compartir_respuestas en el
+      // backend): si ya estaba compartido con otra persona, esa persona
+      // pierde el acceso y pasa a ser del nuevo destinatario -- se avisa
+      // antes de hacerlo. Re-compartir con la MISMA persona no cambia nada,
+      // solo se informa (probable duplicado sin querer).
       const mismoDestinatario = [];
       const otroDestinatario = [];
       lastData.respuestas.forEach((r) => {
@@ -638,14 +638,14 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (con.length === 0) return;
         const nombre = r.datos["Nombre y apellido"] || r.datos["Nombre"] || `#${r.id}`;
         if (con.includes(usuario.nombre)) mismoDestinatario.push(nombre);
-        else otroDestinatario.push(`${nombre} (ya con ${con.join(", ")})`);
+        else otroDestinatario.push(`${nombre} (de ${con.join(", ")})`);
       });
       const partes = [];
       if (mismoDestinatario.length) {
         partes.push(`${mismoDestinatario.join(", ")} ya estaba(n) compartido(s) con ${usuario.nombre}.`);
       }
       if (otroDestinatario.length) {
-        partes.push(`${otroDestinatario.join(", ")} ya está(n) compartido(s) con otra persona. ¿Compartir también con ${usuario.nombre}?`);
+        partes.push(`${otroDestinatario.join(", ")} pasará(n) a ser de ${usuario.nombre} (deja de verlo(s) quien lo(s) tenía antes).`);
       }
       if (partes.length && !confirm(`${partes.join(" ")}\n¿Continuar?`)) return;
     }

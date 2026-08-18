@@ -815,8 +815,24 @@ def contar_por_estado(empresa=None, q=None, vacante_id=None, sin_vacante=False):
 
 
 def compartir_candidatos_directo(candidato_ids: list[int], usuario_id: int, compartido_por: str):
+    """Comparte cada candidato con `usuario_id` -- compartir es EXCLUSIVO: si
+    el candidato ya estaba compartido con otra persona (por cualquiera de
+    los dos caminos, directo aquí o vía Informes), se le quita el acceso a
+    esa persona antes de dárselo al nuevo destinatario. Así un candidato
+    tiene como mucho un responsable de Reclutamiento a la vez, en vez de
+    acumular gente cada vez que se re-comparte a alguien distinto (ver
+    confirmarCompartirCandidatos en el frontend, que avisa de este cambio
+    antes de hacerlo)."""
     conn = get_connection()
     for candidato_id in candidato_ids:
+        conn.execute(
+            "DELETE FROM candidato_compartidos WHERE candidato_id = ? AND usuario_id != ?",
+            (candidato_id, usuario_id),
+        )
+        conn.execute(
+            "DELETE FROM informe_compartidos WHERE candidato_id = ? AND usuario_id != ?",
+            (candidato_id, usuario_id),
+        )
         conn.execute(
             """
             INSERT INTO candidato_compartidos (candidato_id, usuario_id, compartido_por)

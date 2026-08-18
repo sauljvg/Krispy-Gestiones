@@ -1535,9 +1535,11 @@ async function confirmarCompartirCandidatos() {
   if (!usuarioId || ids.length === 0) return;
   const usuario = usuariosParaCompartirCandidatos.find((u) => u.id === usuarioId);
   if (usuario) {
-    // Igual que en Informes: distingue re-compartir con la MISMA persona
-    // (probable duplicado) de compartir con OTRA cuando ya estaba
-    // compartido con alguien más (puede ser intencional, pero se avisa).
+    // Compartir es EXCLUSIVO (ver reclutamiento.compartir_candidatos_directo):
+    // si ya estaba compartido con otra persona, esa persona pierde el
+    // acceso y pasa a ser del nuevo destinatario -- se avisa antes de
+    // hacerlo. Re-compartir con la MISMA persona no cambia nada, solo se
+    // informa (probable duplicado sin querer).
     const mismoDestinatario = [];
     const otroDestinatario = [];
     ultimosCandidatosCargados.forEach((c) => {
@@ -1546,14 +1548,14 @@ async function confirmarCompartirCandidatos() {
       if (compartidos.length === 0) return;
       const nombre = c.nombre_completo || `#${c.id}`;
       if (compartidos.some((x) => x.usuario_id === usuarioId)) mismoDestinatario.push(nombre);
-      else otroDestinatario.push(`${nombre} (ya con ${compartidos.map((x) => x.nombre).join(", ")})`);
+      else otroDestinatario.push(`${nombre} (de ${compartidos.map((x) => x.nombre).join(", ")})`);
     });
     const partes = [];
     if (mismoDestinatario.length) {
       partes.push(`${mismoDestinatario.join(", ")} ya estaba(n) compartido(s) con ${usuario.nombre}.`);
     }
     if (otroDestinatario.length) {
-      partes.push(`${otroDestinatario.join(", ")} ya está(n) compartido(s) con otra persona. ¿Compartir también con ${usuario.nombre}?`);
+      partes.push(`${otroDestinatario.join(", ")} pasará(n) a ser de ${usuario.nombre} (deja de verlo(s) quien lo(s) tenía antes).`);
     }
     if (partes.length && !confirm(`${partes.join(" ")}\n¿Continuar?`)) return;
   }
