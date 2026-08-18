@@ -542,6 +542,23 @@ def ingest_fila_directa(tipo_clave, fila, origen="Formulario web", columnas_extr
     }
 
 
+def forzar_no_apto(respuesta_id):
+    """Fuerza RESULTADO = "No apto" en una respuesta ya insertada -- usado
+    cuando quien respondió un Test marcó una opción configurada como
+    descalificatoria (ver encuestas.guardar_respuesta), sin importar lo que
+    scoring_valores.calcular() hubiera calculado. El texto contiene "No
+    apto" a propósito, igual que el que genera scoring_valores, para caer
+    en el mismo filtro filtro_aptos de get_respuestas() sin duplicar esa
+    lógica."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE informe_respuestas SET datos_json = json_set(datos_json, '$.RESULTADO', ?) WHERE id = ?",
+        ("❌ No apto (respuesta descalificatoria)", respuesta_id),
+    )
+    conn.commit()
+    conn.close()
+
+
 def _detect_date_columns(columnas):
     return [c for c in columnas if any(hint in c.lower() for hint in DATE_HINTS)]
 

@@ -106,6 +106,18 @@ def ensure_encuestas_tables():
     if "migrada_opcion_simple" not in cols_preguntas:
         conn.execute("ALTER TABLE encuesta_preguntas ADD COLUMN migrada_opcion_simple INTEGER NOT NULL DEFAULT 0")
         conn.execute("UPDATE encuesta_preguntas SET tipo = 'opcion_simple' WHERE tipo = 'opcion_multiple'")
+    # opciones_descarta_json: lista de booleanos en paralelo a opciones_json
+    # (misma posición = misma opción) -- marca qué opciones de una pregunta
+    # de opción simple descalifican al candidato. Solo tiene sentido en
+    # "opcion_simple" (ver condicionEditorHTML en tests.js, que restringe
+    # igual las preguntas usables para ramificar). Si quien responde elige
+    # una opción marcada así, guardar_respuesta() fuerza RESULTADO = "No
+    # apto" en la fila de Informes que genera esa respuesta -- así entra en
+    # el mismo filtro "Excluir/Solo no aptos" que ya existía para las
+    # respuestas puntuadas por scoring_valores, sin tener que duplicar esa
+    # lógica de filtro.
+    if "opciones_descarta_json" not in cols_preguntas:
+        conn.execute("ALTER TABLE encuesta_preguntas ADD COLUMN opciones_descarta_json TEXT")
     # Sin fila_hash/dedup a propósito: cada persona real puede responder una
     # sola vez desde el propio flujo (no hay reenvío), y a diferencia de
     # Informes esto no se alimenta por Excel donde sí hace falta deduplicar
@@ -364,6 +376,7 @@ def _fetch_estructura(conn, encuesta_id):
         for q in preguntas:
             qd = dict(q)
             qd["opciones"] = json.loads(qd.pop("opciones_json") or "[]")
+            qd["opciones_descarta"] = json.loads(qd.pop("opciones_descarta_json") or "[]")
             qd["obligatoria"] = bool(qd["obligatoria"])
             qd["mostrar_dashboard"] = bool(qd["mostrar_dashboard"])
             preguntas_dict.append(qd)
@@ -545,7 +558,7 @@ def mover_pagina(pagina_id, direccion):
     conn.close()
 
 
-def add_pregunta(pagina_id, tipo, etiqueta, obligatoria=True, opciones=None, mostrar_dashboard=False):
+def add_pregunta(pagina_id, tipo, etiqueta, obligatoria=True, opciones=None, mostrar_dashboard=False, opciones_descarta=None):
     if tipo not in TIPOS_PREGUNTA:
         raise ValueError(f"Tipo de pregunta desconocido: {tipo}")
     conn = get_connection()
@@ -553,10 +566,11 @@ def add_pregunta(pagina_id, tipo, etiqueta, obligatoria=True, opciones=None, mos
         "SELECT COALESCE(MAX(orden), 0) + 1 FROM encuesta_preguntas WHERE pagina_id = ?", (pagina_id,)
     ).fetchone()[0]
     cur = conn.execute(
-        "INSERT INTO encuesta_preguntas (pagina_id, orden, tipo, etiqueta, obligatoria, opciones_json, mostrar_dashboard) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO encuesta_preguntas (pagina_id, orden, tipo, etiqueta, obligatoria, opciones_json, mostrar_dashboard, opciones_descarta_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (pagina_id, orden, tipo, etiqueta.strip(), 1 if obligatoria else 0,
-         json.dumps(opciones or [], ensure_ascii=False), 1 if mostrar_dashboard else 0),
+         json.dumps(opciones or [], ensure_ascii=False), 1 if mostrar_dashboard else 0,
+         json.dumps(opciones_descarta or [], ensure_ascii=False)),
     )
     pregunta_id = cur.lastrowid
     conn.commit()
@@ -564,12 +578,12 @@ def add_pregunta(pagina_id, tipo, etiqueta, obligatoria=True, opciones=None, mos
     return pregunta_id
 
 
-def update_pregunta(pregunta_id, etiqueta, obligatoria, opciones=None, mostrar_dashboard=False):
+def update_pregunta(pregunta_id, etiqueta, obligatoria, opciones=None, mostrar_dashboard=False, opciones_descarta=None):
     conn = get_connection()
     conn.execute(
-        "UPDATE encuesta_preguntas SET etiqueta = ?, obligatoria = ?, opciones_json = ?, mostrar_dashboard = ? WHERE id = ?",
+        "UPDATE encuesta_preguntas SET etiqueta = ?, obligatoria = ?, opciones_json = ?, mostrar_dashboard = ?, opciones_descarta_json = ? WHERE id = ?",
         (etiqueta.strip(), 1 if obligatoria else 0, json.dumps(opciones or [], ensure_ascii=False),
-         1 if mostrar_dashboard else 0, pregunta_id),
+         1 if mostrar_dashboard else 0, json.dumps(opciones_descarta or [], ensure_ascii=False), pregunta_id),
     )
     conn.commit()
     conn.close()
@@ -668,13 +682,32 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
     tipo_informe_clave = row["tipo_informe_clave"]
 
     preguntas = conn.execute("""
-        SELECT eq.id, eq.etiqueta, eq.mostrar_dashboard FROM encuesta_preguntas eq
+        SELECT eq.id, eq.etiqueta, eq.mostrar_dashboard, eq.tipo, eq.opciones_json, eq.opciones_descarta_json
+        FROM encuesta_preguntas eq
         JOIN encuesta_paginas ep ON ep.id = eq.pagina_id
         WHERE ep.encuesta_id = ?
         ORDER BY ep.orden, eq.orden
     """, (encuesta_id,)).fetchall()
     etiqueta_por_id = {str(p["id"]): p["etiqueta"] for p in preguntas}
     mostrar_dashboard_por_id = {str(p["id"]): bool(p["mostrar_dashboard"]) for p in preguntas}
+
+    # ¿Alguna respuesta eligió una opción marcada como descalificatoria? Solo
+    # se mira en preguntas de opción simple (ver opciones_descarta_json) --
+    # si es así, la fila que esto genere en Informes se fuerza a "No apto"
+    # más abajo, sin importar lo que calcule scoring_valores.
+    es_no_apto = False
+    for pid, valor in respuestas_por_pregunta.items():
+        pid = str(pid)
+        pregunta = next((p for p in preguntas if str(p["id"]) == pid), None)
+        if not pregunta or pregunta["tipo"] != "opcion_simple":
+            continue
+        opciones = json.loads(pregunta["opciones_json"] or "[]")
+        descarta = json.loads(pregunta["opciones_descarta_json"] or "[]")
+        if valor in opciones:
+            idx = opciones.index(valor)
+            if idx < len(descarta) and descarta[idx]:
+                es_no_apto = True
+                break
 
     # Dos preguntas pueden compartir el mismo enunciado a propósito (p.ej. la
     # misma pregunta de "Ordena las siguientes afirmaciones..." repetida en
@@ -735,6 +768,13 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
             )
             conn2.commit()
             conn2.close()
+            if es_no_apto:
+                # Se fuerza DESPUÉS de ingest_fila_directa (que puede haber
+                # calculado su propio RESULTADO vía scoring_valores si la
+                # pregunta encajaba con el cuestionario de Valores y
+                # Competencias) para que la respuesta descalificatoria gane
+                # siempre, sin importar el score.
+                informes_module.forzar_no_apto(enlace["respuesta_id"])
             # Si quien acaba de responder ya está en la base de Reclutamiento
             # (creado a mano, por CV, o desde una vacante) pero todavía sin
             # test enlazado, se conecta automáticamente con esta respuesta en

@@ -277,7 +277,7 @@ function etiquetaVisible(q) {
   return q.etiqueta;
 }
 
-function opcionesEditorHTML(tipo, opciones) {
+function opcionesEditorHTML(tipo, opciones, opcionesDescarta) {
   if (tipo === "likert") {
     // El puntaje SIEMPRE es 1-5 según la posición (no el texto) — así el
     // admin puede cambiar la leyenda de cada nivel libremente sin arriesgar
@@ -301,13 +301,21 @@ function opcionesEditorHTML(tipo, opciones) {
   }
   if (!TIPOS_CON_OPCIONES.has(tipo)) return "";
   const lista = opciones && opciones.length ? opciones : ["", ""];
-  return `<div class="opciones-editor">
+  // Solo tiene sentido marcar una opción como descalificatoria en opción
+  // simple (una sola respuesta posible) -- en opción múltiple no habría
+  // forma inequívoca de decidir si "descalifica" con una sola marcada entre
+  // varias. Es la misma restricción que ya usa preguntasRamificablesAntesDe
+  // para las ramificaciones condicionales.
+  const permiteDescarta = tipo === "opcion_simple";
+  const descarta = opcionesDescarta && opcionesDescarta.length === lista.length ? opcionesDescarta : lista.map(() => false);
+  return `<div class="opciones-editor" data-permite-descarta="${permiteDescarta ? "1" : "0"}">
     <div class="opciones-editor-filas">
       ${lista
         .map(
           (op, i) => `
         <div class="opcion-editor-row">
           <input type="text" class="opcion-editor-input" value="${escapeHTML(op)}" placeholder="Opción ${i + 1}">
+          ${opcionDescartaChkHTML(permiteDescarta, descarta[i])}
           <button type="button" class="btn-mini btn-opcion-quitar" title="Quitar esta opción"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
         </div>`
         )
@@ -317,9 +325,18 @@ function opcionesEditorHTML(tipo, opciones) {
   </div>`;
 }
 
+// Si quien responde elige esta opción, su respuesta se marca "No apto" en
+// Informes (ver encuestas.guardar_respuesta) -- solo aparece en preguntas
+// de opción simple.
+function opcionDescartaChkHTML(permiteDescarta, marcada) {
+  if (!permiteDescarta) return "";
+  return `<label class="chk opcion-descarta-chk" title="Si eligen esta opción, la respuesta se marca como 'No apto' en Informes"><input type="checkbox" class="opcion-editor-descarta" ${marcada ? "checked" : ""}> No apto</label>`;
+}
+
 function bindOpcionesEditor(root) {
   root.querySelectorAll(".opciones-editor").forEach((editor) => {
     const filas = editor.querySelector(".opciones-editor-filas");
+    const permiteDescarta = editor.dataset.permiteDescarta === "1";
     editor.querySelectorAll(".btn-opcion-quitar").forEach((btn) => {
       btn.addEventListener("click", () => {
         if (filas.children.length <= 2) return;
@@ -330,7 +347,7 @@ function bindOpcionesEditor(root) {
     btnAgregar?.addEventListener("click", () => {
       const row = document.createElement("div");
       row.className = "opcion-editor-row";
-      row.innerHTML = `<input type="text" class="opcion-editor-input" placeholder="Nueva opción"><button type="button" class="btn-mini btn-opcion-quitar" title="Quitar esta opción"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>`;
+      row.innerHTML = `<input type="text" class="opcion-editor-input" placeholder="Nueva opción">${opcionDescartaChkHTML(permiteDescarta, false)}<button type="button" class="btn-mini btn-opcion-quitar" title="Quitar esta opción"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>`;
       filas.appendChild(row);
       row.querySelector(".btn-opcion-quitar").addEventListener("click", () => {
         if (filas.children.length <= 2) return;
@@ -342,9 +359,18 @@ function bindOpcionesEditor(root) {
 
 function leerOpciones(editorRoot) {
   if (!editorRoot) return [];
-  return Array.from(editorRoot.querySelectorAll(".opcion-editor-input"))
-    .map((el) => el.value.trim())
+  return Array.from(editorRoot.querySelectorAll(".opcion-editor-row"))
+    .map((row) => row.querySelector(".opcion-editor-input").value.trim())
     .filter(Boolean);
+}
+
+// Paralelo a leerOpciones: misma posición = misma opción, filtrando igual
+// las filas vacías para que las dos listas queden con la misma longitud.
+function leerOpcionesDescarta(editorRoot) {
+  if (!editorRoot) return [];
+  return Array.from(editorRoot.querySelectorAll(".opcion-editor-row"))
+    .filter((row) => row.querySelector(".opcion-editor-input").value.trim())
+    .map((row) => row.querySelector(".opcion-editor-descarta")?.checked || false);
 }
 
 // Preguntas de opción SIMPLE (una sola respuesta) de páginas ANTERIORES a
@@ -428,7 +454,7 @@ function renderPaginas() {
             <div class="pregunta-edit-form">
               <span class="tipo-badge">${TIPOS_PREGUNTA_LABELS[q.tipo] || q.tipo}</span>
               <input type="text" class="pregunta-edit-etiqueta" value="${escapeHTML(q.etiqueta)}" placeholder="Enunciado de la pregunta...">
-              <div class="pregunta-edit-opciones">${opcionesEditorHTML(q.tipo, q.opciones)}</div>
+              <div class="pregunta-edit-opciones">${opcionesEditorHTML(q.tipo, q.opciones, q.opciones_descarta)}</div>
               <div class="pregunta-edit-flags">
                 <label class="chk"><input type="checkbox" class="pregunta-edit-obligatoria" ${q.obligatoria ? "checked" : ""}> Obligatoria</label>
                 <label class="chk"><input type="checkbox" class="pregunta-edit-dashboard" ${q.mostrar_dashboard ? "checked" : ""}> Mostrar en el dashboard de resultados</label>
@@ -557,6 +583,7 @@ function renderPaginas() {
       const mostrarDashboard = item.querySelector(".pregunta-edit-dashboard").checked;
       const editorOpciones = item.querySelector(".pregunta-edit-opciones .opciones-editor");
       const opciones = editorOpciones ? leerOpciones(editorOpciones) : [];
+      const opcionesDescarta = editorOpciones ? leerOpcionesDescarta(editorOpciones) : [];
       if (editorOpciones && opciones.length < 2) {
         alert("Escribe al menos 2 opciones.");
         return;
@@ -564,7 +591,10 @@ function renderPaginas() {
       const res = await fetch(`${AUTH_API_BASE}/encuestas/preguntas/${preguntaId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tipo: item.dataset.tipo, etiqueta, obligatoria, opciones, mostrar_dashboard: mostrarDashboard }),
+        body: JSON.stringify({
+          tipo: item.dataset.tipo, etiqueta, obligatoria, opciones, mostrar_dashboard: mostrarDashboard,
+          opciones_descarta: opcionesDescarta,
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -599,6 +629,7 @@ function renderPaginas() {
       const slot = wrap.querySelector(`.nueva-pregunta-opciones[data-pagina-id="${paginaId}"]`);
       const editorOpciones = slot.querySelector(".opciones-editor");
       const opciones = editorOpciones ? leerOpciones(editorOpciones) : [];
+      const opcionesDescarta = editorOpciones ? leerOpcionesDescarta(editorOpciones) : [];
       if (editorOpciones && opciones.length < 2) {
         alert("Escribe al menos 2 opciones.");
         return;
@@ -606,7 +637,10 @@ function renderPaginas() {
       const res = await fetch(`${AUTH_API_BASE}/encuestas/paginas/${paginaId}/preguntas`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tipo, etiqueta, obligatoria, opciones, mostrar_dashboard: mostrarDashboard }),
+        body: JSON.stringify({
+          tipo, etiqueta, obligatoria, opciones, mostrar_dashboard: mostrarDashboard,
+          opciones_descarta: opcionesDescarta,
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
