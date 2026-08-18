@@ -330,7 +330,7 @@ function renderDetalleBloques(statsPorPeriodo) {
     .join("");
 }
 
-function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquetaVacio, alEliminar, alEditarEmail) {
+function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquetaVacio, alEliminar, alEditarEmail, alEditarMotivo) {
   const wrap = document.getElementById(wrapId);
   const lista = document.getElementById(listaId);
   document.getElementById(summaryId).textContent = `${items.length} ${etiquetaVacio}`;
@@ -340,6 +340,7 @@ function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquet
       <li>
         <span>${escapeHTML(formatoItem(it))}</span>
         <span class="auditoria-acciones">
+          ${alEditarMotivo ? `<button type="button" class="btn-editar-motivo-auditoria${it.motivo ? "" : " btn-sin-email"}" data-id="${it.salida_id}" data-motivo="${escapeHTML(it.motivo || "")}" title="${it.motivo ? "Editar motivo" : "Falta el motivo de la salida"}">${it.motivo ? `📝 ${escapeHTML(it.motivo)}` : "📝 sin motivo"}</button>` : ""}
           ${alEditarEmail ? `<button type="button" class="btn-editar-email-auditoria${it.email ? "" : " btn-sin-email"}" data-id="${it.salida_id}" data-email="${escapeHTML(it.email || "")}" title="${it.email ? "Editar email" : "Falta el email — no llegará el recordatorio"}">✉ ${it.email ? "email" : "sin email"}</button>` : ""}
           ${alEliminar ? `<button type="button" class="btn-eliminar-auditoria" data-id="${it.salida_id}" title="Eliminar registro">🗑</button>` : ""}
         </span>
@@ -360,6 +361,20 @@ function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquet
         const nuevo = prompt("Email para el recordatorio:", actual);
         if (nuevo === null) return;
         await alEditarEmail(Number(btn.dataset.id), nuevo.trim());
+      });
+    });
+  }
+  if (alEditarMotivo) {
+    lista.querySelectorAll(".btn-editar-motivo-auditoria").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const actual = btn.dataset.motivo || "";
+        const nuevo = prompt("Motivo de la salida:", actual);
+        if (nuevo === null) return;
+        if (!nuevo.trim()) {
+          alert("El motivo no puede quedar vacío.");
+          return;
+        }
+        await alEditarMotivo(Number(btn.dataset.id), nuevo.trim());
       });
     });
   }
@@ -498,14 +513,27 @@ async function vincularRespuestaSalida(respuestaId, salidaId) {
 async function registrarSalidaDesdeAuditoria(item) {
   const centro = item.centro || (centrosActuales[0] || "");
   const fecha = (item.fecha || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
-  await crearSalidaManual(centro, item.nombre, fecha, null);
+  // El motivo es obligatorio al registrar la salida (ver crearSalidaManual)
+  // -- se sugiere el que la propia persona marcó en su respuesta como punto
+  // de partida, pero RRHH debe confirmarlo o corregirlo, no se guarda tal
+  // cual sin pasar por aquí.
+  const motivo = prompt(
+    "Motivo de la salida (obligatorio):",
+    item.motivo_autoreportado || ""
+  );
+  if (motivo === null) return;
+  if (!motivo.trim()) {
+    alert("El motivo es obligatorio para registrar la salida.");
+    return;
+  }
+  await crearSalidaManual(centro, item.nombre, fecha, motivo.trim(), null);
 }
 
-async function crearSalidaManual(centro, nombre, fechaBaja, email) {
+async function crearSalidaManual(centro, nombre, fechaBaja, motivo, email) {
   const res = await fetch(`${AUTH_API_BASE}/entrevistas/${currentOleada}/salidas`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ centro, nombre, fecha_baja: fechaBaja, email: email || null }),
+    body: JSON.stringify({ centro, nombre, fecha_baja: fechaBaja, motivo, email: email || null }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -524,6 +552,20 @@ async function editarEmailSalida(salidaId, email) {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     alert(err.detail || "No se pudo guardar el email.");
+    return;
+  }
+  await loadEvolucion(currentCentro);
+}
+
+async function editarMotivoSalida(salidaId, motivo) {
+  const res = await fetch(`${AUTH_API_BASE}/entrevistas/${currentOleada}/salidas/${salidaId}/motivo`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ motivo }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.detail || "No se pudo guardar el motivo.");
     return;
   }
   await loadEvolucion(currentCentro);
@@ -572,7 +614,8 @@ async function loadEvolucion(centro) {
       data.auditoria_f, (a) => `${a.nombre} — ${a.centro || ""} (baja: ${(a.fecha_baja || "").slice(0, 10)})`,
       "salidas sin ninguna respuesta detectada",
       eliminarSalida,
-      editarEmailSalida
+      editarEmailSalida,
+      editarMotivoSalida
     );
     wireRecordatorio(data.auditoria_f);
     renderAuditoriaG(data.auditoria_g, data.auditoria_f);
@@ -880,14 +923,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     const centro = document.getElementById("salida-manual-centro").value;
     const nombre = document.getElementById("salida-manual-nombre").value.trim();
     const fecha = document.getElementById("salida-manual-fecha").value;
+    const motivo = document.getElementById("salida-manual-motivo").value.trim();
     const email = document.getElementById("salida-manual-email").value.trim();
-    if (!centro || !nombre || !fecha) {
-      alert("Completa centro, nombre y fecha de baja.");
+    if (!centro || !nombre || !fecha || !motivo) {
+      alert("Completa centro, nombre, fecha de baja y motivo.");
       return;
     }
-    await crearSalidaManual(centro, nombre, fecha, email);
+    await crearSalidaManual(centro, nombre, fecha, motivo, email);
     document.getElementById("salida-manual-nombre").value = "";
     document.getElementById("salida-manual-fecha").value = "";
+    document.getElementById("salida-manual-motivo").value = "";
     document.getElementById("salida-manual-email").value = "";
   });
 

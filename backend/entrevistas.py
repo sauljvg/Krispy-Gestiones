@@ -651,6 +651,14 @@ def ensure_entrevistas_tables():
         conn.execute("ALTER TABLE entrevistas_salidas ADD COLUMN puesto TEXT")
     if "email" not in cols_salidas:
         conn.execute("ALTER TABLE entrevistas_salidas ADD COLUMN email TEXT")
+    # Motivo de la baja tal como lo registra RRHH al dar de alta la salida --
+    # antes el único "motivo" que existía era el que la propia persona
+    # marcaba en su formulario (nada garantiza que sea el real: puede poner
+    # el que más le convenga). Nullable porque las salidas que vienen del
+    # Excel "Salidas Totales" no traen esta columna, solo las que se dan de
+    # alta a mano (ver add_salida, donde SÍ es obligatorio).
+    if "motivo" not in cols_salidas:
+        conn.execute("ALTER TABLE entrevistas_salidas ADD COLUMN motivo TEXT")
     # Override manual de un cruce respuesta<->salida — para cuando la misma
     # persona aparece en las dos auditorías (p.ej. "FLORES, LENIN MICHAEL" en
     # Salidas Totales vs "Lenin flores alvarado" en su propia respuesta) pero
@@ -1259,12 +1267,12 @@ def compute_reporte(oleada_id, centro=None):
 def _fetch_salidas(conn, oleada_id, centro):
     if centro:
         rows = conn.execute(
-            "SELECT id, centro, nombre, fecha_baja, puesto, email FROM entrevistas_salidas WHERE oleada_id = ? AND centro = ?",
+            "SELECT id, centro, nombre, fecha_baja, puesto, email, motivo FROM entrevistas_salidas WHERE oleada_id = ? AND centro = ?",
             (oleada_id, centro),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id, centro, nombre, fecha_baja, puesto, email FROM entrevistas_salidas WHERE oleada_id = ?", (oleada_id,)
+            "SELECT id, centro, nombre, fecha_baja, puesto, email, motivo FROM entrevistas_salidas WHERE oleada_id = ?", (oleada_id,)
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -1312,21 +1320,28 @@ def borrar_respuesta(respuesta_id):
     conn.close()
 
 
-def add_salida(oleada_id, centro, nombre, fecha_baja, email=None):
+def add_salida(oleada_id, centro, nombre, fecha_baja, motivo, email=None):
     """Registra una salida real a mano, sin depender del Excel de "Salidas
     Totales" — sirve tanto para dar de alta a alguien que no vino en la hoja
     como para confirmar una respuesta que no cruzó automáticamente (se le
     pasa su propio nombre/centro/fecha y queda contada igual que si viniera
-    del Excel). El email es opcional pero, si se rellena, deja el registro
-    "completo": aparecerá con email en auditoría y el botón de recordatorio
-    (mailto) ya lo recogerá sin tener que pasar por el Excel."""
+    del Excel). El motivo es OBLIGATORIO a propósito: es RRHH quien lo
+    registra en el momento del alta (el motivo real de la baja, no el que la
+    persona decida marcar luego en su propio formulario) -- antes no existía
+    este campo aquí y el único "motivo" disponible era el autoreportado. El
+    email es opcional pero, si se rellena, deja el registro "completo":
+    aparecerá con email en auditoría y el botón de recordatorio (mailto) ya
+    lo recogerá sin tener que pasar por el Excel."""
+    motivo_limpio = (motivo or "").strip()
+    if not motivo_limpio:
+        raise ValueError("El motivo de la salida es obligatorio")
     email_limpio = (email or "").strip() or None
     if email_limpio and not _EMAIL_RE.match(email_limpio):
         raise ValueError("El email no tiene un formato válido")
     conn = get_connection()
     conn.execute(
-        "INSERT INTO entrevistas_salidas (oleada_id, centro, nombre, fecha_baja, email) VALUES (?, ?, ?, ?, ?)",
-        (oleada_id, centro, nombre, fecha_baja, email_limpio),
+        "INSERT INTO entrevistas_salidas (oleada_id, centro, nombre, fecha_baja, motivo, email) VALUES (?, ?, ?, ?, ?, ?)",
+        (oleada_id, centro, nombre, fecha_baja, motivo_limpio, email_limpio),
     )
     conn.commit()
     conn.close()
@@ -1345,6 +1360,19 @@ def update_salida_email(salida_id, email):
         raise ValueError("El email no tiene un formato válido")
     conn = get_connection()
     conn.execute("UPDATE entrevistas_salidas SET email = ? WHERE id = ?", (email_limpio, salida_id))
+    conn.commit()
+    conn.close()
+
+
+def update_salida_motivo(salida_id, motivo):
+    """Corrige el motivo de una salida ya registrada -- igual que
+    update_salida_email, para no tener que borrar y volver a dar de alta
+    solo por un error de tecleo."""
+    motivo_limpio = (motivo or "").strip()
+    if not motivo_limpio:
+        raise ValueError("El motivo no puede quedar vacío")
+    conn = get_connection()
+    conn.execute("UPDATE entrevistas_salidas SET motivo = ? WHERE id = ?", (motivo_limpio, salida_id))
     conn.commit()
     conn.close()
 
@@ -1379,6 +1407,7 @@ def compute_evolucion(oleada_id, centro=None):
     centro_col = roles["centro_col"]
     nombre_col = _mejor_columna_nombre(_union_headers(_todas_las_filas), roles["metadata"])
     fecha_col = roles["metadata"].get("hora_inicio")
+    motivo_col = roles["motivo_col"]
 
     salidas_por_id = {s["id"]: s for s in salidas}
     salidas_por_centro = {}
@@ -1415,13 +1444,20 @@ def compute_evolucion(oleada_id, centro=None):
                     break
 
         if not matched:
-            auditoria_g.append({"respuesta_id": respuesta_id, "nombre": nombre_fila, "fecha": fecha_propia, "centro": centro_fila})
+            # motivo_autoreportado se manda como sugerencia al registrar esta
+            # respuesta como salida (ver registrarSalidaDesdeAuditoria en el
+            # frontend) -- RRHH lo confirma o lo corrige, no se usa tal cual.
+            motivo_autoreportado = fila.get(motivo_col) if motivo_col else None
+            auditoria_g.append({
+                "respuesta_id": respuesta_id, "nombre": nombre_fila, "fecha": fecha_propia, "centro": centro_fila,
+                "motivo_autoreportado": motivo_autoreportado,
+            })
 
         cuat = get_cuatrimestre(fecha_efectiva)
         enriquecidas.append({"fila": fila, "cuatrimestre": cuat, "matched": matched})
 
     auditoria_f = [
-        {"salida_id": s["id"], "nombre": s["nombre"], "fecha_baja": s["fecha_baja"], "centro": s["centro"], "email": s["email"]}
+        {"salida_id": s["id"], "nombre": s["nombre"], "fecha_baja": s["fecha_baja"], "centro": s["centro"], "email": s["email"], "motivo": s["motivo"]}
         for s in salidas
         if s["id"] not in usadas_ids
     ]
