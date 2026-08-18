@@ -1,3 +1,4 @@
+import datetime
 import hashlib
 import io
 import json
@@ -730,6 +731,60 @@ def dejar_de_compartir(respuesta_id, usuario_id):
     )
     conn.commit()
     conn.close()
+
+
+def cambiar_destinatario_informe(pares, nuevo_usuario_id, compartido_en):
+    """Igual que reclutamiento.cambiar_destinatario_directo pero para
+    informe_compartidos (pares = [(respuesta_id, usuario_id_actual), ...])."""
+    conn = get_connection()
+    for respuesta_id, usuario_id_actual in pares:
+        if usuario_id_actual == nuevo_usuario_id:
+            conn.execute(
+                "UPDATE informe_compartidos SET compartido_en = ? WHERE respuesta_id = ? AND usuario_id = ?",
+                (compartido_en, respuesta_id, nuevo_usuario_id),
+            )
+            continue
+        ya_existe = conn.execute(
+            "SELECT 1 FROM informe_compartidos WHERE respuesta_id = ? AND usuario_id = ?",
+            (respuesta_id, nuevo_usuario_id),
+        ).fetchone()
+        if ya_existe:
+            conn.execute(
+                "DELETE FROM informe_compartidos WHERE respuesta_id = ? AND usuario_id = ?",
+                (respuesta_id, usuario_id_actual),
+            )
+            conn.execute(
+                "UPDATE informe_compartidos SET compartido_en = ? WHERE respuesta_id = ? AND usuario_id = ?",
+                (compartido_en, respuesta_id, nuevo_usuario_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE informe_compartidos SET usuario_id = ?, compartido_en = ? "
+                "WHERE respuesta_id = ? AND usuario_id = ?",
+                (nuevo_usuario_id, compartido_en, respuesta_id, usuario_id_actual),
+            )
+    conn.commit()
+    conn.close()
+
+
+def cambiar_destinatario_compartidos(items, nuevo_usuario_id):
+    """Orquesta el cambio de destinatario/fusión de tanda para una
+    selección mixta de "Compartidos por ti" (candidatos compartidos directo
+    + candidatos que llegaron vía Informes -- ver frontend/js/compartidos.js).
+    `items` son dicts {tipo: 'directo'|'informe', candidato_id o
+    respuesta_id, usuario_id_actual}. Todos quedan re-estampados con el
+    MISMO timestamp (calculado una sola vez aquí), así que sea cual sea su
+    tanda/destinatario original, aparecen agrupados juntos después -- esto
+    cubre a la vez "cambiar a quién se compartió" (Heber -> Adhara) y
+    "fusionar tandas sueltas en una sola" (mismo destinatario, timestamps
+    distintos)."""
+    ahora = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    pares_directo = [(it["candidato_id"], it["usuario_id_actual"]) for it in items if it["tipo"] == "directo"]
+    pares_informe = [(it["respuesta_id"], it["usuario_id_actual"]) for it in items if it["tipo"] == "informe"]
+    if pares_directo:
+        reclutamiento_module.cambiar_destinatario_directo(pares_directo, nuevo_usuario_id, ahora)
+    if pares_informe:
+        cambiar_destinatario_informe(pares_informe, nuevo_usuario_id, ahora)
 
 
 def usuario_tiene_acceso_respuesta(usuario_id, respuesta_id):

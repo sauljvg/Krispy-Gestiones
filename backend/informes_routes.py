@@ -53,6 +53,18 @@ class CompartirBody(BaseModel):
     usuario_id: int
 
 
+class CambiarDestinatarioItem(BaseModel):
+    tipo: str  # "directo" | "informe"
+    candidato_id: int | None = None
+    respuesta_id: int | None = None
+    usuario_id_actual: int
+
+
+class CambiarDestinatarioBody(BaseModel):
+    items: list[CambiarDestinatarioItem]
+    nuevo_usuario_id: int
+
+
 class HojaOcultaBody(BaseModel):
     hoja: str
     oculta: bool
@@ -226,4 +238,11 @@ def compartir_route(body: CompartirBody, user: dict = Depends(require_informes))
 @router.delete("/compartir/{respuesta_id}/{usuario_id}")
 def dejar_de_compartir_route(respuesta_id: int, usuario_id: int, _user: dict = Depends(require_informes)):
     informes_module.dejar_de_compartir(respuesta_id, usuario_id)
+    return {"ok": True}
+
+
+@router.put("/compartidos-por-mi/destinatario")
+def cambiar_destinatario_route(body: CambiarDestinatarioBody, _user: dict = Depends(require_informes)):
+    items = [it.model_dump() for it in body.items]
+    informes_module.cambiar_destinatario_compartidos(items, body.nuevo_usuario_id)
     return {"ok": True}

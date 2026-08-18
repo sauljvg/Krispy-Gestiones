@@ -202,6 +202,7 @@ function fmtFechaHora(iso) {
 // otra persona (quién lo compartió, o con quién se compartió).
 let modoSeleccionCompartidos = false;
 let compartidosSeleccionadosIds = new Set();
+let compartidosPorMiCache = []; // items crudos de "Compartidos por ti" (para armar el payload de cambiar destinatario)
 
 function agruparPorTanda(items, claveOtro) {
   const grupos = [];
@@ -297,6 +298,7 @@ function seccionHTML(titulo, grupos, etiquetaOtro, vacioMsg, permitirDejarDeComp
       ${modoSeleccionCompartidos ? `
         <span id="compartidos-seleccion-contador" class="staff-hint">${compartidosSeleccionadosIds.size} seleccionado(s)</span>
         <button type="button" id="btn-unir-compartidos" class="btn btn-primary" ${compartidosSeleccionadosIds.size === 0 ? "disabled" : ""}>🔗 Unir a la misma solicitud...</button>
+        <button type="button" id="btn-cambiar-destinatario" class="btn btn-primary" ${compartidosSeleccionadosIds.size === 0 ? "disabled" : ""}>👤 Cambiar destinatario...</button>
       ` : ""}
     </div>` : "";
   if (grupos.length === 0) {
@@ -354,6 +356,10 @@ function wireCompartidosInteractivos(wrap) {
   if (btnUnir) {
     btnUnir.addEventListener("click", () => abrirModalAsignarVacante("compartidos"));
   }
+  const btnCambiarDestinatario = document.getElementById("btn-cambiar-destinatario");
+  if (btnCambiarDestinatario) {
+    btnCambiarDestinatario.addEventListener("click", abrirModalCambiarDestinatario);
+  }
 }
 
 // Una vacante compartida da acceso a TODOS sus candidatos de una vez
@@ -390,6 +396,7 @@ async function loadCompartidos() {
 
   const gruposConmigo = agruparPorTanda(conmigo, "compartido_por");
   const gruposPorMi = agruparPorTanda(porMi, "destinatario_nombre");
+  compartidosPorMiCache = porMi;
 
   // Las vacantes compartidas van primero -- es la forma recomendada de ver
   // todo agrupado; los "Compartidos" sueltos por candidato (tandas) quedan
@@ -1538,6 +1545,56 @@ async function confirmarAsignarVacante() {
   }
 }
 
+// Cambia a quién se compartieron los candidatos seleccionados (p.ej. se
+// compartieron con Heber por error y en realidad eran para Adhara) Y, de
+// paso, fusiona en una sola tanda cualquier selección que viniera de
+// tandas/destinatarios sueltos distintos -- ver informes.cambiar_destinatario_compartidos
+// en el backend, que re-estampa todo con el mismo timestamp.
+async function abrirModalCambiarDestinatario() {
+  if (compartidosSeleccionadosIds.size === 0) return;
+  if (usuariosParaCompartirCandidatos.length === 0) {
+    usuariosParaCompartirCandidatos = await fetch(`${AUTH_API_BASE}/informes/usuarios-para-compartir`).then((r) => r.json());
+  }
+  const select = document.getElementById("cambiar-destinatario-select");
+  select.innerHTML = usuariosParaCompartirCandidatos
+    .map((u) => `<option value="${u.id}">${escapeHTML(u.nombre)} (${escapeHTML(u.username)} · ${escapeHTML(u.rol)})</option>`)
+    .join("");
+  document.getElementById("cambiar-destinatario-modal").classList.add("visible");
+}
+
+function cerrarModalCambiarDestinatario() {
+  document.getElementById("cambiar-destinatario-modal").classList.remove("visible");
+}
+
+async function confirmarCambiarDestinatario() {
+  const nuevoUsuarioId = Number(document.getElementById("cambiar-destinatario-select").value);
+  if (!nuevoUsuarioId) return;
+  // Un mismo candidato puede aparecer en más de una tanda si se compartió
+  // con varias personas a la vez -- se incluyen TODAS sus filas de
+  // "Compartidos por ti" que estén seleccionadas, no solo una.
+  const seleccionados = compartidosPorMiCache.filter((it) => compartidosSeleccionadosIds.has(it.candidato_id));
+  const items = seleccionados.map((it) => ({
+    tipo: String(it.compartido_id).startsWith("candidato-") ? "directo" : "informe",
+    candidato_id: it.candidato_id,
+    respuesta_id: it.respuesta_id,
+    usuario_id_actual: it.destinatario_id,
+  }));
+  if (items.length === 0) return;
+  const res = await fetch(`${AUTH_API_BASE}/informes/compartidos-por-mi/destinatario`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items, nuevo_usuario_id: nuevoUsuarioId }),
+  });
+  if (!res.ok) {
+    alert("No se pudo cambiar el destinatario. Inténtalo de nuevo.");
+    return;
+  }
+  cerrarModalCambiarDestinatario();
+  modoSeleccionCompartidos = false;
+  compartidosSeleccionadosIds.clear();
+  await loadCompartidos();
+}
+
 async function renderCandidatosTabs() {
   const q = document.getElementById("candidatos-buscar").value.trim();
   const vacanteFiltro = document.getElementById("candidatos-filtro-vacante").value;
@@ -1699,6 +1756,8 @@ async function initBaseCandidatos(user) {
   document.getElementById("btn-asignar-vacante-seleccionados").addEventListener("click", () => abrirModalAsignarVacante("grid"));
   document.getElementById("btn-asignar-vacante-cancelar").addEventListener("click", cerrarModalAsignarVacante);
   document.getElementById("btn-asignar-vacante-confirmar").addEventListener("click", confirmarAsignarVacante);
+  document.getElementById("btn-cambiar-destinatario-cancelar").addEventListener("click", cerrarModalCambiarDestinatario);
+  document.getElementById("btn-cambiar-destinatario-confirmar").addEventListener("click", confirmarCambiarDestinatario);
   document.getElementById("btn-fusionar-vacante-cancelar").addEventListener("click", cerrarModalFusionarVacante);
   document.getElementById("btn-fusionar-vacante-confirmar").addEventListener("click", confirmarFusionarVacante);
   document.getElementById("btn-compartir-vacante-cancelar").addEventListener("click", cerrarModalCompartirVacante);

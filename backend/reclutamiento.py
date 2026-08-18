@@ -839,6 +839,47 @@ def dejar_de_compartir_candidato(candidato_id: int, usuario_id: int):
     conn.close()
 
 
+def cambiar_destinatario_directo(pares, nuevo_usuario_id, compartido_en):
+    """pares = [(candidato_id, usuario_id_actual), ...]. Mueve cada share
+    directo a `nuevo_usuario_id`, re-estampando `compartido_en` con la
+    MISMA fecha para todos -- así, aunque vinieran de tandas o
+    destinatarios distintos, quedan agrupados en una sola tanda nueva tras
+    el cambio (ver informes.cambiar_destinatario_compartidos, que orquesta
+    esto junto con el lado de informe_compartidos bajo el mismo timestamp).
+    Si el candidato YA estaba también compartido con el destinatario nuevo,
+    se descarta el share viejo en vez de chocar con
+    UNIQUE(candidato_id, usuario_id)."""
+    conn = get_connection()
+    for candidato_id, usuario_id_actual in pares:
+        if usuario_id_actual == nuevo_usuario_id:
+            conn.execute(
+                "UPDATE candidato_compartidos SET compartido_en = ? WHERE candidato_id = ? AND usuario_id = ?",
+                (compartido_en, candidato_id, nuevo_usuario_id),
+            )
+            continue
+        ya_existe = conn.execute(
+            "SELECT 1 FROM candidato_compartidos WHERE candidato_id = ? AND usuario_id = ?",
+            (candidato_id, nuevo_usuario_id),
+        ).fetchone()
+        if ya_existe:
+            conn.execute(
+                "DELETE FROM candidato_compartidos WHERE candidato_id = ? AND usuario_id = ?",
+                (candidato_id, usuario_id_actual),
+            )
+            conn.execute(
+                "UPDATE candidato_compartidos SET compartido_en = ? WHERE candidato_id = ? AND usuario_id = ?",
+                (compartido_en, candidato_id, nuevo_usuario_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE candidato_compartidos SET usuario_id = ?, compartido_en = ? "
+                "WHERE candidato_id = ? AND usuario_id = ?",
+                (nuevo_usuario_id, compartido_en, candidato_id, usuario_id_actual),
+            )
+    conn.commit()
+    conn.close()
+
+
 def get_candidatos_compartidos_directo_con(usuario_id, empresa=None):
     conn = get_connection()
     clauses = ["cc.usuario_id = ?"]
