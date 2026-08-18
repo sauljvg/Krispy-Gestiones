@@ -512,6 +512,8 @@ class PersonalIn(BaseModel):
     nombre_canonico: str
     variantes: list[str] = []
     fecha_inicio: str | None = None
+    confirmar_duplicado: bool = False
+    fusionar_con_personal_id: int | None = None
 
 
 class PersonalEditIn(BaseModel):
@@ -528,6 +530,13 @@ class SalidaPersonalIn(BaseModel):
     fecha: str
     tipo: str  # "baja" | "traslado"
     tienda_destino: str | None = None
+    confirmar_duplicado: bool = False
+    fusionar_con_personal_id: int | None = None
+
+
+class FusionarPersonalIn(BaseModel):
+    personal_id_origen: int
+    personal_id_destino: int
 
 
 @router.get("/personal")
@@ -538,7 +547,12 @@ def listar_personal_route(tienda: str | None = None, _admin: dict = Depends(requ
 @router.post("/personal")
 def crear_personal_route(body: PersonalIn, _admin: dict = Depends(require_admin)):
     try:
-        return personal_module.crear_personal(body.tienda, body.nombre_canonico, body.variantes, body.fecha_inicio)
+        return personal_module.crear_personal(
+            body.tienda, body.nombre_canonico, body.variantes, body.fecha_inicio,
+            confirmar_duplicado=body.confirmar_duplicado, fusionar_con_personal_id=body.fusionar_con_personal_id,
+        )
+    except personal_module.PersonalDuplicadoError as exc:
+        raise HTTPException(status_code=409, detail={"duplicados": exc.duplicados})
     except personal_module.PersonalError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -563,7 +577,21 @@ def editar_personal_route(personal_id: int, body: PersonalEditIn, _admin: dict =
 @router.post("/personal/salida")
 def salida_personal_route(body: SalidaPersonalIn, _admin: dict = Depends(require_admin)):
     try:
-        return personal_module.dar_salida(body.asignacion_id, body.fecha, body.tipo, body.tienda_destino)
+        return personal_module.dar_salida(
+            body.asignacion_id, body.fecha, body.tipo, body.tienda_destino,
+            confirmar_duplicado=body.confirmar_duplicado, fusionar_con_personal_id=body.fusionar_con_personal_id,
+        )
+    except personal_module.PersonalDuplicadoError as exc:
+        raise HTTPException(status_code=409, detail={"duplicados": exc.duplicados})
+    except personal_module.PersonalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/personal/fusionar")
+def fusionar_personal_route(body: FusionarPersonalIn, _admin: dict = Depends(require_admin)):
+    try:
+        personal_module.fusionar_personal(body.personal_id_origen, body.personal_id_destino)
+        return {"ok": True}
     except personal_module.PersonalError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

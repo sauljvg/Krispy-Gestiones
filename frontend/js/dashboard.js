@@ -338,6 +338,7 @@ let personalModalCache = [];
 let personalTiendasCache = [];
 let personalEditandoAsignacionId = null;
 let personalSalidaAsignacionId = null;
+let personalFusionandoAsignacionId = null;
 let personalVariantesSugeridas = [];
 let personalVariantesSeleccionadas = new Set();
 
@@ -356,6 +357,31 @@ function personalSalidaFormHTML(p) {
       <div class="modal-actions" style="justify-content:flex-start;">
         <button type="button" class="btn btn-primary btn-sm btn-salida-confirmar" data-asignacion-id="${p.asignacion_id}">Confirmar</button>
         <button type="button" class="btn btn-ghost btn-sm btn-salida-cancelar">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+function personalFusionFormHTML(p) {
+  const otras = personalModalCache.filter(
+    (o) => o.tienda === p.tienda && o.activo && o.personal_id !== p.personal_id
+  );
+  if (otras.length === 0) {
+    return `
+      <div class="salida-form" data-fusion-asignacion-id="${p.asignacion_id}">
+        <p class="personal-hint" style="margin:0 0 8px;">No hay más personal activo en ${escapeHTML(p.tienda)} con quien fusionar.</p>
+        <div class="modal-actions" style="justify-content:flex-start;">
+          <button type="button" class="btn btn-ghost btn-sm btn-fusion-cancelar">Cerrar</button>
+        </div>
+      </div>`;
+  }
+  const opciones = otras.map((o) => `<option value="${o.personal_id}">${escapeHTML(o.nombre_canonico)}</option>`).join("");
+  return `
+    <div class="salida-form" data-fusion-asignacion-id="${p.asignacion_id}">
+      <p class="personal-hint" style="margin:0 0 6px;">Es la misma persona que...</p>
+      <select class="fusion-destino-select">${opciones}</select>
+      <div class="modal-actions" style="justify-content:flex-start;">
+        <button type="button" class="btn btn-primary btn-sm btn-fusion-confirmar" data-personal-id="${p.personal_id}">Fusionar</button>
+        <button type="button" class="btn btn-ghost btn-sm btn-fusion-cancelar">Cancelar</button>
       </div>
     </div>`;
 }
@@ -383,6 +409,7 @@ function personalFilaHTML(p) {
     : `${p.fecha_inicio ? `${p.fecha_inicio} → ` : ""}${p.fecha_fin || "?"} · ${p.motivo_fin === "traslado" ? "trasladada" : "baja"}`;
   const acciones = p.activo
     ? `<button type="button" class="btn btn-ghost btn-personal-editar" data-asignacion-id="${p.asignacion_id}" title="Editar nombre/variantes">✏️</button>
+       <button type="button" class="btn btn-ghost btn-personal-fusionar" data-asignacion-id="${p.asignacion_id}" title="Es la misma persona que otra ficha de esta tienda">🔗 Fusionar...</button>
        <button type="button" class="btn btn-ghost btn-personal-salida" data-asignacion-id="${p.asignacion_id}">Salida...</button>`
     : `<button type="button" class="btn btn-ghost btn-personal-eliminar" data-personal-id="${p.personal_id}" title="Borrar (solo si se dio de alta por error)">🗑</button>`;
 
@@ -397,6 +424,7 @@ function personalFilaHTML(p) {
         <div class="personal-fila-acciones">${acciones}</div>
       </div>
       ${personalSalidaAsignacionId === p.asignacion_id ? personalSalidaFormHTML(p) : ""}
+      ${personalFusionandoAsignacionId === p.asignacion_id ? personalFusionFormHTML(p) : ""}
     </div>`;
 }
 
@@ -446,6 +474,7 @@ async function loadPersonalModal() {
 function abrirModalPersonal() {
   personalEditandoAsignacionId = null;
   personalSalidaAsignacionId = null;
+  personalFusionandoAsignacionId = null;
   personalVariantesSugeridas = [];
   personalVariantesSeleccionadas = new Set();
   document.getElementById("personal-nuevo-nombre").value = "";
@@ -500,6 +529,62 @@ async function sugerirVariantesPersonal() {
   }
 }
 
+// Pregunta al confirmar un posible duplicado (misma persona en la misma
+// tienda con nombre/variante repetida): OK = fusionar en una sola ficha,
+// Cancelar = son personas distintas, seguir y crear/trasladar aparte.
+function confirmarEsMismaPersona(duplicados) {
+  const nombres = duplicados.map((d) => d.nombre_canonico).join(", ");
+  return confirm(
+    `Ya hay alguien con ese nombre en esa tienda (${nombres}). ¿Es la misma persona?\n\n` +
+    `Aceptar = sí, fusionar en una sola ficha (sus reseñas se cuentan juntas).\n` +
+    `Cancelar = no, son personas distintas, añadir aparte.`
+  );
+}
+
+async function enviarCreacionPersonal(payload) {
+  const res = await fetch(`${API_BASE}/personal`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (res.status === 409) {
+    const err = await res.json().catch(() => ({}));
+    const duplicados = err.detail?.duplicados || [];
+    if (confirmarEsMismaPersona(duplicados)) {
+      return enviarCreacionPersonal({ ...payload, fusionar_con_personal_id: duplicados[0].personal_id });
+    }
+    return enviarCreacionPersonal({ ...payload, confirmar_duplicado: true });
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(`No se pudo añadir: ${err.detail || res.status}`);
+    return false;
+  }
+  return true;
+}
+
+async function enviarSalidaPersonal(payload) {
+  const res = await fetch(`${API_BASE}/personal/salida`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (res.status === 409) {
+    const err = await res.json().catch(() => ({}));
+    const duplicados = err.detail?.duplicados || [];
+    if (confirmarEsMismaPersona(duplicados)) {
+      return enviarSalidaPersonal({ ...payload, fusionar_con_personal_id: duplicados[0].personal_id });
+    }
+    return enviarSalidaPersonal({ ...payload, confirmar_duplicado: true });
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(`No se pudo registrar la salida: ${err.detail || res.status}`);
+    return false;
+  }
+  return true;
+}
+
 async function crearPersonalNuevo() {
   const tienda = document.getElementById("personal-nuevo-tienda").value;
   const nombre = document.getElementById("personal-nuevo-nombre").value.trim();
@@ -512,16 +597,8 @@ async function crearPersonalNuevo() {
   const variantes = [...new Set([...personalVariantesSeleccionadas, ...extra])];
   const fecha_inicio = document.getElementById("personal-nuevo-fecha").value || null;
 
-  const res = await fetch(`${API_BASE}/personal`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tienda, nombre_canonico: nombre, variantes, fecha_inicio }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    alert(`No se pudo añadir: ${err.detail || res.status}`);
-    return;
-  }
+  const ok = await enviarCreacionPersonal({ tienda, nombre_canonico: nombre, variantes, fecha_inicio });
+  if (!ok) return;
 
   document.getElementById("personal-nuevo-nombre").value = "";
   document.getElementById("personal-nuevo-variantes-extra").value = "";
@@ -538,6 +615,7 @@ function wirePersonalListado() {
     if (btnEditar) {
       personalEditandoAsignacionId = Number(btnEditar.dataset.asignacionId);
       personalSalidaAsignacionId = null;
+      personalFusionandoAsignacionId = null;
       renderPersonalListado();
       return;
     }
@@ -574,6 +652,7 @@ function wirePersonalListado() {
     if (btnSalida) {
       personalSalidaAsignacionId = Number(btnSalida.dataset.asignacionId);
       personalEditandoAsignacionId = null;
+      personalFusionandoAsignacionId = null;
       renderPersonalListado();
       return;
     }
@@ -596,17 +675,46 @@ function wirePersonalListado() {
         alert("Elige la tienda de destino del traslado.");
         return;
       }
-      const res = await fetch(`${API_BASE}/personal/salida`, {
+      const ok = await enviarSalidaPersonal({
+        asignacion_id: Number(btnSalidaConfirmar.dataset.asignacionId), fecha, tipo, tienda_destino,
+      });
+      if (!ok) return;
+      personalSalidaAsignacionId = null;
+      await loadPersonalModal();
+      loadStaffMentions().catch((err) => console.error("Fallo refrescando ranking de personal:", err));
+      return;
+    }
+    const btnFusionar = e.target.closest(".btn-personal-fusionar");
+    if (btnFusionar) {
+      personalFusionandoAsignacionId = Number(btnFusionar.dataset.asignacionId);
+      personalEditandoAsignacionId = null;
+      personalSalidaAsignacionId = null;
+      renderPersonalListado();
+      return;
+    }
+    if (e.target.closest(".btn-fusion-cancelar")) {
+      personalFusionandoAsignacionId = null;
+      renderPersonalListado();
+      return;
+    }
+    const btnFusionConfirmar = e.target.closest(".btn-fusion-confirmar");
+    if (btnFusionConfirmar) {
+      const form = btnFusionConfirmar.closest(".salida-form");
+      const personalIdDestino = Number(form.querySelector(".fusion-destino-select").value);
+      const res = await fetch(`${API_BASE}/personal/fusionar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ asignacion_id: Number(btnSalidaConfirmar.dataset.asignacionId), fecha, tipo, tienda_destino }),
+        body: JSON.stringify({
+          personal_id_origen: Number(btnFusionConfirmar.dataset.personalId),
+          personal_id_destino: personalIdDestino,
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        alert(`No se pudo registrar la salida: ${err.detail || res.status}`);
+        alert(`No se pudo fusionar: ${err.detail || res.status}`);
         return;
       }
-      personalSalidaAsignacionId = null;
+      personalFusionandoAsignacionId = null;
       await loadPersonalModal();
       loadStaffMentions().catch((err) => console.error("Fallo refrescando ranking de personal:", err));
       return;

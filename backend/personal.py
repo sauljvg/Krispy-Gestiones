@@ -13,6 +13,7 @@ como personal actual o anterior de esa tienda — las fechas son solo
 informativas, no se usan para filtrar menciones por fecha de reseña.
 """
 
+import datetime
 import json
 import os
 import re
@@ -27,6 +28,19 @@ GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_M
 
 class PersonalError(Exception):
     pass
+
+
+class PersonalDuplicadoError(PersonalError):
+    """Ya hay alguien activo en esa tienda con el mismo nombre/variante —
+    p.ej. se intenta dar de alta "Maria Pilar" en Plenilunio cuando ya había
+    un "Pilar" ahí: si son la misma persona y se crean como dos fichas
+    separadas, las menciones de reseñas se reparten entre las dos en vez de
+    sumar en una sola. Quien llama decide si fusionar o crear aparte."""
+
+    def __init__(self, duplicados):
+        self.duplicados = duplicados
+        nombres = ", ".join(d["nombre_canonico"] for d in duplicados)
+        super().__init__(f"Ya hay personal con ese nombre en esa tienda: {nombres}")
 
 
 def ensure_personal_tables():
@@ -91,6 +105,31 @@ def _normalizar_variantes(variantes):
     return limpio
 
 
+def _buscar_posibles_duplicados(conn, tienda, nombre_canonico, variantes):
+    """Personal ACTIVO en `tienda` cuyo nombre o alguna variante coincida
+    (sin distinguir mayúsculas) con las de la persona que se va a dar de
+    alta ahí. No mira otras tiendas -- el mismo nombre de pila en tiendas
+    distintas puede ser gente distinta a propósito (ver docstring del
+    módulo), el conflicto real es dentro de LA MISMA tienda."""
+    propias = set(_normalizar_variantes(variantes)) | {nombre_canonico.strip().lower()}
+    filas = conn.execute("""
+        SELECT p.id AS personal_id, p.nombre_canonico, p.variantes
+        FROM personal_asignaciones pa
+        JOIN personal p ON p.id = pa.personal_id
+        WHERE pa.tienda = ? AND pa.activo = 1
+    """, (tienda,)).fetchall()
+    duplicados = []
+    for fila in filas:
+        existentes = set(json.loads(fila["variantes"])) | {fila["nombre_canonico"].strip().lower()}
+        if propias & existentes:
+            duplicados.append({
+                "personal_id": fila["personal_id"],
+                "nombre_canonico": fila["nombre_canonico"],
+                "variantes": sorted(existentes),
+            })
+    return duplicados
+
+
 def build_store_staff():
     """{tienda: {"current": {nombre: [variantes]}, "former": {...}}} —
     misma forma que el antiguo STORE_STAFF fijo, reconstruida desde la BD en
@@ -142,7 +181,8 @@ def list_personal(tienda=None):
     ]
 
 
-def crear_personal(tienda, nombre_canonico, variantes, fecha_inicio=None):
+def crear_personal(tienda, nombre_canonico, variantes, fecha_inicio=None,
+                    confirmar_duplicado=False, fusionar_con_personal_id=None):
     tienda = (tienda or "").strip()
     nombre_canonico = (nombre_canonico or "").strip()
     if not tienda:
@@ -155,6 +195,39 @@ def crear_personal(tienda, nombre_canonico, variantes, fecha_inicio=None):
         variantes.insert(0, nombre_canonico.lower())
 
     conn = get_connection()
+
+    if fusionar_con_personal_id:
+        destino = conn.execute("SELECT id, variantes FROM personal WHERE id = ?", (fusionar_con_personal_id,)).fetchone()
+        if not destino:
+            conn.close()
+            raise PersonalError("La persona con la que fusionar ya no existe")
+        variantes_unidas = _normalizar_variantes(json.loads(destino["variantes"]) + variantes)
+        conn.execute(
+            "UPDATE personal SET variantes = ? WHERE id = ?",
+            (json.dumps(variantes_unidas, ensure_ascii=False), fusionar_con_personal_id),
+        )
+        # Si ya tiene una asignación activa en esa tienda (el caso normal:
+        # se fusiona precisamente porque ya estaba ahí) no se crea otra --
+        # dejaría dos filas activas de la misma persona en la misma tienda.
+        ya_activa_aqui = conn.execute(
+            "SELECT 1 FROM personal_asignaciones WHERE personal_id = ? AND tienda = ? AND activo = 1",
+            (fusionar_con_personal_id, tienda),
+        ).fetchone()
+        if not ya_activa_aqui:
+            conn.execute(
+                "INSERT INTO personal_asignaciones (personal_id, tienda, fecha_inicio, activo) VALUES (?, ?, ?, 1)",
+                (fusionar_con_personal_id, tienda, fecha_inicio or None),
+            )
+        conn.commit()
+        conn.close()
+        return {"personal_id": fusionar_con_personal_id, "fusionado": True}
+
+    if not confirmar_duplicado:
+        duplicados = _buscar_posibles_duplicados(conn, tienda, nombre_canonico, variantes)
+        if duplicados:
+            conn.close()
+            raise PersonalDuplicadoError(duplicados)
+
     cur = conn.execute(
         "INSERT INTO personal (nombre_canonico, variantes) VALUES (?, ?)",
         (nombre_canonico, json.dumps(variantes, ensure_ascii=False)),
@@ -190,7 +263,8 @@ def actualizar_personal(personal_id, nombre_canonico, variantes):
     conn.close()
 
 
-def dar_salida(asignacion_id, fecha, tipo, tienda_destino=None):
+def dar_salida(asignacion_id, fecha, tipo, tienda_destino=None,
+                confirmar_duplicado=False, fusionar_con_personal_id=None):
     if tipo not in ("baja", "traslado"):
         raise PersonalError("Tipo de salida no válido")
     fecha = (fecha or "").strip()
@@ -208,6 +282,7 @@ def dar_salida(asignacion_id, fecha, tipo, tienda_destino=None):
         conn.close()
         raise PersonalError("Esa persona ya no está activa en esa tienda")
 
+    destino_existente = None
     if tipo == "traslado":
         tienda_destino = (tienda_destino or "").strip()
         if not tienda_destino:
@@ -217,20 +292,111 @@ def dar_salida(asignacion_id, fecha, tipo, tienda_destino=None):
             conn.close()
             raise PersonalError("La tienda de destino tiene que ser distinta de la actual")
 
+        persona = conn.execute(
+            "SELECT nombre_canonico, variantes FROM personal WHERE id = ?", (asignacion["personal_id"],)
+        ).fetchone()
+
+        if fusionar_con_personal_id:
+            destino_existente = conn.execute(
+                "SELECT id, variantes FROM personal WHERE id = ?", (fusionar_con_personal_id,)
+            ).fetchone()
+            if not destino_existente:
+                conn.close()
+                raise PersonalError("La persona con la que fusionar ya no existe")
+        elif not confirmar_duplicado:
+            # Al trasladarla, ¿ya hay alguien con ese nombre en la tienda de
+            # destino? (el caso que motivó esto: "Pilar" ya existía en
+            # Plenilunio y al trasladar a otra "Pilar"/"Maria Pilar" desde
+            # otra tienda se creaba una ficha aparte, partiendo en dos las
+            # menciones de la misma persona en vez de sumarlas en una sola).
+            duplicados = _buscar_posibles_duplicados(conn, tienda_destino, persona["nombre_canonico"], json.loads(persona["variantes"]))
+            if duplicados:
+                conn.close()
+                raise PersonalDuplicadoError(duplicados)
+
     conn.execute(
         "UPDATE personal_asignaciones SET fecha_fin = ?, activo = 0, motivo_fin = ? WHERE id = ?",
         (fecha, tipo, asignacion_id),
     )
+
     nueva_asignacion_id = None
     if tipo == "traslado":
-        cur = conn.execute(
-            "INSERT INTO personal_asignaciones (personal_id, tienda, fecha_inicio, activo) VALUES (?, ?, ?, 1)",
-            (asignacion["personal_id"], tienda_destino, fecha),
-        )
-        nueva_asignacion_id = cur.lastrowid
+        personal_id_destino = asignacion["personal_id"]
+        crear_asignacion_destino = True
+        if fusionar_con_personal_id:
+            variantes_unidas = _normalizar_variantes(json.loads(destino_existente["variantes"]) + json.loads(persona["variantes"]))
+            conn.execute(
+                "UPDATE personal SET variantes = ? WHERE id = ?",
+                (json.dumps(variantes_unidas, ensure_ascii=False), fusionar_con_personal_id),
+            )
+            personal_id_destino = fusionar_con_personal_id
+            # Si ya tenía una asignación activa ahí (el caso normal: por eso
+            # se detectó como duplicado) no se crea otra encima.
+            ya_activa_aqui = conn.execute(
+                "SELECT 1 FROM personal_asignaciones WHERE personal_id = ? AND tienda = ? AND activo = 1",
+                (fusionar_con_personal_id, tienda_destino),
+            ).fetchone()
+            crear_asignacion_destino = not ya_activa_aqui
+        if crear_asignacion_destino:
+            cur = conn.execute(
+                "INSERT INTO personal_asignaciones (personal_id, tienda, fecha_inicio, activo) VALUES (?, ?, ?, 1)",
+                (personal_id_destino, tienda_destino, fecha),
+            )
+            nueva_asignacion_id = cur.lastrowid
+
     conn.commit()
     conn.close()
     return {"ok": True, "nueva_asignacion_id": nueva_asignacion_id}
+
+
+def fusionar_personal(personal_id_origen, personal_id_destino):
+    """Une dos fichas que resultan ser la misma persona (p.ej. dadas de alta
+    por separado antes de que existiera la detección automática de
+    duplicados): todo el historial de asignaciones de `origen` pasa a
+    `destino`, sus variantes se unen, y la ficha `origen` (ya sin
+    asignaciones) se borra."""
+    if personal_id_origen == personal_id_destino:
+        raise PersonalError("No se puede fusionar una persona consigo misma")
+
+    conn = get_connection()
+    origen = conn.execute("SELECT id, variantes FROM personal WHERE id = ?", (personal_id_origen,)).fetchone()
+    destino = conn.execute("SELECT id, variantes FROM personal WHERE id = ?", (personal_id_destino,)).fetchone()
+    if not origen or not destino:
+        conn.close()
+        raise PersonalError("Alguna de las dos personas ya no existe")
+
+    variantes_unidas = _normalizar_variantes(json.loads(destino["variantes"]) + json.loads(origen["variantes"]))
+    conn.execute(
+        "UPDATE personal SET variantes = ? WHERE id = ?",
+        (json.dumps(variantes_unidas, ensure_ascii=False), personal_id_destino),
+    )
+
+    # Si origen y destino tienen las dos una asignación ACTIVA en la misma
+    # tienda (el caso típico: por eso se detectaron como la misma persona),
+    # reasignar sin más dejaría dos filas activas de destino en esa tienda.
+    # Se cierra la de origen (como si fuera la que "se traslada" a la ficha
+    # de destino) en vez de dejarla activa por duplicado.
+    tiendas_activas_destino = {
+        row["tienda"] for row in conn.execute(
+            "SELECT tienda FROM personal_asignaciones WHERE personal_id = ? AND activo = 1", (personal_id_destino,)
+        ).fetchall()
+    }
+    asignaciones_origen = conn.execute(
+        "SELECT id, tienda, activo FROM personal_asignaciones WHERE personal_id = ?", (personal_id_origen,)
+    ).fetchall()
+    hoy = datetime.date.today().isoformat()
+    for a in asignaciones_origen:
+        if a["activo"] and a["tienda"] in tiendas_activas_destino:
+            conn.execute(
+                "UPDATE personal_asignaciones SET personal_id = ?, activo = 0, fecha_fin = ?, motivo_fin = 'fusion' WHERE id = ?",
+                (personal_id_destino, hoy, a["id"]),
+            )
+        else:
+            conn.execute("UPDATE personal_asignaciones SET personal_id = ? WHERE id = ?", (personal_id_destino, a["id"]))
+
+    conn.execute("DELETE FROM personal WHERE id = ?", (personal_id_origen,))
+    conn.commit()
+    conn.close()
 
 
 def eliminar_personal(personal_id):
