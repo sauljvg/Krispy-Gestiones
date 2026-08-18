@@ -26,9 +26,12 @@
   .hoja-tab { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary); cursor: pointer; font-size: 13px; }
   .hoja-tab.active { background: var(--acento); color: #fff; border-color: var(--acento); }
   .filtros-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 14px 0; }
+  .filtros-row .campo { flex: 1 1 120px; min-width: 100px; }
+  .filtros-row .campo.campo-ancho { flex: 1.6 1 170px; }
+  .filtros-row .campo.campo-boton { flex: 0 0 auto; }
   .filtros-row .campo label { display: block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; }
   .filtros-row input, .filtros-row select {
-    padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border);
+    width: 100%; box-sizing: border-box; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border);
     background: var(--surface-page); color: var(--text-primary); font-size: 13px;
   }
   .compartir-bar {
@@ -153,7 +156,7 @@
       </div>
 
       <div class="filtros-row">
-        <div class="campo">
+        <div class="campo campo-ancho">
           <label for="f-buscar">Buscar</label>
           <input type="text" id="f-buscar" placeholder="Nombre, correo, texto…">
         </div>
@@ -180,14 +183,15 @@
           <label for="f-filtro-aptos">Aptos</label>
           <select id="f-filtro-aptos">
             <option value="todos">Todos</option>
-            <option value="excluir_no_aptos">Excluir "No aptos"</option>
-            <option value="solo_no_aptos">Solo "No aptos"</option>
+            <option value="excluir_no_aptos">Aptos</option>
+            <option value="solo_no_aptos">No Aptos</option>
           </select>
         </div>
-        <div class="campo">
+        <div class="campo campo-boton">
+          <label>&nbsp;</label>
           <button type="button" id="btn-limpiar-filtros" class="btn btn-ghost">✕ Limpiar</button>
         </div>
-        <div class="campo columnas-wrap">
+        <div class="campo campo-boton columnas-wrap">
           <label>&nbsp;</label>
           <button type="button" id="btn-columnas" class="btn btn-ghost">⚏ Columnas</button>
           <div class="columnas-panel" id="columnas-panel">
