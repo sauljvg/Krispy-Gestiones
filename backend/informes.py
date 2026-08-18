@@ -615,11 +615,26 @@ def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=N
     compartidos_por_respuesta = {}
     if ids_pagina:
         placeholders = ",".join("?" * len(ids_pagina))
+        # Unión de los dos caminos de compartir, igual que
+        # reclutamiento._compartidos_por_candidato -- antes esto solo miraba
+        # informe_compartidos y se dejaba fuera a quien se hubiera compartido
+        # como "directo" desde Reclutamiento (candidato_compartidos), así que
+        # el sombreado verde y el aviso de "ya compartido" de Informes iban
+        # por debajo de lo que de verdad había (se veían menos filas
+        # compartidas aquí que en Reclutamiento, que sí unía las dos).
         for r in conn.execute(f"""
-            SELECT ic.respuesta_id AS respuesta_id, u.nombre AS usuario_nombre
-            FROM informe_compartidos ic JOIN usuarios u ON u.id = ic.usuario_id
-            WHERE ic.respuesta_id IN ({placeholders})
-        """, ids_pagina).fetchall():
+            SELECT respuesta_id, usuario_nombre FROM (
+                SELECT ic.respuesta_id AS respuesta_id, u.nombre AS usuario_nombre
+                FROM informe_compartidos ic JOIN usuarios u ON u.id = ic.usuario_id
+                WHERE ic.respuesta_id IN ({placeholders})
+                UNION
+                SELECT cand.respuesta_id AS respuesta_id, u.nombre AS usuario_nombre
+                FROM candidatos cand
+                JOIN candidato_compartidos cc ON cc.candidato_id = cand.id
+                JOIN usuarios u ON u.id = cc.usuario_id
+                WHERE cand.respuesta_id IN ({placeholders})
+            )
+        """, ids_pagina + ids_pagina).fetchall():
             compartidos_por_respuesta.setdefault(r["respuesta_id"], []).append(r["usuario_nombre"])
     conn.close()
 
