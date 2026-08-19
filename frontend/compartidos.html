@@ -33,18 +33,6 @@
   .tanda-meta { color: var(--text-secondary); font-size: 12px; }
   .tanda-body { padding: 4px 18px 14px; }
   .btn-eliminar-grupo { display: block; margin: 0 0 10px; font-size: 12px; color: var(--status-critical); }
-  .candidato-card { background: var(--surface-page); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 12px; }
-  .candidato-card:last-child { margin-bottom: 0; }
-  .candidato-card h3 { margin: 0 0 4px; font-size: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .candidato-meta { color: var(--text-secondary); font-size: 12px; margin-bottom: 12px; }
-  .candidato-datos { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 16px; font-size: 13px; }
-  .candidato-datos .campo-nombre { color: var(--text-muted); font-size: 11px; }
-  .candidato-acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-  .candidato-notas { margin-top: 10px; }
-  .candidato-notas textarea {
-    width: 100%; min-height: 44px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
-    background: var(--surface-1); color: var(--text-primary); font-size: 13px; font-family: inherit; box-sizing: border-box;
-  }
 
   .badge-estado { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
   .badge-pendiente { background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-secondary); }
@@ -147,6 +135,7 @@
   .candidato-mini-test-estado.test-respondido { color: var(--status-good); }
   .candidato-mini-test-estado.test-pendiente { color: var(--text-secondary); }
   .candidato-mini-contacto-fila { margin-top: 6px; }
+  .candidato-mini-acciones { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
   .candidato-mini-contacto-select {
     font-size: 11px; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--border);
     background: var(--surface-page); color: var(--text-secondary);

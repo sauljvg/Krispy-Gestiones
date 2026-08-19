@@ -192,11 +192,6 @@ function resultadoBadgeHTML(resultado) {
   return `<span class="badge-resultado ${clase}">${escapeHTML(resultado)}</span>`;
 }
 
-function estadoSelectHTML(candidatoId, estado) {
-  const opciones = ESTADOS.map((e) => `<option value="${e}" ${e === (estado || "pendiente") ? "selected" : ""}>${ESTADO_LABELS[e]}</option>`).join("");
-  return `<select class="candidato-estado-select" data-candidato-id="${candidatoId}">${opciones}</select>`;
-}
-
 const MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
 // "2026-07-22 13:44:24" -> "22 jul 2026, 13:44"
@@ -263,21 +258,30 @@ async function actualizarCandidatoInline(candidatoId, campos) {
   });
 }
 
+// Misma tarjeta compacta que "Base de candidatos" (candidatoMiniCardHTML) --
+// antes esta vista tenía su propia tarjeta grande con TODOS los campos del
+// test volcados (candidatoCardHTML), muy distinta de cómo se ve el resto de
+// Reclutamiento; ahora es la misma tarjeta en todos lados, con solo lo que
+// esta vista necesita de más (Ver CV, Dejar de compartir) como botones
+// pequeños al pie. El detalle completo del test se sigue viendo desde "Ver
+// ficha completa" (📋 Respuestas del test), no hace falta duplicarlo aquí.
 function candidatoCardHTML(item, permitirDejarDeCompartir, permitirSeleccion) {
-  const entries = Object.entries(item.datos).filter(([k]) => k.toLowerCase() !== "nombre");
-  const cvBtn = item.tiene_cv
-    ? `<a href="${AUTH_API_BASE}/informes/respuestas/${item.respuesta_id}/cv" target="_blank" rel="noopener" class="btn btn-primary">📄 Ver CV</a>`
-    : `<span class="staff-hint">Sin CV subido todavía.</span>`;
   const candId = item.candidato_id;
-  const whatsappBtn = item.telefono
-    ? `<a class="btn btn-ghost" href="https://wa.me/${soloDigitos(item.telefono)}" target="_blank" rel="noopener">💬 WhatsApp</a>`
+  const nombre = nombreCandidato(item.datos);
+  const vacante = vacantesTodasCache.find((v) => v.id === item.vacante_id);
+  const vacanteTxt = vacante ? `📁 ${vacante.puesto}${vacante.centro ? ` · ${vacante.centro}` : ""}` : "Sin vacante asignada";
+  const linea2 = [item.telefono, item.email].filter(Boolean).join(" · ");
+  const checkboxHTML = permitirSeleccion && candId
+    ? `<input type="checkbox" class="candidato-compartido-check" data-candidato-id="${candId}" ${compartidosSeleccionadosIds.has(candId) ? "checked" : ""} style="margin-right:4px;">`
     : "";
-  const estadoHTML = candId ? estadoSelectHTML(candId, item.estado) : "";
-  const notasHTML = candId
-    ? `<div class="candidato-notas"><textarea class="candidato-notas-input" data-candidato-id="${candId}" placeholder="Notas sobre este candidato...">${escapeHTML(item.notas || "")}</textarea></div>`
+  const cvBtn = item.tiene_cv
+    ? `<a href="${AUTH_API_BASE}/informes/respuestas/${item.respuesta_id}/cv" target="_blank" rel="noopener" class="btn-mini">📄 Ver CV</a>`
+    : "";
+  const whatsappBtn = item.telefono
+    ? `<a class="btn-mini" href="https://wa.me/${soloDigitos(item.telefono)}" target="_blank" rel="noopener">💬 WhatsApp</a>`
     : "";
   const fichaBtn = candId
-    ? `<button type="button" class="btn btn-ghost candidato-abrir-ficha" data-candidato-id="${candId}">📋 Ver ficha completa</button>`
+    ? `<button type="button" class="btn-mini candidato-abrir-ficha" data-candidato-id="${candId}">📋 Ver ficha completa</button>`
     : "";
   // Solo tiene sentido en "Compartidos por ti" -- deja de compartir ESTE
   // candidato con ESTE destinatario en concreto (no borra el candidato ni
@@ -286,24 +290,22 @@ function candidatoCardHTML(item, permitirDejarDeCompartir, permitirSeleccion) {
   // compartido_id numérico) y otro es un "compartir directo" desde
   // Reclutamiento (candidato_compartidos, compartido_id "candidato-N").
   const dejarDeCompartirBtn = permitirDejarDeCompartir
-    ? `<button type="button" class="btn btn-ghost btn-dejar-compartir"
+    ? `<button type="button" class="btn-mini btn-dejar-compartir"
          data-directo="${String(item.compartido_id).startsWith("candidato-") ? "1" : "0"}"
          data-candidato-id="${candId}" data-respuesta-id="${item.respuesta_id ?? ""}"
          data-destinatario-id="${item.destinatario_id ?? ""}">✕ Dejar de compartir</button>`
     : "";
-  const metaTxt = item.hoja ? `${item.tipo_nombre} · hoja "${item.hoja}"` : item.tipo_nombre;
-  const checkboxHTML = permitirSeleccion && candId
-    ? `<input type="checkbox" class="candidato-compartido-check" data-candidato-id="${candId}" ${compartidosSeleccionadosIds.has(candId) ? "checked" : ""} style="margin-right:6px;">`
-    : "";
   return `
-    <div class="candidato-card">
-      <h3>${checkboxHTML}${escapeHTML(nombreCandidato(item.datos))} ${estadoHTML} ${resultadoBadgeHTML(item.test_resultado)}</h3>
-      <p class="candidato-meta">${escapeHTML(metaTxt)}</p>
-      <div class="candidato-datos">
-        ${entries.map(([k, v]) => `<div><div class="campo-nombre">${escapeHTML(k)}</div><div>${escapeHTML(v)}</div></div>`).join("")}
+    <div class="candidato-mini-card" data-candidato-id="${candId || ""}">
+      <div class="candidato-mini-card-fila">
+        <span class="candidato-mini-foto candidato-mini-foto-vacia">${escapeHTML((nombre || "?").trim()[0] || "?")}</span>
+        <div class="candidato-mini-card-info">
+          <h4>${checkboxHTML}${escapeHTML(nombre)} ${item.estado ? estadoBadgeHTML(item.estado) : ""} ${resultadoBadgeHTML(item.test_resultado)}</h4>
+          <p>${escapeHTML(linea2)}</p>
+          <p style="color:var(--text-muted);">${escapeHTML(vacanteTxt)}</p>
+          <div class="candidato-mini-acciones">${fichaBtn}${cvBtn}${whatsappBtn}${dejarDeCompartirBtn}</div>
+        </div>
       </div>
-      <div class="candidato-acciones">${fichaBtn}${cvBtn}${whatsappBtn}${dejarDeCompartirBtn}</div>
-      ${notasHTML}
     </div>`;
 }
 
@@ -390,12 +392,6 @@ async function eliminarGrupoClick(btn, grupo) {
 }
 
 function wireCompartidosInteractivos(wrap) {
-  wrap.querySelectorAll(".candidato-estado-select").forEach((el) => {
-    el.addEventListener("change", () => actualizarCandidatoInline(el.dataset.candidatoId, { estado: el.value }));
-  });
-  wrap.querySelectorAll(".candidato-notas-input").forEach((el) => {
-    el.addEventListener("blur", () => actualizarCandidatoInline(el.dataset.candidatoId, { notas: el.value }));
-  });
   wrap.querySelectorAll(".candidato-abrir-ficha").forEach((el) => {
     el.addEventListener("click", () => abrirEdicionCandidato(el.dataset.candidatoId));
   });
@@ -466,7 +462,7 @@ function vacanteCompartidaHTML(vacante, { soloAptos = false, colapsable = false 
   const estadoBadge = `<span class="badge-vacante-estado badge-${vacante.estado}">${VACANTE_ESTADO_LABELS[vacante.estado]}</span>`;
   const meta = `👥 ${gerentesTxt} · ${n} candidato${n === 1 ? "" : "s"}${ocultosTxt}`;
   const cuerpo = candidatosVisibles.length
-    ? `<div class="candidatos-grid">${candidatosVisibles.map((c) => candidatoMiniCardHTML(c, { ocultarVacante: true })).join("")}</div>`
+    ? `<div class="candidatos-grid candidatos-lista">${candidatosVisibles.map((c) => candidatoMiniCardHTML(c, { ocultarVacante: true })).join("")}</div>`
     : `<p class="staff-hint">Ningún candidato apto en esta solicitud todavía.</p>`;
   if (colapsable) {
     const clave = `vacsol-${vacante.id}`;
@@ -509,7 +505,7 @@ async function loadCompartidos() {
   // lado "conmigo" (recibido); en "por ti" (lo que tú compartiste) se sigue
   // viendo todo, porque ahí sí hace falta gestionar también a los descartados.
   const conmigoAptos = conmigo.filter((it) => !(it.test_resultado && it.test_resultado.includes("No apto")));
-  const gruposConmigo = agruparPorTanda(conmigoAptos, "compartido_por", false);
+  const gruposConmigo = agruparPorTanda(conmigoAptos, "compartido_por", true);
   const gruposPorMi = agruparPorTanda(porMi, "destinatario_nombre", true);
   compartidosPorMiCache = porMi;
   gruposPorMiCache = gruposPorMi;
