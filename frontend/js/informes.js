@@ -366,12 +366,12 @@ function renderTable() {
   thead.innerHTML =
     `<th><input type="checkbox" id="check-all"></th>` +
     columnasVisibles.map((c) => `<th title="${escapeHTML(c)}" draggable="true" data-col="${escapeHTML(c)}">${escapeHTML(c)}</th>`).join("") +
-    `<th>Compartido con</th><th>CV</th>`;
+    `<th>Vacante</th><th>Compartido con</th><th>CV</th>`;
   wireDragColumnas(thead);
 
   const tbody = document.getElementById("tipo-detail-tbody");
   if (data.respuestas.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="${columnasVisibles.length + 3}">Todavía no hay respuestas importadas. Usa "Importar Excel" arriba.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${columnasVisibles.length + 4}">Todavía no hay respuestas importadas. Usa "Importar Excel" arriba.</td></tr>`;
   } else {
     tbody.innerHTML = data.respuestas
       .map((r) => {
@@ -381,6 +381,11 @@ function renderTable() {
           : "";
         const compartidoCon = r.compartido_con || [];
         const compartida = compartidoCon.length > 0;
+        const gerentes = r.vacante_gerentes || [];
+        const vacanteTitle = gerentes.length ? `Responsable${gerentes.length === 1 ? "" : "s"}: ${gerentes.join(", ")}` : "Sin responsable asignado todavía";
+        const vacanteHTML = r.vacante_nombre
+          ? `<span title="${escapeHTML(vacanteTitle)}">📁 ${escapeHTML(r.vacante_nombre)}${gerentes.length ? ` · 👤 ${escapeHTML(gerentes.join(", "))}` : ""}</span>`
+          : `<span class="staff-hint">—</span>`;
         return `<tr data-id="${r.id}" class="${compartida ? "fila-compartida" : ""}">
           <td><input type="checkbox" class="row-check" data-id="${r.id}" ${checked}></td>
           ${columnasVisibles.map((c) => {
@@ -388,6 +393,7 @@ function renderTable() {
             const mostrar = data.columnas_fecha.includes(c) ? formatFechaCorta(valor) : valor;
             return `<td title="${escapeHTML(valor)}">${escapeHTML(mostrar)}</td>`;
           }).join("")}
+          <td class="col-vacante">${vacanteHTML}</td>
           <td class="col-compartido-con" title="${escapeHTML(compartidoCon.join(", "))}">${compartida ? `🔗 ${escapeHTML(compartidoCon.join(", "))}` : ""}</td>
           <td>
             ${cvBtn}

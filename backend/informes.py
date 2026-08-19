@@ -636,6 +636,31 @@ def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=N
             )
         """, ids_pagina + ids_pagina).fetchall():
             compartidos_por_respuesta.setdefault(r["respuesta_id"], []).append(r["usuario_nombre"])
+
+    # Vacante del candidato ligado a esta respuesta (si lo hay) -- para saber
+    # de un vistazo a quién compartir sin adivinar; si la vacante ya tiene
+    # responsables asignados (compartir_vacante), no hace falta compartir el
+    # candidato individualmente porque ya tienen acceso a todos los suyos.
+    vacante_por_respuesta = {}
+    if ids_pagina:
+        placeholders = ",".join("?" * len(ids_pagina))
+        for r in conn.execute(f"""
+            SELECT cand.respuesta_id AS respuesta_id, v.id AS vacante_id,
+                   v.puesto AS vacante_puesto, v.centro AS vacante_centro,
+                   GROUP_CONCAT(DISTINCT u.nombre) AS gerentes
+            FROM candidatos cand
+            JOIN vacantes v ON v.id = cand.vacante_id
+            LEFT JOIN vacante_compartidos vc ON vc.vacante_id = v.id
+            LEFT JOIN usuarios u ON u.id = vc.usuario_id
+            WHERE cand.respuesta_id IN ({placeholders})
+            GROUP BY cand.respuesta_id
+        """, ids_pagina).fetchall():
+            nombre_vacante = r["vacante_puesto"] + (f" · {r['vacante_centro']}" if r["vacante_centro"] else "")
+            vacante_por_respuesta[r["respuesta_id"]] = {
+                "vacante_id": r["vacante_id"],
+                "vacante_nombre": nombre_vacante,
+                "vacante_gerentes": r["gerentes"].split(",") if r["gerentes"] else [],
+            }
     conn.close()
 
     respuestas = []
@@ -647,6 +672,7 @@ def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=N
             if k not in seen:
                 seen.add(k)
                 columnas.append(k)
+        vacante_info = vacante_por_respuesta.get(row["id"], {"vacante_id": None, "vacante_nombre": None, "vacante_gerentes": []})
         respuestas.append({
             "id": row["id"],
             "creado_en": row["creado_en"],
@@ -654,6 +680,7 @@ def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=N
             "tiene_cv": row["cv_ruta"] is not None,
             "cv_nombre": row["cv_nombre_original"],
             "compartido_con": compartidos_por_respuesta.get(row["id"], []),
+            **vacante_info,
         })
 
     return {
