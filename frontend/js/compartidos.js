@@ -44,6 +44,21 @@ function soloDigitos(tel) {
 let campanaCandidatos = [];
 let campanaTestsAbiertos = [];
 let campanaEnlaceTest = "";
+let campanaTestIdSeleccionado = null;
+
+// Marca "invitado al test" en el momento real de intentar el envío (clic en
+// Enviar / Abrir correo) en vez de al elegir el test en el desplegable --
+// así no depende de que el admin vuelva a tocar el select en cada tanda de
+// envíos (si no lo toca, antes se quedaba sin marcar aunque sí mandara el
+// mensaje con el enlace ya escrito de antes).
+function marcarInvitadoTest(candidatoIds, encuestaId) {
+  if (!encuestaId || !candidatoIds.length) return;
+  fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/marcar-invitados-test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ candidato_ids: candidatoIds, encuesta_id: encuestaId }),
+  });
+}
 let usuarioActual = null; // se fija en initBaseCandidatos -- para firmar el email con el nombre de quien lo envía
 
 async function cargarTestsAbiertosCampana() {
@@ -80,7 +95,7 @@ function candidatoWhatsappRowHTML(c, i) {
         <p>${escapeHTML(c.telefono || "Sin teléfono guardado")}</p>
       </div>
       ${tieneTelefono
-        ? `<a class="btn btn-ghost btn-whatsapp-campana" data-idx="${i}" target="_blank" rel="noopener">💬 Enviar</a>`
+        ? `<a class="btn btn-ghost btn-whatsapp-campana" data-idx="${i}" data-candidato-id="${c.id}" target="_blank" rel="noopener">💬 Enviar</a>`
         : ""}
     </div>`;
 }
@@ -99,6 +114,7 @@ function actualizarEnlacesCampana() {
 function onCambiaTestCampana() {
   const select = document.getElementById("campana-test");
   campanaEnlaceTest = select.value ? `${location.origin}/encuesta.html?slug=${select.value}` : "";
+  campanaTestIdSeleccionado = select.value ? Number(select.value) : null;
   const textarea = document.getElementById("campana-mensaje");
   // Primera vez que se elige un test en este envío: si el mensaje todavía no
   // menciona el enlace, se añade solo para que quede a la vista — si el
@@ -107,18 +123,6 @@ function onCambiaTestCampana() {
     textarea.value = `${textarea.value}\n\n{enlace}`;
   }
   actualizarEnlacesCampana();
-  // No hay forma de saber si el mensaje se llega a enviar de verdad (es un
-  // enlace wa.me que el propio usuario confirma en WhatsApp) -- elegir un
-  // test aquí es la mejor aproximación disponible de "se intentó contactar
-  // a este grupo", y es lo que permite luego el filtro "Recordatorio a
-  // pendientes" (invitado pero sin respuesta_id todavía).
-  if (select.value) {
-    fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/marcar-invitados-test`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ candidato_ids: campanaCandidatos.map((c) => c.id), encuesta_id: Number(select.value) }),
-    });
-  }
 }
 
 function cerrarCampanaWhatsapp() {
@@ -130,6 +134,7 @@ function cerrarCampanaWhatsapp() {
 async function abrirCampanaWhatsapp(candidatos) {
   campanaCandidatos = candidatos;
   campanaEnlaceTest = "";
+  campanaTestIdSeleccionado = null;
   campanaTestsAbiertos = await cargarTestsAbiertosCampana();
   const conTelefono = candidatos.filter((c) => c.telefono).length;
   const wrap = document.getElementById("campana-whatsapp-wrap");
@@ -155,6 +160,12 @@ async function abrirCampanaWhatsapp(candidatos) {
   document.getElementById("btn-cerrar-campana").addEventListener("click", cerrarCampanaWhatsapp);
   const testSelect = document.getElementById("campana-test");
   if (testSelect) testSelect.addEventListener("change", onCambiaTestCampana);
+  // El marcado de "invitado al test" se dispara en el clic real de Enviar
+  // (no al elegir el test arriba) para que quede registrado sin importar
+  // si el admin reselecciona el desplegable en cada tanda de envíos.
+  wrap.querySelectorAll(".btn-whatsapp-campana").forEach((btn) => {
+    btn.addEventListener("click", () => marcarInvitadoTest([Number(btn.dataset.candidatoId)], campanaTestIdSeleccionado));
+  });
   actualizarEnlacesCampana();
   wrap.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -318,7 +329,7 @@ function grupoHTML(grupo, etiquetaOtro, abierta, permitirDejarDeCompartir, permi
     </details>`;
 }
 
-function seccionHTML(seccionId, titulo, grupos, etiquetaOtro, vacioMsg, permitirDejarDeCompartir, permitirSeleccion) {
+function seccionHTML(seccionId, titulo, grupos, etiquetaOtro, vacioMsg, permitirDejarDeCompartir, permitirSeleccion, abrirPorDefecto = true) {
   // "Unir a la misma solicitud" solo tiene sentido en "Compartidos por ti"
   // -- para el caso de compartir el mismo grupo de candidatos en tandas
   // distintas (p.ej. unos a las 8:46 y otros a las 8:59 al mismo gerente) y
@@ -335,11 +346,14 @@ function seccionHTML(seccionId, titulo, grupos, etiquetaOtro, vacioMsg, permitir
   if (grupos.length === 0) {
     return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2>${barraSeleccion}<p class="staff-hint">${escapeHTML(vacioMsg)}</p>`;
   }
-  // La primera vez que se pinta esta sección (por sesión de página), se dejan
-  // abiertas todas las tandas -- así se ve todo de un vistazo, y a partir de
-  // ahí se respeta lo que el usuario haya colapsado/expandido a mano.
+  // La primera vez que se pinta esta sección (por sesión de página), se
+  // aplica su apertura por defecto -- a partir de ahí se respeta lo que el
+  // usuario haya colapsado/expandido a mano. "Compartidos por ti" arranca
+  // siempre colapsada (puede ser una lista muy larga, ruido para quien solo
+  // quiere abrir una tanda concreta); "Compartidos conmigo" sigue abriendo
+  // todo de entrada porque ya viene filtrada a solo aptos.
   if (!tandasSeccionInicializada.has(seccionId)) {
-    grupos.forEach((g) => tandasAbiertas.add(g.clave));
+    if (abrirPorDefecto) grupos.forEach((g) => tandasAbiertas.add(g.clave));
     tandasSeccionInicializada.add(seccionId);
   }
   return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2>${barraSeleccion}` +
@@ -434,22 +448,50 @@ function wireCompartidosInteractivos(wrap) {
 // compartido individualmente -- ver reclutamiento.compartir_vacante. Se
 // muestra como una sola tarjeta con todos sus candidatos dentro, reusando
 // candidatoMiniCardHTML (mismo formato que la Base de candidatos).
-function vacanteCompartidaHTML(vacante) {
+// soloAptos: para "Solicitudes compartidas contigo" (vista del gerente) --
+// no le interesa ver a quien ya quedó descartado, así que se oculta y solo
+// queda el recuento real de a cuántos sigue teniendo que contactar.
+// colapsable: para "Solicitudes que has compartido" (vista de quien
+// comparte), cada tarjeta es un <details> que arranca cerrado -- ver
+// abrirPorDefecto en seccionHTML, mismo motivo (evitar página infinita).
+function vacanteCompartidaHTML(vacante, { soloAptos = false, colapsable = false } = {}) {
   const gerentesTxt = (vacante.gerentes || []).map((g) => escapeHTML(g.nombre)).join(", ") || "—";
-  const n = vacante.candidatos.length;
+  const candidatosVisibles = soloAptos
+    ? vacante.candidatos.filter((c) => !(c.test_resultado && c.test_resultado.includes("No apto")))
+    : vacante.candidatos;
+  const ocultos = vacante.candidatos.length - candidatosVisibles.length;
+  const ocultosTxt = soloAptos && ocultos > 0 ? ` (${ocultos} no apto${ocultos === 1 ? "" : "s"} oculto${ocultos === 1 ? "" : "s"})` : "";
+  const n = candidatosVisibles.length;
+  const titulo = `📁 ${escapeHTML(vacante.puesto)}${vacante.centro ? ` · ${escapeHTML(vacante.centro)}` : ""}`;
+  const estadoBadge = `<span class="badge-vacante-estado badge-${vacante.estado}">${VACANTE_ESTADO_LABELS[vacante.estado]}</span>`;
+  const meta = `👥 ${gerentesTxt} · ${n} candidato${n === 1 ? "" : "s"}${ocultosTxt}`;
+  const cuerpo = candidatosVisibles.length
+    ? `<div class="candidatos-grid">${candidatosVisibles.map((c) => candidatoMiniCardHTML(c, { ocultarVacante: true })).join("")}</div>`
+    : `<p class="staff-hint">Ningún candidato apto en esta solicitud todavía.</p>`;
+  if (colapsable) {
+    const clave = `vacsol-${vacante.id}`;
+    return `
+      <details class="tanda" data-clave="${clave}" ${tandasAbiertas.has(clave) ? "open" : ""}>
+        <summary class="tanda-summary">
+          <span class="tanda-fecha">${titulo}</span> ${estadoBadge}
+          <span class="tanda-meta">${escapeHTML(meta)}</span>
+        </summary>
+        <div class="tanda-body">${cuerpo}</div>
+      </details>`;
+  }
   return `
     <div class="vacante-compartida-card">
-      <h3>📁 ${escapeHTML(vacante.puesto)}${vacante.centro ? ` · ${escapeHTML(vacante.centro)}` : ""} <span class="badge-vacante-estado badge-${vacante.estado}">${VACANTE_ESTADO_LABELS[vacante.estado]}</span></h3>
-      <p class="staff-hint">👥 Responsables: ${gerentesTxt} · ${n} candidato${n === 1 ? "" : "s"}</p>
-      <div class="candidatos-grid">${vacante.candidatos.map((c) => candidatoMiniCardHTML(c, { ocultarVacante: true })).join("")}</div>
+      <h3>${titulo} ${estadoBadge}</h3>
+      <p class="staff-hint">${escapeHTML(meta)}</p>
+      ${cuerpo}
     </div>`;
 }
 
-function vacantesCompartidasSeccionHTML(titulo, vacantes, vacioMsg) {
+function vacantesCompartidasSeccionHTML(titulo, vacantes, vacioMsg, opciones = {}) {
   if (vacantes.length === 0) {
     return vacioMsg ? `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2><p class="staff-hint">${escapeHTML(vacioMsg)}</p>` : "";
   }
-  return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2><div class="vacantes-compartidas-lista">${vacantes.map(vacanteCompartidaHTML).join("")}</div>`;
+  return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2><div class="vacantes-compartidas-lista">${vacantes.map((v) => vacanteCompartidaHTML(v, opciones)).join("")}</div>`;
 }
 
 async function loadCompartidos() {
@@ -461,7 +503,13 @@ async function loadCompartidos() {
     fetch(`${AUTH_API_BASE}/reclutamiento/vacantes-compartidas-por-mi?empresa=${EMPRESA}`).then((r) => (r.ok ? r.json() : [])),
   ]);
 
-  const gruposConmigo = agruparPorTanda(conmigo, "compartido_por", false);
+  // A quien le comparten candidatos (típicamente un gerente de tienda) no le
+  // interesa ver a quien ya quedó descartado -- es ruido, lo que de verdad
+  // importa es a quién debe poder contactar. Se oculta "No apto" solo en el
+  // lado "conmigo" (recibido); en "por ti" (lo que tú compartiste) se sigue
+  // viendo todo, porque ahí sí hace falta gestionar también a los descartados.
+  const conmigoAptos = conmigo.filter((it) => !(it.test_resultado && it.test_resultado.includes("No apto")));
+  const gruposConmigo = agruparPorTanda(conmigoAptos, "compartido_por", false);
   const gruposPorMi = agruparPorTanda(porMi, "destinatario_nombre", true);
   compartidosPorMiCache = porMi;
   gruposPorMiCache = gruposPorMi;
@@ -469,8 +517,8 @@ async function loadCompartidos() {
   // Las vacantes compartidas van primero -- es la forma recomendada de ver
   // todo agrupado; los "Compartidos" sueltos por candidato (tandas) quedan
   // debajo, para candidatos que aún no se asignaron a ninguna solicitud.
-  let html = vacantesCompartidasSeccionHTML("Solicitudes compartidas contigo", vacantesConmigo, "");
-  html += vacantesCompartidasSeccionHTML("Solicitudes que has compartido", vacantesPorMi, "");
+  let html = vacantesCompartidasSeccionHTML("Solicitudes compartidas contigo", vacantesConmigo, "", { soloAptos: true });
+  html += vacantesCompartidasSeccionHTML("Solicitudes que has compartido", vacantesPorMi, "", { colapsable: true });
 
   html += seccionHTML(
     "conmigo",
@@ -484,8 +532,10 @@ async function loadCompartidos() {
 
   // La sección "Compartidos por ti" solo tiene sentido enseñarla si esta
   // persona ha compartido algo alguna vez (a un gerente no le aparecerá).
+  // Arranca colapsada -- para no convertir la pantalla en una página
+  // infinita cuando hay muchas tandas acumuladas.
   if (gruposPorMi.length > 0) {
-    html += seccionHTML("por-mi", "Compartidos por ti", gruposPorMi, "compartido con", "", true, true);
+    html += seccionHTML("por-mi", "Compartidos por ti", gruposPorMi, "compartido con", "", true, true, false);
   }
 
   wrap.innerHTML = html;
@@ -1482,7 +1532,7 @@ function actualizarBotonWhatsappSeleccionados() {
 }
 
 function seleccionarTodosCandidatos() {
-  ultimosCandidatosCargados.forEach((c) => candidatosSeleccionadosIds.add(c.id));
+  candidatosFiltradosPorApto().forEach((c) => candidatosSeleccionadosIds.add(c.id));
   actualizarBotonWhatsappSeleccionados();
   renderCandidatosGrid();
 }
@@ -1691,11 +1741,19 @@ async function renderCandidatosTabs() {
   });
 }
 
+function candidatosFiltradosPorApto() {
+  const filtro = document.getElementById("candidatos-filtro-apto").value;
+  if (!filtro) return ultimosCandidatosCargados;
+  if (filtro === "apto") return ultimosCandidatosCargados.filter((c) => c.test_resultado && !c.test_resultado.includes("No apto"));
+  return ultimosCandidatosCargados.filter((c) => c.test_resultado && c.test_resultado.includes("No apto"));
+}
+
 function renderCandidatosGrid() {
   const grid = document.getElementById("candidatos-grid");
-  grid.innerHTML = ultimosCandidatosCargados.length
-    ? ultimosCandidatosCargados.map(candidatoMiniCardHTML).join("")
-    : `<p class="staff-hint">Todavía no hay candidatos en la base de datos.</p>`;
+  const visibles = candidatosFiltradosPorApto();
+  grid.innerHTML = visibles.length
+    ? visibles.map(candidatoMiniCardHTML).join("")
+    : `<p class="staff-hint">${ultimosCandidatosCargados.length ? "Ningún candidato coincide con el filtro de aptos." : "Todavía no hay candidatos en la base de datos."}</p>`;
   grid.querySelectorAll(".candidato-mini-card").forEach((card) => {
     card.addEventListener("click", (e) => {
       if (e.target.closest(".candidato-mini-contacto-select")) return;
@@ -1760,6 +1818,7 @@ function abrirCampanaWhatsappSeleccionados() {
 let campanaEmailCandidatos = [];
 let campanaEmailTestsAbiertos = [];
 let campanaEmailEnlaceTest = "";
+let campanaEmailTestIdSeleccionado = null;
 
 function asuntoEmailPorDefecto() {
   return EMPRESA === "saona" ? "Proceso de Selección - SAONA" : "Proceso de Selección - Krispy Kreme España";
@@ -1795,13 +1854,7 @@ function campanaEmailTestSelectHTML() {
 function onCambiaTestCampanaEmail() {
   const select = document.getElementById("campana-email-test");
   campanaEmailEnlaceTest = select.value ? `${location.origin}/encuesta.html?slug=${select.value}` : "";
-  if (select.value) {
-    fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/marcar-invitados-test`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ candidato_ids: campanaEmailCandidatos.map((c) => c.id), encuesta_id: Number(select.value) }),
-    });
-  }
+  campanaEmailTestIdSeleccionado = select.value ? Number(select.value) : null;
 }
 
 function cerrarCampanaEmail() {
@@ -1815,6 +1868,7 @@ function confirmarAbrirEmail() {
   const cuerpo = document.getElementById("campana-email-cuerpo").value.replaceAll("{enlace}", campanaEmailEnlaceTest);
   const destinatarios = campanaEmailCandidatos.map((c) => c.email).join(",");
   window.location.href = `mailto:?bcc=${encodeURIComponent(destinatarios)}&subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+  marcarInvitadoTest(campanaEmailCandidatos.map((c) => c.id), campanaEmailTestIdSeleccionado);
   cerrarCampanaEmail();
 }
 
@@ -1829,6 +1883,7 @@ async function abrirCampanaEmail(candidatos) {
   }
   campanaEmailCandidatos = conEmail;
   campanaEmailEnlaceTest = "";
+  campanaEmailTestIdSeleccionado = null;
   campanaEmailTestsAbiertos = await cargarTestsAbiertosCampana();
   const wrap = document.getElementById("campana-email-wrap");
   wrap.innerHTML = `
@@ -1934,6 +1989,7 @@ async function initBaseCandidatos(user) {
     renderVacantesGrid();
     loadCandidatos();
   });
+  document.getElementById("candidatos-filtro-apto").addEventListener("change", renderCandidatosGrid);
   let buscarTimeout;
   document.getElementById("candidatos-buscar").addEventListener("input", () => {
     clearTimeout(buscarTimeout);
