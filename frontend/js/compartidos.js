@@ -1507,25 +1507,56 @@ async function previsualizarLote() {
   // extraídos (division_disponible), a cada uno se le adjunta solo SU
   // rango de páginas en vez del PDF de lote entero -- el rango detectado se
   // muestra editable por si falla en algún caso concreto.
+  // Contador aparte solo para los ENCONTRADOS (a los que de verdad se les
+  // va a hacer algo) -- así "empezar desde el nº 7" se corresponde con lo
+  // que el reclutador ve en pantalla, no con la posición en el PDF.
+  let numeroEncontrado = 0;
   resultadoWrap.innerHTML = `
     ${avisoExtraccionHTML(data.metodo, items.length, data.motivo_local)}
     <p class="staff-hint">${encontrados.length} coincidencia${encontrados.length === 1 ? "" : "s"} encontrada${encontrados.length === 1 ? "" : "s"} de ${items.length}${noEncontrados ? ` (${noEncontrados} sin ficha con ese nombre exacto -- no se les adjunta nada)` : ""}.
     ${data.division_disponible ? "Se ha detectado en qué páginas está cada uno -- se adjunta solo esa parte del PDF (puedes corregir el rango si hace falta)." : "No se pudo dividir el PDF de forma fiable -- se adjuntará el PDF completo a cada ficha encontrada, como antes."}</p>
+    ${encontrados.length ? `<div class="lote-saltar-fila">
+      <label class="staff-hint">Ya reextraje hasta el nº <input type="number" min="1" max="${encontrados.length}" id="lote-empezar-desde" style="width:52px;"> -- empezar desde ahí</label>
+      <button type="button" id="btn-lote-aplicar-desde" class="btn-mini">Aplicar</button>
+      <button type="button" id="btn-lote-marcar-todos" class="btn-mini">Marcar todos</button>
+    </div>` : ""}
     <ul class="lote-lista">
-      ${items.map((it, i) => `
-        <li class="${it.candidato_id ? "lote-ok" : "lote-sin-match"}">
-          ${it.candidato_id ? "✓" : "✗"} ${escapeHTML(it.nombre)}
-          ${it.candidato_id && data.division_disponible ? `
+      ${items.map((it, i) => {
+        if (!it.candidato_id) return `<li class="lote-sin-match">✗ ${escapeHTML(it.nombre)}</li>`;
+        numeroEncontrado++;
+        return `
+        <li class="lote-ok">
+          <label class="lote-ok-label">
+            <input type="checkbox" class="lote-check" data-idx="${i}" checked>
+            <span class="lote-ok-n">${numeroEncontrado}.</span> ${escapeHTML(it.nombre)}
+          </label>
+          ${data.division_disponible ? `
             <span class="lote-paginas">
               págs. <input type="number" min="1" class="lote-pagina-inicio" data-idx="${i}" value="${it.pagina_inicio}" style="width:44px;">
               a <input type="number" min="1" class="lote-pagina-fin" data-idx="${i}" value="${it.pagina_fin}" style="width:44px;">
             </span>` : ""}
-        </li>`).join("")}
+        </li>`;
+      }).join("")}
     </ul>
-    ${encontrados.length ? `<button type="button" id="btn-confirmar-lote" class="btn btn-primary">Adjuntar PDF a las ${encontrados.length} fichas encontradas</button>` : ""}
+    ${encontrados.length ? `<button type="button" id="btn-confirmar-lote" class="btn btn-primary">Adjuntar PDF a las fichas marcadas</button>` : ""}
     <div id="lote-progreso"></div>`;
   if (encontrados.length) {
     document.getElementById("btn-confirmar-lote").addEventListener("click", () => confirmarAdjuntarLote(items));
+    document.getElementById("btn-lote-marcar-todos").addEventListener("click", () => {
+      resultadoWrap.querySelectorAll(".lote-check").forEach((chk) => (chk.checked = true));
+    });
+    // Desmarca los primeros N-1 encontrados (ya reextraídos en una tanda
+    // anterior) y deja marcados desde el nº elegido en adelante -- para no
+    // tener que volver a gastar tiempo/cuota de IA repasando a quien ya
+    // quedó bien, si el lote se cortó a medias (cuota agotada, etc.).
+    document.getElementById("btn-lote-aplicar-desde").addEventListener("click", () => {
+      const desde = Number(document.getElementById("lote-empezar-desde").value) || 1;
+      let n = 0;
+      resultadoWrap.querySelectorAll(".lote-ok").forEach((li) => {
+        n++;
+        li.querySelector(".lote-check").checked = n >= desde;
+      });
+    });
   }
 }
 
@@ -1534,9 +1565,14 @@ async function confirmarAdjuntarLote(items) {
   const progreso = document.getElementById("lote-progreso");
   btn.disabled = true;
   progreso.textContent = "Recortando y adjuntando...";
+  // Solo entran los marcados -- desmarcar a quien ya se reextrajo en una
+  // tanda anterior (ver btn-lote-aplicar-desde) hace que ni se le vuelva a
+  // adjuntar el PDF ni se gaste tiempo/cuota de IA repasándolo.
   const mapeo = items
     .map((it, i) => {
       if (!it.candidato_id) return null;
+      const checkbox = document.querySelector(`.lote-check[data-idx="${i}"]`);
+      if (checkbox && !checkbox.checked) return null;
       const inputInicio = document.querySelector(`.lote-pagina-inicio[data-idx="${i}"]`);
       const inputFin = document.querySelector(`.lote-pagina-fin[data-idx="${i}"]`);
       return {
@@ -1546,6 +1582,11 @@ async function confirmarAdjuntarLote(items) {
       };
     })
     .filter(Boolean);
+  if (mapeo.length === 0) {
+    progreso.textContent = "No hay ninguna ficha marcada para adjuntar.";
+    btn.disabled = false;
+    return;
+  }
   const formData = new FormData();
   formData.append("file", loteArchivoPendiente);
   formData.append("mapeo", JSON.stringify(mapeo));
@@ -1838,7 +1879,7 @@ function candidatoMiniCardHTML(c, opts = {}) {
   const vacanteTxt = vacante ? `📁 ${vacante.puesto}${vacante.centro ? ` · ${vacante.centro}` : ""}` : "Sin vacante asignada";
   const seleccionada = candidatosSeleccionadosIds.has(c.id);
   const abierta = candidatoEditando && candidatoEditando.id === c.id;
-  const checkbox = `<input type="checkbox" class="candidato-mini-checkbox" ${seleccionada ? "checked" : ""} style="margin-right:4px;">`;
+  const checkbox = `<input type="checkbox" class="candidato-mini-checkbox" ${seleccionada ? "checked" : ""}>`;
   const fotoHTML = c.tiene_foto
     ? `<img class="candidato-mini-foto" src="${AUTH_API_BASE}/reclutamiento/candidatos/${c.id}/foto" alt="">`
     : `<span class="candidato-mini-foto candidato-mini-foto-vacia">${escapeHTML((c.nombre_completo || "?").trim()[0] || "?")}</span>`;
@@ -1849,9 +1890,10 @@ function candidatoMiniCardHTML(c, opts = {}) {
   return `
     <div class="candidato-mini-card ${seleccionada ? "seleccionada" : ""} ${abierta ? "abierta" : ""}" data-candidato-id="${c.id}">
       <div class="candidato-mini-card-fila">
+        <span class="candidato-mini-checkbox-col">${checkbox}</span>
         ${fotoHTML}
         <div class="candidato-mini-card-info">
-          <h4>${checkbox}${escapeHTML(c.nombre_completo || "(sin nombre)")} ${estadoBadgeHTML(c.estado)} ${resultadoBadgeHTML(c.test_resultado)} ${!c.telefono || !c.email ? `<span title="Faltan datos de contacto (${!c.telefono ? "teléfono" : ""}${!c.telefono && !c.email ? " y " : ""}${!c.email ? "email" : ""})">⚠️</span>` : ""}</h4>
+          <h4>${escapeHTML(c.nombre_completo || "(sin nombre)")} ${estadoBadgeHTML(c.estado)} ${resultadoBadgeHTML(c.test_resultado)} ${!c.telefono || !c.email ? `<span title="Faltan datos de contacto (${!c.telefono ? "teléfono" : ""}${!c.telefono && !c.email ? " y " : ""}${!c.email ? "email" : ""})">⚠️</span>` : ""}</h4>
           <p>${escapeHTML(c.puesto_solicitado || "")}</p>
           <p>${escapeHTML(linea2)}</p>
           ${opts.ocultarVacante ? "" : `<p style="color:var(--text-muted);">${escapeHTML(vacanteTxt)}</p>`}

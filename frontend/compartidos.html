@@ -127,6 +127,11 @@
   .candidato-mini-card.abierta { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 8%, var(--surface-page)); }
   .candidato-mini-card-fila { display: flex; gap: 10px; align-items: flex-start; }
   .candidato-mini-card-info { flex: 1; min-width: 0; }
+  /* Checkbox en su propia columna, más grande y separado del nombre -- para
+     no seleccionar la ficha sin querer al intentar abrirla (era un checkbox
+     pequeño pegado al texto, dentro del propio título). */
+  .candidato-mini-checkbox-col { display: flex; align-items: center; flex-shrink: 0; padding: 2px; }
+  .candidato-mini-checkbox { width: 20px; height: 20px; cursor: pointer; accent-color: var(--acento); }
   /* Base de candidatos: lista en vez de cuadrícula -- una tarjeta ancha por
      fila (mismo estilo de tarjeta de siempre) en vez de varias en columnas,
      para leer de arriba a abajo en vez de saltar entre columnas. */
@@ -230,11 +235,16 @@
   .archivos-lista a { font-size: 13px; }
   .archivo-item-fila { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .lote-lista { list-style: none; padding: 0; margin: 10px 0; max-height: 260px; overflow-y: auto; font-size: 13px; }
-  .lote-lista li { padding: 4px 0; }
+  .lote-lista li { padding: 4px 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
   .lote-lista .lote-ok { color: var(--status-good); }
   .lote-lista .lote-sin-match { color: var(--text-muted); }
+  .lote-ok-label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .lote-ok-label input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--acento); cursor: pointer; }
+  .lote-ok-n { color: var(--text-muted); font-size: 12px; }
   .lote-paginas { margin-left: 8px; font-size: 12px; color: var(--text-secondary); }
   .lote-paginas input { padding: 2px 4px; border-radius: 5px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); }
+  .lote-saltar-fila { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
+  .lote-saltar-fila input[type="number"] { padding: 3px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); width: 52px; }
 
   .badge-vacante-estado { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
   .badge-abierta { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
@@ -438,6 +448,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260724a"></script>
 <script src="js/topbar-menu.js?v=20260819b"></script>
-<script src="js/compartidos.js?v=20260819g"></script>
+<script src="js/compartidos.js?v=20260819h"></script>
 </body>
 </html>
