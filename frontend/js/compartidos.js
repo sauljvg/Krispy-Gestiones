@@ -605,9 +605,16 @@ async function loadCompartidos() {
   // ningún clic abría la ficha en "Solicitudes compartidas contigo".
   wrap.querySelectorAll(".vacante-compartida-candidatos .candidato-mini-card").forEach((card) => {
     card.addEventListener("click", (e) => {
-      if (e.target.closest(".candidato-mini-contacto-select")) return;
+      // El checkbox no tiene cableado propio en esta vista (solo sirve para
+      // marcar a quién exportar, ver btn-exportar-excel-vacante-compartida
+      // más abajo) -- sin este corte, el clic se colaba hasta la tarjeta y
+      // abría la ficha en vez de solo marcar la casilla.
+      if (e.target.closest(".candidato-mini-checkbox-col") || e.target.closest(".candidato-mini-contacto-select")) return;
       abrirEdicionCandidato(card.dataset.candidatoId);
     });
+  });
+  wrap.querySelectorAll(".vacante-compartida-candidatos .candidato-mini-checkbox").forEach((check) => {
+    check.addEventListener("click", (e) => e.stopPropagation());
   });
   wrap.querySelectorAll(".vacante-compartida-candidatos .candidato-mini-contacto-select").forEach((select) => {
     select.addEventListener("click", (e) => e.stopPropagation());
@@ -618,7 +625,13 @@ async function loadCompartidos() {
   wrap.querySelectorAll(".btn-exportar-excel-vacante-compartida").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      const ids = btn.dataset.candidatoIds.split(",").map(Number).filter(Boolean);
+      // Si se marcó algún checkbox dentro de esta misma solicitud, exporta
+      // solo esos -- si no se marcó ninguno, exporta la solicitud entera
+      // (el comportamiento de siempre, para no obligar a marcar uno a uno
+      // cuando se quieren todos).
+      const marcados = Array.from(btn.parentElement.querySelectorAll(".candidato-mini-checkbox:checked"))
+        .map((c) => Number(c.closest(".candidato-mini-card").dataset.candidatoId));
+      const ids = marcados.length ? marcados : btn.dataset.candidatoIds.split(",").map(Number).filter(Boolean);
       abrirModalExportarExcel("vacante-compartida", ids);
     });
   });
