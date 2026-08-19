@@ -180,8 +180,28 @@
   .candidato-whatsapp-row h4 { margin: 0; }
   .candidato-whatsapp-row p { margin: 2px 0 0; }
 
-  .candidato-form { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
-  .candidato-form h3 { margin-top: 0; }
+  .candidato-form { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; position: relative; }
+  .candidato-form h3 { margin-top: 0; padding-right: 30px; }
+  .btn-cerrar-ficha-x {
+    position: absolute; top: 14px; right: 14px; width: 28px; height: 28px;
+    border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary);
+    border-radius: 50%; font-size: 15px; line-height: 1; cursor: pointer; display: flex;
+    align-items: center; justify-content: center; padding: 0;
+  }
+  .btn-cerrar-ficha-x:hover { border-color: var(--acento); color: var(--text-primary); }
+  /* En vista Lista, la ficha se inserta justo debajo de la tarjeta clicada
+     (ver renderCandidatosGrid en compartidos.js) en vez de quedarse fija al
+     final de la página -- este margen la separa un poco de la fila de
+     encima para que no se pegue a la tarjeta. */
+  .candidatos-lista #form-wrap:not(:empty) { margin-top: -2px; }
+  /* Agrupa CV/foto/compartido/aviso/resultado/respuestas del test con
+     separación uniforme -- sin esto, cada pieza traía su propio margen (o
+     ninguno) y se veían amontonadas sin distinguirse unas de otras. */
+  .ficha-cabecera { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-bottom: 16px; }
+  .ficha-cabecera:empty { display: none; margin-bottom: 0; }
+  .ficha-cabecera > * { margin: 0 !important; }
+  .ficha-cabecera > .aviso-datos-faltantes,
+  .ficha-cabecera > .respuestas-test-detalle { align-self: stretch; }
   .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 14px; margin-bottom: 12px; }
   .form-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
   .form-field input, .form-field select, .form-field textarea {
@@ -452,7 +472,7 @@
 <script src="js/theme.js?v=20260724a"></script>
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260724a"></script>
-<script src="js/topbar-menu.js?v=20260819b"></script>
-<script src="js/compartidos.js?v=20260819i"></script>
+<script src="js/topbar-menu.js?v=20260819c"></script>
+<script src="js/compartidos.js?v=20260819k"></script>
 </body>
 </html>

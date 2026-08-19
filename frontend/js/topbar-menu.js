@@ -169,6 +169,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 // sigue en marcha. No pinta nada si no hay ningún lote activo para este
 // usuario.
 document.addEventListener("DOMContentLoaded", async () => {
+  // Solo tiene sentido en Reclutamiento -- en el resto de páginas no hay
+  // nada que esté rellenando con IA en segundo plano.
+  if (!window.location.pathname.endsWith("compartidos.html")) return;
+
   const header = document.querySelector("header.topbar");
   if (!header) return;
 

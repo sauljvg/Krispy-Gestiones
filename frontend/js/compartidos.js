@@ -919,6 +919,11 @@ function extraEditorRowHTML(key, value) {
   // vez de una lista. A partir de cierto largo se usa un <textarea> en su
   // lugar, mismo campo .extra-value así que leerExtraFieldsDelForm no
   // necesita cambiar nada.
+  // Algunos candidatos antiguos tienen un "otro dato" que no es texto (p.ej.
+  // un número) -- sin este cast, .length/.includes rompían aquí y, al
+  // propagarse el error, dejaban sin conectar TODOS los botones que se
+  // cablean después en renderForm (Guardar, Cancelar, la X de cerrar...).
+  value = value == null ? "" : String(value);
   const esLargo = value.length > 80 || value.includes("\n");
   const campoValor = esLargo
     ? `<textarea class="extra-value" placeholder="Valor" style="min-height:70px;">${escapeHTML(value)}</textarea>`
@@ -1105,7 +1110,7 @@ function historialLegadoHTML(campo, etiqueta, valor) {
     <div class="form-field form-field-full">
       <label>${escapeHTML(etiqueta)} (texto libre, dato antiguo)</label>
       <textarea class="candidato-input" data-campo="${campo}" style="min-height:60px;">${escapeHTML(valor)}</textarea>
-      <p class="staff-hint">Formato antiguo -- si añades una entrada arriba, este texto deja de usarse.</p>
+      <p class="staff-hint">Formato antiguo -- si añades una entrada arriba, este texto deja de usarse. <button type="button" class="btn-mini btn-borrar-legado" data-campo="${campo}">🗑 Borrar este texto</button></p>
     </div>`;
 }
 
@@ -1212,13 +1217,16 @@ function renderForm() {
 
   wrap.innerHTML = `
     <div class="candidato-form">
+      <button type="button" class="btn-cerrar-ficha-x" id="btn-cerrar-ficha-x" title="Cerrar ficha">✕</button>
       <h3>${esEdicion ? "Editar candidato" : "Nuevo candidato"}</h3>
-      ${descargarCvHTML}
-      ${fotoFormHTML}
-      ${compartidoFichaHTML}
-      ${avisoDatosHTML}
-      ${resultadoTestHTML}
-      ${respuestaTestHTML}
+      <div class="ficha-cabecera">
+        ${descargarCvHTML}
+        ${fotoFormHTML}
+        ${compartidoFichaHTML}
+        ${avisoDatosHTML}
+        ${resultadoTestHTML}
+        ${respuestaTestHTML}
+      </div>
       ${subirCvHTML}
       <div id="single-candidato-wrap">
         <div class="form-grid">
@@ -1278,6 +1286,14 @@ function renderForm() {
       btn.onclick = () => btn.closest(".extra-editor-row").remove();
     });
   });
+  wrap.querySelectorAll(".btn-borrar-legado").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!confirm("¿Borrar este texto antiguo? No se puede deshacer una vez que guardes la ficha.")) return;
+      const campo = btn.dataset.campo;
+      document.querySelector(`.candidato-input[data-campo="${campo}"]`).value = "";
+      btn.closest(".form-field").remove();
+    });
+  });
   renderFormacionEditor();
   document.getElementById("btn-formacion-agregar").addEventListener("click", () => {
     const cont = document.getElementById("formacion-editor-filas");
@@ -1291,6 +1307,7 @@ function renderForm() {
     wireHistorialQuitar(cont);
   });
   document.getElementById("btn-cerrar-form").addEventListener("click", cerrarForm);
+  document.getElementById("btn-cerrar-ficha-x").addEventListener("click", cerrarForm);
   document.getElementById("btn-guardar-candidato").addEventListener("click", guardarCandidato);
   if (esEdicion) {
     document.getElementById("btn-eliminar-candidato").addEventListener("click", eliminarCandidatoActual);
@@ -1307,7 +1324,11 @@ function renderForm() {
   }
   // En "Lista + CV" la ficha ya está fija (sticky) a la vista -- desplazar
   // la página entera solo haría perder el sitio en la lista de la izquierda.
-  if (candidatosVista !== "combinada") wrap.scrollIntoView({ behavior: "smooth", block: "start" });
+  // En "Lista" el scroll se hace después, en renderCandidatosGrid, una vez
+  // el formulario ya se movió justo debajo de la tarjeta abierta -- si se
+  // hiciera aquí, desplazaría a la posición vieja (al final de la página)
+  // un instante antes de que se reubique.
+  if (candidatosVista === "tarjetas") wrap.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function cerrarForm() {
@@ -2261,7 +2282,23 @@ function aplicarVistaCandidatos() {
   compartidosWrap.classList.toggle("vista-combinada", candidatosVista === "combinada");
 }
 
+// #form-wrap vive normalmente justo después de #reclu-candidatos-wrap (su
+// sitio de siempre en el HTML). En vista Lista lo trasladamos dentro del
+// grid, justo debajo de la tarjeta abierta, para que la ficha aparezca "ahí
+// mismo" en vez de al final de la página -- pero grid.innerHTML lo borraría
+// sin darse cuenta si se quedara dentro cuando se repinta la lista (buscar,
+// filtrar, paginar...), así que SIEMPRE se aparca de vuelta a su sitio antes
+// de tocar el grid, y se reubica después si toca.
+function aparcarFormWrapEnSitio() {
+  const formWrap = document.getElementById("form-wrap");
+  const home = document.getElementById("reclu-candidatos-wrap");
+  if (formWrap && home && formWrap.previousElementSibling !== home) {
+    home.insertAdjacentElement("afterend", formWrap);
+  }
+}
+
 function renderCandidatosGrid() {
+  aparcarFormWrapEnSitio();
   aplicarVistaCandidatos();
   const grid = document.getElementById("candidatos-grid");
   const visibles = candidatosFiltradosPorApto();
@@ -2273,6 +2310,14 @@ function renderCandidatosGrid() {
     ? pagina.map(candidatoMiniCardHTML).join("")
     : `<p class="staff-hint">${ultimosCandidatosCargados.length ? "Ningún candidato coincide con el filtro de aptos." : "Todavía no hay candidatos en la base de datos."}</p>`;
   renderCandidatosPaginacion(visibles.length, totalPaginas);
+  if (candidatosVista === "lista" && candidatoEditando) {
+    const cardAbierta = grid.querySelector(`.candidato-mini-card[data-candidato-id="${candidatoEditando.id}"]`);
+    if (cardAbierta) {
+      const formWrap = document.getElementById("form-wrap");
+      cardAbierta.insertAdjacentElement("afterend", formWrap);
+      formWrap.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }
   grid.querySelectorAll(".candidato-mini-card").forEach((card) => {
     const id = Number(card.dataset.candidatoId);
     card.querySelector(".candidato-mini-checkbox").addEventListener("click", (e) => {
