@@ -2,6 +2,7 @@ import json
 import mimetypes
 import os
 import secrets
+import time
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
@@ -10,6 +11,7 @@ from pydantic import BaseModel
 import auth as auth_module
 import cv_extraction
 import cv_pdf
+import notificaciones as notificaciones_module
 import reclutamiento as reclutamiento_module
 from auth_routes import get_current_user
 from informes_routes import require_informes
@@ -369,22 +371,64 @@ async def adjuntar_pdf_lote_route(empresa: str = "kk", file: UploadFile = File(.
 _progreso_lotes: dict[str, dict] = {}
 
 
-def _rellenar_huecos_en_segundo_plano(lote_id: str, recortes: list[tuple[int, bytes]]):
+# Margen bajo el límite de 10 peticiones/minuto del plan gratuito de Gemini
+# (ver GEMINI_MODEL en cv_extraction) -- con esto de por medio, un lote de 37
+# candidatos tarda más en procesarse pero prácticamente no choca con el
+# límite de RPM, así que casi todos acaban pasando por IA en vez de solo los
+# primeros ~9 antes de que saltara el 429 (ver GeminiLimiteTemporalError).
+GEMINI_ESPACIADO_SEGUNDOS = 7
+GEMINI_MAX_REINTENTOS_RPM = 2
+
+
+def _rellenar_huecos_en_segundo_plano(lote_id: str, recortes: list[tuple[int, bytes]], usuario_id: int):
     """Re-extrae con IA cada recorte y rellena huecos -- se ejecuta DESPUÉS
     de responder al navegador (ver BackgroundTasks en la ruta de abajo).
     Antes esto iba dentro de la propia petición: con Gemini saturado, cada
     llamada podía tardar hasta el timeout (ver cv_extraction) y encadenar
     hasta 37 de esas dejó el proceso bloqueado cerca de una hora, tumbando
     el resto del sitio para todo el mundo mientras tanto (usuarios en línea,
-    tests en directo...). Aquí ya no bloquea nada -- y en cuanto Gemini falla
-    una vez, se deja de intentar para el resto de la tanda (intentar_gemini)
-    en vez de esperar el timeout otra vez por cada persona que queda."""
+    tests en directo...). Aquí ya no bloquea nada.
+
+    Dentro del lote se reparten las llamadas a Gemini con una pausa fija
+    (GEMINI_ESPACIADO_SEGUNDOS) para no chocar con el límite de peticiones
+    por minuto del plan gratuito, y si aun así llega un 429 "por minuto"
+    (GeminiLimiteTemporalError, con el retryDelay que da la propia Gemini) se
+    espera y se reintenta ESE candidato en vez de rendirse para el resto del
+    lote -- solo se deja de intentar Gemini del todo si el fallo es de otro
+    tipo (cupo diario agotado, clave inválida, Gemini caído), que no se
+    arregla esperando un momento."""
     intentar_gemini = True
+    ultimo_intento_gemini = 0.0
+    con_ia = 0
+    con_local = 0
     for candidato_id, recorte in recortes:
         try:
-            extraidos, metodo, _motivo = cv_extraction.extraer_cv(recorte, intentar_gemini=intentar_gemini)
-            if metodo == "local":
-                intentar_gemini = False
+            extraidos, metodo = None, "local"
+            if intentar_gemini:
+                reintentos = 0
+                while True:
+                    espera = GEMINI_ESPACIADO_SEGUNDOS - (time.monotonic() - ultimo_intento_gemini)
+                    if espera > 0:
+                        time.sleep(espera)
+                    ultimo_intento_gemini = time.monotonic()
+                    try:
+                        extraidos, metodo = cv_extraction.extraer_con_gemini(recorte), "gemini"
+                        break
+                    except cv_extraction.GeminiLimiteTemporalError as exc:
+                        reintentos += 1
+                        if reintentos > GEMINI_MAX_REINTENTOS_RPM:
+                            break  # solo este candidato cae a local, el resto del lote sigue con Gemini
+                        time.sleep(min(exc.retry_after_segundos, 90))
+                    except (cv_extraction.GeminiNoConfiguradoError, cv_extraction.GeminiNoDisponibleError) as exc:
+                        print(f"[adjuntar-pdf-lote] Gemini no disponible, resto del lote en local: {exc}")
+                        intentar_gemini = False
+                        break
+            if metodo != "gemini":
+                extraidos, metodo, _motivo = cv_extraction.extraer_cv(recorte, intentar_gemini=False)
+            if metodo == "gemini":
+                con_ia += 1
+            else:
+                con_local += 1
             if extraidos:
                 reclutamiento_module.rellenar_huecos_candidato(candidato_id, extraidos[0])
         except Exception as exc:
@@ -393,13 +437,26 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, recortes: list[tuple[int, by
             _progreso_lotes[lote_id]["procesados"] += 1
     _progreso_lotes[lote_id]["terminado"] = True
 
+    total = len(recortes)
+    if con_ia and con_local:
+        resumen = f"{con_ia} con IA, {con_local} con método local"
+    elif con_ia:
+        resumen = "todos con IA"
+    else:
+        resumen = "todos con método local (Gemini no disponible)"
+    notificaciones_module.crear_notificacion(
+        usuario_id,
+        f"Relleno de CVs terminado: {total}/{total} candidatos procesados ({resumen}).",
+        "/compartidos.html",
+    )
+
 
 @router.post("/candidatos/adjuntar-pdf-lote/confirmar")
 async def adjuntar_pdf_lote_confirmar_route(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     mapeo: str = Form(...),
-    _user: dict = Depends(require_informes),
+    user: dict = Depends(require_informes),
 ):
     """Recorta y adjunta -- recibe el PDF de lote UNA sola vez (en vez de
     subirlo N veces, una por candidato, como hacía antes el frontend) más la
@@ -447,7 +504,7 @@ async def adjuntar_pdf_lote_confirmar_route(
     if recortes_para_rellenar:
         lote_id = secrets.token_hex(8)
         _progreso_lotes[lote_id] = {"total": len(recortes_para_rellenar), "procesados": 0, "terminado": False}
-        background_tasks.add_task(_rellenar_huecos_en_segundo_plano, lote_id, recortes_para_rellenar)
+        background_tasks.add_task(_rellenar_huecos_en_segundo_plano, lote_id, recortes_para_rellenar, user["id"])
     return {"ok": True, "adjuntados": adjuntados, "procesando_relleno": len(recortes_para_rellenar), "lote_id": lote_id}
 
 

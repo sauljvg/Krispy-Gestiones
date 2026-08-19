@@ -33,6 +33,35 @@ class GeminiNoDisponibleError(Exception):
     pass
 
 
+class GeminiLimiteTemporalError(GeminiNoDisponibleError):
+    """429 por límite de peticiones/minuto (RPM), a diferencia de un 429 por
+    cupo diario agotado -- este se libera solo con esperar unos segundos, así
+    que merece la pena reintentar en vez de rendirse con Gemini para el resto
+    del lote (ver retry_after_segundos y _rellenar_huecos_en_segundo_plano en
+    reclutamiento_routes.py)."""
+
+    def __init__(self, mensaje, retry_after_segundos):
+        super().__init__(mensaje)
+        self.retry_after_segundos = retry_after_segundos
+
+
+def _extraer_retry_delay(resp) -> int | None:
+    """Cuando Gemini devuelve 429, suele incluir en el propio cuerpo del
+    error cuánto esperar antes de reintentar (RetryInfo.retryDelay, p.ej.
+    "18s") -- mucho más fiable que adivinar un tiempo de espera fijo, y es la
+    señal de que el 429 es por RPM (temporal) y no por cupo diario agotado."""
+    try:
+        detalles = resp.json().get("error", {}).get("details", [])
+    except Exception:
+        return None
+    for d in detalles:
+        if str(d.get("@type", "")).endswith("RetryInfo"):
+            m = re.match(r"(\d+(?:\.\d+)?)s?$", str(d.get("retryDelay", "")).strip())
+            if m:
+                return int(float(m.group(1))) + 1
+    return None
+
+
 def _parsear_lista_estructurada(valor, claves) -> list[dict]:
     if not isinstance(valor, list):
         return []
@@ -59,12 +88,18 @@ def _parsear_candidato_gemini(obj: dict) -> dict:
     return extraido
 
 
-def _extraer_con_gemini(pdf_bytes: bytes) -> list[dict]:
+def extraer_con_gemini(pdf_bytes: bytes) -> list[dict]:
     """Pide a Gemini la lista de candidatos del PDF — puede ser un único CV o
     un PDF por lotes con varios CVs concatenados (hasta ~50), muy habitual
     cuando alguien junta varios currículums en un solo archivo antes de
     enviarlos. Siempre se pide un array, aunque solo haya un candidato, para
-    no tener dos formatos de respuesta distintos que mantener."""
+    no tener dos formatos de respuesta distintos que mantener.
+
+    Pública (a diferencia del resto de _funciones de este módulo) porque
+    reclutamiento_routes.py la llama directamente cuando quiere manejar sus
+    propios reintentos con espera (ver GeminiLimiteTemporalError) en vez de
+    caer automáticamente al método local en el primer fallo, que es lo que
+    hace extraer_cv() más abajo."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise GeminiNoConfiguradoError(
@@ -141,6 +176,16 @@ def _extraer_con_gemini(pdf_bytes: bytes) -> list[dict]:
     if resp.status_code == 503:
         raise GeminiNoDisponibleError("Google Gemini está saturado ahora mismo (capa gratuita). Inténtalo de nuevo en unos minutos.")
     if resp.status_code == 429:
+        reintento_en = _extraer_retry_delay(resp)
+        # Si Google indica un retryDelay corto es el límite de peticiones
+        # POR MINUTO (se libera solo con esperar); sin ese dato, o con un
+        # valor largo, se trata como cupo DIARIO agotado (no vale la pena
+        # reintentar en la misma tanda) -- ver GeminiLimiteTemporalError.
+        if reintento_en is not None and reintento_en <= 90:
+            raise GeminiLimiteTemporalError(
+                f"Límite de peticiones por minuto de Gemini alcanzado, reintentando en {reintento_en}s.",
+                reintento_en,
+            )
         raise GeminiNoDisponibleError("Se ha alcanzado el límite de uso gratuito de Gemini por ahora. Inténtalo de nuevo en unos minutos.")
     if resp.status_code != 200:
         raise GeminiNoDisponibleError(f"Gemini devolvió un error ({resp.status_code}): {resp.text[:200]}")
@@ -432,7 +477,7 @@ def extraer_cv(pdf_bytes: bytes, intentar_gemini: bool = True) -> tuple[list[dic
     esperar el timeout de nuevo por cada persona."""
     if intentar_gemini and os.environ.get("GEMINI_API_KEY"):
         try:
-            return _extraer_con_gemini(pdf_bytes), "gemini", None
+            return extraer_con_gemini(pdf_bytes), "gemini", None
         except (GeminiNoConfiguradoError, GeminiNoDisponibleError) as exc:
             # Antes esto se tragaba en silencio -- no quedaba ningún rastro
             # de por qué se cayó al método local, así que un fallo real

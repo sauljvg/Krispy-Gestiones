@@ -45,6 +45,7 @@ from encuestas_routes import router as encuestas_router
 from encuestas_routes import router_publico as encuestas_router_publico
 from entrevistas_routes import router as entrevistas_router
 from informes_routes import router as informes_router
+from notificaciones_routes import router as notificaciones_router
 from reclutamiento_routes import router as reclutamiento_router
 from request_context import tiendas_permitidas_actual
 from routes import router
@@ -120,6 +121,7 @@ app.include_router(disc_router, prefix="/api/disc")
 app.include_router(disc_router_publico, prefix="/api/public/disc")
 app.include_router(david_router, prefix="/api/david")
 app.include_router(agregadores_router, prefix="/api/agregadores")
+app.include_router(notificaciones_router, prefix="/api")
 app.include_router(router, prefix="/api", dependencies=[Depends(require_resenas)])
 
 

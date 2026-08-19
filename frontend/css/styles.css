@@ -231,6 +231,15 @@ h3 {
   font-size: 11px; font-weight: 700; text-align: center;
 }
 
+/* Campanita genérica de avisos (ver topbar-menu.js) -- reutiliza
+   .notif-badge-btn/.notif-badge-count/.notif-tests-panel/.notif-tests-lista
+   (mismo look que la de "respuestas nuevas de Test"), solo cambia cómo se ve
+   cada fila: mensaje + fecha en dos líneas en vez de título + contador. */
+.notif-aviso-item { flex-direction: column; align-items: flex-start !important; gap: 2px !important; }
+.notif-aviso-item span:first-child { font-size: 12.5px; line-height: 1.35; }
+.notif-aviso-fecha { font-size: 11px; color: var(--text-secondary); }
+.notif-aviso-no-vista { background: color-mix(in srgb, var(--acento) 10%, transparent); }
+
 /* Indicador de "quién está en línea" (solo visible para el usuario admin
    "saul", ver topbar-menu.js) — mismo patrón visual que .notif-badge. */
 .en-linea-badge-wrap { position: relative; }

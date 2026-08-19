@@ -86,6 +86,81 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 });
 
+// Campanita genérica de avisos (distinta de la de "respuestas nuevas de
+// Test" de arriba, que es un contador por encuesta) -- para avisos puntuales
+// de trabajos en segundo plano que ya terminaron (ver notificaciones.py /
+// crear_notificacion), como el relleno de CVs de un lote grande: el usuario
+// puede haber navegado a otra pantalla mientras tanto, así que necesita algo
+// que le avise al volver en vez de tener que quedarse mirando la barra de
+// progreso. Disponible para cualquier usuario con sesión (no depende de
+// ningún módulo concreto).
+document.addEventListener("DOMContentLoaded", async () => {
+  const wrap = document.querySelector(".hamburger-wrap");
+  if (!wrap) return;
+  let data;
+  try {
+    const res = await fetch(`${window.location.origin}/api/notificaciones`);
+    if (!res.ok) return;
+    data = await res.json();
+  } catch {
+    return;
+  }
+  if (!data || !data.notificaciones || data.notificaciones.length === 0) return;
+
+  const escapeHTML = (str) => {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  };
+
+  const formatFecha = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso.replace(" ", "T") + "Z");
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  };
+
+  const badgeWrap = document.createElement("div");
+  badgeWrap.className = "notif-badge-wrap";
+  badgeWrap.innerHTML = `
+    <button type="button" id="btn-notif-avisos" class="btn btn-ghost notif-badge-btn" aria-label="Avisos" aria-haspopup="true" aria-expanded="false">
+      🔔${data.total > 0 ? `<span class="notif-badge-count">${data.total}</span>` : ""}
+    </button>
+    <div id="notif-avisos-panel" class="notif-tests-panel" hidden>
+      <p class="notif-tests-titulo">Avisos</p>
+      <ul class="notif-tests-lista">
+        ${data.notificaciones
+          .map(
+            (n) => `<li><a href="${escapeHTML(n.url || "#")}" class="notif-aviso-item ${n.vista_en ? "" : "notif-aviso-no-vista"}">
+              <span>${escapeHTML(n.mensaje)}</span><span class="notif-aviso-fecha">${formatFecha(n.creada_en)}</span>
+            </a></li>`
+          )
+          .join("")}
+      </ul>
+    </div>`;
+  wrap.parentElement.insertBefore(badgeWrap, wrap);
+
+  const notifBtn = badgeWrap.querySelector("#btn-notif-avisos");
+  const notifPanel = badgeWrap.querySelector("#notif-avisos-panel");
+  notifBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    notifPanel.hidden = !notifPanel.hidden;
+    notifBtn.setAttribute("aria-expanded", String(!notifPanel.hidden));
+    if (!notifPanel.hidden) {
+      notifBtn.querySelector(".notif-badge-count")?.remove();
+      notifPanel.querySelectorAll(".notif-aviso-no-vista").forEach((a) => a.classList.remove("notif-aviso-no-vista"));
+      await fetch(`${window.location.origin}/api/notificaciones/marcar-vistas`, { method: "POST" });
+    }
+  });
+  notifPanel.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", () => {
+    if (!notifPanel.hidden) {
+      notifPanel.hidden = true;
+      notifBtn.setAttribute("aria-expanded", "false");
+    }
+  });
+});
+
 // Indicador de "quién está en línea ahora mismo" — solo se activa para el
 // usuario "saul" (el backend devuelve 403 para cualquier otro, así que aquí
 // simplemente se deja de consultar si el primer intento falla, sin
