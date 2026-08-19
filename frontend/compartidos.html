@@ -16,6 +16,32 @@
 <link rel="stylesheet" href="css/styles.css?v=20260819a">
 <style>
   .compartidos-wrap { max-width: 900px; margin: 0 auto; padding: 0 0 60px; }
+  /* Vista "Lista + CV" (ver candidatos-vista en compartidos.js) -- imita la
+     vista combinada de InfoJobs: la lista de candidatos a la izquierda y la
+     ficha abierta fija a la derecha, para poder ir clicando uno tras otro
+     sin perder el sitio en la lista. .hero-banner/.reclu-candidatos-wrap/
+     #form-wrap/#compartidos-list son hijos directos de .compartidos-wrap
+     (ver el HTML más abajo), así que grid-template-areas los reordena sin
+     tener que mover nada en el DOM ni tocar el hueco de #form-wrap fuera de
+     reclu-candidatos-wrap (lo sigue usando quien solo tiene acceso a
+     Compartidos, ver el comentario junto a #form-wrap). Vacantes queda
+     dentro de la misma columna de lista en vez de tener su propia área --
+     es un compromiso a propósito para no reestructurar el HTML compartido. */
+  .compartidos-wrap.vista-combinada {
+    max-width: 1400px;
+    display: grid;
+    grid-template-columns: minmax(300px, 420px) 1fr;
+    grid-template-areas: "hero hero" "lista ficha" "compartidos compartidos";
+    column-gap: 24px;
+  }
+  .compartidos-wrap.vista-combinada > .hero-banner { grid-area: hero; }
+  .compartidos-wrap.vista-combinada > .reclu-candidatos-wrap { grid-area: lista; min-width: 0; }
+  .compartidos-wrap.vista-combinada > #form-wrap {
+    grid-area: ficha; min-width: 0;
+    position: sticky; top: 12px; align-self: start;
+    max-height: calc(100vh - 24px); overflow-y: auto;
+  }
+  .compartidos-wrap.vista-combinada > #compartidos-list { grid-area: compartidos; }
   .reclu-seccion { font-size: 18px; margin: 26px 0 12px; }
   .reclu-seccion:first-child { margin-top: 6px; }
   .compartidos-seleccion-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
@@ -96,6 +122,7 @@
   .candidato-mini-card h4 { margin: 0 0 4px; font-size: 14px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .candidato-mini-card p { margin: 2px 0; font-size: 12px; color: var(--text-secondary); }
   .candidato-mini-card.seleccionada { border-color: var(--acento); box-shadow: 0 0 0 2px color-mix(in srgb, var(--acento) 20%, transparent); }
+  .candidato-mini-card.abierta { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 8%, var(--surface-page)); }
   .candidato-mini-card-fila { display: flex; gap: 10px; align-items: flex-start; }
   .candidato-mini-card-info { flex: 1; min-width: 0; }
   /* Base de candidatos: lista en vez de cuadrícula -- una tarjeta ancha por
@@ -286,6 +313,16 @@
           <option value="no_apto">Solo no aptos</option>
           <option value="sin_test">Sin responder test</option>
         </select>
+        <select id="candidatos-orden" title="Ordenar por">
+          <option value="">Más recientes</option>
+          <option value="nombre_asc">Nombre (A-Z)</option>
+          <option value="nombre_desc">Nombre (Z-A)</option>
+        </select>
+        <select id="candidatos-vista" title="Cómo ver la lista">
+          <option value="lista">📃 Lista</option>
+          <option value="combinada">📃➕ Lista + CV</option>
+          <option value="tarjetas">🗂️ Tarjetas</option>
+        </select>
         <button id="btn-modo-seleccion" class="btn btn-ghost" type="button">☑ Selección múltiple</button>
         <button id="btn-revincular-tests" class="btn btn-ghost" type="button" title="Busca de nuevo entre las respuestas de test ya enviadas por si alguna coincide con un candidato que no tenía enlace">🔗 Buscar tests ya respondidos</button>
         <button id="btn-adjuntar-lote" class="btn btn-ghost" type="button" title="Para un PDF con varios CVs juntos que ya usaste para crear estas fichas -- adjunta el PDF a cada ficha existente por nombre, sin duplicar a nadie">🗂️ Adjuntar PDF a fichas existentes</button>
@@ -384,6 +421,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260724a"></script>
 <script src="js/topbar-menu.js?v=20260819a"></script>
-<script src="js/compartidos.js?v=20260819d"></script>
+<script src="js/compartidos.js?v=20260819e"></script>
 </body>
 </html>

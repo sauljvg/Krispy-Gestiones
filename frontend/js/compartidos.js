@@ -1270,12 +1270,15 @@ function renderForm() {
   if (agregarArchivoHTML) {
     document.getElementById("btn-agregar-archivo").addEventListener("click", agregarArchivoAlCandidato);
   }
-  wrap.scrollIntoView({ behavior: "smooth", block: "start" });
+  // En "Lista + CV" la ficha ya está fija (sticky) a la vista -- desplazar
+  // la página entera solo haría perder el sitio en la lista de la izquierda.
+  if (candidatosVista !== "combinada") wrap.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function cerrarForm() {
   candidatoEditando = null;
   document.getElementById("form-wrap").innerHTML = "";
+  refrescarResaltadoAbierta();
 }
 
 function avisoExtraccionHTML(metodo, n, motivoLocal) {
@@ -1697,6 +1700,10 @@ let candidatosFiltroEstado = "";
 // vez), el tamaño de página elegido se recuerda entre sesiones.
 let candidatosPagina = 1;
 let candidatosPorPagina = Number(localStorage.getItem("kt-candidatos-por-pagina")) || 20;
+// "": recientes primero (orden del servidor, por última actualización).
+let candidatosOrden = localStorage.getItem("kt-candidatos-orden") || "";
+// tarjetas | lista | combinada (ver .vista-combinada en compartidos.html).
+let candidatosVista = localStorage.getItem("kt-candidatos-vista") || "lista";
 // Distingue "el select muestra Personalizado mientras se escribe el número"
 // de "candidatosPorPagina ya es un valor no estándar" -- si no, al elegir
 // "Personalizado..." el primer repintado (con candidatosPorPagina todavía
@@ -1733,6 +1740,7 @@ function candidatoMiniCardHTML(c, opts = {}) {
   const vacante = vacantesTodasCache.find((v) => v.id === c.vacante_id);
   const vacanteTxt = vacante ? `📁 ${vacante.puesto}${vacante.centro ? ` · ${vacante.centro}` : ""}` : "Sin vacante asignada";
   const seleccionada = modoSeleccionCandidatos && candidatosSeleccionadosIds.has(c.id);
+  const abierta = candidatoEditando && candidatoEditando.id === c.id;
   const checkbox = modoSeleccionCandidatos ? `<input type="checkbox" ${seleccionada ? "checked" : ""} style="margin-right:4px;">` : "";
   const fotoHTML = c.tiene_foto
     ? `<img class="candidato-mini-foto" src="${AUTH_API_BASE}/reclutamiento/candidatos/${c.id}/foto" alt="">`
@@ -1742,7 +1750,7 @@ function candidatoMiniCardHTML(c, opts = {}) {
     ? `<p class="candidato-mini-compartido">🔗 Compartido con: ${escapeHTML(compartidos.map((x) => x.nombre).join(", "))}</p>`
     : "";
   return `
-    <div class="candidato-mini-card ${seleccionada ? "seleccionada" : ""}" data-candidato-id="${c.id}">
+    <div class="candidato-mini-card ${seleccionada ? "seleccionada" : ""} ${abierta ? "abierta" : ""}" data-candidato-id="${c.id}">
       <div class="candidato-mini-card-fila">
         ${fotoHTML}
         <div class="candidato-mini-card-info">
@@ -1999,10 +2007,15 @@ async function renderCandidatosTabs() {
 
 function candidatosFiltradosPorApto() {
   const filtro = document.getElementById("candidatos-filtro-apto").value;
-  if (!filtro) return ultimosCandidatosCargados;
-  if (filtro === "apto") return ultimosCandidatosCargados.filter((c) => c.test_resultado && !c.test_resultado.includes("No apto"));
-  if (filtro === "sin_test") return ultimosCandidatosCargados.filter((c) => !c.test_resultado);
-  return ultimosCandidatosCargados.filter((c) => c.test_resultado && c.test_resultado.includes("No apto"));
+  let visibles = ultimosCandidatosCargados;
+  if (filtro === "apto") visibles = visibles.filter((c) => c.test_resultado && !c.test_resultado.includes("No apto"));
+  else if (filtro === "sin_test") visibles = visibles.filter((c) => !c.test_resultado);
+  else if (filtro === "no_apto") visibles = visibles.filter((c) => c.test_resultado && c.test_resultado.includes("No apto"));
+  if (candidatosOrden === "nombre_asc" || candidatosOrden === "nombre_desc") {
+    visibles = [...visibles].sort((a, b) => (a.nombre_completo || "").localeCompare(b.nombre_completo || "", "es"));
+    if (candidatosOrden === "nombre_desc") visibles.reverse();
+  }
+  return visibles;
 }
 
 const TAMANOS_PAGINA_CANDIDATOS = [10, 20, 50, 100];
@@ -2072,7 +2085,15 @@ function renderCandidatosPaginacion(total, totalPaginas) {
   });
 }
 
+function aplicarVistaCandidatos() {
+  const compartidosWrap = document.querySelector(".compartidos-wrap");
+  const grid = document.getElementById("candidatos-grid");
+  grid.classList.toggle("candidatos-lista", candidatosVista !== "tarjetas");
+  compartidosWrap.classList.toggle("vista-combinada", candidatosVista === "combinada");
+}
+
 function renderCandidatosGrid() {
+  aplicarVistaCandidatos();
   const grid = document.getElementById("candidatos-grid");
   const visibles = candidatosFiltradosPorApto();
   const totalPaginas = Math.max(1, Math.ceil(visibles.length / candidatosPorPagina));
@@ -2249,15 +2270,26 @@ function abrirMailtoSeleccionados() {
   abrirCampanaEmail(candidatos);
 }
 
+// Repinta la lista de "Base de candidatos" para que la tarjeta abierta se
+// resalte (ver .candidato-mini-card.abierta) -- se salta a sí misma cuando
+// la lista ni siquiera está visible (usuario sin el módulo completo que
+// solo abre fichas desde "Compartidos", ver reclu-candidatos-wrap).
+function refrescarResaltadoAbierta() {
+  const wrap = document.getElementById("reclu-candidatos-wrap");
+  if (wrap && !wrap.hidden) renderCandidatosGrid();
+}
+
 async function abrirEdicionCandidato(candidatoId) {
   const candidato = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}`).then((r) => r.json());
   candidatoEditando = candidato;
   renderForm();
+  refrescarResaltadoAbierta();
 }
 
 function abrirNuevoCandidato() {
   candidatoEditando = null;
   renderForm();
+  refrescarResaltadoAbierta();
 }
 
 async function revincularTests() {
@@ -2321,6 +2353,21 @@ async function initBaseCandidatos(user) {
   });
   document.getElementById("candidatos-filtro-apto").addEventListener("change", () => {
     candidatosPagina = 1;
+    renderCandidatosGrid();
+  });
+  const selectOrden = document.getElementById("candidatos-orden");
+  selectOrden.value = candidatosOrden;
+  selectOrden.addEventListener("change", () => {
+    candidatosOrden = selectOrden.value;
+    localStorage.setItem("kt-candidatos-orden", candidatosOrden);
+    candidatosPagina = 1;
+    renderCandidatosGrid();
+  });
+  const selectVista = document.getElementById("candidatos-vista");
+  selectVista.value = candidatosVista;
+  selectVista.addEventListener("change", () => {
+    candidatosVista = selectVista.value;
+    localStorage.setItem("kt-candidatos-vista", candidatosVista);
     renderCandidatosGrid();
   });
   let buscarTimeout;
