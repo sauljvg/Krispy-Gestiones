@@ -1503,33 +1503,31 @@ async function previsualizarLote() {
   const items = data.candidatos || [];
   const encontrados = items.filter((it) => it.candidato_id);
   const noEncontrados = items.length - encontrados.length;
-  // Cuando la detección de páginas coincide en número con los candidatos
-  // extraídos (division_disponible), a cada uno se le adjunta solo SU
-  // rango de páginas en vez del PDF de lote entero -- el rango detectado se
-  // muestra editable por si falla en algún caso concreto.
-  // Contador aparte solo para los ENCONTRADOS (a los que de verdad se les
-  // va a hacer algo) -- así "empezar desde el nº 7" se corresponde con lo
-  // que el reclutador ve en pantalla, no con la posición en el PDF.
-  let numeroEncontrado = 0;
+  // ya_enriquecido lo calcula el backend mirando si formacion_json/
+  // experiencia_json ya tienen algo -- eso solo lo rellena Gemini, así que
+  // no está vacío es señal fiable de "esta ficha ya se reextrajo con IA en
+  // una tanda anterior" (ver candidatos_ya_enriquecidos). Así el reclutador
+  // no tiene que llevar la cuenta de a quién le tocó ya: se desmarcan solos.
+  const yaListos = encontrados.filter((it) => it.ya_enriquecido).length;
   resultadoWrap.innerHTML = `
     ${avisoExtraccionHTML(data.metodo, items.length, data.motivo_local)}
     <p class="staff-hint">${encontrados.length} coincidencia${encontrados.length === 1 ? "" : "s"} encontrada${encontrados.length === 1 ? "" : "s"} de ${items.length}${noEncontrados ? ` (${noEncontrados} sin ficha con ese nombre exacto -- no se les adjunta nada)` : ""}.
-    ${data.division_disponible ? "Se ha detectado en qué páginas está cada uno -- se adjunta solo esa parte del PDF (puedes corregir el rango si hace falta)." : "No se pudo dividir el PDF de forma fiable -- se adjuntará el PDF completo a cada ficha encontrada, como antes."}</p>
+    ${data.division_disponible ? "Se ha detectado en qué páginas está cada uno -- se adjunta solo esa parte del PDF (puedes corregir el rango si hace falta)." : "No se pudo dividir el PDF de forma fiable -- se adjuntará el PDF completo a cada ficha encontrada, como antes."}
+    ${yaListos ? ` ${yaListos} ya tienen formación/experiencia con IA de una tanda anterior -- se han desmarcado solas, no se van a repasar salvo que las marques a mano.` : ""}</p>
     ${encontrados.length ? `<div class="lote-saltar-fila">
-      <label class="staff-hint">Ya reextraje hasta el nº <input type="number" min="1" max="${encontrados.length}" id="lote-empezar-desde" style="width:52px;"> -- empezar desde ahí</label>
-      <button type="button" id="btn-lote-aplicar-desde" class="btn-mini">Aplicar</button>
       <button type="button" id="btn-lote-marcar-todos" class="btn-mini">Marcar todos</button>
+      <button type="button" id="btn-lote-desmarcar-todos" class="btn-mini">Desmarcar todos</button>
     </div>` : ""}
     <ul class="lote-lista">
       ${items.map((it, i) => {
         if (!it.candidato_id) return `<li class="lote-sin-match">✗ ${escapeHTML(it.nombre)}</li>`;
-        numeroEncontrado++;
         return `
         <li class="lote-ok">
           <label class="lote-ok-label">
-            <input type="checkbox" class="lote-check" data-idx="${i}" checked>
-            <span class="lote-ok-n">${numeroEncontrado}.</span> ${escapeHTML(it.nombre)}
+            <input type="checkbox" class="lote-check" data-idx="${i}" ${it.ya_enriquecido ? "" : "checked"}>
+            ${escapeHTML(it.nombre)}
           </label>
+          ${it.ya_enriquecido ? `<span class="lote-ya-listo">✓ ya con IA</span>` : ""}
           ${data.division_disponible ? `
             <span class="lote-paginas">
               págs. <input type="number" min="1" class="lote-pagina-inicio" data-idx="${i}" value="${it.pagina_inicio}" style="width:44px;">
@@ -1545,17 +1543,8 @@ async function previsualizarLote() {
     document.getElementById("btn-lote-marcar-todos").addEventListener("click", () => {
       resultadoWrap.querySelectorAll(".lote-check").forEach((chk) => (chk.checked = true));
     });
-    // Desmarca los primeros N-1 encontrados (ya reextraídos en una tanda
-    // anterior) y deja marcados desde el nº elegido en adelante -- para no
-    // tener que volver a gastar tiempo/cuota de IA repasando a quien ya
-    // quedó bien, si el lote se cortó a medias (cuota agotada, etc.).
-    document.getElementById("btn-lote-aplicar-desde").addEventListener("click", () => {
-      const desde = Number(document.getElementById("lote-empezar-desde").value) || 1;
-      let n = 0;
-      resultadoWrap.querySelectorAll(".lote-ok").forEach((li) => {
-        n++;
-        li.querySelector(".lote-check").checked = n >= desde;
-      });
+    document.getElementById("btn-lote-desmarcar-todos").addEventListener("click", () => {
+      resultadoWrap.querySelectorAll(".lote-check").forEach((chk) => (chk.checked = false));
     });
   }
 }

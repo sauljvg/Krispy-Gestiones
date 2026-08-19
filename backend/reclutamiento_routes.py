@@ -420,6 +420,11 @@ async def adjuntar_pdf_lote_route(empresa: str = "kk", file: UploadFile = File(.
         if division_disponible:
             item["pagina_inicio"], item["pagina_fin"] = rangos[i]
         resultado.append(item)
+    ya_enriquecidos = reclutamiento_module.candidatos_ya_enriquecidos(
+        [it["candidato_id"] for it in resultado if it["candidato_id"]]
+    )
+    for it in resultado:
+        it["ya_enriquecido"] = it["candidato_id"] in ya_enriquecidos
     return {
         "ok": True, "metodo": metodo, "motivo_local": motivo_local, "candidatos": resultado,
         "division_disponible": division_disponible, "total_paginas": len(rangos) if not division_disponible else None,

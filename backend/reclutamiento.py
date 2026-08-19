@@ -830,6 +830,32 @@ def buscar_candidato_por_nombre(empresa, nombre):
     return None
 
 
+def candidatos_ya_enriquecidos(candidato_ids: list[int]) -> set[int]:
+    """De esos ids, cuáles YA tienen formacion_json/experiencia_json con
+    datos -- solo Gemini rellena esas dos listas (el método local guarda
+    formación/experiencia como texto plano en los campos antiguos, nunca
+    ahí), así que no estar vacías es señal fiable de que ya se reextrajo con
+    IA en una tanda anterior. Se usa en la vista previa de "Adjuntar PDF a
+    fichas existentes" para no hacer repasar a quien ya quedó bien si un
+    lote se cortó a medias (ver adjuntar_pdf_lote_route)."""
+    if not candidato_ids:
+        return set()
+    conn = get_connection()
+    placeholders = ",".join("?" * len(candidato_ids))
+    rows = conn.execute(f"""
+        SELECT id, formacion_json, experiencia_json FROM candidatos WHERE id IN ({placeholders})
+    """, candidato_ids).fetchall()
+    conn.close()
+    listos = set()
+    for row in rows:
+        for campo in ("formacion_json", "experiencia_json"):
+            valor = row[campo]
+            if valor and valor not in ("[]", "null"):
+                listos.add(row["id"])
+                break
+    return listos
+
+
 def crear_candidato(campos: dict, empresa="kk", origen="manual", respuesta_id=None, creado_por=None, vacante_id=None):
     extra_fields = campos.pop("extra_fields", {}) or {}
     formacion_json = campos.pop("formacion_json", None)
