@@ -161,6 +161,61 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 });
 
+// Banner persistente de "trabajos de IA en curso" -- relleno de CVs en
+// segundo plano (ver _progreso_lotes / /candidatos/lotes-en-progreso en
+// reclutamiento_routes.py). Visible en CUALQUIER pantalla, justo debajo del
+// header, para poder salir de Reclutamiento sin perder de vista cuánto
+// falta; la campanita de arriba avisa cuando termina, esto es para mientras
+// sigue en marcha. No pinta nada si no hay ningún lote activo para este
+// usuario.
+document.addEventListener("DOMContentLoaded", async () => {
+  const header = document.querySelector("header.topbar");
+  if (!header) return;
+
+  const escapeHTML = (str) => {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  };
+
+  const banner = document.createElement("div");
+  banner.id = "lotes-progreso-banner";
+  banner.className = "lotes-progreso-banner";
+  banner.hidden = true;
+  header.insertAdjacentElement("afterend", banner);
+
+  const formatEta = (segundos) => {
+    if (!segundos) return "";
+    if (segundos < 60) return ` · ${segundos} s`;
+    return ` · ~${Math.round(segundos / 60)} min`;
+  };
+
+  async function actualizar() {
+    let lotes;
+    try {
+      const res = await fetch(`${window.location.origin}/api/reclutamiento/candidatos/lotes-en-progreso`);
+      if (!res.ok) return;
+      lotes = await res.json();
+    } catch {
+      return;
+    }
+    if (!lotes || lotes.length === 0) {
+      banner.hidden = true;
+      return;
+    }
+    banner.hidden = false;
+    banner.innerHTML = lotes
+      .map(
+        (l) =>
+          `<div class="lote-progreso-item">🤖 ${escapeHTML(l.titulo)}: ${l.procesados}/${l.total}${formatEta(l.eta_segundos)}</div>`
+      )
+      .join("");
+  }
+
+  await actualizar();
+  setInterval(actualizar, 8000);
+});
+
 // Indicador de "quién está en línea ahora mismo" — solo se activa para el
 // usuario "saul" (el backend devuelve 403 para cualquier otro, así que aquí
 // simplemente se deja de consultar si el primer intento falla, sin

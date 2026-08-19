@@ -296,6 +296,22 @@ def dejar_de_compartir_candidato_route(candidato_id: int, usuario_id: int, _user
     return {"ok": True}
 
 
+@router.get("/candidatos/lotes-en-progreso")
+def lotes_en_progreso_route(user: dict = Depends(get_current_user)):
+    """Todos los lotes de relleno con IA en curso (no terminados) del usuario
+    que pide la ruta -- alimenta el banner persistente del topbar (ver
+    topbar-menu.js), visible en cualquier pantalla mientras algo sigue
+    trabajando en segundo plano. Definida ANTES de /candidatos/{candidato_id}
+    a propósito: FastAPI resuelve por orden de registro, así que si fuera
+    después, "lotes-en-progreso" se colaría como candidato_id de esa otra
+    ruta en vez de llegar aquí."""
+    return [
+        {"lote_id": lote_id, **p}
+        for lote_id, p in _progreso_lotes.items()
+        if p.get("usuario_id") == user["id"] and not p["terminado"]
+    ]
+
+
 @router.get("/candidatos/{candidato_id}")
 def get_candidato_route(candidato_id: int, _user: dict = Depends(require_acceso_candidato)):
     candidato = reclutamiento_module.get_candidato(candidato_id)
@@ -340,15 +356,36 @@ def eliminar_candidato_route(candidato_id: int, _user: dict = Depends(require_in
 
 
 @router.post("/candidatos/extraer-cv")
-async def extraer_cv_route(file: UploadFile = File(...), _user: dict = Depends(require_informes)):
+async def extraer_cv_route(
+    intentar_gemini: bool = True, file: UploadFile = File(...), _user: dict = Depends(require_informes)
+):
+    """intentar_gemini=False para una lectura local instantánea (sin esperar
+    a la IA) -- el frontend la usa primero para saber cuántos candidatos trae
+    el PDF: si es uno solo, repite la llamada con intentar_gemini=True (un
+    único CV, la espera es corta) para la calidad de siempre; si son varios,
+    crea las fichas ya mismo con estos datos locales y mejora cada una en
+    segundo plano (ver adjuntar_pdf_lote_confirmar_route, que es quien de
+    verdad hace ese enriquecido -- aquí solo se detectan los rangos de
+    página de cada candidato para poder pedírselo después)."""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Sube el CV en formato PDF")
     contenido = await file.read()
     try:
-        candidatos, metodo, motivo_local = cv_extraction.extraer_cv(contenido)
+        candidatos, metodo, motivo_local = cv_extraction.extraer_cv(contenido, intentar_gemini=intentar_gemini)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "metodo": metodo, "motivo_local": motivo_local, "candidatos": candidatos}
+    rangos = []
+    if len(candidatos) > 1:
+        try:
+            rangos = cv_extraction.detectar_paginas_por_candidato(contenido)
+        except Exception:
+            rangos = []
+    division_disponible = len(rangos) == len(candidatos)
+    return {
+        "ok": True, "metodo": metodo, "motivo_local": motivo_local, "candidatos": candidatos,
+        "division_disponible": division_disponible,
+        "rangos_paginas": rangos if division_disponible else None,
+    }
 
 
 @router.post("/candidatos/adjuntar-pdf-lote")
@@ -406,7 +443,7 @@ GEMINI_ESPACIADO_SEGUNDOS = 7
 GEMINI_MAX_REINTENTOS_RPM = 2
 
 
-def _rellenar_huecos_en_segundo_plano(lote_id: str, recortes: list[tuple[int, bytes]], usuario_id: int):
+def _rellenar_huecos_en_segundo_plano(lote_id: str, recortes: list[tuple[int, bytes]], usuario_id: int, titulo: str):
     """Re-extrae con IA cada recorte y rellena huecos -- se ejecuta DESPUÉS
     de responder al navegador (ver BackgroundTasks en la ruta de abajo).
     Antes esto iba dentro de la propia petición: con Gemini saturado, cada
@@ -479,7 +516,7 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, recortes: list[tuple[int, by
         resumen = "todos con método local (Gemini no disponible)"
     notificaciones_module.crear_notificacion(
         usuario_id,
-        f"Relleno de CVs terminado: {total}/{total} candidatos procesados ({resumen}).",
+        f"{titulo}: relleno con IA terminado, {total}/{total} candidatos procesados ({resumen}).",
         "/compartidos.html",
     )
 
@@ -489,6 +526,7 @@ async def adjuntar_pdf_lote_confirmar_route(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     mapeo: str = Form(...),
+    titulo: str | None = Form(None),
     user: dict = Depends(require_informes),
 ):
     """Recorta y adjunta -- recibe el PDF de lote UNA sola vez (en vez de
@@ -536,8 +574,12 @@ async def adjuntar_pdf_lote_confirmar_route(
     lote_id = None
     if recortes_para_rellenar:
         lote_id = secrets.token_hex(8)
-        _progreso_lotes[lote_id] = {"total": len(recortes_para_rellenar), "procesados": 0, "terminado": False, "eta_segundos": None}
-        background_tasks.add_task(_rellenar_huecos_en_segundo_plano, lote_id, recortes_para_rellenar, user["id"])
+        titulo_lote = titulo or "Relleno de CVs"
+        _progreso_lotes[lote_id] = {
+            "total": len(recortes_para_rellenar), "procesados": 0, "terminado": False, "eta_segundos": None,
+            "usuario_id": user["id"], "titulo": titulo_lote,
+        }
+        background_tasks.add_task(_rellenar_huecos_en_segundo_plano, lote_id, recortes_para_rellenar, user["id"], titulo_lote)
     return {"ok": True, "adjuntados": adjuntados, "procesando_relleno": len(recortes_para_rellenar), "lote_id": lote_id}
 
 

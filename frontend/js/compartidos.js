@@ -632,6 +632,11 @@ function vacanteFormHTML() {
           </select>
         </div>` : ""}
         <div class="form-field form-field-full"><label>Notas</label><textarea id="vacante-notas" style="min-height:50px;">${v ? escapeHTML(v.notas || "") : ""}</textarea></div>
+        ${!v ? `<div class="form-field form-field-full">
+          <label>Subir CVs para esta vacante (opcional)</label>
+          <input type="file" id="vacante-cv-lote" accept=".pdf">
+          <p class="staff-hint" style="margin-top:4px;">El CV de una persona o un PDF con varios juntos -- las fichas se crean ya asignadas a esta vacante.</p>
+        </div>` : ""}
       </div>
       ${v ? `<p class="staff-hint">Solicitada el ${escapeHTML(fmtFechaHora(v.fecha_solicitud))}${v.fecha_cierre ? ` · cerrada el ${escapeHTML(fmtFechaHora(v.fecha_cierre))}` : ""}</p>` : ""}
       ${v ? `<p class="staff-hint">
@@ -684,6 +689,8 @@ async function guardarVacante() {
   }
   const centro = document.getElementById("vacante-centro").value.trim() || null;
   const notas = document.getElementById("vacante-notas").value.trim() || null;
+  const archivoInput = document.getElementById("vacante-cv-lote");
+  const archivo = !vacanteEditando && archivoInput?.files.length ? archivoInput.files[0] : null;
   let res;
   if (vacanteEditando) {
     const estado = document.getElementById("vacante-estado-form").value;
@@ -702,8 +709,18 @@ async function guardarVacante() {
     mostrarAviso(err.detail || `No se pudo guardar la vacante (error ${res.status}).`);
     return;
   }
+  const data = await res.json();
   cerrarVacanteForm();
   await refreshVacantes();
+  // Reutiliza el flujo de "Nuevo candidato" (local-first + IA en segundo
+  // plano, ver procesarPdfNuevosCandidatos) con la vacante recién creada ya
+  // preseleccionada, para no tener que ir asignando candidato a candidato.
+  if (archivo && data.id) {
+    abrirNuevoCandidato();
+    await procesarPdfNuevosCandidatos(archivo, document.getElementById("extraccion-aviso-wrap"), {
+      vacantePreseleccionadaId: data.id,
+    });
+  }
 }
 
 async function eliminarVacanteActual() {
@@ -1295,6 +1312,7 @@ function renderForm() {
 
 function cerrarForm() {
   candidatoEditando = null;
+  loteRevisionContexto = null;
   document.getElementById("form-wrap").innerHTML = "";
   refrescarResaltadoAbierta();
 }
@@ -1327,20 +1345,26 @@ function rellenarFormConCandidato(campos) {
 }
 
 let candidatosPorRevisar = [];
+// Contexto del PDF que se leyó para llegar a candidatosPorRevisar -- si hay
+// rangos de página fiables (uno por candidato), se reutilizan al crear para
+// adjuntar el recorte de cada uno y lanzar el enriquecido con IA en segundo
+// plano (ver crearCandidatosMultiples). null si no hay PDF que adjuntar
+// (p.ej. viene de un alta manual sin CV) o si la detección de página no
+// coincidió candidato a candidato.
+let loteRevisionContexto = null;
 
 // Cuando el PDF trae varios candidatos, no tiene sentido rellenar el
 // formulario de "un candidato" — se oculta y se muestra en su lugar una
-// lista de revisión con checkboxes para crear varias fichas de golpe. El CV
-// original (por lotes) no se adjunta a cada ficha individual: si hace falta
-// el CV de uno en concreto, se puede añadir después desde su propia ficha.
-function renderRevisionMultiple(candidatos) {
+// lista de revisión con checkboxes para crear varias fichas de golpe.
+function renderRevisionMultiple(candidatos, { file = null, rangosPaginas = null, vacantePreseleccionadaId = null } = {}) {
   candidatosPorRevisar = candidatos;
+  loteRevisionContexto = file ? { file, rangosPaginas } : null;
   document.getElementById("single-candidato-wrap").hidden = true;
   const wrap = document.getElementById("revision-multiple-wrap");
   wrap.innerHTML = `
     <div class="form-field" style="margin-bottom:10px; max-width:340px;">
       <label>Asignar todos a la vacante</label>
-      ${vacanteSelectHTML(vacantePreseleccionada(), "revision-vacante-select")}
+      ${vacanteSelectHTML(vacantePreseleccionadaId ?? vacantePreseleccionada(), "revision-vacante-select")}
     </div>
     <p class="staff-hint" id="revision-contador"></p>
     <div class="candidatos-grid">
@@ -1375,7 +1399,7 @@ function renderRevisionMultiple(candidatos) {
 
 async function crearCandidatosMultiples() {
   const seleccionados = Array.from(document.querySelectorAll(".revision-multiple-check:checked"))
-    .map((el) => candidatosPorRevisar[Number(el.dataset.idx)]);
+    .map((el) => ({ idx: Number(el.dataset.idx), campos: candidatosPorRevisar[Number(el.dataset.idx)] }));
   if (seleccionados.length === 0) {
     mostrarAviso("Selecciona al menos un candidato.");
     return;
@@ -1386,19 +1410,39 @@ async function crearCandidatosMultiples() {
   btn.disabled = true;
   btn.textContent = "Creando...";
   let errores = 0;
-  for (const campos of seleccionados) {
+  const mapeo = [];
+  for (const { idx, campos } of seleccionados) {
     const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...campos, empresa: EMPRESA, vacante_id }),
     });
-    if (!res.ok) errores++;
+    if (!res.ok) {
+      errores++;
+      continue;
+    }
+    const data = await res.json();
+    const rango = loteRevisionContexto?.rangosPaginas?.[idx];
+    if (rango) mapeo.push({ candidato_id: data.id, pagina_inicio: rango[0], pagina_fin: rango[1] });
   }
   if (errores > 0) {
     mostrarAviso(`No se pudieron crear ${errores} de ${seleccionados.length} candidatos. Revisa la conexión e inténtalo de nuevo.`);
     btn.disabled = false;
     btn.textContent = "Crear candidatos seleccionados";
     return;
+  }
+  // Adjunta a cada candidato nuevo su recorte del PDF y lanza el enriquecido
+  // con IA en segundo plano -- mismo mecanismo que "Adjuntar PDF a fichas
+  // existentes" (ver adjuntar_pdf_lote_confirmar_route), solo que aquí las
+  // fichas se acaban de crear en vez de ya existir.
+  if (mapeo.length && loteRevisionContexto?.file) {
+    const vacante = vacante_id ? vacantesTodasCache.find((v) => v.id === vacante_id) : null;
+    const titulo = vacante ? `${vacante.puesto}${vacante.centro ? ` · ${vacante.centro}` : ""}` : "Candidatos nuevos";
+    const formData = new FormData();
+    formData.append("file", loteRevisionContexto.file);
+    formData.append("mapeo", JSON.stringify(mapeo));
+    formData.append("titulo", titulo);
+    await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/adjuntar-pdf-lote/confirmar`, { method: "POST", body: formData }).catch(() => null);
   }
   cerrarForm();
   await refreshVacantes();
@@ -1560,27 +1604,54 @@ async function extraerCvYRellenar() {
     avisoWrap.innerHTML = `<p class="extraccion-aviso local">Selecciona primero un PDF.</p>`;
     return;
   }
-  const formData = new FormData();
-  formData.append("file", input.files[0]);
+  await procesarPdfNuevosCandidatos(input.files[0], avisoWrap, {});
+}
+
+// Primero lee el PDF en LOCAL (instantáneo, sin esperar a la IA) para saber
+// cuántos candidatos trae -- si es uno solo, vale la pena esperar a Gemini
+// (un único CV, la espera es corta) y se mantiene la revisión de siempre
+// antes de guardar. Si son varios, no tiene sentido hacer esperar al
+// reclutador por un PDF de 30-50 CVs: se crean ya con estos datos locales y
+// se mejora cada uno con IA en segundo plano nada más crearlos (ver
+// crearCandidatosMultiples).
+async function procesarPdfNuevosCandidatos(file, avisoWrap, { vacantePreseleccionadaId = null } = {}) {
   avisoWrap.innerHTML = `<p class="staff-hint">Leyendo el CV...</p>`;
-  const resp = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/extraer-cv`, { method: "POST", body: formData });
-  if (!resp.ok) {
+  const formLocal = new FormData();
+  formLocal.append("file", file);
+  const respLocal = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/extraer-cv?intentar_gemini=false`, {
+    method: "POST", body: formLocal,
+  });
+  if (!respLocal.ok) {
     avisoWrap.innerHTML = `<p class="extraccion-aviso local">No se pudo leer el CV. Rellena los datos a mano.</p>`;
     return;
   }
-  const data = await resp.json();
-  const candidatos = data.candidatos || [];
-  if (candidatos.length === 0) {
+  const dataLocal = await respLocal.json();
+  const candidatosLocal = dataLocal.candidatos || [];
+  if (candidatosLocal.length === 0) {
     avisoWrap.innerHTML = `<p class="extraccion-aviso local">No se reconoció ningún candidato en el PDF. Rellena los datos a mano.</p>`;
     return;
   }
-  avisoWrap.innerHTML = avisoExtraccionHTML(data.metodo, candidatos.length, data.motivo_local);
-  if (candidatos.length === 1) {
+
+  if (candidatosLocal.length === 1) {
+    const formData = new FormData();
+    formData.append("file", file);
+    const resp = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/extraer-cv`, { method: "POST", body: formData });
+    const data = resp.ok ? await resp.json() : null;
+    const candidatos = data?.candidatos?.length ? data.candidatos : candidatosLocal;
+    avisoWrap.innerHTML = avisoExtraccionHTML(data?.metodo || "local", candidatos.length, data?.motivo_local);
     rellenarFormConCandidato(candidatos[0]);
-    input.dataset.pendingUpload = "1";
-  } else {
-    renderRevisionMultiple(candidatos);
+    document.getElementById("input-cv-nuevo").dataset.pendingUpload = "1";
+    const selectVacante = document.getElementById("candidato-vacante-form");
+    if (vacantePreseleccionadaId && selectVacante) selectVacante.value = String(vacantePreseleccionadaId);
+    return;
   }
+
+  avisoWrap.innerHTML = `<p class="extraccion-aviso local">✓ ${candidatosLocal.length} candidatos detectados (lectura local, instantánea). Se mejorarán solos con IA en segundo plano al crearlos.</p>`;
+  renderRevisionMultiple(candidatosLocal, {
+    file,
+    rangosPaginas: dataLocal.division_disponible ? dataLocal.rangos_paginas : null,
+    vacantePreseleccionadaId,
+  });
 }
 
 // Re-lee un PDF que YA está adjunto a esta ficha con el extractor actual
