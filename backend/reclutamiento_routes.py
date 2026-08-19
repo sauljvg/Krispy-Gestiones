@@ -528,6 +528,11 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, items: list[tuple[int, int]]
                 extraidos, metodo, _motivo = cv_extraction.extraer_cv(recorte, intentar_gemini=False)
             if metodo == "gemini":
                 con_ia += 1
+                # Se marca aunque Gemini no haya encontrado nada que rellenar
+                # (candidato sin formación/experiencia real en su CV) -- lo
+                # que importa aquí es que SÍ lo procesó, no si el resultado
+                # tenía contenido (ver candidatos_ya_enriquecidos).
+                reclutamiento_module.marcar_ia_extraida(candidato_id)
             else:
                 con_local += 1
             if extraidos:

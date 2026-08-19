@@ -163,6 +163,27 @@ def ensure_reclutamiento_tables():
         conn.execute("ALTER TABLE candidatos ADD COLUMN formacion_json TEXT")
     if "experiencia_json" not in cols_candidatos:
         conn.execute("ALTER TABLE candidatos ADD COLUMN experiencia_json TEXT")
+    # ia_extraida_en: marca explícita de "a este candidato ya lo procesó
+    # Gemini", independiente de si formacion_json/experiencia_json quedaron
+    # con algo -- antes se usaba solo "¿tiene formacion_json/experiencia_json
+    # no vacíos?" como señal (ver candidatos_ya_enriquecidos), pero un CV real
+    # puede no tener ninguna entrada de formación o de experiencia que
+    # extraer (candidato sin estudios reglados, p.ej.) y Gemini SÍ lo procesó
+    # bien -- con la señal vieja, "Descargar CV en PDF" seguía sirviendo el
+    # PDF original de InfoJobs en vez del nuestro aunque el candidato ya
+    # estuviera correctamente enriquecido.
+    if "ia_extraida_en" not in cols_candidatos:
+        conn.execute("ALTER TABLE candidatos ADD COLUMN ia_extraida_en TEXT")
+        # Backfill: quien ya tenía formacion_json/experiencia_json con datos
+        # es, con certeza, alguien que SÍ pasó por Gemini (ver
+        # candidatos_ya_enriquecidos) -- para esos se marca ya mismo, así no
+        # se pierde la detección de quien se enriqueció antes de este cambio.
+        conn.execute("""
+            UPDATE candidatos SET ia_extraida_en = datetime('now')
+            WHERE ia_extraida_en IS NULL
+              AND ((formacion_json IS NOT NULL AND formacion_json NOT IN ('[]', 'null'))
+                OR (experiencia_json IS NOT NULL AND experiencia_json NOT IN ('[]', 'null')))
+        """)
     # Backfill de fecha_solicitud vacía con la fecha en la que se dio de alta
     # la ficha -- es una aproximación razonable (normalmente se sube el mismo
     # día que se recibe la solicitud) y evita dejar el campo en blanco en
@@ -856,29 +877,34 @@ def buscar_candidato_por_nombre(empresa, nombre):
 
 
 def candidatos_ya_enriquecidos(candidato_ids: list[int]) -> set[int]:
-    """De esos ids, cuáles YA tienen formacion_json/experiencia_json con
-    datos -- solo Gemini rellena esas dos listas (el método local guarda
-    formación/experiencia como texto plano en los campos antiguos, nunca
-    ahí), así que no estar vacías es señal fiable de que ya se reextrajo con
-    IA en una tanda anterior. Se usa en la vista previa de "Adjuntar PDF a
-    fichas existentes" para no hacer repasar a quien ya quedó bien si un
-    lote se cortó a medias (ver adjuntar_pdf_lote_route)."""
+    """De esos ids, a cuáles YA procesó Gemini (ver ia_extraida_en) -- se usa
+    en la vista previa de "Adjuntar PDF a fichas existentes" para no hacer
+    repasar a quien ya quedó bien si un lote se cortó a medias, y en
+    "Descargar CV en PDF" para decidir si ya toca servir nuestro diseño en
+    vez del PDF original. Antes se inferís de si formacion_json/
+    experiencia_json tenían algo, pero un candidato sin estudios ni
+    experiencia que extraer (CV real, Gemini lo procesa bien) se quedaba con
+    esos dos campos vacíos igualmente -- se veía como "no procesado" aunque
+    sí lo estuviera."""
     if not candidato_ids:
         return set()
     conn = get_connection()
     placeholders = ",".join("?" * len(candidato_ids))
     rows = conn.execute(f"""
-        SELECT id, formacion_json, experiencia_json FROM candidatos WHERE id IN ({placeholders})
+        SELECT id FROM candidatos WHERE id IN ({placeholders}) AND ia_extraida_en IS NOT NULL
     """, candidato_ids).fetchall()
     conn.close()
-    listos = set()
-    for row in rows:
-        for campo in ("formacion_json", "experiencia_json"):
-            valor = row[campo]
-            if valor and valor not in ("[]", "null"):
-                listos.add(row["id"])
-                break
-    return listos
+    return {row["id"] for row in rows}
+
+
+def marcar_ia_extraida(candidato_id: int):
+    """Se llama cada vez que Gemini procesa (con éxito) el CV de este
+    candidato, encuentre o no encuentre formación/experiencia que rellenar
+    -- ver candidatos_ya_enriquecidos."""
+    conn = get_connection()
+    conn.execute("UPDATE candidatos SET ia_extraida_en = datetime('now') WHERE id = ?", (candidato_id,))
+    conn.commit()
+    conn.close()
 
 
 def crear_lote_ia_pendiente(lote_id: str, usuario_id: int, titulo: str, candidatos_archivos: list[tuple[int, int]]):
