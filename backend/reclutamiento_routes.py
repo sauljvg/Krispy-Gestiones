@@ -5,7 +5,7 @@ import secrets
 import threading
 import time
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -467,9 +467,9 @@ GEMINI_MAX_REINTENTOS_RPM = 2
 
 def _rellenar_huecos_en_segundo_plano(lote_id: str, items: list[tuple[int, int]], usuario_id: int, titulo: str):
     """Re-extrae con IA cada candidato pendiente y rellena huecos -- se
-    ejecuta DESPUÉS de responder al navegador (ver BackgroundTasks en la
-    ruta de abajo) o al arrancar el proceso si retoma un lote a medias (ver
-    _reanudar_lotes_al_arrancar). Antes esto iba dentro de la propia
+    ejecuta en un hilo aparte DESPUÉS de responder al navegador (ver
+    _lanzar_relleno más abajo), tanto recién subido el PDF como al retomar
+    un lote a medias (ver reanudar_lotes_ia_pendientes). Antes esto iba dentro de la propia
     petición: con Gemini saturado, cada llamada podía tardar hasta el
     timeout (ver cv_extraction) y encadenar hasta 37 de esas dejó el proceso
     bloqueado cerca de una hora, tumbando el resto del sitio para todo el
@@ -488,44 +488,59 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, items: list[tuple[int, int]]
     por minuto del plan gratuito, y si aun así llega un 429 "por minuto"
     (GeminiLimiteTemporalError, con el retryDelay que da la propia Gemini) se
     espera y se reintenta ESE candidato en vez de rendirse para el resto del
-    lote -- solo se deja de intentar Gemini del todo si el fallo es de otro
-    tipo (cupo diario agotado, clave inválida, Gemini caído), que no se
-    arregla esperando un momento."""
-    intentar_gemini = True
+    lote.
+
+    Si Gemini está caído del todo (GeminiNoConfiguradoError/
+    GeminiNoDisponibleError -- clave inválida, cupo diario agotado, servicio
+    caído), YA NO se cae a método local para el resto: eso daba un lote
+    "terminado" con resultados de peor calidad sin que nadie se enterara a
+    tiempo (el aviso decía "terminado" igual). En vez de eso, el lote se
+    para aquí mismo -- los candidatos que aún no se procesaron se quedan tal
+    cual en la cola (lotes_ia_pendientes) y _reintentar_lotes_ia_periodicamente
+    los retoma solo, más tarde, sin que haga falta que nadie vuelva a subir
+    nada."""
+    p_inicial = _progreso_lotes.get(lote_id)
+    if p_inicial is not None:
+        p_inicial["pausado"] = False  # esta pasada ya está corriendo, no esperando
     ultimo_intento_gemini = 0.0
     con_ia = 0
     con_local = 0
     inicio = time.monotonic()
     procesados_esta_tanda = 0
+    pausado_gemini_caido = False
     for candidato_id, archivo_id in items:
         try:
             archivo = reclutamiento_module.get_archivo(archivo_id)
             if archivo is None or not os.path.exists(archivo["ruta"]):
+                reclutamiento_module.marcar_candidato_lote_terminado(lote_id, candidato_id)
                 continue
             with open(archivo["ruta"], "rb") as f:
                 recorte = f.read()
             extraidos, metodo = None, "local"
-            if intentar_gemini:
-                reintentos = 0
-                while True:
-                    espera = GEMINI_ESPACIADO_SEGUNDOS - (time.monotonic() - ultimo_intento_gemini)
-                    if espera > 0:
-                        time.sleep(espera)
-                    ultimo_intento_gemini = time.monotonic()
-                    try:
-                        extraidos, metodo = cv_extraction.extraer_con_gemini(recorte), "gemini"
-                        break
-                    except cv_extraction.GeminiLimiteTemporalError as exc:
-                        reintentos += 1
-                        if reintentos > GEMINI_MAX_REINTENTOS_RPM:
-                            break  # solo este candidato cae a local, el resto del lote sigue con Gemini
-                        time.sleep(min(exc.retry_after_segundos, 90))
-                    except (cv_extraction.GeminiNoConfiguradoError, cv_extraction.GeminiNoDisponibleError) as exc:
-                        print(f"[adjuntar-pdf-lote] Gemini no disponible, resto del lote en local: {exc}")
-                        intentar_gemini = False
-                        break
-            if metodo != "gemini":
-                extraidos, metodo, _motivo = cv_extraction.extraer_cv(recorte, intentar_gemini=False)
+            reintentos = 0
+            while True:
+                espera = GEMINI_ESPACIADO_SEGUNDOS - (time.monotonic() - ultimo_intento_gemini)
+                if espera > 0:
+                    time.sleep(espera)
+                ultimo_intento_gemini = time.monotonic()
+                try:
+                    extraidos, metodo = cv_extraction.extraer_con_gemini(recorte), "gemini"
+                    break
+                except cv_extraction.GeminiLimiteTemporalError as exc:
+                    reintentos += 1
+                    if reintentos > GEMINI_MAX_REINTENTOS_RPM:
+                        extraidos, metodo, _motivo = cv_extraction.extraer_cv(recorte, intentar_gemini=False)
+                        break  # solo este candidato cae a local, el resto del lote sigue con Gemini
+                    time.sleep(min(exc.retry_after_segundos, 90))
+                except (cv_extraction.GeminiNoConfiguradoError, cv_extraction.GeminiNoDisponibleError) as exc:
+                    print(f"[adjuntar-pdf-lote] Gemini no disponible, se pausa el lote '{titulo}' para reintentar más tarde: {exc}")
+                    pausado_gemini_caido = True
+                    p = _progreso_lotes.get(lote_id)
+                    if p is not None:
+                        p["pausado"] = True
+                    break
+            if pausado_gemini_caido:
+                break  # este candidato NO se marca terminado -- se reintenta entero en la próxima pasada
             if metodo == "gemini":
                 con_ia += 1
                 # Se marca aunque Gemini no haya encontrado nada que rellenar
@@ -537,22 +552,35 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, items: list[tuple[int, int]]
                 con_local += 1
             if extraidos:
                 reclutamiento_module.rellenar_huecos_candidato(candidato_id, extraidos[0])
-        except Exception as exc:
-            print(f"[adjuntar-pdf-lote] No se pudo rellenar huecos del candidato {candidato_id}: {exc}")
-        finally:
             reclutamiento_module.marcar_candidato_lote_terminado(lote_id, candidato_id)
-            procesados_esta_tanda += 1
-            p = _progreso_lotes.get(lote_id)
-            if p is not None:
-                p["procesados"] += 1
-                # Ritmo medio real de ESTA tanda (incluye esperas de espaciado y
-                # reintentos) proyectado sobre lo que queda -- si el lote viene
-                # retomado tras un reinicio, procesados_esta_tanda arranca en 0
-                # aunque p["procesados"] ya venga con lo hecho antes, para no
-                # calcular el ritmo como si lo de antes también hubiera
-                # tardado lo de ahora.
-                restantes = p["total"] - p["procesados"]
-                p["eta_segundos"] = round((time.monotonic() - inicio) / procesados_esta_tanda * restantes) if restantes > 0 else 0
+        except Exception as exc:
+            # Error real de ESTE candidato (PDF corrupto, lo que sea) -- se
+            # da por perdido y se sigue con el resto, igual que antes; no se
+            # confunde con pausado_gemini_caido (eso para el LOTE entero para
+            # reintentarlo más tarde, esto solo se rinde con uno).
+            print(f"[adjuntar-pdf-lote] No se pudo rellenar huecos del candidato {candidato_id}: {exc}")
+            reclutamiento_module.marcar_candidato_lote_terminado(lote_id, candidato_id)
+        finally:
+            if not pausado_gemini_caido:
+                procesados_esta_tanda += 1
+                p = _progreso_lotes.get(lote_id)
+                if p is not None:
+                    p["procesados"] += 1
+                    # Ritmo medio real de ESTA tanda (incluye esperas de espaciado y
+                    # reintentos) proyectado sobre lo que queda -- si el lote viene
+                    # retomado tras un reinicio, procesados_esta_tanda arranca en 0
+                    # aunque p["procesados"] ya venga con lo hecho antes, para no
+                    # calcular el ritmo como si lo de antes también hubiera
+                    # tardado lo de ahora.
+                    restantes = p["total"] - p["procesados"]
+                    p["eta_segundos"] = round((time.monotonic() - inicio) / procesados_esta_tanda * restantes) if restantes > 0 else 0
+
+    if pausado_gemini_caido:
+        # Sin marcar terminado -- el indicador del topbar sigue mostrando
+        # "en curso" (correcto, lo está) y no se manda ningún aviso de
+        # "terminado" a medias con peor calidad.
+        return
+
     p = _progreso_lotes.get(lote_id)
     if p is not None:
         p["terminado"] = True
@@ -565,7 +593,7 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, items: list[tuple[int, int]]
     elif con_ia:
         resumen = "todos con IA"
     else:
-        resumen = "todos con método local (Gemini no disponible)"
+        resumen = "todos con método local"
     notificaciones_module.crear_notificacion(
         usuario_id,
         f"{titulo}: relleno con IA terminado, {total}/{total} candidatos procesados ({resumen}).",
@@ -573,32 +601,78 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, items: list[tuple[int, int]]
     )
 
 
+# lote_id de cualquier lote que tenga YA un hilo/tarea corriendo -- evita
+# que reanudar_lotes_ia_pendientes() (llamado al arrancar Y cada
+# REINTENTO_GEMINI_INTERVALO_MINUTOS) lance una segunda pasada duplicada
+# sobre el mismo lote si la anterior todavía no ha terminado o pausado.
+_lotes_en_ejecucion: set[str] = set()
+
+
+def _lanzar_relleno(lote_id: str, items: list[tuple[int, int]], usuario_id: int, titulo: str):
+    if lote_id in _lotes_en_ejecucion:
+        return
+    _lotes_en_ejecucion.add(lote_id)
+
+    def _run():
+        try:
+            _rellenar_huecos_en_segundo_plano(lote_id, items, usuario_id, titulo)
+        finally:
+            _lotes_en_ejecucion.discard(lote_id)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def reanudar_lotes_ia_pendientes():
-    """Se llama al arrancar el proceso (ver el startup de main.py) --
-    retoma cada lote de relleno con IA que se quedó a medias en el arranque
-    anterior (redeploy, reinicio, caída...) en vez de dejarlo perdido para
-    siempre. Reconstruye _progreso_lotes con el total real y lo ya
-    procesado (no desde 0) para que el indicador del topbar no mienta, y
-    lanza el resto en un hilo aparte -- fuera de una petición no hay
-    BackgroundTasks de FastAPI que valga."""
+    """Retoma cada lote de relleno con IA que se quedó a medias -- se llama
+    al arrancar el proceso (ver el startup de main.py; un redeploy/reinicio
+    a media tanda ya no pierde el trabajo) Y periódicamente mientras el
+    proceso sigue corriendo (ver iniciar_reintento_periodico_lotes_ia), que
+    es lo que de verdad resuelve el caso "Gemini no disponible": en vez de
+    caer a método local para no dejar el lote colgado, se para y esta
+    función lo retoma sola más tarde, cuando Gemini ya vuelva a responder.
+    Reconstruye _progreso_lotes con el total real y lo ya procesado (no
+    desde 0) para que el indicador del topbar no mienta."""
     lotes = reclutamiento_module.lotes_ia_incompletos()
     for lote in lotes:
+        if lote["lote_id"] in _lotes_en_ejecucion:
+            continue
         ya_hechos = lote["total"] - len(lote["pendientes"])
         _progreso_lotes[lote["lote_id"]] = {
             "total": lote["total"], "procesados": ya_hechos, "terminado": False, "eta_segundos": None,
-            "usuario_id": lote["usuario_id"], "titulo": lote["titulo"],
+            "usuario_id": lote["usuario_id"], "titulo": lote["titulo"], "pausado": False,
         }
         print(f"[adjuntar-pdf-lote] Retomando lote '{lote['titulo']}' ({ya_hechos}/{lote['total']} ya hechos, {len(lote['pendientes'])} pendientes)", flush=True)
-        threading.Thread(
-            target=_rellenar_huecos_en_segundo_plano,
-            args=(lote["lote_id"], lote["pendientes"], lote["usuario_id"], lote["titulo"]),
-            daemon=True,
-        ).start()
+        _lanzar_relleno(lote["lote_id"], lote["pendientes"], lote["usuario_id"], lote["titulo"])
+
+
+REINTENTO_GEMINI_INTERVALO_MINUTOS = 30
+_scheduler_reintento_iniciado = False
+
+
+def _reintentar_lotes_ia_periodicamente():
+    while True:
+        time.sleep(REINTENTO_GEMINI_INTERVALO_MINUTOS * 60)
+        try:
+            reanudar_lotes_ia_pendientes()
+        except Exception as exc:
+            print(f"[adjuntar-pdf-lote] Fallo en el reintento periódico de lotes de IA: {exc}", flush=True)
+
+
+def iniciar_reintento_periodico_lotes_ia():
+    """Hilo en segundo plano (una sola vez) que cada
+    REINTENTO_GEMINI_INTERVALO_MINUTOS vuelve a intentar los lotes que se
+    pausaron por "Gemini no disponible" -- sin esto, un lote pausado se
+    quedaría esperando para siempre hasta el próximo reinicio del proceso."""
+    global _scheduler_reintento_iniciado
+    if _scheduler_reintento_iniciado:
+        return
+    _scheduler_reintento_iniciado = True
+    threading.Thread(target=_reintentar_lotes_ia_periodicamente, daemon=True).start()
+    print(f"[adjuntar-pdf-lote] Reintento automático de lotes de IA pausados cada {REINTENTO_GEMINI_INTERVALO_MINUTOS} min", flush=True)
 
 
 @router.post("/candidatos/adjuntar-pdf-lote/confirmar")
 async def adjuntar_pdf_lote_confirmar_route(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     mapeo: str = Form(...),
     titulo: str | None = Form(None),
@@ -652,14 +726,14 @@ async def adjuntar_pdf_lote_confirmar_route(
         titulo_lote = titulo or "Relleno de CVs"
         _progreso_lotes[lote_id] = {
             "total": len(items_para_rellenar), "procesados": 0, "terminado": False, "eta_segundos": None,
-            "usuario_id": user["id"], "titulo": titulo_lote,
+            "usuario_id": user["id"], "titulo": titulo_lote, "pausado": False,
         }
         # Cola durable ANTES de programar el segundo plano -- si el proceso
         # se reinicia (redeploy, caída...) antes o durante el lote,
         # _reanudar_lotes_al_arrancar lo retoma solo desde aquí sin perder
         # lo que ya se procesó.
         reclutamiento_module.crear_lote_ia_pendiente(lote_id, user["id"], titulo_lote, items_para_rellenar)
-        background_tasks.add_task(_rellenar_huecos_en_segundo_plano, lote_id, items_para_rellenar, user["id"], titulo_lote)
+        _lanzar_relleno(lote_id, items_para_rellenar, user["id"], titulo_lote)
     return {"ok": True, "adjuntados": adjuntados, "procesando_relleno": len(items_para_rellenar), "lote_id": lote_id}
 
 

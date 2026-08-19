@@ -235,8 +235,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     badgeWrap.hidden = false;
     contador.textContent = String(lotes.length);
     lista.innerHTML = lotes
-      .map(
-        (l) => `<li>🤖 ${escapeHTML(l.titulo)}: ${l.procesados}/${l.total}${formatEta(l.eta_segundos)}</li>`
+      .map((l) =>
+        l.pausado
+          ? `<li>⏸️ ${escapeHTML(l.titulo)}: ${l.procesados}/${l.total} · en espera, Gemini no responde ahora mismo (se reintenta solo)</li>`
+          : `<li>🤖 ${escapeHTML(l.titulo)}: ${l.procesados}/${l.total}${formatEta(l.eta_segundos)}</li>`
       )
       .join("");
   }
