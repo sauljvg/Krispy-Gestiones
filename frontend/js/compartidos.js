@@ -1190,11 +1190,12 @@ function cerrarForm() {
   document.getElementById("form-wrap").innerHTML = "";
 }
 
-function avisoExtraccionHTML(metodo, n) {
+function avisoExtraccionHTML(metodo, n, motivoLocal) {
   const clase = metodo === "gemini" ? "gemini" : "local";
+  const motivoTxt = motivoLocal ? ` Motivo: ${motivoLocal}` : "";
   const texto = metodo === "gemini"
     ? `✓ ${n} candidato${n === 1 ? "" : "s"} extraído${n === 1 ? "" : "s"} con IA. Revisa los datos antes de guardar.`
-    : `Se usó el método local (sin IA) para leer el PDF${n > 1 ? ` (${n} candidatos detectados)` : ""}. Revisa los datos con más atención antes de guardar.`;
+    : `Se usó el método local (sin IA) para leer el PDF${n > 1 ? ` (${n} candidatos detectados)` : ""}. Revisa los datos con más atención antes de guardar.${motivoTxt}`;
   return `<p class="extraccion-aviso ${clase}">${escapeHTML(texto)}</p>`;
 }
 
@@ -1354,7 +1355,7 @@ async function previsualizarLote() {
   // rango de páginas en vez del PDF de lote entero -- el rango detectado se
   // muestra editable por si falla en algún caso concreto.
   resultadoWrap.innerHTML = `
-    ${avisoExtraccionHTML(data.metodo, items.length)}
+    ${avisoExtraccionHTML(data.metodo, items.length, data.motivo_local)}
     <p class="staff-hint">${encontrados.length} coincidencia${encontrados.length === 1 ? "" : "s"} encontrada${encontrados.length === 1 ? "" : "s"} de ${items.length}${noEncontrados ? ` (${noEncontrados} sin ficha con ese nombre exacto -- no se les adjunta nada)` : ""}.
     ${data.division_disponible ? "Se ha detectado en qué páginas está cada uno -- se adjunta solo esa parte del PDF (puedes corregir el rango si hace falta)." : "No se pudo dividir el PDF de forma fiable -- se adjuntará el PDF completo a cada ficha encontrada, como antes."}</p>
     <ul class="lote-lista">
@@ -1403,7 +1404,8 @@ async function confirmarAdjuntarLote(items) {
     return;
   }
   const data = await res.json();
-  progreso.textContent = `Listo: PDF adjuntado a ${data.adjuntados} ficha(s), ${data.rellenados} con datos nuevos rellenados automáticamente (formación, experiencia y otros campos que estaban vacíos).`;
+  const motivoTxt = data.motivo_local ? ` Se usó el método local (sin IA) -- motivo: ${data.motivo_local}` : "";
+  progreso.textContent = `Listo: PDF adjuntado a ${data.adjuntados} ficha(s), ${data.rellenados} con datos nuevos rellenados automáticamente (formación, experiencia y otros campos que estaban vacíos).${motivoTxt}`;
   btn.remove();
   await loadCandidatos();
 }
@@ -1429,7 +1431,7 @@ async function extraerCvYRellenar() {
     avisoWrap.innerHTML = `<p class="extraccion-aviso local">No se reconoció ningún candidato en el PDF. Rellena los datos a mano.</p>`;
     return;
   }
-  avisoWrap.innerHTML = avisoExtraccionHTML(data.metodo, candidatos.length);
+  avisoWrap.innerHTML = avisoExtraccionHTML(data.metodo, candidatos.length, data.motivo_local);
   if (candidatos.length === 1) {
     rellenarFormConCandidato(candidatos[0]);
     input.dataset.pendingUpload = "1";
@@ -1456,7 +1458,7 @@ async function reextraerCv(archivoId) {
     return;
   }
   const data = await resp.json();
-  avisoWrap.innerHTML = avisoExtraccionHTML(data.metodo, 1);
+  avisoWrap.innerHTML = avisoExtraccionHTML(data.metodo, 1, data.motivo_local);
   rellenarFormConCandidato(data.candidato);
   // Si el PDF adjunto es un lote con varias personas, la foto de la
   // "página 1" no tiene por qué ser la de esta ficha -- no se intenta sacar

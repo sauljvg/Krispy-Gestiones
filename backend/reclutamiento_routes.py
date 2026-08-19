@@ -316,10 +316,10 @@ async def extraer_cv_route(file: UploadFile = File(...), _user: dict = Depends(r
         raise HTTPException(status_code=400, detail="Sube el CV en formato PDF")
     contenido = await file.read()
     try:
-        candidatos, metodo = cv_extraction.extraer_cv(contenido)
+        candidatos, metodo, motivo_local = cv_extraction.extraer_cv(contenido)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "metodo": metodo, "candidatos": candidatos}
+    return {"ok": True, "metodo": metodo, "motivo_local": motivo_local, "candidatos": candidatos}
 
 
 @router.post("/candidatos/adjuntar-pdf-lote")
@@ -338,7 +338,7 @@ async def adjuntar_pdf_lote_route(empresa: str = "kk", file: UploadFile = File(.
         raise HTTPException(status_code=400, detail="Sube el PDF con todos los candidatos")
     contenido = await file.read()
     try:
-        candidatos, metodo = cv_extraction.extraer_cv(contenido)
+        candidatos, metodo, motivo_local = cv_extraction.extraer_cv(contenido)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     try:
@@ -354,7 +354,10 @@ async def adjuntar_pdf_lote_route(empresa: str = "kk", file: UploadFile = File(.
         if division_disponible:
             item["pagina_inicio"], item["pagina_fin"] = rangos[i]
         resultado.append(item)
-    return {"ok": True, "metodo": metodo, "candidatos": resultado, "division_disponible": division_disponible, "total_paginas": len(rangos) if not division_disponible else None}
+    return {
+        "ok": True, "metodo": metodo, "motivo_local": motivo_local, "candidatos": resultado,
+        "division_disponible": division_disponible, "total_paginas": len(rangos) if not division_disponible else None,
+    }
 
 
 @router.post("/candidatos/adjuntar-pdf-lote/confirmar")
@@ -387,6 +390,7 @@ async def adjuntar_pdf_lote_confirmar_route(
     contenido = await file.read()
     adjuntados = 0
     rellenados = 0
+    motivo_local = None
     for item in items:
         candidato_id = item.get("candidato_id")
         if not candidato_id:
@@ -403,12 +407,18 @@ async def adjuntar_pdf_lote_confirmar_route(
         adjuntados += 1
         if pagina_inicio and pagina_fin:
             try:
-                extraidos, _metodo = cv_extraction.extraer_cv(recorte)
+                extraidos, metodo, motivo = cv_extraction.extraer_cv(recorte)
+                # Todas las personas de este lote comparten el mismo motivo
+                # (misma cuota de Gemini en el mismo momento) -- basta con
+                # guardarse el primero para avisar al final, no hace falta
+                # repetirlo por cada uno.
+                if metodo == "local" and motivo_local is None:
+                    motivo_local = motivo
                 if extraidos and reclutamiento_module.rellenar_huecos_candidato(candidato_id, extraidos[0]):
                     rellenados += 1
             except Exception:
                 pass
-    return {"ok": True, "adjuntados": adjuntados, "rellenados": rellenados}
+    return {"ok": True, "adjuntados": adjuntados, "rellenados": rellenados, "motivo_local": motivo_local}
 
 
 @router.post("/candidatos/{candidato_id}/archivos")
@@ -444,13 +454,13 @@ def reextraer_archivo_route(candidato_id: int, archivo_id: int, _user: dict = De
     nuevo."""
     contenido = _leer_archivo_pdf(candidato_id, archivo_id)
     try:
-        candidatos, metodo = cv_extraction.extraer_cv(contenido)
+        candidatos, metodo, motivo_local = cv_extraction.extraer_cv(contenido)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     if not candidatos:
         raise HTTPException(status_code=422, detail="No se reconoció ningún candidato en este PDF")
     if len(candidatos) == 1:
-        return {"ok": True, "metodo": metodo, "candidato": candidatos[0], "de_lote": False}
+        return {"ok": True, "metodo": metodo, "motivo_local": motivo_local, "candidato": candidatos[0], "de_lote": False}
     # El PDF adjunto es un lote con varias personas (ver
     # /candidatos/adjuntar-pdf-lote, que adjunta la misma copia a cada
     # ficha) -- hay que identificar cuál de todas es ESTA ficha, por nombre.
@@ -466,7 +476,7 @@ def reextraer_archivo_route(candidato_id: int, archivo_id: int, _user: dict = De
             detail="Este PDF trae varios candidatos y no se pudo identificar cuál es este por el nombre. "
                    "Comprueba que el campo \"Nombre completo\" de la ficha coincide exactamente con el del PDF.",
         )
-    return {"ok": True, "metodo": metodo, "candidato": encontrado, "de_lote": True}
+    return {"ok": True, "metodo": metodo, "motivo_local": motivo_local, "candidato": encontrado, "de_lote": True}
 
 
 @router.post("/candidatos/{candidato_id}/archivos/{archivo_id}/extraer-foto")

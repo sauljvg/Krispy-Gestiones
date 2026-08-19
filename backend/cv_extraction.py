@@ -410,19 +410,23 @@ def recortar_pdf(pdf_bytes: bytes, pagina_inicio: int, pagina_fin: int) -> bytes
     return salida.getvalue()
 
 
-def extraer_cv(pdf_bytes: bytes) -> tuple[list[dict], str]:
+def extraer_cv(pdf_bytes: bytes) -> tuple[list[dict], str, str | None]:
     """Intenta Gemini si hay API key configurada; si falla o no hay key, cae
     al método local sin IA. El PDF puede traer un único candidato o varios
     (hasta ~50) concatenados en el mismo archivo — se devuelve SIEMPRE una
     lista, de un elemento cuando es un solo candidato. Devuelve
-    (lista_de_candidatos, metodo)."""
+    (lista_de_candidatos, metodo, motivo) -- motivo es None si se usó Gemini,
+    o el mensaje de por qué falló (cuota agotada, saturado, clave inválida...)
+    si se cayó al método local, para poder enseñárselo a quien subió el PDF
+    en vez de solo dejarlo en los logs."""
     if os.environ.get("GEMINI_API_KEY"):
         try:
-            return _extraer_con_gemini(pdf_bytes), "gemini"
+            return _extraer_con_gemini(pdf_bytes), "gemini", None
         except (GeminiNoConfiguradoError, GeminiNoDisponibleError) as exc:
             # Antes esto se tragaba en silencio -- no quedaba ningún rastro
-            # en los logs de por qué se cayó al método local, así que un
-            # fallo real (clave inválida, cuota agotada) era indistinguible
-            # de uno transitorio (Gemini saturado un momento).
+            # de por qué se cayó al método local, así que un fallo real
+            # (clave inválida, cuota agotada) era indistinguible de uno
+            # transitorio (Gemini saturado un momento).
             print(f"[cv_extraction] Gemini falló, usando extracción local: {exc}")
-    return _extraer_local(pdf_bytes), "local"
+            return _extraer_local(pdf_bytes), "local", str(exc)
+    return _extraer_local(pdf_bytes), "local", "No hay ninguna clave de Gemini configurada en el servidor."
