@@ -55,6 +55,15 @@ def ensure_encuestas_tables():
         # recordatorios en vez del "enlace público" largo — puramente
         # informativo, el backend no lo usa para resolver la encuesta.
         conn.execute("ALTER TABLE encuestas ADD COLUMN enlace_corto TEXT")
+    if "mensaje_no_apto" not in cols_encuestas:
+        # Mensaje alternativo mostrado en vez de mensaje_final cuando la
+        # respuesta recién enviada resulta "No apto" (ver guardar_respuesta)
+        # -- editable en Ajustes igual que mensaje_final, con un texto
+        # sugerido por defecto para no dejarlo vacío en los tests ya creados.
+        conn.execute(
+            "ALTER TABLE encuestas ADD COLUMN mensaje_no_apto TEXT NOT NULL DEFAULT "
+            "'Gracias por contestar nuestro test. En esta ocasión no has superado el proceso, pero te deseamos mucha suerte.'"
+        )
     if "evitar_duplicados" not in cols_encuestas:
         # Casilla en Ajustes de cada test: si está activa, guardar_respuesta
         # rechaza una respuesta nueva cuando coincide con una anterior de la
@@ -448,14 +457,14 @@ def create_encuesta(titulo):
     return encuesta_id
 
 
-def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None, evitar_duplicados=False):
+def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None, evitar_duplicados=False, mensaje_no_apto=None):
     conn = get_connection()
     conn.execute(
         "UPDATE encuestas SET titulo = ?, mensaje_final = ?, color_boton = ?, tipo_informe_clave = ?, "
-        "tipo_entrevista_empresa = ?, enlace_corto = ?, evitar_duplicados = ? WHERE id = ?",
+        "tipo_entrevista_empresa = ?, enlace_corto = ?, evitar_duplicados = ?, mensaje_no_apto = ? WHERE id = ?",
         (titulo.strip(), mensaje_final.strip(), color_boton.strip(), tipo_informe_clave or None,
          tipo_entrevista_empresa or None, (enlace_corto or "").strip() or None,
-         1 if evitar_duplicados else 0, encuesta_id),
+         1 if evitar_duplicados else 0, (mensaje_no_apto or "").strip() or mensaje_final.strip(), encuesta_id),
     )
     conn.commit()
     conn.close()
@@ -826,6 +835,14 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
                 # Competencias) para que la respuesta descalificatoria gane
                 # siempre, sin importar el score.
                 informes_module.forzar_no_apto(enlace["respuesta_id"])
+            else:
+                # scoring_valores puede haber calculado "No apto" por su
+                # cuenta (cuestionario de Valores y Competencias) sin que
+                # ninguna opción estuviera marcada como descalificatoria --
+                # también cuenta para decidir qué mensaje mostrar.
+                resp_final = informes_module.get_respuesta(enlace["respuesta_id"])
+                if resp_final and "No apto" in (json.loads(resp_final["datos_json"]).get("RESULTADO") or ""):
+                    es_no_apto = True
             # Si quien acaba de responder ya está en la base de Reclutamiento
             # (creado a mano, por CV, o desde una vacante) pero todavía sin
             # test enlazado, se conecta automáticamente con esta respuesta en
@@ -843,7 +860,7 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
         )
 
     marcar_sesion_completada(token)
-    return {"ok": True}
+    return {"ok": True, "mensaje": row["mensaje_no_apto"] if es_no_apto else row["mensaje_final"]}
 
 
 def list_respuestas(encuesta_id):

@@ -29,6 +29,7 @@ class EncuestaEditarIn(BaseModel):
     tipo_entrevista_empresa: str | None = None
     enlace_corto: str | None = None
     evitar_duplicados: bool = False
+    mensaje_no_apto: str = "Gracias por contestar nuestro test. En esta ocasión no has superado el proceso, pero te deseamos mucha suerte."
 
 
 class PaginaIn(BaseModel):
@@ -148,6 +149,7 @@ def update_encuesta_route(encuesta_id: int, body: EncuestaEditarIn, _user: dict 
     encuestas_module.update_encuesta(
         encuesta_id, body.titulo, body.mensaje_final, body.color_boton,
         body.tipo_informe_clave, body.tipo_entrevista_empresa, body.enlace_corto, body.evitar_duplicados,
+        body.mensaje_no_apto,
     )
     return {"ok": True}
 

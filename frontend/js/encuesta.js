@@ -351,9 +351,9 @@ async function enviarRespuestas() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ respuestas: respuestasPlano, token: SESION_TOKEN }),
   });
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    mostrarAviso(err.detail || "No se pudo enviar el formulario. Inténtalo de nuevo.");
+    mostrarAviso(data.detail || "No se pudo enviar el formulario. Inténtalo de nuevo.");
     btn.disabled = false;
     btn.textContent = "Enviar";
     return;
@@ -361,7 +361,7 @@ async function enviarRespuestas() {
   document.getElementById("encuesta-card").innerHTML = `
     <div class="encuesta-final">
       <div class="icono">✅</div>
-      <p>${escapeHTML(encuesta.mensaje_final)}</p>
+      <p>${escapeHTML(data.mensaje || encuesta.mensaje_final)}</p>
     </div>`;
 }
 

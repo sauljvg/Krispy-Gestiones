@@ -109,6 +109,7 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("editor-titulo-h2").textContent = "Editar test";
     document.getElementById("test-titulo").value = currentTest.titulo;
     document.getElementById("test-mensaje-final").value = currentTest.mensaje_final;
+    document.getElementById("test-mensaje-no-apto").value = currentTest.mensaje_no_apto;
     document.getElementById("test-color-boton").value = currentTest.color_boton;
     if (currentTest.tipo_entrevista_empresa) {
       document.getElementById("test-tipo-informe").value = `entrevista:${currentTest.tipo_entrevista_empresa}`;
@@ -140,6 +141,7 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("editor-titulo-h2").textContent = "Nuevo test";
     document.getElementById("test-titulo").value = "";
     document.getElementById("test-mensaje-final").value = "Gracias por completar el formulario.";
+    document.getElementById("test-mensaje-no-apto").value = "Gracias por contestar nuestro test. En esta ocasión no has superado el proceso, pero te deseamos mucha suerte.";
     document.getElementById("test-color-boton").value = "#5b2a2a";
     document.getElementById("test-tipo-informe").value = "";
     document.getElementById("test-enlace-publico").value = "";
@@ -187,6 +189,7 @@ async function guardarTest() {
   const body = {
     titulo,
     mensaje_final: document.getElementById("test-mensaje-final").value.trim(),
+    mensaje_no_apto: document.getElementById("test-mensaje-no-apto").value.trim(),
     color_boton: document.getElementById("test-color-boton").value,
     tipo_informe_clave: destino.startsWith("informe:") ? destino.slice("informe:".length) : null,
     tipo_entrevista_empresa: destino.startsWith("entrevista:") ? destino.slice("entrevista:".length) : null,
