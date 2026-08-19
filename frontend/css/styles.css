@@ -231,15 +231,11 @@ h3 {
   font-size: 11px; font-weight: 700; text-align: center;
 }
 
-/* Banner persistente de lotes de IA en curso (ver topbar-menu.js) -- justo
-   debajo del header, visible en cualquier pantalla mientras algo sigue
-   trabajando en segundo plano. */
-.lotes-progreso-banner {
-  display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center;
-  padding: 8px 20px; background: color-mix(in srgb, var(--acento) 10%, var(--surface-1));
-  border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--text-secondary);
-}
-.lote-progreso-item { white-space: nowrap; }
+/* Indicador de lotes de IA en curso (ver topbar-menu.js) -- mismo icono +
+   globo + panel que las campanitas de notificaciones, junto al resto de
+   botones del topbar. */
+#lotes-progreso-lista li { padding: 6px 8px; font-size: 12.5px; color: var(--text-primary); }
+#lotes-progreso-lista li + li { border-top: 1px solid var(--border); }
 
 /* Campanita genérica de avisos (ver topbar-menu.js) -- reutiliza
    .notif-badge-btn/.notif-badge-count/.notif-tests-panel/.notif-tests-lista

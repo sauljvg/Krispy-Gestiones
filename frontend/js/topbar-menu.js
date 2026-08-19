@@ -161,20 +161,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 });
 
-// Banner persistente de "trabajos de IA en curso" -- relleno de CVs en
-// segundo plano (ver _progreso_lotes / /candidatos/lotes-en-progreso en
-// reclutamiento_routes.py). Visible en CUALQUIER pantalla, justo debajo del
-// header, para poder salir de Reclutamiento sin perder de vista cuánto
-// falta; la campanita de arriba avisa cuando termina, esto es para mientras
-// sigue en marcha. No pinta nada si no hay ningún lote activo para este
-// usuario.
+// Indicador de "trabajos de IA en curso" -- relleno de CVs en segundo plano
+// (ver _progreso_lotes / /candidatos/lotes-en-progreso en
+// reclutamiento_routes.py). Mismo patrón visual que las campanitas de
+// arriba (icono + globo de conteo + panel desplegable) en vez de una barra
+// a todo lo ancho, para que quede junto al resto de iconos del topbar. Se
+// crea siempre (oculto si no hay nada activo) porque un lote puede empezar
+// mientras el usuario ya está mirando esta pantalla.
 document.addEventListener("DOMContentLoaded", async () => {
   // Solo tiene sentido en Reclutamiento -- en el resto de páginas no hay
   // nada que esté rellenando con IA en segundo plano.
   if (!window.location.pathname.endsWith("compartidos.html")) return;
 
-  const header = document.querySelector("header.topbar");
-  if (!header) return;
+  const wrap = document.querySelector(".hamburger-wrap");
+  if (!wrap) return;
 
   const escapeHTML = (str) => {
     const div = document.createElement("div");
@@ -182,17 +182,42 @@ document.addEventListener("DOMContentLoaded", async () => {
     return div.innerHTML;
   };
 
-  const banner = document.createElement("div");
-  banner.id = "lotes-progreso-banner";
-  banner.className = "lotes-progreso-banner";
-  banner.hidden = true;
-  header.insertAdjacentElement("afterend", banner);
-
   const formatEta = (segundos) => {
     if (!segundos) return "";
     if (segundos < 60) return ` · ${segundos} s`;
     return ` · ~${Math.round(segundos / 60)} min`;
   };
+
+  const badgeWrap = document.createElement("div");
+  badgeWrap.className = "notif-badge-wrap";
+  badgeWrap.hidden = true;
+  badgeWrap.innerHTML = `
+    <button type="button" id="btn-lotes-progreso" class="btn btn-ghost notif-badge-btn" aria-label="Relleno de CVs con IA en curso" aria-haspopup="true" aria-expanded="false">
+      🤖<span class="notif-badge-count"></span>
+    </button>
+    <div id="lotes-progreso-panel" class="notif-tests-panel" hidden>
+      <p class="notif-tests-titulo">Relleno de CVs con IA en curso</p>
+      <ul id="lotes-progreso-lista" class="notif-tests-lista"></ul>
+    </div>`;
+  wrap.parentElement.insertBefore(badgeWrap, wrap);
+
+  const btn = badgeWrap.querySelector("#btn-lotes-progreso");
+  const panel = badgeWrap.querySelector("#lotes-progreso-panel");
+  const lista = badgeWrap.querySelector("#lotes-progreso-lista");
+  const contador = badgeWrap.querySelector(".notif-badge-count");
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    panel.hidden = !panel.hidden;
+    btn.setAttribute("aria-expanded", String(!panel.hidden));
+  });
+  panel.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", () => {
+    if (!panel.hidden) {
+      panel.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+    }
+  });
 
   async function actualizar() {
     let lotes;
@@ -204,14 +229,14 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
     if (!lotes || lotes.length === 0) {
-      banner.hidden = true;
+      badgeWrap.hidden = true;
       return;
     }
-    banner.hidden = false;
-    banner.innerHTML = lotes
+    badgeWrap.hidden = false;
+    contador.textContent = String(lotes.length);
+    lista.innerHTML = lotes
       .map(
-        (l) =>
-          `<div class="lote-progreso-item">🤖 ${escapeHTML(l.titulo)}: ${l.procesados}/${l.total}${formatEta(l.eta_segundos)}</div>`
+        (l) => `<li>🤖 ${escapeHTML(l.titulo)}: ${l.procesados}/${l.total}${formatEta(l.eta_segundos)}</li>`
       )
       .join("");
   }

@@ -13,7 +13,7 @@
     }
   })();
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260819b">
+<link rel="stylesheet" href="css/styles.css?v=20260819c">
 <style>
   .compartidos-wrap { max-width: 900px; margin: 0 auto; padding: 0 0 60px; }
   /* Vista "Lista + CV" (ver candidatos-vista en compartidos.js) -- imita la
@@ -180,6 +180,21 @@
   .candidato-whatsapp-row h4 { margin: 0; }
   .candidato-whatsapp-row p { margin: 2px 0 0; }
 
+  /* Selector de vista (Lista/Lista+CV/Tarjetas) como grupo de iconos dividido,
+     estilo InfoJobs -- antes era un <select> con texto, ahora un único
+     contenedor partido en celdas iguales por una línea fina. */
+  .vista-toggle {
+    display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    background: var(--surface-page);
+  }
+  .vista-toggle-btn {
+    border: none; background: transparent; color: var(--text-secondary);
+    font-size: 15px; padding: 7px 12px; cursor: pointer; line-height: 1;
+  }
+  .vista-toggle-btn:not(:last-child) { border-right: 1px solid var(--border); }
+  .vista-toggle-btn:hover { background: color-mix(in srgb, var(--acento) 8%, transparent); }
+  .vista-toggle-btn.activo { background: var(--acento); color: #fff; }
+
   .candidato-form { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; position: relative; }
   .candidato-form h3 { margin-top: 0; padding-right: 30px; }
   .btn-cerrar-ficha-x {
@@ -210,6 +225,12 @@
   }
   .form-field-full { grid-column: 1 / -1; }
   .form-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  /* Acciones de la ficha de vacante: etiquetas cortas + sin salto de línea
+     para que Guardar/Mensaje/Fusionar/Archivar/Eliminar/Cancelar quepan
+     todas juntas en una sola fila (con scroll horizontal como último
+     recurso si la pantalla es muy estrecha). */
+  .form-actions-compacta { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+  .form-actions-compacta .btn { white-space: nowrap; flex-shrink: 0; }
   .subir-cv-row { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
   .extraccion-aviso { font-size: 12px; padding: 8px 10px; border-radius: 8px; margin-bottom: 12px; }
   .extraccion-aviso.local { background: color-mix(in srgb, var(--status-warning) 18%, transparent); color: #9a6b00; }
@@ -358,11 +379,11 @@
           <option value="nombre_asc">Nombre (A-Z)</option>
           <option value="nombre_desc">Nombre (Z-A)</option>
         </select>
-        <select id="candidatos-vista" title="Cómo ver la lista">
-          <option value="lista">📃 Lista</option>
-          <option value="combinada">📃➕ Lista + CV</option>
-          <option value="tarjetas">🗂️ Tarjetas</option>
-        </select>
+        <div class="vista-toggle" role="group" aria-label="Cómo ver la lista">
+          <button type="button" class="vista-toggle-btn" data-vista="lista" title="Lista">📃</button>
+          <button type="button" class="vista-toggle-btn" data-vista="combinada" title="Lista + CV">📃➕</button>
+          <button type="button" class="vista-toggle-btn" data-vista="tarjetas" title="Tarjetas">🗂️</button>
+        </div>
         <button id="btn-revincular-tests" class="btn btn-ghost" type="button" title="Busca de nuevo entre las respuestas de test ya enviadas por si alguna coincide con un candidato que no tenía enlace">🔗 Buscar tests ya respondidos</button>
         <button id="btn-adjuntar-lote" class="btn btn-ghost" type="button" title="Para un PDF con varios CVs juntos que ya usaste para crear estas fichas -- adjunta el PDF a cada ficha existente por nombre, sin duplicar a nadie">🗂️ Adjuntar PDF a fichas existentes</button>
         <button id="btn-recordatorio-pendientes" class="btn btn-ghost" type="button" title="Abre la campaña de WhatsApp ya rellena solo con quienes tienen un test pendiente de responder">🔔 Recordatorio a pendientes</button>
@@ -472,7 +493,7 @@
 <script src="js/theme.js?v=20260724a"></script>
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260724a"></script>
-<script src="js/topbar-menu.js?v=20260819c"></script>
-<script src="js/compartidos.js?v=20260819k"></script>
+<script src="js/topbar-menu.js?v=20260819d"></script>
+<script src="js/compartidos.js?v=20260819l"></script>
 </body>
 </html>

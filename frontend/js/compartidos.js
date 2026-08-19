@@ -646,12 +646,12 @@ function vacanteFormHTML() {
         <button type="button" id="btn-compartir-vacante" class="btn-mini">＋ Añadir</button>
       </p>
       <p class="staff-hint" style="margin-top:-8px;">Un responsable ve TODOS los candidatos de esta solicitud, aunque se añadan después -- no hace falta compartirlos uno a uno.</p>` : ""}
-      <div class="form-actions">
+      <div class="form-actions form-actions-compacta">
         <button type="button" id="btn-guardar-vacante" class="btn btn-primary">Guardar</button>
-        ${v && v.candidatos.length ? `<button type="button" id="btn-whatsapp-vacante" class="btn btn-ghost">💬 Mensaje a los candidatos de esta vacante</button>` : ""}
-        ${v ? `<button type="button" id="btn-fusionar-vacante" class="btn btn-ghost">🔗 Fusionar con otra solicitud...</button>` : ""}
-        ${v ? `<button type="button" id="btn-archivar-vacante" class="btn btn-ghost">${v.archivada ? "📤 Desarchivar" : "🗄️ Archivar vacante"}</button>` : ""}
-        ${v ? `<button type="button" id="btn-eliminar-vacante" class="btn btn-ghost">Eliminar vacante</button>` : ""}
+        ${v && v.candidatos.length ? `<button type="button" id="btn-whatsapp-vacante" class="btn btn-ghost" title="Mensaje a los candidatos de esta vacante">💬 Mensaje</button>` : ""}
+        ${v ? `<button type="button" id="btn-fusionar-vacante" class="btn btn-ghost" title="Fusionar con otra solicitud...">🔗 Fusionar</button>` : ""}
+        ${v ? `<button type="button" id="btn-archivar-vacante" class="btn btn-ghost">${v.archivada ? "📤 Desarchivar" : "🗄️ Archivar"}</button>` : ""}
+        ${v ? `<button type="button" id="btn-eliminar-vacante" class="btn btn-ghost" title="Eliminar vacante">🗑 Eliminar</button>` : ""}
         <button type="button" id="btn-cerrar-vacante-form" class="btn btn-ghost">Cancelar</button>
       </div>
     </div>`;
@@ -2580,12 +2580,18 @@ async function initBaseCandidatos(user) {
     candidatosPagina = 1;
     renderCandidatosGrid();
   });
-  const selectVista = document.getElementById("candidatos-vista");
-  selectVista.value = candidatosVista;
-  selectVista.addEventListener("change", () => {
-    candidatosVista = selectVista.value;
-    localStorage.setItem("kt-candidatos-vista", candidatosVista);
-    renderCandidatosGrid();
+  const botonesVista = document.querySelectorAll(".vista-toggle-btn");
+  const marcarVistaActiva = () => {
+    botonesVista.forEach((b) => b.classList.toggle("activo", b.dataset.vista === candidatosVista));
+  };
+  marcarVistaActiva();
+  botonesVista.forEach((b) => {
+    b.addEventListener("click", () => {
+      candidatosVista = b.dataset.vista;
+      localStorage.setItem("kt-candidatos-vista", candidatosVista);
+      marcarVistaActiva();
+      renderCandidatosGrid();
+    });
   });
   let buscarTimeout;
   document.getElementById("candidatos-buscar").addEventListener("input", () => {
