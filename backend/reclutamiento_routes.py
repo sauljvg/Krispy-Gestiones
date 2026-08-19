@@ -1,6 +1,7 @@
 import json
 import mimetypes
 import os
+import secrets
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
@@ -360,7 +361,15 @@ async def adjuntar_pdf_lote_route(empresa: str = "kk", file: UploadFile = File(.
     }
 
 
-def _rellenar_huecos_en_segundo_plano(recortes: list[tuple[int, bytes]]):
+# Progreso del relleno en segundo plano, en memoria -- un proceso Railway
+# único (ver el incidente de más arriba), así que no hace falta nada más
+# elaborado que un diccionario para que el frontend pueda sondear "cuántos
+# van". Se pierde si el servidor se reinicia a media tanda, pero es solo un
+# indicador de progreso, no un dato que haga falta conservar.
+_progreso_lotes: dict[str, dict] = {}
+
+
+def _rellenar_huecos_en_segundo_plano(lote_id: str, recortes: list[tuple[int, bytes]]):
     """Re-extrae con IA cada recorte y rellena huecos -- se ejecuta DESPUÉS
     de responder al navegador (ver BackgroundTasks en la ruta de abajo).
     Antes esto iba dentro de la propia petición: con Gemini saturado, cada
@@ -380,6 +389,9 @@ def _rellenar_huecos_en_segundo_plano(recortes: list[tuple[int, bytes]]):
                 reclutamiento_module.rellenar_huecos_candidato(candidato_id, extraidos[0])
         except Exception as exc:
             print(f"[adjuntar-pdf-lote] No se pudo rellenar huecos del candidato {candidato_id}: {exc}")
+        finally:
+            _progreso_lotes[lote_id]["procesados"] += 1
+    _progreso_lotes[lote_id]["terminado"] = True
 
 
 @router.post("/candidatos/adjuntar-pdf-lote/confirmar")
@@ -431,9 +443,23 @@ async def adjuntar_pdf_lote_confirmar_route(
         adjuntados += 1
         if pagina_inicio and pagina_fin:
             recortes_para_rellenar.append((candidato_id, recorte))
+    lote_id = None
     if recortes_para_rellenar:
-        background_tasks.add_task(_rellenar_huecos_en_segundo_plano, recortes_para_rellenar)
-    return {"ok": True, "adjuntados": adjuntados, "procesando_relleno": len(recortes_para_rellenar)}
+        lote_id = secrets.token_hex(8)
+        _progreso_lotes[lote_id] = {"total": len(recortes_para_rellenar), "procesados": 0, "terminado": False}
+        background_tasks.add_task(_rellenar_huecos_en_segundo_plano, lote_id, recortes_para_rellenar)
+    return {"ok": True, "adjuntados": adjuntados, "procesando_relleno": len(recortes_para_rellenar), "lote_id": lote_id}
+
+
+@router.get("/candidatos/adjuntar-pdf-lote/progreso/{lote_id}")
+def progreso_relleno_lote_route(lote_id: str, _user: dict = Depends(require_informes)):
+    """Para que el frontend pueda sondear 'cuántos van' del relleno con IA en
+    segundo plano (ver _rellenar_huecos_en_segundo_plano) -- 404 si el
+    servidor se reinició desde entonces o el id no existe."""
+    progreso = _progreso_lotes.get(lote_id)
+    if progreso is None:
+        raise HTTPException(status_code=404, detail="No hay ningún proceso en marcha con ese id")
+    return progreso
 
 
 @router.post("/candidatos/{candidato_id}/archivos")

@@ -1404,15 +1404,35 @@ async function confirmarAdjuntarLote(items) {
     return;
   }
   const data = await res.json();
-  // El relleno con IA (formación/experiencia y demás huecos) va en segundo
-  // plano en el servidor -- no se espera aquí a que termine, así que no hay
-  // un conteo final que mostrar todavía, solo que se ha puesto en marcha.
-  const rellenoTxt = data.procesando_relleno
-    ? ` Rellenando datos con IA en segundo plano para ${data.procesando_relleno} de ellas (formación, experiencia y otros campos vacíos) -- puede tardar unos minutos, no hace falta esperar en esta pantalla.`
-    : "";
-  progreso.textContent = `Listo: PDF adjuntado a ${data.adjuntados} ficha(s).${rellenoTxt}`;
   btn.remove();
   await loadCandidatos();
+  // El relleno con IA (formación/experiencia y demás huecos) va en segundo
+  // plano en el servidor -- no se espera aquí a que termine (eso fue lo que
+  // tumbó el sitio antes), pero sí se puede sondear cada pocos segundos
+  // cuántos lleva hechos para mostrar un contador real (3/37...).
+  if (data.lote_id && data.procesando_relleno) {
+    sondearProgresoLote(data.lote_id, data.adjuntados, data.procesando_relleno, progreso);
+  } else {
+    progreso.textContent = `Listo: PDF adjuntado a ${data.adjuntados} ficha(s).`;
+  }
+}
+
+async function sondearProgresoLote(loteId, adjuntados, total, progresoEl) {
+  progresoEl.textContent = `Listo: PDF adjuntado a ${adjuntados} ficha(s). Rellenando con IA: 0/${total}...`;
+  const intervalo = setInterval(async () => {
+    const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/adjuntar-pdf-lote/progreso/${loteId}`);
+    if (!res.ok) {
+      clearInterval(intervalo);
+      return;
+    }
+    const p = await res.json();
+    progresoEl.textContent = `Listo: PDF adjuntado a ${adjuntados} ficha(s). Rellenando con IA: ${p.procesados}/${p.total}...`;
+    if (p.terminado) {
+      clearInterval(intervalo);
+      progresoEl.textContent = `Listo: PDF adjuntado a ${adjuntados} ficha(s). Relleno con IA terminado: ${p.procesados}/${p.total}.`;
+      loadCandidatos();
+    }
+  }, 2000);
 }
 
 async function extraerCvYRellenar() {
