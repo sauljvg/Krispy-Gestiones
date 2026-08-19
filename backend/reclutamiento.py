@@ -19,6 +19,27 @@ VACANTE_ESTADOS = ["abierta", "cubierta", "cancelada"]
 # con la persona).
 CONTACTO_ESTADOS = ["sin_contactar", "contactado", "respondio"]
 
+# Columnas que se pueden pedir en el Excel de "Base de candidatos" (ver
+# exportar_candidatos) -- clave interna -> cabecera legible. "vacante" y
+# "test_resultado" no son columnas propias de la tabla, se resuelven aparte
+# (join con vacantes/informe_respuestas).
+CAMPOS_EXPORTABLES = {
+    "nombre_completo": "Nombre completo",
+    "telefono": "Teléfono",
+    "email": "Email",
+    "vacante": "Vacante",
+    "test_resultado": "Resultado del test",
+    "estado": "Estado",
+    "puesto_solicitado": "Puesto solicitado",
+    "direccion": "Dirección",
+    "fecha_nacimiento": "Fecha de nacimiento",
+    "dni": "DNI",
+    "disponibilidad": "Disponibilidad",
+    "fecha_solicitud": "Fecha de solicitud",
+    "contacto_estado": "Estado de contacto",
+    "notas": "Notas",
+}
+
 # Campos "conocidos" del candidato — el resto de datos (de un CV, de un
 # Excel de Informes o de un alta manual) se guarda en extra_fields (JSON),
 # igual que el patrón extraFields de BBDD SV.
@@ -87,6 +108,13 @@ def ensure_reclutamiento_tables():
             creado_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    cols_vacantes = {row[1] for row in conn.execute("PRAGMA table_info(vacantes)")}
+    if "archivada" not in cols_vacantes:
+        # Independiente de estado (abierta/cubierta/cancelada) a propósito --
+        # se puede archivar una vacante cubierta o cancelada para que deje de
+        # verse por defecto sin perder qué pasó con ella, y reabrirla no la
+        # desarchiva sola.
+        conn.execute("ALTER TABLE vacantes ADD COLUMN archivada INTEGER NOT NULL DEFAULT 0")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS candidatos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -258,10 +286,10 @@ def _limpiar_archivos_duplicados():
         print(f"[reclutamiento] Limpieza de archivos duplicados: {borrados} copia(s) eliminada(s).")
 
 
-def list_vacantes(empresa=None, estado=None):
+def list_vacantes(empresa=None, estado=None, archivadas=False):
     conn = get_connection()
-    clauses = []
-    params = []
+    clauses = ["v.archivada = ?"]
+    params = [1 if archivadas else 0]
     if empresa:
         clauses.append("v.empresa = ?")
         params.append(empresa)
@@ -433,6 +461,9 @@ def actualizar_vacante(vacante_id, campos: dict):
             sets.append("fecha_cierre = NULL")
         else:
             sets.append("fecha_cierre = datetime('now')")
+    if "archivada" in campos:
+        sets.append("archivada = ?")
+        params.append(1 if campos["archivada"] else 0)
     if not sets:
         return
     params.append(vacante_id)
@@ -687,6 +718,50 @@ def enlazar_respuesta_a_candidato(candidato_id, respuesta_id):
     )
     conn.commit()
     conn.close()
+
+
+def exportar_candidatos(candidato_ids: list[int], columnas: list[str]) -> list[dict]:
+    """Filas para el Excel de "Base de candidatos" (ver rows_to_xlsx en
+    utils.py) -- solo las columnas pedidas (CAMPOS_EXPORTABLES), en el mismo
+    orden en que se pidieron y con la cabecera legible como clave del dict.
+    "vacante" y "test_resultado" no son columnas propias de candidatos, se
+    resuelven aparte con un join."""
+    columnas = [c for c in columnas if c in CAMPOS_EXPORTABLES] or ["nombre_completo"]
+    if not candidato_ids:
+        return []
+    conn = get_connection()
+    placeholders = ",".join("?" * len(candidato_ids))
+    rows = conn.execute(f"""
+        SELECT c.*, json_extract(r.datos_json, '$.RESULTADO') AS test_resultado,
+               v.puesto AS vacante_puesto, v.centro AS vacante_centro
+        FROM candidatos c
+        LEFT JOIN informe_respuestas r ON r.id = c.respuesta_id
+        LEFT JOIN vacantes v ON v.id = c.vacante_id
+        WHERE c.id IN ({placeholders})
+    """, candidato_ids).fetchall()
+    conn.close()
+    por_id = {r["id"]: r for r in rows}
+    salida = []
+    for cid in candidato_ids:
+        r = por_id.get(cid)
+        if r is None:
+            continue
+        fila = {}
+        for col in columnas:
+            etiqueta = CAMPOS_EXPORTABLES[col]
+            if col == "vacante":
+                fila[etiqueta] = (
+                    r["vacante_puesto"] + (f" · {r['vacante_centro']}" if r["vacante_centro"] else "")
+                    if r["vacante_puesto"] else "Sin vacante asignada"
+                )
+            elif col == "test_resultado":
+                fila[etiqueta] = r["test_resultado"] or "Sin responder test"
+            elif col in ("estado", "contacto_estado"):
+                fila[etiqueta] = (r[col] or "").replace("_", " ").capitalize()
+            else:
+                fila[etiqueta] = r[col] or ""
+        salida.append(fila)
+    return salida
 
 
 def list_candidatos(empresa=None, estado=None, q=None, vacante_id=None, sin_vacante=False):

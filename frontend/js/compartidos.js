@@ -600,10 +600,15 @@ function actualizarSelectFiltroVacante() {
 
 async function refreshVacantes() {
   const estado = document.getElementById("vacantes-filtro-estado").value;
+  const verArchivadas = document.getElementById("vacantes-ver-archivadas").checked;
   const paramsFiltradas = new URLSearchParams({ empresa: EMPRESA });
   if (estado) paramsFiltradas.set("estado", estado);
+  if (verArchivadas) paramsFiltradas.set("archivadas", "true");
   const [filtradas, todas] = await Promise.all([
     fetch(`${AUTH_API_BASE}/reclutamiento/vacantes?${paramsFiltradas}`).then((r) => (r.ok ? r.json() : [])),
+    // vacantesTodasCache alimenta el desplegable de asignación y el filtro de
+    // candidatos -- siempre las NO archivadas, sin importar el checkbox de
+    // arriba (asignar candidatos a una vacante archivada no tendría sentido).
     fetch(`${AUTH_API_BASE}/reclutamiento/vacantes?empresa=${EMPRESA}`).then((r) => (r.ok ? r.json() : [])),
   ]);
   vacantesCache = filtradas;
@@ -640,6 +645,7 @@ function vacanteFormHTML() {
         <button type="button" id="btn-guardar-vacante" class="btn btn-primary">Guardar</button>
         ${v && v.candidatos.length ? `<button type="button" id="btn-whatsapp-vacante" class="btn btn-ghost">💬 Mensaje a los candidatos de esta vacante</button>` : ""}
         ${v ? `<button type="button" id="btn-fusionar-vacante" class="btn btn-ghost">🔗 Fusionar con otra solicitud...</button>` : ""}
+        ${v ? `<button type="button" id="btn-archivar-vacante" class="btn btn-ghost">${v.archivada ? "📤 Desarchivar" : "🗄️ Archivar vacante"}</button>` : ""}
         ${v ? `<button type="button" id="btn-eliminar-vacante" class="btn btn-ghost">Eliminar vacante</button>` : ""}
         <button type="button" id="btn-cerrar-vacante-form" class="btn btn-ghost">Cancelar</button>
       </div>
@@ -653,6 +659,7 @@ function renderVacanteForm() {
   document.getElementById("btn-cerrar-vacante-form").addEventListener("click", cerrarVacanteForm);
   if (vacanteEditando) {
     document.getElementById("btn-eliminar-vacante").addEventListener("click", eliminarVacanteActual);
+    document.getElementById("btn-archivar-vacante").addEventListener("click", archivarVacanteActual);
     document.getElementById("btn-fusionar-vacante").addEventListener("click", abrirModalFusionarVacante);
     document.getElementById("btn-compartir-vacante").addEventListener("click", abrirModalCompartirVacante);
     wrap.querySelectorAll(".btn-quitar-gerente").forEach((btn) => {
@@ -710,6 +717,17 @@ async function eliminarVacanteActual() {
   cerrarVacanteForm();
   await refreshVacantes();
   await loadCandidatos();
+}
+
+async function archivarVacanteActual() {
+  if (!vacanteEditando) return;
+  const archivar = !vacanteEditando.archivada;
+  await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ archivada: archivar }),
+  });
+  cerrarVacanteForm();
+  await refreshVacantes();
 }
 
 // Fusionar dos solicitudes que en realidad son el mismo proceso -- mueve
@@ -1508,6 +1526,15 @@ async function confirmarAdjuntarLote(items) {
   }
 }
 
+// Texto corto de "cuánto falta" -- null/0 significa que aún no hay datos
+// suficientes para estimar (primer candidato del lote todavía en curso).
+function formatEtaSegundos(segundos) {
+  if (!segundos) return "";
+  if (segundos < 60) return ` · ${segundos} s restantes`;
+  const min = Math.round(segundos / 60);
+  return ` · ~${min} min restante${min === 1 ? "" : "s"}`;
+}
+
 async function sondearProgresoLote(loteId, adjuntados, total, progresoEl) {
   progresoEl.textContent = `Listo: PDF adjuntado a ${adjuntados} ficha(s). Rellenando con IA: 0/${total}...`;
   const intervalo = setInterval(async () => {
@@ -1517,7 +1544,7 @@ async function sondearProgresoLote(loteId, adjuntados, total, progresoEl) {
       return;
     }
     const p = await res.json();
-    progresoEl.textContent = `Listo: PDF adjuntado a ${adjuntados} ficha(s). Rellenando con IA: ${p.procesados}/${p.total}...`;
+    progresoEl.textContent = `Listo: PDF adjuntado a ${adjuntados} ficha(s). Rellenando con IA: ${p.procesados}/${p.total}...${formatEtaSegundos(p.eta_segundos)}`;
     if (p.terminado) {
       clearInterval(intervalo);
       progresoEl.textContent = `Listo: PDF adjuntado a ${adjuntados} ficha(s). Relleno con IA terminado: ${p.procesados}/${p.total}.`;
@@ -1691,7 +1718,6 @@ async function agregarArchivoAlCandidato() {
 // WhatsApp con un grupo elegido a mano (independiente de una vacante
 // concreta). Mientras está activa, hacer clic en una ficha la selecciona en
 // vez de abrirla para editar.
-let modoSeleccionCandidatos = false;
 let candidatosSeleccionadosIds = new Set();
 let ultimosCandidatosCargados = [];
 let candidatosFiltroEstado = "";
@@ -1739,9 +1765,9 @@ function candidatoMiniCardHTML(c, opts = {}) {
   // "Sin vacante asignada" aunque sí la tenga.
   const vacante = vacantesTodasCache.find((v) => v.id === c.vacante_id);
   const vacanteTxt = vacante ? `📁 ${vacante.puesto}${vacante.centro ? ` · ${vacante.centro}` : ""}` : "Sin vacante asignada";
-  const seleccionada = modoSeleccionCandidatos && candidatosSeleccionadosIds.has(c.id);
+  const seleccionada = candidatosSeleccionadosIds.has(c.id);
   const abierta = candidatoEditando && candidatoEditando.id === c.id;
-  const checkbox = modoSeleccionCandidatos ? `<input type="checkbox" ${seleccionada ? "checked" : ""} style="margin-right:4px;">` : "";
+  const checkbox = `<input type="checkbox" class="candidato-mini-checkbox" ${seleccionada ? "checked" : ""} style="margin-right:4px;">`;
   const fotoHTML = c.tiene_foto
     ? `<img class="candidato-mini-foto" src="${AUTH_API_BASE}/reclutamiento/candidatos/${c.id}/foto" alt="">`
     : `<span class="candidato-mini-foto candidato-mini-foto-vacia">${escapeHTML((c.nombre_completo || "?").trim()[0] || "?")}</span>`;
@@ -1777,8 +1803,8 @@ function actualizarBotonWhatsappSeleccionados() {
   const estadoMasivo = document.getElementById("candidatos-estado-masivo");
   const contador = document.getElementById("candidatos-seleccion-contador");
   const n = candidatosSeleccionadosIds.size;
-  barra.hidden = !modoSeleccionCandidatos;
-  if (!modoSeleccionCandidatos) return;
+  barra.hidden = n === 0;
+  if (n === 0) return;
   contador.textContent = `${n} candidato${n === 1 ? "" : "s"} seleccionado${n === 1 ? "" : "s"}`;
   const sinSeleccion = n === 0;
   btnWhatsapp.hidden = sinSeleccion;
@@ -1787,6 +1813,7 @@ function actualizarBotonWhatsappSeleccionados() {
   btnMailto.innerHTML = `${ICONO_MAILTO}Email (${n})`;
   btnCompartir.disabled = sinSeleccion;
   btnAsignarVacante.disabled = sinSeleccion;
+  document.getElementById("btn-exportar-excel-seleccionados").disabled = sinSeleccion;
   estadoMasivo.disabled = sinSeleccion;
   // "Seleccionar todos" toma TODOS los candidatos cargados actualmente en la
   // pantalla (respetando el filtro de vacante/búsqueda aplicado), no solo
@@ -1807,14 +1834,6 @@ function deseleccionarTodosCandidatos() {
   renderCandidatosGrid();
 }
 
-function toggleModoSeleccion() {
-  modoSeleccionCandidatos = !modoSeleccionCandidatos;
-  candidatosSeleccionadosIds.clear();
-  document.getElementById("btn-modo-seleccion").textContent = modoSeleccionCandidatos ? "✕ Cancelar selección" : "☑ Selección múltiple";
-  actualizarBotonWhatsappSeleccionados();
-  renderCandidatosGrid();
-}
-
 async function cambiarEstadoSeleccionados(estado) {
   if (!estado || candidatosSeleccionadosIds.size === 0) return;
   const ids = [...candidatosSeleccionadosIds];
@@ -1824,7 +1843,7 @@ async function cambiarEstadoSeleccionados(estado) {
     body: JSON.stringify({ candidato_ids: ids, estado }),
   });
   document.getElementById("candidatos-estado-masivo").value = "";
-  toggleModoSeleccion();
+  deseleccionarTodosCandidatos();
   await loadCandidatos();
 }
 
@@ -1880,7 +1899,7 @@ async function confirmarCompartirCandidatos() {
     body: JSON.stringify({ candidato_ids: ids, usuario_id: usuarioId }),
   });
   cerrarModalCompartirCandidatos();
-  toggleModoSeleccion();
+  deseleccionarTodosCandidatos();
 }
 
 // Asignar en lote una solicitud (vacante) a los candidatos seleccionados --
@@ -1925,9 +1944,57 @@ async function confirmarAsignarVacante() {
     compartidosSeleccionadosIds.clear();
     await loadCompartidos();
   } else {
-    toggleModoSeleccion();
+    deseleccionarTodosCandidatos();
     await loadCandidatos();
   }
+}
+
+let columnasExportablesCache = null;
+const COLUMNAS_EXPORTAR_POR_DEFECTO = ["nombre_completo", "telefono", "email", "vacante", "test_resultado"];
+
+async function abrirModalExportarExcel() {
+  if (candidatosSeleccionadosIds.size === 0) return;
+  if (!columnasExportablesCache) {
+    columnasExportablesCache = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/columnas-exportables`).then((r) => r.json());
+  }
+  document.getElementById("exportar-excel-columnas").innerHTML = Object.entries(columnasExportablesCache)
+    .map(
+      ([clave, etiqueta]) =>
+        `<label><input type="checkbox" value="${clave}" ${COLUMNAS_EXPORTAR_POR_DEFECTO.includes(clave) ? "checked" : ""}> ${escapeHTML(etiqueta)}</label>`
+    )
+    .join("");
+  document.getElementById("exportar-excel-modal").classList.add("visible");
+}
+
+function cerrarModalExportarExcel() {
+  document.getElementById("exportar-excel-modal").classList.remove("visible");
+}
+
+async function confirmarExportarExcel() {
+  const columnas = Array.from(document.querySelectorAll("#exportar-excel-columnas input:checked")).map((i) => i.value);
+  if (columnas.length === 0) {
+    mostrarAviso("Elige al menos un dato para exportar.");
+    return;
+  }
+  const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/exportar-excel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ candidato_ids: [...candidatosSeleccionadosIds], columnas }),
+  });
+  if (!res.ok) {
+    mostrarAviso("No se pudo generar el Excel.");
+    return;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "candidatos.xlsx";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  cerrarModalExportarExcel();
 }
 
 // Cambia a quién se compartieron los candidatos seleccionados (p.ej. se
@@ -2105,17 +2172,17 @@ function renderCandidatosGrid() {
     : `<p class="staff-hint">${ultimosCandidatosCargados.length ? "Ningún candidato coincide con el filtro de aptos." : "Todavía no hay candidatos en la base de datos."}</p>`;
   renderCandidatosPaginacion(visibles.length, totalPaginas);
   grid.querySelectorAll(".candidato-mini-card").forEach((card) => {
+    const id = Number(card.dataset.candidatoId);
+    card.querySelector(".candidato-mini-checkbox").addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (candidatosSeleccionadosIds.has(id)) candidatosSeleccionadosIds.delete(id);
+      else candidatosSeleccionadosIds.add(id);
+      actualizarBotonWhatsappSeleccionados();
+      renderCandidatosGrid();
+    });
     card.addEventListener("click", (e) => {
       if (e.target.closest(".candidato-mini-contacto-select")) return;
-      const id = Number(card.dataset.candidatoId);
-      if (modoSeleccionCandidatos) {
-        if (candidatosSeleccionadosIds.has(id)) candidatosSeleccionadosIds.delete(id);
-        else candidatosSeleccionadosIds.add(id);
-        actualizarBotonWhatsappSeleccionados();
-        renderCandidatosGrid();
-      } else {
-        abrirEdicionCandidato(card.dataset.candidatoId);
-      }
+      abrirEdicionCandidato(card.dataset.candidatoId);
     });
   });
   grid.querySelectorAll(".candidato-mini-contacto-select").forEach((select) => {
@@ -2328,7 +2395,6 @@ async function initBaseCandidatos(user) {
   document.getElementById("btn-adjuntar-lote").addEventListener("click", abrirAdjuntarLote);
   document.getElementById("btn-recordatorio-pendientes").addEventListener("click", abrirRecordatorioPendientes);
   document.getElementById("btn-nueva-vacante").addEventListener("click", abrirNuevaVacante);
-  document.getElementById("btn-modo-seleccion").addEventListener("click", toggleModoSeleccion);
   document.getElementById("btn-seleccionar-todos-candidatos").addEventListener("click", seleccionarTodosCandidatos);
   document.getElementById("btn-deseleccionar-todos-candidatos").addEventListener("click", deseleccionarTodosCandidatos);
   document.getElementById("btn-whatsapp-seleccionados").addEventListener("click", abrirCampanaWhatsappSeleccionados);
@@ -2339,6 +2405,9 @@ async function initBaseCandidatos(user) {
   document.getElementById("btn-asignar-vacante-seleccionados").addEventListener("click", () => abrirModalAsignarVacante("grid"));
   document.getElementById("btn-asignar-vacante-cancelar").addEventListener("click", cerrarModalAsignarVacante);
   document.getElementById("btn-asignar-vacante-confirmar").addEventListener("click", confirmarAsignarVacante);
+  document.getElementById("btn-exportar-excel-seleccionados").addEventListener("click", abrirModalExportarExcel);
+  document.getElementById("btn-exportar-excel-cancelar").addEventListener("click", cerrarModalExportarExcel);
+  document.getElementById("btn-exportar-excel-confirmar").addEventListener("click", confirmarExportarExcel);
   document.getElementById("btn-cambiar-destinatario-cancelar").addEventListener("click", cerrarModalCambiarDestinatario);
   document.getElementById("btn-cambiar-destinatario-confirmar").addEventListener("click", confirmarCambiarDestinatario);
   document.getElementById("btn-fusionar-vacante-cancelar").addEventListener("click", cerrarModalFusionarVacante);
@@ -2347,6 +2416,7 @@ async function initBaseCandidatos(user) {
   document.getElementById("btn-compartir-vacante-confirmar").addEventListener("click", confirmarCompartirVacante);
   document.getElementById("candidatos-estado-masivo").addEventListener("change", (e) => cambiarEstadoSeleccionados(e.target.value));
   document.getElementById("vacantes-filtro-estado").addEventListener("change", refreshVacantes);
+  document.getElementById("vacantes-ver-archivadas").addEventListener("change", refreshVacantes);
   document.getElementById("candidatos-filtro-vacante").addEventListener("change", () => {
     renderVacantesGrid();
     loadCandidatos();

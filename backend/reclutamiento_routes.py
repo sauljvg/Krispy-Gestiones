@@ -15,6 +15,7 @@ import notificaciones as notificaciones_module
 import reclutamiento as reclutamiento_module
 from auth_routes import get_current_user
 from informes_routes import require_informes
+from utils import rows_to_xlsx
 
 router = APIRouter()
 
@@ -45,6 +46,7 @@ class VacanteUpdateIn(BaseModel):
     centro: str | None = None
     notas: str | None = None
     estado: str | None = None
+    archivada: bool | None = None
 
 
 class CandidatoIn(BaseModel):
@@ -82,6 +84,11 @@ class CompartirCandidatosIn(BaseModel):
     usuario_id: int
 
 
+class ExportarExcelIn(BaseModel):
+    candidato_ids: list[int]
+    columnas: list[str]
+
+
 class CandidatoUpdateIn(BaseModel):
     vacante_id: int | None = None
     nombre_completo: str | None = None
@@ -104,8 +111,11 @@ class CandidatoUpdateIn(BaseModel):
 
 
 @router.get("/vacantes")
-def list_vacantes_route(empresa: str | None = None, estado: str | None = None, _user: dict = Depends(require_informes)):
-    return reclutamiento_module.list_vacantes(empresa=empresa, estado=estado)
+def list_vacantes_route(
+    empresa: str | None = None, estado: str | None = None, archivadas: bool = False,
+    _user: dict = Depends(require_informes),
+):
+    return reclutamiento_module.list_vacantes(empresa=empresa, estado=estado, archivadas=archivadas)
 
 
 @router.get("/vacantes/{vacante_id}")
@@ -245,6 +255,22 @@ def actualizar_vacante_multiple_route(body: VacanteMultipleIn, _user: dict = Dep
         raise HTTPException(status_code=404, detail="Vacante no encontrada")
     reclutamiento_module.actualizar_vacante_multiple(body.candidato_ids, body.vacante_id)
     return {"ok": True}
+
+
+@router.get("/candidatos/columnas-exportables")
+def columnas_exportables_route(_user: dict = Depends(require_informes)):
+    return reclutamiento_module.CAMPOS_EXPORTABLES
+
+
+@router.post("/candidatos/exportar-excel")
+def exportar_excel_route(body: ExportarExcelIn, _user: dict = Depends(require_informes)):
+    filas = reclutamiento_module.exportar_candidatos(body.candidato_ids, body.columnas)
+    contenido = rows_to_xlsx(filas)
+    return Response(
+        content=contenido,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=candidatos.xlsx"},
+    )
 
 
 class MarcarInvitadosTestIn(BaseModel):
@@ -401,6 +427,7 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, recortes: list[tuple[int, by
     ultimo_intento_gemini = 0.0
     con_ia = 0
     con_local = 0
+    inicio = time.monotonic()
     for candidato_id, recorte in recortes:
         try:
             extraidos, metodo = None, "local"
@@ -434,7 +461,13 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, recortes: list[tuple[int, by
         except Exception as exc:
             print(f"[adjuntar-pdf-lote] No se pudo rellenar huecos del candidato {candidato_id}: {exc}")
         finally:
-            _progreso_lotes[lote_id]["procesados"] += 1
+            p = _progreso_lotes[lote_id]
+            p["procesados"] += 1
+            # Ritmo medio real hasta ahora (incluye esperas de espaciado y
+            # reintentos) proyectado sobre lo que queda -- se autocorrige solo
+            # según avanza en vez de asumir un tiempo fijo por candidato.
+            restantes = p["total"] - p["procesados"]
+            p["eta_segundos"] = round((time.monotonic() - inicio) / p["procesados"] * restantes) if restantes > 0 else 0
     _progreso_lotes[lote_id]["terminado"] = True
 
     total = len(recortes)
@@ -503,7 +536,7 @@ async def adjuntar_pdf_lote_confirmar_route(
     lote_id = None
     if recortes_para_rellenar:
         lote_id = secrets.token_hex(8)
-        _progreso_lotes[lote_id] = {"total": len(recortes_para_rellenar), "procesados": 0, "terminado": False}
+        _progreso_lotes[lote_id] = {"total": len(recortes_para_rellenar), "procesados": 0, "terminado": False, "eta_segundos": None}
         background_tasks.add_task(_rellenar_huecos_en_segundo_plano, lote_id, recortes_para_rellenar, user["id"])
     return {"ok": True, "adjuntados": adjuntados, "procesando_relleno": len(recortes_para_rellenar), "lote_id": lote_id}
 

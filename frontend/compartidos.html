@@ -100,6 +100,8 @@
   .modal-box h3 { margin: 0 0 14px; font-size: 16px; }
   .modal-box select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); margin-bottom: 14px; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .exportar-excel-columnas { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin-bottom: 14px; }
+  .exportar-excel-columnas label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 
   .reclu-candidatos-wrap { margin-bottom: 30px; }
   .candidatos-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
@@ -294,6 +296,9 @@
           <option value="cubierta">Cubiertas</option>
           <option value="cancelada">Canceladas</option>
         </select>
+        <label class="staff-hint" style="display:flex; align-items:center; gap:6px;">
+          <input type="checkbox" id="vacantes-ver-archivadas"> Ver archivadas
+        </label>
         <button id="btn-nueva-vacante" class="btn btn-primary" type="button">＋ Nueva vacante</button>
       </div>
       <div id="vacantes-grid" class="candidatos-grid"></div>
@@ -323,7 +328,6 @@
           <option value="combinada">📃➕ Lista + CV</option>
           <option value="tarjetas">🗂️ Tarjetas</option>
         </select>
-        <button id="btn-modo-seleccion" class="btn btn-ghost" type="button">☑ Selección múltiple</button>
         <button id="btn-revincular-tests" class="btn btn-ghost" type="button" title="Busca de nuevo entre las respuestas de test ya enviadas por si alguna coincide con un candidato que no tenía enlace">🔗 Buscar tests ya respondidos</button>
         <button id="btn-adjuntar-lote" class="btn btn-ghost" type="button" title="Para un PDF con varios CVs juntos que ya usaste para crear estas fichas -- adjunta el PDF a cada ficha existente por nombre, sin duplicar a nadie">🗂️ Adjuntar PDF a fichas existentes</button>
         <button id="btn-recordatorio-pendientes" class="btn btn-ghost" type="button" title="Abre la campaña de WhatsApp ya rellena solo con quienes tienen un test pendiente de responder">🔔 Recordatorio a pendientes</button>
@@ -343,6 +347,7 @@
         </select>
         <button id="btn-compartir-seleccionados" class="btn btn-ghost" type="button">Compartir con...</button>
         <button id="btn-asignar-vacante-seleccionados" class="btn btn-ghost" type="button">Asignar a solicitud...</button>
+        <button id="btn-exportar-excel-seleccionados" class="btn btn-ghost" type="button">📊 Exportar a Excel...</button>
         <button id="btn-whatsapp-seleccionados" class="btn btn-ghost btn-whatsapp" type="button" hidden></button>
         <button id="btn-mailto-seleccionados" class="btn btn-ghost btn-mailto" type="button" hidden></button>
       </div>
@@ -379,6 +384,18 @@
     <div class="modal-actions">
       <button type="button" class="btn btn-ghost" id="btn-asignar-vacante-cancelar">Cancelar</button>
       <button type="button" class="btn btn-primary" id="btn-asignar-vacante-confirmar">Asignar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="exportar-excel-modal">
+  <div class="modal-box">
+    <h3>Exportar a Excel</h3>
+    <p class="staff-hint" style="margin-top:-6px;">Elige qué datos incluir de los candidatos seleccionados.</p>
+    <div id="exportar-excel-columnas" class="exportar-excel-columnas"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="btn-exportar-excel-cancelar">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btn-exportar-excel-confirmar">Descargar</button>
     </div>
   </div>
 </div>
@@ -421,6 +438,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260724a"></script>
 <script src="js/topbar-menu.js?v=20260819a"></script>
-<script src="js/compartidos.js?v=20260819e"></script>
+<script src="js/compartidos.js?v=20260819f"></script>
 </body>
 </html>
