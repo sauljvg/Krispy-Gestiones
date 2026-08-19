@@ -2,6 +2,7 @@ import json
 import mimetypes
 import os
 import secrets
+import threading
 import time
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Response, UploadFile
@@ -258,13 +259,26 @@ def actualizar_vacante_multiple_route(body: VacanteMultipleIn, _user: dict = Dep
 
 
 @router.get("/candidatos/columnas-exportables")
-def columnas_exportables_route(_user: dict = Depends(require_informes)):
+def columnas_exportables_route(_user: dict = Depends(get_current_user)):
     return reclutamiento_module.CAMPOS_EXPORTABLES
 
 
 @router.post("/candidatos/exportar-excel")
-def exportar_excel_route(body: ExportarExcelIn, _user: dict = Depends(require_informes)):
-    filas = reclutamiento_module.exportar_candidatos(body.candidato_ids, body.columnas)
+def exportar_excel_route(body: ExportarExcelIn, user: dict = Depends(get_current_user)):
+    # A diferencia del resto de acciones en lote de "Base de candidatos"
+    # (que exigen el módulo completo con require_informes), exportar debe
+    # poder usarlo también quien solo tiene candidatos sueltos compartidos
+    # (un gerente al que solo le comparten fichas, ver require_acceso_candidato)
+    # -- así que en vez de bloquear a quien no tiene el módulo, se filtran en
+    # silencio los ids a los que de verdad tiene acceso, y se exporta solo esos.
+    if auth_module.tiene_modulo(user, "informes") or auth_module.tiene_modulo(user, "saona_informes"):
+        candidato_ids = body.candidato_ids
+    else:
+        candidato_ids = [
+            cid for cid in body.candidato_ids
+            if reclutamiento_module.usuario_tiene_acceso_candidato(user["id"], cid)
+        ]
+    filas = reclutamiento_module.exportar_candidatos(candidato_ids, body.columnas)
     contenido = rows_to_xlsx(filas)
     return Response(
         content=contenido,
@@ -431,11 +445,14 @@ async def adjuntar_pdf_lote_route(empresa: str = "kk", file: UploadFile = File(.
     }
 
 
-# Progreso del relleno en segundo plano, en memoria -- un proceso Railway
-# único (ver el incidente de más arriba), así que no hace falta nada más
-# elaborado que un diccionario para que el frontend pueda sondear "cuántos
-# van". Se pierde si el servidor se reinicia a media tanda, pero es solo un
-# indicador de progreso, no un dato que haga falta conservar.
+# Progreso del relleno en segundo plano, en memoria -- solo es el indicador
+# que sondea el frontend ("cuántos van"), así que un diccionario en memoria
+# basta. El TRABAJO en sí (qué candidatos faltan) SÍ se conserva en disco
+# (ver lotes_ia/lotes_ia_pendientes en reclutamiento.py): si el proceso se
+# reinicia a media tanda, este diccionario se pierde pero
+# reanudar_lotes_ia_pendientes lo reconstruye al arrancar con el total y lo
+# ya hecho reales, y relanza el resto -- no hace falta que el usuario lo
+# note ni que rehaga nada a mano.
 _progreso_lotes: dict[str, dict] = {}
 
 
@@ -448,14 +465,23 @@ GEMINI_ESPACIADO_SEGUNDOS = 7
 GEMINI_MAX_REINTENTOS_RPM = 2
 
 
-def _rellenar_huecos_en_segundo_plano(lote_id: str, recortes: list[tuple[int, bytes]], usuario_id: int, titulo: str):
-    """Re-extrae con IA cada recorte y rellena huecos -- se ejecuta DESPUÉS
-    de responder al navegador (ver BackgroundTasks en la ruta de abajo).
-    Antes esto iba dentro de la propia petición: con Gemini saturado, cada
-    llamada podía tardar hasta el timeout (ver cv_extraction) y encadenar
-    hasta 37 de esas dejó el proceso bloqueado cerca de una hora, tumbando
-    el resto del sitio para todo el mundo mientras tanto (usuarios en línea,
-    tests en directo...). Aquí ya no bloquea nada.
+def _rellenar_huecos_en_segundo_plano(lote_id: str, items: list[tuple[int, int]], usuario_id: int, titulo: str):
+    """Re-extrae con IA cada candidato pendiente y rellena huecos -- se
+    ejecuta DESPUÉS de responder al navegador (ver BackgroundTasks en la
+    ruta de abajo) o al arrancar el proceso si retoma un lote a medias (ver
+    _reanudar_lotes_al_arrancar). Antes esto iba dentro de la propia
+    petición: con Gemini saturado, cada llamada podía tardar hasta el
+    timeout (ver cv_extraction) y encadenar hasta 37 de esas dejó el proceso
+    bloqueado cerca de una hora, tumbando el resto del sitio para todo el
+    mundo mientras tanto (usuarios en línea, tests en directo...). Aquí ya
+    no bloquea nada.
+
+    `items` son (candidato_id, archivo_id) -- se lee el PDF de disco en cada
+    vuelta (ya lo dejó guardado agregar_archivo antes de programar esto) en
+    vez de recibir los bytes por parámetro, precisamente para poder
+    reconstruir la llamada desde cero si el proceso se reinició a media
+    tanda: lo único que hace falta conservar es la cola en
+    lotes_ia_pendientes (ver reclutamiento_module), no los bytes del PDF.
 
     Dentro del lote se reparten las llamadas a Gemini con una pausa fija
     (GEMINI_ESPACIADO_SEGUNDOS) para no chocar con el límite de peticiones
@@ -470,8 +496,14 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, recortes: list[tuple[int, by
     con_ia = 0
     con_local = 0
     inicio = time.monotonic()
-    for candidato_id, recorte in recortes:
+    procesados_esta_tanda = 0
+    for candidato_id, archivo_id in items:
         try:
+            archivo = reclutamiento_module.get_archivo(archivo_id)
+            if archivo is None or not os.path.exists(archivo["ruta"]):
+                continue
+            with open(archivo["ruta"], "rb") as f:
+                recorte = f.read()
             extraidos, metodo = None, "local"
             if intentar_gemini:
                 reintentos = 0
@@ -503,16 +535,26 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, recortes: list[tuple[int, by
         except Exception as exc:
             print(f"[adjuntar-pdf-lote] No se pudo rellenar huecos del candidato {candidato_id}: {exc}")
         finally:
-            p = _progreso_lotes[lote_id]
-            p["procesados"] += 1
-            # Ritmo medio real hasta ahora (incluye esperas de espaciado y
-            # reintentos) proyectado sobre lo que queda -- se autocorrige solo
-            # según avanza en vez de asumir un tiempo fijo por candidato.
-            restantes = p["total"] - p["procesados"]
-            p["eta_segundos"] = round((time.monotonic() - inicio) / p["procesados"] * restantes) if restantes > 0 else 0
-    _progreso_lotes[lote_id]["terminado"] = True
+            reclutamiento_module.marcar_candidato_lote_terminado(lote_id, candidato_id)
+            procesados_esta_tanda += 1
+            p = _progreso_lotes.get(lote_id)
+            if p is not None:
+                p["procesados"] += 1
+                # Ritmo medio real de ESTA tanda (incluye esperas de espaciado y
+                # reintentos) proyectado sobre lo que queda -- si el lote viene
+                # retomado tras un reinicio, procesados_esta_tanda arranca en 0
+                # aunque p["procesados"] ya venga con lo hecho antes, para no
+                # calcular el ritmo como si lo de antes también hubiera
+                # tardado lo de ahora.
+                restantes = p["total"] - p["procesados"]
+                p["eta_segundos"] = round((time.monotonic() - inicio) / procesados_esta_tanda * restantes) if restantes > 0 else 0
+    p = _progreso_lotes.get(lote_id)
+    if p is not None:
+        p["terminado"] = True
+        total = p["total"]
+    else:
+        total = len(items)
 
-    total = len(recortes)
     if con_ia and con_local:
         resumen = f"{con_ia} con IA, {con_local} con método local"
     elif con_ia:
@@ -524,6 +566,29 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, recortes: list[tuple[int, by
         f"{titulo}: relleno con IA terminado, {total}/{total} candidatos procesados ({resumen}).",
         "/compartidos.html",
     )
+
+
+def reanudar_lotes_ia_pendientes():
+    """Se llama al arrancar el proceso (ver el startup de main.py) --
+    retoma cada lote de relleno con IA que se quedó a medias en el arranque
+    anterior (redeploy, reinicio, caída...) en vez de dejarlo perdido para
+    siempre. Reconstruye _progreso_lotes con el total real y lo ya
+    procesado (no desde 0) para que el indicador del topbar no mienta, y
+    lanza el resto en un hilo aparte -- fuera de una petición no hay
+    BackgroundTasks de FastAPI que valga."""
+    lotes = reclutamiento_module.lotes_ia_incompletos()
+    for lote in lotes:
+        ya_hechos = lote["total"] - len(lote["pendientes"])
+        _progreso_lotes[lote["lote_id"]] = {
+            "total": lote["total"], "procesados": ya_hechos, "terminado": False, "eta_segundos": None,
+            "usuario_id": lote["usuario_id"], "titulo": lote["titulo"],
+        }
+        print(f"[adjuntar-pdf-lote] Retomando lote '{lote['titulo']}' ({ya_hechos}/{lote['total']} ya hechos, {len(lote['pendientes'])} pendientes)", flush=True)
+        threading.Thread(
+            target=_rellenar_huecos_en_segundo_plano,
+            args=(lote["lote_id"], lote["pendientes"], lote["usuario_id"], lote["titulo"]),
+            daemon=True,
+        ).start()
 
 
 @router.post("/candidatos/adjuntar-pdf-lote/confirmar")
@@ -559,7 +624,7 @@ async def adjuntar_pdf_lote_confirmar_route(
         raise HTTPException(status_code=400, detail="mapeo inválido")
     contenido = await file.read()
     adjuntados = 0
-    recortes_para_rellenar = []
+    items_para_rellenar = []
     for item in items:
         candidato_id = item.get("candidato_id")
         if not candidato_id:
@@ -572,20 +637,25 @@ async def adjuntar_pdf_lote_confirmar_route(
                 recorte = cv_extraction.recortar_pdf(contenido, int(pagina_inicio), int(pagina_fin))
             except Exception:
                 recorte = contenido
-        reclutamiento_module.agregar_archivo(candidato_id, file.filename, recorte)
+        archivo_id = reclutamiento_module.agregar_archivo(candidato_id, file.filename, recorte)
         adjuntados += 1
         if pagina_inicio and pagina_fin:
-            recortes_para_rellenar.append((candidato_id, recorte))
+            items_para_rellenar.append((candidato_id, archivo_id))
     lote_id = None
-    if recortes_para_rellenar:
+    if items_para_rellenar:
         lote_id = secrets.token_hex(8)
         titulo_lote = titulo or "Relleno de CVs"
         _progreso_lotes[lote_id] = {
-            "total": len(recortes_para_rellenar), "procesados": 0, "terminado": False, "eta_segundos": None,
+            "total": len(items_para_rellenar), "procesados": 0, "terminado": False, "eta_segundos": None,
             "usuario_id": user["id"], "titulo": titulo_lote,
         }
-        background_tasks.add_task(_rellenar_huecos_en_segundo_plano, lote_id, recortes_para_rellenar, user["id"], titulo_lote)
-    return {"ok": True, "adjuntados": adjuntados, "procesando_relleno": len(recortes_para_rellenar), "lote_id": lote_id}
+        # Cola durable ANTES de programar el segundo plano -- si el proceso
+        # se reinicia (redeploy, caída...) antes o durante el lote,
+        # _reanudar_lotes_al_arrancar lo retoma solo desde aquí sin perder
+        # lo que ya se procesó.
+        reclutamiento_module.crear_lote_ia_pendiente(lote_id, user["id"], titulo_lote, items_para_rellenar)
+        background_tasks.add_task(_rellenar_huecos_en_segundo_plano, lote_id, items_para_rellenar, user["id"], titulo_lote)
+    return {"ok": True, "adjuntados": adjuntados, "procesando_relleno": len(items_para_rellenar), "lote_id": lote_id}
 
 
 @router.get("/candidatos/adjuntar-pdf-lote/progreso/{lote_id}")

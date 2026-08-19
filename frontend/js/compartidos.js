@@ -214,6 +214,11 @@ function fmtFechaHora(iso) {
 // compartió, o con quién se compartió).
 let modoSeleccionCompartidos = false;
 let compartidosSeleccionadosIds = new Set();
+// Selección independiente para "Compartidos conmigo" (ver seccionHTML) --
+// separada de la de "Compartidos por ti" de arriba para que activar/marcar
+// en una sección no mezcle ni active la otra.
+let modoSeleccionCompartidosConmigo = false;
+let compartidosConmigoSeleccionadosIds = new Set();
 let compartidosPorMiCache = []; // items crudos de "Compartidos por ti" (para armar el payload de cambiar destinatario)
 let gruposPorMiCache = []; // tandas ya agrupadas de "Compartidos por ti" (para el botón "Dejar de compartir todo el grupo")
 let tandasAbiertas = new Set(); // claves de <details> que el usuario ha dejado abiertas -- se respeta entre re-renders
@@ -265,14 +270,20 @@ async function actualizarCandidatoInline(candidatoId, campos) {
 // esta vista necesita de más (Ver CV, Dejar de compartir) como botones
 // pequeños al pie. El detalle completo del test se sigue viendo desde "Ver
 // ficha completa" (📋 Respuestas del test), no hace falta duplicarlo aquí.
-function candidatoCardHTML(item, permitirDejarDeCompartir, permitirSeleccion) {
+function candidatoCardHTML(item, permitirDejarDeCompartir, permitirSeleccion, contexto = "por_mi") {
   const candId = item.candidato_id;
   const nombre = nombreCandidato(item.datos);
   const vacante = vacantesTodasCache.find((v) => v.id === item.vacante_id);
   const vacanteTxt = vacante ? `📁 ${vacante.puesto}${vacante.centro ? ` · ${vacante.centro}` : ""}` : "Sin vacante asignada";
   const linea2 = [item.telefono, item.email].filter(Boolean).join(" · ");
+  // "Conmigo" y "por ti" llevan cada uno su propia selección (ver
+  // compartidosConmigoSeleccionadosIds) -- si compartieran el mismo Set,
+  // marcar "Seleccionar" en una sección activaría también la otra, y un
+  // candidato marcado en una se contaría como seleccionado en la otra
+  // aunque ni siquiera aparezca ahí.
+  const seleccionSet = contexto === "conmigo" ? compartidosConmigoSeleccionadosIds : compartidosSeleccionadosIds;
   const checkboxHTML = permitirSeleccion && candId
-    ? `<input type="checkbox" class="candidato-compartido-check" data-candidato-id="${candId}" ${compartidosSeleccionadosIds.has(candId) ? "checked" : ""} style="margin-right:4px;">`
+    ? `<input type="checkbox" class="candidato-compartido-check" data-contexto="${contexto}" data-candidato-id="${candId}" ${seleccionSet.has(candId) ? "checked" : ""} style="margin-right:4px;">`
     : "";
   const cvBtn = item.tiene_cv
     ? `<a href="${AUTH_API_BASE}/informes/respuestas/${item.respuesta_id}/cv" target="_blank" rel="noopener" class="btn-mini">📄 Ver CV</a>`
@@ -313,7 +324,7 @@ function candidatoCardHTML(item, permitirDejarDeCompartir, permitirSeleccion) {
 // para poder recordar si el usuario la dejó abierta entre re-renders (ver
 // tandasAbiertas) -- antes se perdía el estado en cuanto se marcaba un
 // checkbox, porque cada cambio de selección repinta toda la lista.
-function grupoHTML(grupo, etiquetaOtro, abierta, permitirDejarDeCompartir, permitirSeleccion) {
+function grupoHTML(grupo, etiquetaOtro, abierta, permitirDejarDeCompartir, permitirSeleccion, contexto = "por_mi") {
   const n = grupo.items.length;
   const eliminarGrupoBtn = permitirDejarDeCompartir
     ? `<button type="button" class="btn btn-ghost btn-eliminar-grupo" data-clave="${escapeHTML(grupo.clave)}">🗑 Dejar de compartir todo el grupo</button>`
@@ -326,23 +337,36 @@ function grupoHTML(grupo, etiquetaOtro, abierta, permitirDejarDeCompartir, permi
       </summary>
       <div class="tanda-body">
         ${eliminarGrupoBtn}
-        ${grupo.items.map((it) => candidatoCardHTML(it, permitirDejarDeCompartir, permitirSeleccion)).join("")}
+        ${grupo.items.map((it) => candidatoCardHTML(it, permitirDejarDeCompartir, permitirSeleccion, contexto)).join("")}
       </div>
     </details>`;
 }
 
-function seccionHTML(seccionId, titulo, grupos, etiquetaOtro, vacioMsg, permitirDejarDeCompartir, permitirSeleccion, abrirPorDefecto = true) {
-  // "Unir a la misma solicitud" solo tiene sentido en "Compartidos por ti"
-  // -- para el caso de compartir el mismo grupo de candidatos en tandas
-  // distintas (p.ej. unos a las 8:46 y otros a las 8:59 al mismo gerente) y
-  // querer agruparlos bajo un único proceso después.
+function seccionHTML(seccionId, titulo, grupos, etiquetaOtro, vacioMsg, permitirDejarDeCompartir, permitirSeleccion, abrirPorDefecto = true, contexto = "por_mi") {
+  // "Unir a la misma solicitud" y "Cambiar destinatario" solo tienen
+  // sentido en "Compartidos por ti" (quien comparte) -- para el caso de
+  // compartir el mismo grupo de candidatos en tandas distintas (p.ej. unos
+  // a las 8:46 y otros a las 8:59 al mismo gerente) y querer agruparlos
+  // bajo un único proceso después, o corregir a quién se lo compartiste.
+  // "Compartidos conmigo" (quien recibe, p.ej. un gerente al que solo le
+  // comparten candidatos sueltos) no puede hacer ninguna de esas dos, pero
+  // sí necesita poder exportar a Excel lo que le compartieron -- mismo
+  // Excel que ya existe en "Base de candidatos" (ver
+  // abrirModalExportarExcel), sin necesitar el módulo completo.
+  const modoActivo = contexto === "conmigo" ? modoSeleccionCompartidosConmigo : modoSeleccionCompartidos;
+  const seleccionSet = contexto === "conmigo" ? compartidosConmigoSeleccionadosIds : compartidosSeleccionadosIds;
+  const idModo = contexto === "conmigo" ? "btn-modo-seleccion-compartidos-conmigo" : "btn-modo-seleccion-compartidos";
+  const idContador = contexto === "conmigo" ? "compartidos-conmigo-seleccion-contador" : "compartidos-seleccion-contador";
+  const accionesContexto = contexto === "conmigo"
+    ? `<button type="button" id="btn-exportar-excel-compartidos" class="btn btn-primary" ${seleccionSet.size === 0 ? "disabled" : ""}>📊 Exportar a Excel...</button>`
+    : `<button type="button" id="btn-unir-compartidos" class="btn btn-primary" ${seleccionSet.size === 0 ? "disabled" : ""}>🔗 Unir a la misma solicitud...</button>
+       <button type="button" id="btn-cambiar-destinatario" class="btn btn-primary" ${seleccionSet.size === 0 ? "disabled" : ""}>👤 Cambiar destinatario...</button>`;
   const barraSeleccion = permitirSeleccion ? `
     <div class="compartidos-seleccion-bar">
-      <button type="button" id="btn-modo-seleccion-compartidos" class="btn btn-ghost">${modoSeleccionCompartidos ? "✕ Cancelar selección" : "☑ Seleccionar"}</button>
-      ${modoSeleccionCompartidos ? `
-        <span id="compartidos-seleccion-contador" class="staff-hint">${compartidosSeleccionadosIds.size} seleccionado(s)</span>
-        <button type="button" id="btn-unir-compartidos" class="btn btn-primary" ${compartidosSeleccionadosIds.size === 0 ? "disabled" : ""}>🔗 Unir a la misma solicitud...</button>
-        <button type="button" id="btn-cambiar-destinatario" class="btn btn-primary" ${compartidosSeleccionadosIds.size === 0 ? "disabled" : ""}>👤 Cambiar destinatario...</button>
+      <button type="button" id="${idModo}" class="btn btn-ghost">${modoActivo ? "✕ Cancelar selección" : "☑ Seleccionar"}</button>
+      ${modoActivo ? `
+        <span id="${idContador}" class="staff-hint">${seleccionSet.size} seleccionado(s)</span>
+        ${accionesContexto}
       ` : ""}
     </div>` : "";
   if (grupos.length === 0) {
@@ -359,7 +383,7 @@ function seccionHTML(seccionId, titulo, grupos, etiquetaOtro, vacioMsg, permitir
     tandasSeccionInicializada.add(seccionId);
   }
   return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2>${barraSeleccion}` +
-    grupos.map((g) => grupoHTML(g, etiquetaOtro, tandasAbiertas.has(g.clave), permitirDejarDeCompartir, permitirSeleccion && modoSeleccionCompartidos)).join("");
+    grupos.map((g) => grupoHTML(g, etiquetaOtro, tandasAbiertas.has(g.clave), permitirDejarDeCompartir, permitirSeleccion && modoActivo, contexto)).join("");
 }
 
 async function dejarDeCompartirClick(btn) {
@@ -401,8 +425,9 @@ function wireCompartidosInteractivos(wrap) {
   wrap.querySelectorAll(".candidato-compartido-check").forEach((el) => {
     el.addEventListener("change", () => {
       const id = Number(el.dataset.candidatoId);
-      if (el.checked) compartidosSeleccionadosIds.add(id);
-      else compartidosSeleccionadosIds.delete(id);
+      const set = el.dataset.contexto === "conmigo" ? compartidosConmigoSeleccionadosIds : compartidosSeleccionadosIds;
+      if (el.checked) set.add(id);
+      else set.delete(id);
       loadCompartidos();
     });
   });
@@ -414,6 +439,14 @@ function wireCompartidosInteractivos(wrap) {
       loadCompartidos();
     });
   }
+  const btnModoConmigo = document.getElementById("btn-modo-seleccion-compartidos-conmigo");
+  if (btnModoConmigo) {
+    btnModoConmigo.addEventListener("click", () => {
+      modoSeleccionCompartidosConmigo = !modoSeleccionCompartidosConmigo;
+      compartidosConmigoSeleccionadosIds.clear();
+      loadCompartidos();
+    });
+  }
   const btnUnir = document.getElementById("btn-unir-compartidos");
   if (btnUnir) {
     btnUnir.addEventListener("click", () => abrirModalAsignarVacante("compartidos"));
@@ -421,6 +454,10 @@ function wireCompartidosInteractivos(wrap) {
   const btnCambiarDestinatario = document.getElementById("btn-cambiar-destinatario");
   if (btnCambiarDestinatario) {
     btnCambiarDestinatario.addEventListener("click", abrirModalCambiarDestinatario);
+  }
+  const btnExportarCompartidos = document.getElementById("btn-exportar-excel-compartidos");
+  if (btnExportarCompartidos) {
+    btnExportarCompartidos.addEventListener("click", () => abrirModalExportarExcel("compartidos-conmigo"));
   }
   wrap.querySelectorAll(".btn-eliminar-grupo").forEach((el) => {
     el.addEventListener("click", () => {
@@ -492,11 +529,24 @@ function vacantesCompartidasSeccionHTML(titulo, vacantes, vacioMsg, opciones = {
 
 async function loadCompartidos() {
   const wrap = document.getElementById("compartidos-list");
+  // Quien tiene el módulo completo (informes/saona_informes) está viendo
+  // esta pantalla dentro del contexto de UNA marca (la de la URL, ver
+  // EMPRESA), así que tiene sentido acotar "Compartidos" a esa marca. Pero
+  // quien NO tiene ningún módulo completo (un gerente al que solo le
+  // comparten candidatos sueltos, p.ej. Heber) no eligió ninguna marca --
+  // simplemente entra a /compartidos.html a secas, que por defecto cae en
+  // "kk". Si se le compartió un candidato de SAONA, con el filtro puesto
+  // era invisible del todo (sin ningún aviso ni forma de cambiar de marca
+  // en esta pantalla): por eso para esta gente se pide TODO, sin filtrar
+  // por empresa (el backend ya lo permite -- empresa es opcional).
+  const modulos = usuarioActual?.modulos || [];
+  const esRestringido = !(modulos.includes("informes") || modulos.includes("saona_informes"));
+  const filtroEmpresa = esRestringido ? "" : `?empresa=${EMPRESA}`;
   const [conmigo, porMi, vacantesConmigo, vacantesPorMi] = await Promise.all([
-    fetch(`${AUTH_API_BASE}/informes/compartidos?empresa=${EMPRESA}`).then((r) => (r.ok ? r.json() : [])),
-    fetch(`${AUTH_API_BASE}/informes/compartidos-por-mi?empresa=${EMPRESA}`).then((r) => (r.ok ? r.json() : [])),
-    fetch(`${AUTH_API_BASE}/reclutamiento/vacantes-compartidas-conmigo?empresa=${EMPRESA}`).then((r) => (r.ok ? r.json() : [])),
-    fetch(`${AUTH_API_BASE}/reclutamiento/vacantes-compartidas-por-mi?empresa=${EMPRESA}`).then((r) => (r.ok ? r.json() : [])),
+    fetch(`${AUTH_API_BASE}/informes/compartidos${filtroEmpresa}`).then((r) => (r.ok ? r.json() : [])),
+    fetch(`${AUTH_API_BASE}/informes/compartidos-por-mi${filtroEmpresa}`).then((r) => (r.ok ? r.json() : [])),
+    fetch(`${AUTH_API_BASE}/reclutamiento/vacantes-compartidas-conmigo${filtroEmpresa}`).then((r) => (r.ok ? r.json() : [])),
+    fetch(`${AUTH_API_BASE}/reclutamiento/vacantes-compartidas-por-mi${filtroEmpresa}`).then((r) => (r.ok ? r.json() : [])),
   ]);
 
   // A quien le comparten candidatos (típicamente un gerente de tienda) no le
@@ -523,7 +573,9 @@ async function loadCompartidos() {
     "compartido por",
     "Todavía no te han compartido ningún candidato.",
     false,
-    false
+    true,
+    true,
+    "conmigo"
   );
 
   // La sección "Compartidos por ti" solo tiene sentido enseñarla si esta
@@ -2073,10 +2125,13 @@ async function confirmarAsignarVacante() {
 }
 
 let columnasExportablesCache = null;
+let origenExportarExcel = "grid";
 const COLUMNAS_EXPORTAR_POR_DEFECTO = ["nombre_completo", "telefono", "email", "vacante", "test_resultado"];
 
-async function abrirModalExportarExcel() {
-  if (candidatosSeleccionadosIds.size === 0) return;
+async function abrirModalExportarExcel(origen = "grid") {
+  const ids = origen === "compartidos-conmigo" ? compartidosConmigoSeleccionadosIds : candidatosSeleccionadosIds;
+  if (ids.size === 0) return;
+  origenExportarExcel = origen;
   if (!columnasExportablesCache) {
     columnasExportablesCache = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/columnas-exportables`).then((r) => r.json());
   }
@@ -2099,10 +2154,11 @@ async function confirmarExportarExcel() {
     mostrarAviso("Elige al menos un dato para exportar.");
     return;
   }
+  const ids = origenExportarExcel === "compartidos-conmigo" ? compartidosConmigoSeleccionadosIds : candidatosSeleccionadosIds;
   const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/exportar-excel`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ candidato_ids: [...candidatosSeleccionadosIds], columnas }),
+    body: JSON.stringify({ candidato_ids: [...ids], columnas }),
   });
   if (!res.ok) {
     mostrarAviso("No se pudo generar el Excel.");
@@ -2302,6 +2358,17 @@ function renderCandidatosGrid() {
   aplicarVistaCandidatos();
   const grid = document.getElementById("candidatos-grid");
   const visibles = candidatosFiltradosPorApto();
+  // Los contadores de arriba (Todos/Pendiente/Entrevistado...) solo cuentan
+  // por estado -- no se mueven al tocar "Solo aptos"/"Solo no aptos"/"Sin
+  // responder test", así que no sirven para saber cuántos quedan con ESE
+  // filtro puesto. Este de aquí sí se recalcula con cada filtro (incluida
+  // la búsqueda y la vacante, ya aplicadas en ultimosCandidatosCargados).
+  const contadorFiltro = document.getElementById("candidatos-contador-filtro");
+  if (contadorFiltro) {
+    const difiere = visibles.length !== ultimosCandidatosCargados.length;
+    contadorFiltro.textContent = `${visibles.length} candidato${visibles.length === 1 ? "" : "s"} con este filtro` +
+      (difiere ? ` (de ${ultimosCandidatosCargados.length} en esta pestaña)` : "");
+  }
   const totalPaginas = Math.max(1, Math.ceil(visibles.length / candidatosPorPagina));
   if (candidatosPagina > totalPaginas) candidatosPagina = totalPaginas;
   const inicio = (candidatosPagina - 1) * candidatosPorPagina;
@@ -2532,6 +2599,12 @@ async function initBaseCandidatos(user) {
   const modulos = user.modulos || [];
   const tieneAcceso = modulos.includes("informes") || modulos.includes("saona_informes");
   const wrap = document.getElementById("reclu-candidatos-wrap");
+  // El modal de exportar a Excel se usa tanto desde "Base de candidatos"
+  // como desde "Compartidos conmigo" (ver btn-exportar-excel-compartidos en
+  // wireCompartidosInteractivos) -- quien no tiene el módulo completo
+  // también necesita esto, así que se cablea ANTES del return de abajo.
+  document.getElementById("btn-exportar-excel-cancelar").addEventListener("click", cerrarModalExportarExcel);
+  document.getElementById("btn-exportar-excel-confirmar").addEventListener("click", confirmarExportarExcel);
   if (!tieneAcceso) {
     wrap.hidden = true;
     return;
@@ -2552,9 +2625,7 @@ async function initBaseCandidatos(user) {
   document.getElementById("btn-asignar-vacante-seleccionados").addEventListener("click", () => abrirModalAsignarVacante("grid"));
   document.getElementById("btn-asignar-vacante-cancelar").addEventListener("click", cerrarModalAsignarVacante);
   document.getElementById("btn-asignar-vacante-confirmar").addEventListener("click", confirmarAsignarVacante);
-  document.getElementById("btn-exportar-excel-seleccionados").addEventListener("click", abrirModalExportarExcel);
-  document.getElementById("btn-exportar-excel-cancelar").addEventListener("click", cerrarModalExportarExcel);
-  document.getElementById("btn-exportar-excel-confirmar").addEventListener("click", confirmarExportarExcel);
+  document.getElementById("btn-exportar-excel-seleccionados").addEventListener("click", () => abrirModalExportarExcel("grid"));
   document.getElementById("btn-cambiar-destinatario-cancelar").addEventListener("click", cerrarModalCambiarDestinatario);
   document.getElementById("btn-cambiar-destinatario-confirmar").addEventListener("click", confirmarCambiarDestinatario);
   document.getElementById("btn-fusionar-vacante-cancelar").addEventListener("click", cerrarModalFusionarVacante);

@@ -234,6 +234,31 @@ def ensure_reclutamiento_tables():
             UNIQUE(vacante_id, usuario_id)
         )
     """)
+    # Cola durable del relleno con IA en segundo plano (ver
+    # _rellenar_huecos_en_segundo_plano en reclutamiento_routes.py). El
+    # progreso en sí sigue viviendo en memoria (_progreso_lotes, solo para
+    # pintar el indicador), pero SIN esto un redeploy o reinicio de Railway a
+    # media tanda mataba el trabajo de verdad sin dejar ningún rastro -- el
+    # usuario volvía a entrar, veía "0/32" y tenía que rehacer todo el lote a
+    # mano. Con esto, al arrancar el proceso se retoma solo desde donde se
+    # quedó (ver reanudar_lotes_ia_pendientes / _reanudar_lotes_al_arrancar).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS lotes_ia (
+            lote_id TEXT PRIMARY KEY,
+            usuario_id INTEGER NOT NULL,
+            titulo TEXT NOT NULL,
+            total INTEGER NOT NULL,
+            creado_en TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS lotes_ia_pendientes (
+            lote_id TEXT NOT NULL REFERENCES lotes_ia(lote_id) ON DELETE CASCADE,
+            candidato_id INTEGER NOT NULL,
+            archivo_id INTEGER NOT NULL,
+            PRIMARY KEY (lote_id, candidato_id)
+        )
+    """)
     conn.commit()
     conn.close()
     _limpiar_archivos_duplicados()
@@ -854,6 +879,63 @@ def candidatos_ya_enriquecidos(candidato_ids: list[int]) -> set[int]:
                 listos.add(row["id"])
                 break
     return listos
+
+
+def crear_lote_ia_pendiente(lote_id: str, usuario_id: int, titulo: str, candidatos_archivos: list[tuple[int, int]]):
+    """candidatos_archivos: [(candidato_id, archivo_id), ...] -- registra en
+    disco qué le falta por rellenar con IA a este lote, para poder
+    retomarlo solo si el proceso se reinicia a media tanda (ver
+    lotes_ia_incompletos / _reanudar_lotes_al_arrancar en
+    reclutamiento_routes.py). El archivo_id ya apunta a un PDF que
+    agregar_archivo dejó guardado en disco ANTES de programar el relleno en
+    segundo plano, así que no hace falta guardar los bytes aquí también."""
+    if not candidatos_archivos:
+        return
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO lotes_ia (lote_id, usuario_id, titulo, total) VALUES (?, ?, ?, ?)",
+        (lote_id, usuario_id, titulo, len(candidatos_archivos)),
+    )
+    conn.executemany(
+        "INSERT INTO lotes_ia_pendientes (lote_id, candidato_id, archivo_id) VALUES (?, ?, ?)",
+        [(lote_id, cid, aid) for cid, aid in candidatos_archivos],
+    )
+    conn.commit()
+    conn.close()
+
+
+def marcar_candidato_lote_terminado(lote_id: str, candidato_id: int):
+    """Quita a este candidato de la cola pendiente del lote -- si no queda
+    ninguno más, el lote ya está completo del todo y se borra también su
+    fila de metadatos."""
+    conn = get_connection()
+    conn.execute("DELETE FROM lotes_ia_pendientes WHERE lote_id = ? AND candidato_id = ?", (lote_id, candidato_id))
+    restantes = conn.execute("SELECT COUNT(*) FROM lotes_ia_pendientes WHERE lote_id = ?", (lote_id,)).fetchone()[0]
+    if restantes == 0:
+        conn.execute("DELETE FROM lotes_ia WHERE lote_id = ?", (lote_id,))
+    conn.commit()
+    conn.close()
+
+
+def lotes_ia_incompletos():
+    """Lotes que se quedaron a medias (ver _reanudar_lotes_al_arrancar) --
+    con esto el arranque del proceso puede retomar cada uno justo donde se
+    quedó en vez de perder el trabajo ya hecho."""
+    conn = get_connection()
+    lotes = conn.execute("SELECT * FROM lotes_ia").fetchall()
+    resultado = []
+    for lote in lotes:
+        pendientes = conn.execute(
+            "SELECT candidato_id, archivo_id FROM lotes_ia_pendientes WHERE lote_id = ?", (lote["lote_id"],)
+        ).fetchall()
+        if not pendientes:
+            continue
+        resultado.append({
+            "lote_id": lote["lote_id"], "usuario_id": lote["usuario_id"], "titulo": lote["titulo"],
+            "total": lote["total"], "pendientes": [(p["candidato_id"], p["archivo_id"]) for p in pendientes],
+        })
+    conn.close()
+    return resultado
 
 
 def crear_candidato(campos: dict, empresa="kk", origen="manual", respuesta_id=None, creado_por=None, vacante_id=None):

@@ -46,6 +46,7 @@ from encuestas_routes import router_publico as encuestas_router_publico
 from entrevistas_routes import router as entrevistas_router
 from informes_routes import router as informes_router
 from notificaciones_routes import router as notificaciones_router
+from reclutamiento_routes import reanudar_lotes_ia_pendientes
 from reclutamiento_routes import router as reclutamiento_router
 from request_context import tiendas_permitidas_actual
 from routes import router
@@ -129,6 +130,7 @@ app.include_router(router, prefix="/api", dependencies=[Depends(require_resenas)
 def _start_db_backups():
     backups_module.start_scheduler()
     agregadores_module.start_scheduler_limpieza_capturas()
+    reanudar_lotes_ia_pendientes()
 
 
 @app.on_event("shutdown")
