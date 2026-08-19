@@ -838,12 +838,12 @@ const CAMPOS_FORM = [
   ["puesto_solicitado", "Puesto al que aplica"],
   ["fecha_solicitud", "Fecha de solicitud"],
   ["disponibilidad", "Disponibilidad"],
-  ["formacion", "Formación", true],
-  ["experiencia", "Experiencia", true],
 ];
 
 let candidatoEditando = null; // null = alta nueva; objeto = editando existente
 let extraFieldsState = {};
+let formacionState = [];
+let experienciaState = [];
 
 function vacanteSelectHTML(selectedId, elementId, fallbackLabel) {
   const opciones = vacantesTodasCache
@@ -912,10 +912,117 @@ function leerExtraFieldsDelForm() {
   return extra;
 }
 
+// Historial estructurado de Formación/Experiencia -- estilo InfoJobs (título/
+// centro/fechas por estudio, puesto/empresa/fechas/descripción por puesto)
+// en vez de un único bloque de texto libre. Mismo patrón de edición que
+// extra_fields: filas en el DOM, se leen al guardar (leerFormacionDelForm/
+// leerExperienciaDelForm), no hace falta mantener el array sincronizado en
+// cada tecla.
+function formacionEntryHTML(e, i) {
+  const v = e || {};
+  return `
+    <div class="historial-entry-row" data-idx="${i}">
+      <div class="historial-entry-grid">
+        <input type="text" class="historial-titulo" placeholder="Título (p.ej. Grado en Derecho)" value="${escapeHTML(v.titulo || "")}">
+        <input type="text" class="historial-centro" placeholder="Centro" value="${escapeHTML(v.centro || "")}">
+        <input type="text" class="historial-fecha-inicio" placeholder="Desde (p.ej. sept. 2020)" value="${escapeHTML(v.fecha_inicio || "")}">
+        <input type="text" class="historial-fecha-fin" placeholder="Hasta (o Actualmente)" value="${escapeHTML(v.fecha_fin || "")}">
+      </div>
+      <button type="button" class="btn-mini historial-quitar">✕</button>
+    </div>`;
+}
+
+function experienciaEntryHTML(e, i) {
+  const v = e || {};
+  return `
+    <div class="historial-entry-row" data-idx="${i}">
+      <div class="historial-entry-grid">
+        <input type="text" class="historial-puesto" placeholder="Puesto (p.ej. Camarero/a)" value="${escapeHTML(v.puesto || "")}">
+        <input type="text" class="historial-empresa" placeholder="Empresa" value="${escapeHTML(v.empresa || "")}">
+        <input type="text" class="historial-fecha-inicio" placeholder="Desde (p.ej. enero 2025)" value="${escapeHTML(v.fecha_inicio || "")}">
+        <input type="text" class="historial-fecha-fin" placeholder="Hasta (o Actualmente)" value="${escapeHTML(v.fecha_fin || "")}">
+        <textarea class="historial-descripcion form-field-full" placeholder="Tareas/funciones (opcional)" style="min-height:40px;">${escapeHTML(v.descripcion || "")}</textarea>
+      </div>
+      <button type="button" class="btn-mini historial-quitar">✕</button>
+    </div>`;
+}
+
+function wireHistorialQuitar(cont) {
+  cont.querySelectorAll(".historial-quitar").forEach((btn) => {
+    btn.addEventListener("click", () => btn.closest(".historial-entry-row").remove());
+  });
+}
+
+function renderFormacionEditor() {
+  const cont = document.getElementById("formacion-editor-filas");
+  if (!cont) return;
+  cont.innerHTML = formacionState.map(formacionEntryHTML).join("");
+  wireHistorialQuitar(cont);
+}
+
+function renderExperienciaEditor() {
+  const cont = document.getElementById("experiencia-editor-filas");
+  if (!cont) return;
+  cont.innerHTML = experienciaState.map(experienciaEntryHTML).join("");
+  wireHistorialQuitar(cont);
+}
+
+function leerFormacionDelForm() {
+  return Array.from(document.querySelectorAll("#formacion-editor-filas .historial-entry-row")).map((row) => ({
+    titulo: row.querySelector(".historial-titulo").value.trim(),
+    centro: row.querySelector(".historial-centro").value.trim(),
+    fecha_inicio: row.querySelector(".historial-fecha-inicio").value.trim(),
+    fecha_fin: row.querySelector(".historial-fecha-fin").value.trim(),
+  })).filter((e) => e.titulo || e.centro || e.fecha_inicio || e.fecha_fin);
+}
+
+function leerExperienciaDelForm() {
+  return Array.from(document.querySelectorAll("#experiencia-editor-filas .historial-entry-row")).map((row) => ({
+    puesto: row.querySelector(".historial-puesto").value.trim(),
+    empresa: row.querySelector(".historial-empresa").value.trim(),
+    fecha_inicio: row.querySelector(".historial-fecha-inicio").value.trim(),
+    fecha_fin: row.querySelector(".historial-fecha-fin").value.trim(),
+    descripcion: row.querySelector(".historial-descripcion").value.trim(),
+  })).filter((e) => e.puesto || e.empresa || e.fecha_inicio || e.fecha_fin || e.descripcion);
+}
+
+// Ficha antigua sin historial estructurado todavía -- se sigue viendo (y
+// pudiendo editar) el texto libre de siempre, para no perder lo que ya
+// había, con un aviso de que es el formato antiguo.
+function historialLegadoHTML(campo, etiqueta, valor) {
+  if (!valor) return "";
+  return `
+    <div class="form-field form-field-full">
+      <label>${escapeHTML(etiqueta)} (texto libre, dato antiguo)</label>
+      <textarea class="candidato-input" data-campo="${campo}" style="min-height:60px;">${escapeHTML(valor)}</textarea>
+      <p class="staff-hint">Formato antiguo -- si añades una entrada arriba, este texto deja de usarse.</p>
+    </div>`;
+}
+
+function historialEditorHTML() {
+  const formacionLegado = candidatoEditando ? historialLegadoHTML("formacion", "Formación", candidatoEditando.formacion) : "";
+  const experienciaLegado = candidatoEditando ? historialLegadoHTML("experiencia", "Experiencia", candidatoEditando.experiencia) : "";
+  return `
+    <div class="form-field form-field-full" style="margin-bottom:12px;">
+      <label>🎓 Formación</label>
+      <div id="formacion-editor-filas"></div>
+      <button type="button" id="btn-formacion-agregar" class="btn-mini" style="margin-top:6px;">＋ Añadir estudio</button>
+      ${formacionLegado}
+    </div>
+    <div class="form-field form-field-full" style="margin-bottom:12px;">
+      <label>💼 Experiencia</label>
+      <div id="experiencia-editor-filas"></div>
+      <button type="button" id="btn-experiencia-agregar" class="btn-mini" style="margin-top:6px;">＋ Añadir experiencia</button>
+      ${experienciaLegado}
+    </div>`;
+}
+
 function renderForm() {
   const wrap = document.getElementById("form-wrap");
   const esEdicion = !!candidatoEditando;
   extraFieldsState = esEdicion ? { ...(candidatoEditando.extra_fields || {}) } : {};
+  formacionState = esEdicion ? [...(candidatoEditando.formacion_json || [])] : [];
+  experienciaState = esEdicion ? [...(candidatoEditando.experiencia_json || [])] : [];
 
   const subirCvHTML = esEdicion ? "" : `
     <div class="subir-cv-row">
@@ -1022,6 +1129,7 @@ function renderForm() {
             <textarea id="candidato-notas-form" style="min-height:60px;">${esEdicion ? escapeHTML(candidatoEditando.notas || "") : ""}</textarea>
           </div>
         </div>
+        ${historialEditorHTML()}
         <div class="form-field form-field-full" style="margin-bottom:12px;">
           <label>Otros datos (idiomas, carnet de conducir, certificaciones...)</label>
           <div class="extra-editor" id="extra-editor-filas"></div>
@@ -1045,6 +1153,18 @@ function renderForm() {
     cont.querySelectorAll(".extra-quitar").forEach((btn) => {
       btn.onclick = () => btn.closest(".extra-editor-row").remove();
     });
+  });
+  renderFormacionEditor();
+  document.getElementById("btn-formacion-agregar").addEventListener("click", () => {
+    const cont = document.getElementById("formacion-editor-filas");
+    cont.insertAdjacentHTML("beforeend", formacionEntryHTML({}, cont.children.length));
+    wireHistorialQuitar(cont);
+  });
+  renderExperienciaEditor();
+  document.getElementById("btn-experiencia-agregar").addEventListener("click", () => {
+    const cont = document.getElementById("experiencia-editor-filas");
+    cont.insertAdjacentHTML("beforeend", experienciaEntryHTML({}, cont.children.length));
+    wireHistorialQuitar(cont);
   });
   document.getElementById("btn-cerrar-form").addEventListener("click", cerrarForm);
   document.getElementById("btn-guardar-candidato").addEventListener("click", guardarCandidato);
@@ -1079,12 +1199,20 @@ function avisoExtraccionHTML(metodo, n) {
 
 function rellenarFormConCandidato(campos) {
   for (const [campo, valor] of Object.entries(campos)) {
-    if (campo === "extra_fields") continue;
+    if (campo === "extra_fields" || campo === "formacion_json" || campo === "experiencia_json") continue;
     const el = document.querySelector(`.candidato-input[data-campo="${campo}"]`);
     if (el) el.value = valor;
   }
   extraFieldsState = { ...extraFieldsState, ...(campos.extra_fields || {}) };
   renderExtraEditor();
+  if (campos.formacion_json?.length) {
+    formacionState = campos.formacion_json;
+    renderFormacionEditor();
+  }
+  if (campos.experiencia_json?.length) {
+    experienciaState = campos.experiencia_json;
+    renderExperienciaEditor();
+  }
 }
 
 let candidatosPorRevisar = [];
@@ -1369,6 +1497,8 @@ async function guardarCandidato() {
   });
   campos.notas = document.getElementById("candidato-notas-form").value.trim() || null;
   campos.extra_fields = leerExtraFieldsDelForm();
+  campos.formacion_json = leerFormacionDelForm();
+  campos.experiencia_json = leerExperienciaDelForm();
   const vacanteValor = document.getElementById("candidato-vacante-form").value;
   campos.vacante_id = vacanteValor ? Number(vacanteValor) : null;
 

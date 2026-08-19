@@ -1,3 +1,4 @@
+import datetime
 import json
 import os
 import re
@@ -122,6 +123,25 @@ def ensure_reclutamiento_tables():
         conn.execute("ALTER TABLE candidatos ADD COLUMN invitado_test_encuesta_id INTEGER")
     if "contacto_estado" not in cols_candidatos:
         conn.execute("ALTER TABLE candidatos ADD COLUMN contacto_estado TEXT NOT NULL DEFAULT 'sin_contactar'")
+    # formacion_json/experiencia_json: historial estructurado (título/centro/
+    # fechas por estudio, puesto/empresa/fechas/descripción por experiencia),
+    # como en un perfil de InfoJobs -- reemplaza a formacion/experiencia
+    # (un único bloque de texto libre) para las fichas nuevas. Esas dos
+    # columnas de texto se conservan tal cual para no perder lo ya extraído
+    # de CVs antiguos; la ficha las sigue mostrando como aviso de "dato
+    # antiguo" mientras no haya historial estructurado.
+    if "formacion_json" not in cols_candidatos:
+        conn.execute("ALTER TABLE candidatos ADD COLUMN formacion_json TEXT")
+    if "experiencia_json" not in cols_candidatos:
+        conn.execute("ALTER TABLE candidatos ADD COLUMN experiencia_json TEXT")
+    # Backfill de fecha_solicitud vacía con la fecha en la que se dio de alta
+    # la ficha -- es una aproximación razonable (normalmente se sube el mismo
+    # día que se recibe la solicitud) y evita dejar el campo en blanco en
+    # fichas ya existentes. Idempotente, se puede ejecutar en cada arranque.
+    conn.execute("""
+        UPDATE candidatos SET fecha_solicitud = substr(creado_en, 1, 10)
+        WHERE fecha_solicitud IS NULL OR fecha_solicitud = ''
+    """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS candidato_archivos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -400,6 +420,8 @@ def fusionar_vacantes(origen_id, destino_id):
 def _row_to_dict(row):
     d = dict(row)
     d["extra_fields"] = json.loads(d.get("extra_fields") or "{}")
+    d["formacion_json"] = json.loads(d.get("formacion_json") or "[]")
+    d["experiencia_json"] = json.loads(d.get("experiencia_json") or "[]")
     # No se expone la ruta de disco tal cual (igual que cv_ruta en
     # informes.py) -- solo si hay foto o no; la propia foto se sirve por su
     # endpoint dedicado (GET /candidatos/{id}/foto).
@@ -667,6 +689,12 @@ def buscar_candidato_por_nombre(empresa, nombre):
 
 def crear_candidato(campos: dict, empresa="kk", origen="manual", respuesta_id=None, creado_por=None, vacante_id=None):
     extra_fields = campos.pop("extra_fields", {}) or {}
+    formacion_json = campos.pop("formacion_json", None)
+    experiencia_json = campos.pop("experiencia_json", None)
+    # Si no se indica fecha de solicitud, se asume la de hoy -- lo normal es
+    # que la ficha se dé de alta el mismo día que se recibe la solicitud.
+    if not campos.get("fecha_solicitud"):
+        campos["fecha_solicitud"] = datetime.date.today().isoformat()
     # Si no viene ya con una respuesta enlazada (alta manual, CV o
     # importación de una vacante), se comprueba si esta persona ya había
     # respondido un test antes de tener ficha en Reclutamiento — ver
@@ -675,9 +703,13 @@ def crear_candidato(campos: dict, empresa="kk", origen="manual", respuesta_id=No
         respuesta_id = buscar_respuesta_huerfana_por_contacto(campos.get("telefono"), campos.get("email"))
     valores = {c: campos.get(c) for c in CAMPOS if c in campos}
     conn = get_connection()
-    columnas = ["empresa", "origen", "respuesta_id", "creado_por", "extra_fields", "vacante_id"] + list(valores.keys())
+    columnas = ["empresa", "origen", "respuesta_id", "creado_por", "extra_fields", "vacante_id",
+                "formacion_json", "experiencia_json"] + list(valores.keys())
     placeholders = ", ".join("?" for _ in columnas)
-    params = [empresa, origen, respuesta_id, creado_por, json.dumps(extra_fields, ensure_ascii=False), vacante_id] + list(valores.values())
+    params = [
+        empresa, origen, respuesta_id, creado_por, json.dumps(extra_fields, ensure_ascii=False), vacante_id,
+        json.dumps(formacion_json or [], ensure_ascii=False), json.dumps(experiencia_json or [], ensure_ascii=False),
+    ] + list(valores.values())
     cur = conn.execute(
         f"INSERT INTO candidatos ({', '.join(columnas)}) VALUES ({placeholders})", params
     )
@@ -722,6 +754,12 @@ def actualizar_candidato(candidato_id, campos: dict):
     if "contacto_estado" in campos:
         sets.append("contacto_estado = ?")
         params.append(campos.pop("contacto_estado"))
+    if "formacion_json" in campos:
+        sets.append("formacion_json = ?")
+        params.append(json.dumps(campos.pop("formacion_json") or [], ensure_ascii=False))
+    if "experiencia_json" in campos:
+        sets.append("experiencia_json = ?")
+        params.append(json.dumps(campos.pop("experiencia_json") or [], ensure_ascii=False))
     for campo in CAMPOS:
         if campo in campos:
             sets.append(f"{campo} = ?")

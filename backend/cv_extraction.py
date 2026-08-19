@@ -13,8 +13,16 @@ GEMINI_MODEL = "gemini-flash-latest"
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
 # Campos que tiene sentido pedirle a la IA que extraiga de un CV — estado y
-# notas no salen de un CV, los pone el reclutador.
-EXTRACTION_FIELDS = [c for c in CAMPOS if c not in ("estado", "notas")]
+# notas no salen de un CV, los pone el reclutador. formacion/experiencia se
+# piden aparte como listas estructuradas (formacion_json/experiencia_json,
+# ver _parsear_candidato_gemini) en vez de como texto plano.
+EXTRACTION_FIELDS = [c for c in CAMPOS if c not in ("estado", "notas", "formacion", "experiencia")]
+
+# Claves esperadas en cada entrada de formacion_json/experiencia_json -- si
+# Gemini devuelve alguna con un valor que no sea texto (o directamente la
+# omite), se descarta esa clave en vez de la entrada entera.
+CLAVES_FORMACION = ("titulo", "centro", "fecha_inicio", "fecha_fin")
+CLAVES_EXPERIENCIA = ("puesto", "empresa", "fecha_inicio", "fecha_fin", "descripcion")
 
 
 class GeminiNoConfiguradoError(Exception):
@@ -25,8 +33,23 @@ class GeminiNoDisponibleError(Exception):
     pass
 
 
+def _parsear_lista_estructurada(valor, claves) -> list[dict]:
+    if not isinstance(valor, list):
+        return []
+    entradas = []
+    for item in valor:
+        if not isinstance(item, dict):
+            continue
+        entrada = {k: item[k] for k in claves if isinstance(item.get(k), str) and item[k].strip()}
+        if entrada:
+            entradas.append(entrada)
+    return entradas
+
+
 def _parsear_candidato_gemini(obj: dict) -> dict:
     extraido = {f: obj[f] for f in EXTRACTION_FIELDS if isinstance(obj.get(f), str) and obj[f].strip()}
+    extraido["formacion_json"] = _parsear_lista_estructurada(obj.get("formacion_json"), CLAVES_FORMACION)
+    extraido["experiencia_json"] = _parsear_lista_estructurada(obj.get("experiencia_json"), CLAVES_EXPERIENCIA)
     extra = {}
     if isinstance(obj.get("extra"), dict):
         for k, v in obj["extra"].items():
@@ -56,11 +79,23 @@ def _extraer_con_gemini(pdf_bytes: bytes) -> list[dict]:
         "Devuelve SOLO un JSON: un array con un objeto por cada candidato encontrado, con esta forma exacta:\n"
         "[\n  {\n"
         + ",\n".join(f'    "{f}": "string o vacío"' for f in EXTRACTION_FIELDS)
-        + ',\n    "extra": { "nombre_del_campo": "valor" }\n  }\n]\n'
-        "Usa \"extra\" para cualquier dato relevante del CV que no encaje en los campos anteriores. "
-        "Muchos CVs vienen de portales de empleo (InfoJobs y similares) con secciones estructuradas -- "
-        "captura estas SIEMPRE que aparezcan, cada una como un único campo de texto en \"extra\" (no las "
-        "descartes ni las mezcles con los campos fijos de arriba):\n"
+        + ',\n    "formacion_json": [ { "titulo": "string", "centro": "string", "fecha_inicio": "string", "fecha_fin": "string" } ],\n'
+        + '    "experiencia_json": [ { "puesto": "string", "empresa": "string", "fecha_inicio": "string", "fecha_fin": "string", "descripcion": "string" } ],\n'
+        + '    "extra": { "nombre_del_campo": "valor" }\n  }\n]\n'
+        "\"formacion_json\": UN OBJETO POR CADA formación reglada (grado, bachillerato, ESO, máster, curso...), "
+        "en el mismo orden en que aparezcan en el CV (normalmente la más reciente primero). \"titulo\" es el "
+        "nombre de la titulación, \"centro\" el nombre del centro/universidad, \"fecha_inicio\"/\"fecha_fin\" tal "
+        "como aparezcan en el CV (p.ej. \"septiembre de 2020\", \"2023\"); si sigue en curso deja \"fecha_fin\" "
+        "vacío o pon \"Actualmente\". Si no hay ninguna formación reglada, devuelve un array vacío.\n"
+        "\"experiencia_json\": UN OBJETO POR CADA puesto de trabajo, en el mismo orden en que aparezcan (normalmente "
+        "el más reciente primero). \"puesto\" es el cargo, \"empresa\" el nombre de la empresa, \"fecha_inicio\"/"
+        "\"fecha_fin\" tal como aparezcan (vacío o \"Actualmente\" si sigue trabajando ahí), y \"descripcion\" un "
+        "resumen breve de las tareas/funciones si el CV las detalla (vacío si no hay detalle). Si no hay ninguna "
+        "experiencia laboral, devuelve un array vacío.\n"
+        "Usa \"extra\" para cualquier dato relevante del CV que no encaje en los campos anteriores ni en "
+        "formacion_json/experiencia_json. Muchos CVs vienen de portales de empleo (InfoJobs y similares) con "
+        "secciones estructuradas -- captura estas SIEMPRE que aparezcan, cada una como un único campo de texto en "
+        "\"extra\" (no las descartes ni las mezcles con los campos fijos de arriba):\n"
         "- \"Idiomas\": cada idioma con su nivel, separados por \" · \" (ej. \"Español: Nativo · Inglés: Intermedio\").\n"
         "- \"Conocimientos\": la lista de habilidades/etiquetas, separadas por \", \".\n"
         "- \"Situación laboral\": si está trabajando y si busca empleo activamente.\n"
@@ -68,11 +103,12 @@ def _extraer_con_gemini(pdf_bytes: bytes) -> list[dict]:
         "salario mínimo, todo en una frase.\n"
         "- \"Disponibilidad para viajar\" y \"Disponibilidad para cambiar de residencia\": si aparecen como datos "
         "separados (aparte del campo general de disponibilidad).\n"
-        "- \"Estudios\": título, centro y fechas de cada formación reglada, separados por \" · \".\n"
         "- \"Preguntas de selección\": si el documento trae un cuestionario tipo \"pregunta | puntuación | "
-        "respuesta\", únelas TODAS en un solo texto, una por línea con \" — \" entre pregunta, puntuación y "
-        "respuesta (ej. \"¿Disponibilidad inmediata? — 10/10 — Sí, inmediata\"), y añade al final la nota total "
-        "si aparece (ej. \"Nota: 50/50\").\n"
+        "respuesta\" (AJENO a formación/experiencia -- normalmente son preguntas de la oferta, no del historial "
+        "académico o laboral), únelas TODAS en un solo texto, una por línea con \" — \" entre pregunta, puntuación "
+        "y respuesta (ej. \"¿Disponibilidad inmediata? — 10/10 — Sí, inmediata\"), y añade al final la nota total "
+        "si aparece (ej. \"Nota: 50/50\"). Este bloque va SIEMPRE en \"extra\", nunca dentro de formacion_json ni "
+        "experiencia_json.\n"
         "Además, cualquier otro dato suelto que no encaje en nada de lo anterior (carnet de conducir, si es "
         "autónomo, vehículo propio, redes sociales, certificaciones, etc.) también va en \"extra\", cada uno "
         "con su propia clave.\n"
