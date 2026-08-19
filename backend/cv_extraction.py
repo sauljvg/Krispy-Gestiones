@@ -419,6 +419,10 @@ def extraer_cv(pdf_bytes: bytes) -> tuple[list[dict], str]:
     if os.environ.get("GEMINI_API_KEY"):
         try:
             return _extraer_con_gemini(pdf_bytes), "gemini"
-        except (GeminiNoConfiguradoError, GeminiNoDisponibleError):
-            pass
+        except (GeminiNoConfiguradoError, GeminiNoDisponibleError) as exc:
+            # Antes esto se tragaba en silencio -- no quedaba ningún rastro
+            # en los logs de por qué se cayó al método local, así que un
+            # fallo real (clave inválida, cuota agotada) era indistinguible
+            # de uno transitorio (Gemini saturado un momento).
+            print(f"[cv_extraction] Gemini falló, usando extracción local: {exc}")
     return _extraer_local(pdf_bytes), "local"

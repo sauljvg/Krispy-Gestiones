@@ -513,7 +513,7 @@ async function loadCompartidos() {
   // Las vacantes compartidas van primero -- es la forma recomendada de ver
   // todo agrupado; los "Compartidos" sueltos por candidato (tandas) quedan
   // debajo, para candidatos que aún no se asignaron a ninguna solicitud.
-  let html = vacantesCompartidasSeccionHTML("Solicitudes compartidas contigo", vacantesConmigo, "", { soloAptos: true });
+  let html = vacantesCompartidasSeccionHTML("Solicitudes compartidas contigo", vacantesConmigo, "", { soloAptos: true, colapsable: true });
   html += vacantesCompartidasSeccionHTML("Solicitudes que has compartido", vacantesPorMi, "", { colapsable: true });
 
   html += seccionHTML(
