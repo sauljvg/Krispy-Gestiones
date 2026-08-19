@@ -878,10 +878,20 @@ function campoFormHTML([key, label, textarea]) {
 }
 
 function extraEditorRowHTML(key, value) {
+  // Un <input> de una sola línea escondía los saltos de línea de verdad que
+  // ya traía el valor (p.ej. "Preguntas de selección", un bloque largo con
+  // una pregunta por línea) -- se veía como un único párrafo ilegible en
+  // vez de una lista. A partir de cierto largo se usa un <textarea> en su
+  // lugar, mismo campo .extra-value así que leerExtraFieldsDelForm no
+  // necesita cambiar nada.
+  const esLargo = value.length > 80 || value.includes("\n");
+  const campoValor = esLargo
+    ? `<textarea class="extra-value" placeholder="Valor" style="min-height:70px;">${escapeHTML(value)}</textarea>`
+    : `<input type="text" class="extra-value" placeholder="Valor" value="${escapeHTML(value)}">`;
   return `
-    <div class="extra-editor-row">
+    <div class="extra-editor-row ${esLargo ? "extra-editor-row-largo" : ""}">
       <input type="text" class="extra-key" placeholder="Campo (p.ej. Idiomas)" value="${escapeHTML(key)}">
-      <input type="text" class="extra-value" placeholder="Valor" value="${escapeHTML(value)}">
+      ${campoValor}
       <button type="button" class="btn-mini extra-quitar">✕</button>
     </div>`;
 }

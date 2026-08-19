@@ -1,4 +1,5 @@
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -142,6 +143,19 @@ def ensure_reclutamiento_tables():
         UPDATE candidatos SET fecha_solicitud = substr(creado_en, 1, 10)
         WHERE fecha_solicitud IS NULL OR fecha_solicitud = ''
     """)
+    # El texto libre antiguo de formación/experiencia se dejaba como aviso de
+    # "dato antiguo" mientras no hubiera historial estructurado -- pero en
+    # cuanto SÍ hay formacion_json/experiencia_json, ese texto es ruido puro
+    # (la información correcta ya está en el campo estructurado), así que se
+    # vacía. Idempotente, se puede ejecutar en cada arranque.
+    conn.execute("""
+        UPDATE candidatos SET formacion = NULL
+        WHERE formacion IS NOT NULL AND formacion_json IS NOT NULL AND formacion_json != '[]'
+    """)
+    conn.execute("""
+        UPDATE candidatos SET experiencia = NULL
+        WHERE experiencia IS NOT NULL AND experiencia_json IS NOT NULL AND experiencia_json != '[]'
+    """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS candidato_archivos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,6 +165,12 @@ def ensure_reclutamiento_tables():
             subido_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    cols_archivos = {row[1] for row in conn.execute("PRAGMA table_info(candidato_archivos)")}
+    if "contenido_hash" not in cols_archivos:
+        # Para poder detectar cuando se adjunta el MISMO archivo otra vez
+        # (p.ej. reintentar subir el mismo PDF de lote varias veces) y no
+        # crear una copia nueva cada vez -- ver agregar_archivo.
+        conn.execute("ALTER TABLE candidato_archivos ADD COLUMN contenido_hash TEXT")
     # Compartir un candidato directo desde Reclutamiento (sin pasar por un
     # test de Informes) — paralela a informe_compartidos, que exige un
     # respuesta_id y por eso no sirve para candidatos que llegaron por CV o
@@ -188,6 +208,54 @@ def ensure_reclutamiento_tables():
     """)
     conn.commit()
     conn.close()
+    _limpiar_archivos_duplicados()
+
+
+def _hash_archivo(ruta):
+    try:
+        with open(ruta, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def _limpiar_archivos_duplicados():
+    """Colapsa archivos duplicados que hayan quedado de subir el mismo PDF
+    de lote varias veces (reintentos) -- por candidato, agrupa por (nombre
+    original, contenido real) y se queda solo con la copia más reciente,
+    borrando el resto (fila + archivo en disco). Se ejecuta en cada
+    arranque; si no hay duplicados no hace nada, así que es barato dejarla
+    puesta de forma permanente en vez de un script suelto de un solo uso."""
+    conn = get_connection()
+    filas = conn.execute(
+        "SELECT id, candidato_id, nombre_original, ruta, subido_en, contenido_hash "
+        "FROM candidato_archivos ORDER BY subido_en ASC"
+    ).fetchall()
+    grupos = {}
+    for f in filas:
+        h = f["contenido_hash"] or _hash_archivo(f["ruta"])
+        if h is None:
+            continue
+        if not f["contenido_hash"]:
+            conn.execute("UPDATE candidato_archivos SET contenido_hash = ? WHERE id = ?", (h, f["id"]))
+        grupos.setdefault((f["candidato_id"], f["nombre_original"], h), []).append(f)
+    borrados = 0
+    for filas_grupo in grupos.values():
+        if len(filas_grupo) <= 1:
+            continue
+        # Ya vienen ordenadas por subido_en ASC -- se conserva la última.
+        for f in filas_grupo[:-1]:
+            try:
+                if f["ruta"] and os.path.exists(f["ruta"]):
+                    os.remove(f["ruta"])
+            except OSError:
+                pass
+            conn.execute("DELETE FROM candidato_archivos WHERE id = ?", (f["id"],))
+            borrados += 1
+    conn.commit()
+    conn.close()
+    if borrados:
+        print(f"[reclutamiento] Limpieza de archivos duplicados: {borrados} copia(s) eliminada(s).")
 
 
 def list_vacantes(empresa=None, estado=None):
@@ -1083,17 +1151,31 @@ def _borrar_archivo_disco(archivo_id):
 
 
 def agregar_archivo(candidato_id, nombre_original, contenido):
+    # Si ya existe un archivo con el mismo nombre y el mismo contenido para
+    # este candidato (p.ej. reintentar subir el mismo PDF de lote varias
+    # veces), no se crea una copia nueva -- se reutiliza el que ya había,
+    # actualizando su fecha para que quede como "el más reciente".
+    hash_nuevo = hashlib.sha256(contenido).hexdigest()
+    conn = get_connection()
+    existente = conn.execute(
+        "SELECT id FROM candidato_archivos WHERE candidato_id = ? AND nombre_original = ? AND contenido_hash = ?",
+        (candidato_id, nombre_original, hash_nuevo),
+    ).fetchone()
+    if existente:
+        conn.execute("UPDATE candidato_archivos SET subido_en = datetime('now') WHERE id = ?", (existente["id"],))
+        conn.commit()
+        conn.close()
+        return existente["id"]
     carpeta = os.path.join(UPLOADS_DIR, str(candidato_id))
     os.makedirs(carpeta, exist_ok=True)
     ext = os.path.splitext(nombre_original)[1]
-    conn = get_connection()
     n = conn.execute("SELECT COUNT(*) FROM candidato_archivos WHERE candidato_id = ?", (candidato_id,)).fetchone()[0]
     ruta = os.path.join(carpeta, f"{n + 1}{ext}")
     with open(ruta, "wb") as f:
         f.write(contenido)
     cur = conn.execute(
-        "INSERT INTO candidato_archivos (candidato_id, nombre_original, ruta) VALUES (?, ?, ?)",
-        (candidato_id, nombre_original, ruta),
+        "INSERT INTO candidato_archivos (candidato_id, nombre_original, ruta, contenido_hash) VALUES (?, ?, ?, ?)",
+        (candidato_id, nombre_original, ruta, hash_nuevo),
     )
     archivo_id = cur.lastrowid
     conn.commit()
