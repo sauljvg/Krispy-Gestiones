@@ -110,6 +110,21 @@
   .candidato-mini-card.seleccionada { border-color: var(--acento); box-shadow: 0 0 0 2px color-mix(in srgb, var(--acento) 20%, transparent); }
   .candidato-mini-card-fila { display: flex; gap: 10px; align-items: flex-start; }
   .candidato-mini-card-info { flex: 1; min-width: 0; }
+  /* Base de candidatos: lista en vez de cuadrícula -- una tarjeta ancha por
+     fila (mismo estilo de tarjeta de siempre) en vez de varias en columnas,
+     para leer de arriba a abajo en vez de saltar entre columnas. */
+  .candidatos-lista { display: flex; flex-direction: column; gap: 10px; }
+  .candidatos-lista .candidato-mini-card-fila { align-items: center; flex-wrap: wrap; }
+  .candidatos-paginacion {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--border);
+  }
+  .candidatos-paginacion select, .candidatos-paginacion input[type="number"] {
+    width: auto; padding: 5px 8px; font-size: 13px;
+  }
+  .candidatos-paginacion input[type="number"] { width: 64px; }
+  .candidatos-paginacion .staff-hint { margin: 0; }
+  .candidatos-paginacion-botones { display: flex; align-items: center; gap: 6px; margin-left: auto; }
   .candidato-mini-foto {
     width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
     background: var(--surface-1); border: 1px solid var(--border);
@@ -270,7 +285,8 @@
         <button id="btn-whatsapp-seleccionados" class="btn btn-ghost btn-whatsapp" type="button" hidden></button>
         <button id="btn-mailto-seleccionados" class="btn btn-ghost btn-mailto" type="button" hidden></button>
       </div>
-      <div id="candidatos-grid" class="candidatos-grid"></div>
+      <div id="candidatos-grid" class="candidatos-grid candidatos-lista"></div>
+      <div id="candidatos-paginacion" class="candidatos-paginacion"></div>
     </div>
 
     <!-- Fuera de reclu-candidatos-wrap a propósito: quien no tiene el

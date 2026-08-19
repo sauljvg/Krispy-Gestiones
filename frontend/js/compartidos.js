@@ -1446,6 +1446,16 @@ let modoSeleccionCandidatos = false;
 let candidatosSeleccionadosIds = new Set();
 let ultimosCandidatosCargados = [];
 let candidatosFiltroEstado = "";
+// Paginación de "Base de candidatos" -- puramente en el cliente (ya se
+// cargan todos los candidatos que cumplen el filtro del servidor de una
+// vez), el tamaño de página elegido se recuerda entre sesiones.
+let candidatosPagina = 1;
+let candidatosPorPagina = Number(localStorage.getItem("kt-candidatos-por-pagina")) || 20;
+// Distingue "el select muestra Personalizado mientras se escribe el número"
+// de "candidatosPorPagina ya es un valor no estándar" -- si no, al elegir
+// "Personalizado..." el primer repintado (con candidatosPorPagina todavía
+// sin cambiar) volvía a mostrar el desplegable normal en vez del input.
+let candidatosPorPaginaEditandoCustom = false;
 let usuariosParaCompartirCandidatos = [];
 
 const CONTACTO_ESTADO_LABELS = { sin_contactar: "Sin contactar", contactado: "Contactado", respondio: "Respondió" };
@@ -1748,12 +1758,84 @@ function candidatosFiltradosPorApto() {
   return ultimosCandidatosCargados.filter((c) => c.test_resultado && c.test_resultado.includes("No apto"));
 }
 
+const TAMANOS_PAGINA_CANDIDATOS = [10, 20, 50, 100];
+
+function candidatosPaginaSelectHTML() {
+  const esPersonalizado = candidatosPorPaginaEditandoCustom || !TAMANOS_PAGINA_CANDIDATOS.includes(candidatosPorPagina);
+  return `
+    <label class="staff-hint" for="candidatos-por-pagina">Ver</label>
+    <select id="candidatos-por-pagina">
+      ${TAMANOS_PAGINA_CANDIDATOS.map((n) => `<option value="${n}" ${!esPersonalizado && n === candidatosPorPagina ? "selected" : ""}>${n}</option>`).join("")}
+      <option value="personalizado" ${esPersonalizado ? "selected" : ""}>Personalizado...</option>
+    </select>
+    ${esPersonalizado ? `<input type="number" id="candidatos-por-pagina-custom" min="1" value="${candidatosPorPagina}">` : ""}
+    <span class="staff-hint">candidatos por página</span>`;
+}
+
+function renderCandidatosPaginacion(total, totalPaginas) {
+  const wrap = document.getElementById("candidatos-paginacion");
+  if (total === 0) {
+    wrap.innerHTML = "";
+    return;
+  }
+  const desde = (candidatosPagina - 1) * candidatosPorPagina + 1;
+  const hasta = Math.min(candidatosPagina * candidatosPorPagina, total);
+  wrap.innerHTML = `
+    ${candidatosPaginaSelectHTML()}
+    <div class="candidatos-paginacion-botones">
+      <span class="staff-hint">${desde}–${hasta} de ${total}</span>
+      <button type="button" id="btn-candidatos-pagina-atras" class="btn btn-ghost" ${candidatosPagina <= 1 ? "disabled" : ""}>‹ Anterior</button>
+      <span class="staff-hint">Página ${candidatosPagina} de ${totalPaginas}</span>
+      <button type="button" id="btn-candidatos-pagina-adelante" class="btn btn-ghost" ${candidatosPagina >= totalPaginas ? "disabled" : ""}>Siguiente ›</button>
+    </div>`;
+  const selectTamano = document.getElementById("candidatos-por-pagina");
+  selectTamano.addEventListener("change", () => {
+    if (selectTamano.value === "personalizado") {
+      candidatosPorPaginaEditandoCustom = true;
+      renderCandidatosGrid();
+      document.getElementById("candidatos-por-pagina-custom")?.focus();
+      return;
+    }
+    candidatosPorPaginaEditandoCustom = false;
+    candidatosPorPagina = Number(selectTamano.value);
+    candidatosPagina = 1;
+    localStorage.setItem("kt-candidatos-por-pagina", String(candidatosPorPagina));
+    renderCandidatosGrid();
+  });
+  const inputCustom = document.getElementById("candidatos-por-pagina-custom");
+  if (inputCustom) {
+    const aplicarCustom = () => {
+      const n = Math.max(1, Number(inputCustom.value) || 20);
+      candidatosPorPaginaEditandoCustom = false;
+      candidatosPorPagina = n;
+      candidatosPagina = 1;
+      localStorage.setItem("kt-candidatos-por-pagina", String(candidatosPorPagina));
+      renderCandidatosGrid();
+    };
+    inputCustom.addEventListener("blur", aplicarCustom);
+    inputCustom.addEventListener("keydown", (e) => { if (e.key === "Enter") aplicarCustom(); });
+  }
+  document.getElementById("btn-candidatos-pagina-atras").addEventListener("click", () => {
+    candidatosPagina = Math.max(1, candidatosPagina - 1);
+    renderCandidatosGrid();
+  });
+  document.getElementById("btn-candidatos-pagina-adelante").addEventListener("click", () => {
+    candidatosPagina = Math.min(totalPaginas, candidatosPagina + 1);
+    renderCandidatosGrid();
+  });
+}
+
 function renderCandidatosGrid() {
   const grid = document.getElementById("candidatos-grid");
   const visibles = candidatosFiltradosPorApto();
-  grid.innerHTML = visibles.length
-    ? visibles.map(candidatoMiniCardHTML).join("")
+  const totalPaginas = Math.max(1, Math.ceil(visibles.length / candidatosPorPagina));
+  if (candidatosPagina > totalPaginas) candidatosPagina = totalPaginas;
+  const inicio = (candidatosPagina - 1) * candidatosPorPagina;
+  const pagina = visibles.slice(inicio, inicio + candidatosPorPagina);
+  grid.innerHTML = pagina.length
+    ? pagina.map(candidatoMiniCardHTML).join("")
     : `<p class="staff-hint">${ultimosCandidatosCargados.length ? "Ningún candidato coincide con el filtro de aptos." : "Todavía no hay candidatos en la base de datos."}</p>`;
+  renderCandidatosPaginacion(visibles.length, totalPaginas);
   grid.querySelectorAll(".candidato-mini-card").forEach((card) => {
     card.addEventListener("click", (e) => {
       if (e.target.closest(".candidato-mini-contacto-select")) return;
@@ -1777,6 +1859,7 @@ function renderCandidatosGrid() {
 }
 
 async function loadCandidatos() {
+  candidatosPagina = 1;
   const q = document.getElementById("candidatos-buscar").value.trim();
   const vacanteFiltro = document.getElementById("candidatos-filtro-vacante").value;
   const params = new URLSearchParams({ empresa: EMPRESA });
@@ -1989,7 +2072,10 @@ async function initBaseCandidatos(user) {
     renderVacantesGrid();
     loadCandidatos();
   });
-  document.getElementById("candidatos-filtro-apto").addEventListener("change", renderCandidatosGrid);
+  document.getElementById("candidatos-filtro-apto").addEventListener("change", () => {
+    candidatosPagina = 1;
+    renderCandidatosGrid();
+  });
   let buscarTimeout;
   document.getElementById("candidatos-buscar").addEventListener("input", () => {
     clearTimeout(buscarTimeout);
