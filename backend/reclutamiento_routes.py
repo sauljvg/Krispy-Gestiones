@@ -2,7 +2,7 @@ import json
 import mimetypes
 import os
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -360,8 +360,31 @@ async def adjuntar_pdf_lote_route(empresa: str = "kk", file: UploadFile = File(.
     }
 
 
+def _rellenar_huecos_en_segundo_plano(recortes: list[tuple[int, bytes]]):
+    """Re-extrae con IA cada recorte y rellena huecos -- se ejecuta DESPUÉS
+    de responder al navegador (ver BackgroundTasks en la ruta de abajo).
+    Antes esto iba dentro de la propia petición: con Gemini saturado, cada
+    llamada podía tardar hasta el timeout (ver cv_extraction) y encadenar
+    hasta 37 de esas dejó el proceso bloqueado cerca de una hora, tumbando
+    el resto del sitio para todo el mundo mientras tanto (usuarios en línea,
+    tests en directo...). Aquí ya no bloquea nada -- y en cuanto Gemini falla
+    una vez, se deja de intentar para el resto de la tanda (intentar_gemini)
+    en vez de esperar el timeout otra vez por cada persona que queda."""
+    intentar_gemini = True
+    for candidato_id, recorte in recortes:
+        try:
+            extraidos, metodo, _motivo = cv_extraction.extraer_cv(recorte, intentar_gemini=intentar_gemini)
+            if metodo == "local":
+                intentar_gemini = False
+            if extraidos:
+                reclutamiento_module.rellenar_huecos_candidato(candidato_id, extraidos[0])
+        except Exception as exc:
+            print(f"[adjuntar-pdf-lote] No se pudo rellenar huecos del candidato {candidato_id}: {exc}")
+
+
 @router.post("/candidatos/adjuntar-pdf-lote/confirmar")
 async def adjuntar_pdf_lote_confirmar_route(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     mapeo: str = Form(...),
     _user: dict = Depends(require_informes),
@@ -374,13 +397,15 @@ async def adjuntar_pdf_lote_confirmar_route(
     el PDF completo -- mismo comportamiento que la herramienta original.
 
     Además, cuando SÍ hay un rango de páginas propio (un recorte limpio de
-    una sola persona), se aprovecha para volver a extraer con IA y rellenar
-    los huecos de la ficha (formación/experiencia estructuradas y cualquier
-    otro campo vacío) -- así resubir el mismo PDF de lote sobre fichas que
-    ya existían las deja al día sin tener que entrar una a una. Nunca pisa
-    datos que el reclutador ya haya rellenado (ver rellenar_huecos_candidato)
-    ni crea fichas nuevas -- eso lo sigue haciendo solo la extracción
-    original al subir el PDF por primera vez."""
+    una sola persona), se programa volver a extraer con IA y rellenar los
+    huecos de la ficha (formación/experiencia estructuradas y cualquier otro
+    campo vacío) como tarea en segundo plano -- así resubir el mismo PDF de
+    lote sobre fichas que ya existían las deja al día sin tener que entrar
+    una a una, y sin que la petición se quede esperando a la IA (ver
+    _rellenar_huecos_en_segundo_plano). Nunca pisa datos que el reclutador
+    ya haya rellenado (ver rellenar_huecos_candidato) ni crea fichas nuevas
+    -- eso lo sigue haciendo solo la extracción original al subir el PDF por
+    primera vez."""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Sube el PDF con todos los candidatos")
     try:
@@ -389,8 +414,7 @@ async def adjuntar_pdf_lote_confirmar_route(
         raise HTTPException(status_code=400, detail="mapeo inválido")
     contenido = await file.read()
     adjuntados = 0
-    rellenados = 0
-    motivo_local = None
+    recortes_para_rellenar = []
     for item in items:
         candidato_id = item.get("candidato_id")
         if not candidato_id:
@@ -406,19 +430,10 @@ async def adjuntar_pdf_lote_confirmar_route(
         reclutamiento_module.agregar_archivo(candidato_id, file.filename, recorte)
         adjuntados += 1
         if pagina_inicio and pagina_fin:
-            try:
-                extraidos, metodo, motivo = cv_extraction.extraer_cv(recorte)
-                # Todas las personas de este lote comparten el mismo motivo
-                # (misma cuota de Gemini en el mismo momento) -- basta con
-                # guardarse el primero para avisar al final, no hace falta
-                # repetirlo por cada uno.
-                if metodo == "local" and motivo_local is None:
-                    motivo_local = motivo
-                if extraidos and reclutamiento_module.rellenar_huecos_candidato(candidato_id, extraidos[0]):
-                    rellenados += 1
-            except Exception:
-                pass
-    return {"ok": True, "adjuntados": adjuntados, "rellenados": rellenados, "motivo_local": motivo_local}
+            recortes_para_rellenar.append((candidato_id, recorte))
+    if recortes_para_rellenar:
+        background_tasks.add_task(_rellenar_huecos_en_segundo_plano, recortes_para_rellenar)
+    return {"ok": True, "adjuntados": adjuntados, "procesando_relleno": len(recortes_para_rellenar)}
 
 
 @router.post("/candidatos/{candidato_id}/archivos")

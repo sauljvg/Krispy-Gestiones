@@ -1404,8 +1404,13 @@ async function confirmarAdjuntarLote(items) {
     return;
   }
   const data = await res.json();
-  const motivoTxt = data.motivo_local ? ` Se usó el método local (sin IA) -- motivo: ${data.motivo_local}` : "";
-  progreso.textContent = `Listo: PDF adjuntado a ${data.adjuntados} ficha(s), ${data.rellenados} con datos nuevos rellenados automáticamente (formación, experiencia y otros campos que estaban vacíos).${motivoTxt}`;
+  // El relleno con IA (formación/experiencia y demás huecos) va en segundo
+  // plano en el servidor -- no se espera aquí a que termine, así que no hay
+  // un conteo final que mostrar todavía, solo que se ha puesto en marcha.
+  const rellenoTxt = data.procesando_relleno
+    ? ` Rellenando datos con IA en segundo plano para ${data.procesando_relleno} de ellas (formación, experiencia y otros campos vacíos) -- puede tardar unos minutos, no hace falta esperar en esta pantalla.`
+    : "";
+  progreso.textContent = `Listo: PDF adjuntado a ${data.adjuntados} ficha(s).${rellenoTxt}`;
   btn.remove();
   await loadCandidatos();
 }

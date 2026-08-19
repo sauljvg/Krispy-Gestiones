@@ -128,7 +128,11 @@ def _extraer_con_gemini(pdf_bytes: bytes) -> list[dict]:
     }
 
     try:
-        resp = requests.post(GEMINI_URL, params={"key": api_key}, json=body, timeout=90)
+        # 25s en vez de 90s -- con Gemini saturado, encadenar muchas llamadas
+        # (p.ej. al re-extraer un lote de 37 personas) a 90s cada una podía
+        # bloquear el proceso durante casi una hora y tumbar el resto del
+        # sitio para todo el mundo (ver adjuntar_pdf_lote_confirmar_route).
+        resp = requests.post(GEMINI_URL, params={"key": api_key}, json=body, timeout=25)
     except requests.RequestException as exc:
         raise GeminiNoDisponibleError(f"No se pudo contactar con Gemini: {exc}")
 
@@ -410,7 +414,7 @@ def recortar_pdf(pdf_bytes: bytes, pagina_inicio: int, pagina_fin: int) -> bytes
     return salida.getvalue()
 
 
-def extraer_cv(pdf_bytes: bytes) -> tuple[list[dict], str, str | None]:
+def extraer_cv(pdf_bytes: bytes, intentar_gemini: bool = True) -> tuple[list[dict], str, str | None]:
     """Intenta Gemini si hay API key configurada; si falla o no hay key, cae
     al método local sin IA. El PDF puede traer un único candidato o varios
     (hasta ~50) concatenados en el mismo archivo — se devuelve SIEMPRE una
@@ -418,8 +422,13 @@ def extraer_cv(pdf_bytes: bytes) -> tuple[list[dict], str, str | None]:
     (lista_de_candidatos, metodo, motivo) -- motivo es None si se usó Gemini,
     o el mensaje de por qué falló (cuota agotada, saturado, clave inválida...)
     si se cayó al método local, para poder enseñárselo a quien subió el PDF
-    en vez de solo dejarlo en los logs."""
-    if os.environ.get("GEMINI_API_KEY"):
+    en vez de solo dejarlo en los logs.
+
+    intentar_gemini=False salta directamente al método local sin llamar a la
+    API -- para cuando quien llama ya sabe que Gemini está caído en esta
+    misma tanda (ver adjuntar_pdf_lote_confirmar_route) y no tiene sentido
+    esperar el timeout de nuevo por cada persona."""
+    if intentar_gemini and os.environ.get("GEMINI_API_KEY"):
         try:
             return _extraer_con_gemini(pdf_bytes), "gemini", None
         except (GeminiNoConfiguradoError, GeminiNoDisponibleError) as exc:
@@ -429,4 +438,7 @@ def extraer_cv(pdf_bytes: bytes) -> tuple[list[dict], str, str | None]:
             # transitorio (Gemini saturado un momento).
             print(f"[cv_extraction] Gemini falló, usando extracción local: {exc}")
             return _extraer_local(pdf_bytes), "local", str(exc)
-    return _extraer_local(pdf_bytes), "local", "No hay ninguna clave de Gemini configurada en el servidor."
+    motivo = None if intentar_gemini else "Gemini ya había fallado antes en esta misma tanda."
+    if intentar_gemini and not os.environ.get("GEMINI_API_KEY"):
+        motivo = "No hay ninguna clave de Gemini configurada en el servidor."
+    return _extraer_local(pdf_bytes), "local", motivo
