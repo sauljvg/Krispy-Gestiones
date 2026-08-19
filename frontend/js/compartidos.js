@@ -498,8 +498,16 @@ function vacanteCompartidaHTML(vacante, { soloAptos = false, colapsable = false 
   const titulo = `📁 ${escapeHTML(vacante.puesto)}${vacante.centro ? ` · ${escapeHTML(vacante.centro)}` : ""}`;
   const estadoBadge = `<span class="badge-vacante-estado badge-${vacante.estado}">${VACANTE_ESTADO_LABELS[vacante.estado]}</span>`;
   const meta = `👥 ${gerentesTxt} · ${n} candidato${n === 1 ? "" : "s"}${ocultosTxt}`;
+  // vacante-compartida-candidatos: marca este grid en concreto (a
+  // diferencia del de "Compartidos conmigo/por ti", que usa la misma clase
+  // .candidato-mini-card pero dentro de .tanda-body con OTRO cableado --
+  // ver candidato-abrir-ficha) para poder engancharle el clic que abre la
+  // ficha y el botón de exportar sin pisar el otro.
+  const exportarBtn = candidatosVisibles.length
+    ? `<button type="button" class="btn-mini btn-exportar-excel-vacante-compartida" data-candidato-ids="${candidatosVisibles.map((c) => c.id).join(",")}">📊 Exportar a Excel...</button>`
+    : "";
   const cuerpo = candidatosVisibles.length
-    ? `<div class="candidatos-grid candidatos-lista">${candidatosVisibles.map((c) => candidatoMiniCardHTML(c, { ocultarVacante: true })).join("")}</div>`
+    ? `<div class="candidatos-grid candidatos-lista vacante-compartida-candidatos">${candidatosVisibles.map((c) => candidatoMiniCardHTML(c, { ocultarVacante: true })).join("")}</div>`
     : `<p class="staff-hint">Ningún candidato apto en esta solicitud todavía.</p>`;
   if (colapsable) {
     const clave = `vacsol-${vacante.id}`;
@@ -509,13 +517,14 @@ function vacanteCompartidaHTML(vacante, { soloAptos = false, colapsable = false 
           <span class="tanda-fecha">${titulo}</span> ${estadoBadge}
           <span class="tanda-meta">${escapeHTML(meta)}</span>
         </summary>
-        <div class="tanda-body">${cuerpo}</div>
+        <div class="tanda-body">${exportarBtn}${cuerpo}</div>
       </details>`;
   }
   return `
     <div class="vacante-compartida-card">
       <h3>${titulo} ${estadoBadge}</h3>
       <p class="staff-hint">${escapeHTML(meta)}</p>
+      ${exportarBtn}
       ${cuerpo}
     </div>`;
 }
@@ -588,16 +597,29 @@ async function loadCompartidos() {
 
   wrap.innerHTML = html;
   wireCompartidosInteractivos(wrap);
-  wrap.querySelectorAll(".vacante-compartida-card .candidato-mini-card").forEach((card) => {
+  // .vacante-compartida-candidatos (no .vacante-compartida-card) porque
+  // "Solicitudes compartidas contigo" se pinta colapsable -- ahí el grid de
+  // candidatos queda dentro de un <details class="tanda"> igual que
+  // "Compartidos conmigo/por ti", NO dentro de .vacante-compartida-card
+  // (esa clase solo se usa cuando colapsable=false). Con el selector viejo,
+  // ningún clic abría la ficha en "Solicitudes compartidas contigo".
+  wrap.querySelectorAll(".vacante-compartida-candidatos .candidato-mini-card").forEach((card) => {
     card.addEventListener("click", (e) => {
       if (e.target.closest(".candidato-mini-contacto-select")) return;
       abrirEdicionCandidato(card.dataset.candidatoId);
     });
   });
-  wrap.querySelectorAll(".vacante-compartida-card .candidato-mini-contacto-select").forEach((select) => {
+  wrap.querySelectorAll(".vacante-compartida-candidatos .candidato-mini-contacto-select").forEach((select) => {
     select.addEventListener("click", (e) => e.stopPropagation());
     select.addEventListener("change", async () => {
       await actualizarCandidatoInline(select.dataset.candidatoId, { contacto_estado: select.value });
+    });
+  });
+  wrap.querySelectorAll(".btn-exportar-excel-vacante-compartida").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const ids = btn.dataset.candidatoIds.split(",").map(Number).filter(Boolean);
+      abrirModalExportarExcel("vacante-compartida", ids);
     });
   });
 }
@@ -2126,12 +2148,19 @@ async function confirmarAsignarVacante() {
 
 let columnasExportablesCache = null;
 let origenExportarExcel = "grid";
+let idsExportarExcelFijos = []; // para origen "vacante-compartida": lista ya cerrada, no un Set de selección
 const COLUMNAS_EXPORTAR_POR_DEFECTO = ["nombre_completo", "telefono", "email", "vacante", "test_resultado"];
 
-async function abrirModalExportarExcel(origen = "grid") {
-  const ids = origen === "compartidos-conmigo" ? compartidosConmigoSeleccionadosIds : candidatosSeleccionadosIds;
+// idsFijos: solo se usa con origen "vacante-compartida" -- exporta TODOS
+// los candidatos de esa solicitud de una vez (botón por tarjeta), sin pasar
+// por una selección con checkboxes.
+async function abrirModalExportarExcel(origen = "grid", idsFijos = []) {
+  const ids = origen === "compartidos-conmigo" ? compartidosConmigoSeleccionadosIds
+    : origen === "vacante-compartida" ? new Set(idsFijos)
+    : candidatosSeleccionadosIds;
   if (ids.size === 0) return;
   origenExportarExcel = origen;
+  idsExportarExcelFijos = idsFijos;
   if (!columnasExportablesCache) {
     columnasExportablesCache = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/columnas-exportables`).then((r) => r.json());
   }
@@ -2154,7 +2183,9 @@ async function confirmarExportarExcel() {
     mostrarAviso("Elige al menos un dato para exportar.");
     return;
   }
-  const ids = origenExportarExcel === "compartidos-conmigo" ? compartidosConmigoSeleccionadosIds : candidatosSeleccionadosIds;
+  const ids = origenExportarExcel === "compartidos-conmigo" ? [...compartidosConmigoSeleccionadosIds]
+    : origenExportarExcel === "vacante-compartida" ? idsExportarExcelFijos
+    : [...candidatosSeleccionadosIds];
   const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/exportar-excel`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
