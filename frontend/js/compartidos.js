@@ -2001,6 +2001,7 @@ function candidatosFiltradosPorApto() {
   const filtro = document.getElementById("candidatos-filtro-apto").value;
   if (!filtro) return ultimosCandidatosCargados;
   if (filtro === "apto") return ultimosCandidatosCargados.filter((c) => c.test_resultado && !c.test_resultado.includes("No apto"));
+  if (filtro === "sin_test") return ultimosCandidatosCargados.filter((c) => !c.test_resultado);
   return ultimosCandidatosCargados.filter((c) => c.test_resultado && c.test_resultado.includes("No apto"));
 }
 
