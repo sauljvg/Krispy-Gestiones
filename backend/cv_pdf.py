@@ -172,20 +172,23 @@ def _sidebar(candidato, estilos):
         flow.append(Paragraph(_esc(candidato["disponibilidad"]), estilos["sidebar_texto"]))
     # extra_fields: cualquier otro dato suelto que sacó la IA del CV
     # (Idiomas, Conocimientos, Carnet de conducir, Situación laboral...) --
-    # se muestra tal cual, en el mismo orden en que se guardó. "Preguntas de
-    # selección" se excluye a propósito: es el cuestionario interno de la
-    # oferta (no forma parte de un CV), y además puede ser un bloque de
-    # texto larguísimo que no cabe en la columna lateral -- eso fue justo lo
-    # que rompía la generación del PDF (LayoutError: contenido más alto que
-    # una página entera). Por seguridad, cualquier otro valor se recorta
-    # también a un máximo razonable, para que un campo inesperadamente largo
-    # no vuelva a tumbar la maquetación.
-    CAMPOS_EXTRA_EXCLUIDOS_CV = {"preguntas de selección", "preguntas de seleccion"}
+    # se muestra tal cual, en el mismo orden en que se guardó. Las preguntas
+    # de selección se excluyen a propósito: son el cuestionario interno de
+    # la oferta (no forman parte de un CV), no una por una (cada pregunta es
+    # su propia clave, con "Puntuación: ..." como valor -- se reconocen por
+    # ese prefijo) ni el resumen final ("Nota del cuestionario"). Por
+    # seguridad, cualquier otro valor se recorta también a un máximo
+    # razonable, para que un campo inesperadamente largo no vuelva a tumbar
+    # la maquetación (esto fue justo lo que rompía la generación del PDF:
+    # LayoutError, contenido más alto que una página entera).
+    CAMPOS_EXTRA_EXCLUIDOS_CV = {"nota del cuestionario", "preguntas de selección", "preguntas de seleccion"}
     LARGO_MAXIMO_VALOR = 600
     for clave, valor in (candidato.get("extra_fields") or {}).items():
         if not valor or clave.strip().lower() in CAMPOS_EXTRA_EXCLUIDOS_CV:
             continue
         valor_txt = str(valor)
+        if valor_txt.strip().lower().startswith("puntuación"):
+            continue
         if len(valor_txt) > LARGO_MAXIMO_VALOR:
             valor_txt = valor_txt[:LARGO_MAXIMO_VALOR] + "…"
         flow.append(Paragraph(_esc(clave), estilos["sidebar_titulo"]))

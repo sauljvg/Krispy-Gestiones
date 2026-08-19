@@ -924,8 +924,59 @@ function leerExtraFieldsDelForm() {
 // extra_fields: filas en el DOM, se leen al guardar (leerFormacionDelForm/
 // leerExperienciaDelForm), no hace falta mantener el array sincronizado en
 // cada tecla.
+// Duración aproximada entre dos fechas en texto libre (vienen de la IA en
+// formatos muy variados: "sept. 2020", "2023", "enero 2025", "Actualmente"
+// para el final...) -- se parsea lo mejor posible (año siempre, mes si se
+// reconoce el nombre o un mm/aaaa, si no se asume mitad de año para no
+// sesgar hacia principio/fin) y se devuelve null si no se puede calcular
+// nada en vez de mostrar un dato inventado. 0 meses es un resultado válido
+// (p.ej. entró y salió el mismo mes), no se oculta.
+const MESES_TEXTO = {
+  enero: 1, ene: 1, febrero: 2, feb: 2, marzo: 3, mar: 3, abril: 4, abr: 4, mayo: 5, may: 5,
+  junio: 6, jun: 6, julio: 7, jul: 7, agosto: 8, ago: 8, septiembre: 9, setiembre: 9, sept: 9, sep: 9,
+  octubre: 10, oct: 10, noviembre: 11, nov: 11, diciembre: 12, dic: 12,
+};
+
+function parsearFechaAproximada(texto) {
+  if (!texto) return null;
+  const t = texto.toLowerCase();
+  const anioMatch = t.match(/\b(19|20)\d{2}\b/);
+  if (!anioMatch) return null;
+  const anio = Number(anioMatch[0]);
+  let mes = null;
+  for (const [nombre, num] of Object.entries(MESES_TEXTO)) {
+    if (t.includes(nombre)) { mes = num; break; }
+  }
+  if (mes === null) {
+    const numMatch = t.match(/\b(0?[1-9]|1[0-2])[/\-]\s*(19|20)\d{2}\b/);
+    if (numMatch) mes = Number(numMatch[1]);
+  }
+  return { anio, mes: mes ?? 6 };
+}
+
+function calcularDuracion(fechaInicio, fechaFin) {
+  const inicio = parsearFechaAproximada(fechaInicio);
+  if (!inicio) return null;
+  let fin;
+  if (!fechaFin || /actual/i.test(fechaFin)) {
+    const hoy = new Date();
+    fin = { anio: hoy.getFullYear(), mes: hoy.getMonth() + 1 };
+  } else {
+    fin = parsearFechaAproximada(fechaFin);
+    if (!fin) return null;
+  }
+  const totalMeses = (fin.anio - inicio.anio) * 12 + (fin.mes - inicio.mes);
+  if (totalMeses < 0) return null;
+  const anios = Math.floor(totalMeses / 12);
+  const meses = totalMeses % 12;
+  if (anios === 0) return `${meses} mes${meses === 1 ? "" : "es"}`;
+  if (meses === 0) return `${anios} año${anios === 1 ? "" : "s"}`;
+  return `${anios} año${anios === 1 ? "" : "s"} ${meses} mes${meses === 1 ? "" : "es"}`;
+}
+
 function formacionEntryHTML(e, i) {
   const v = e || {};
+  const duracion = calcularDuracion(v.fecha_inicio, v.fecha_fin);
   return `
     <div class="historial-entry-row" data-idx="${i}">
       <div class="historial-entry-grid">
@@ -933,6 +984,7 @@ function formacionEntryHTML(e, i) {
         <input type="text" class="historial-centro" placeholder="Centro" value="${escapeHTML(v.centro || "")}">
         <input type="text" class="historial-fecha-inicio" placeholder="Desde (p.ej. sept. 2020)" value="${escapeHTML(v.fecha_inicio || "")}">
         <input type="text" class="historial-fecha-fin" placeholder="Hasta (o Actualmente)" value="${escapeHTML(v.fecha_fin || "")}">
+        <span class="historial-duracion">${duracion ? escapeHTML(duracion) : ""}</span>
       </div>
       <button type="button" class="btn-mini historial-quitar">✕</button>
     </div>`;
@@ -940,6 +992,7 @@ function formacionEntryHTML(e, i) {
 
 function experienciaEntryHTML(e, i) {
   const v = e || {};
+  const duracion = calcularDuracion(v.fecha_inicio, v.fecha_fin);
   return `
     <div class="historial-entry-row" data-idx="${i}">
       <div class="historial-entry-grid">
@@ -947,6 +1000,7 @@ function experienciaEntryHTML(e, i) {
         <input type="text" class="historial-empresa" placeholder="Empresa" value="${escapeHTML(v.empresa || "")}">
         <input type="text" class="historial-fecha-inicio" placeholder="Desde (p.ej. enero 2025)" value="${escapeHTML(v.fecha_inicio || "")}">
         <input type="text" class="historial-fecha-fin" placeholder="Hasta (o Actualmente)" value="${escapeHTML(v.fecha_fin || "")}">
+        <span class="historial-duracion">${duracion ? escapeHTML(duracion) : ""}</span>
         <textarea class="historial-descripcion form-field-full" placeholder="Tareas/funciones (opcional)" style="min-height:40px;">${escapeHTML(v.descripcion || "")}</textarea>
       </div>
       <button type="button" class="btn-mini historial-quitar">✕</button>
@@ -956,6 +1010,21 @@ function experienciaEntryHTML(e, i) {
 function wireHistorialQuitar(cont) {
   cont.querySelectorAll(".historial-quitar").forEach((btn) => {
     btn.addEventListener("click", () => btn.closest(".historial-entry-row").remove());
+  });
+  // Recalcula la duración mostrada al vuelo si el reclutador corrige una
+  // fecha a mano, sin tener que guardar y reabrir la ficha para verla.
+  cont.querySelectorAll(".historial-entry-row").forEach((row) => {
+    const spanDuracion = row.querySelector(".historial-duracion");
+    if (!spanDuracion) return;
+    const actualizar = () => {
+      const duracion = calcularDuracion(
+        row.querySelector(".historial-fecha-inicio").value,
+        row.querySelector(".historial-fecha-fin").value
+      );
+      spanDuracion.textContent = duracion || "";
+    };
+    row.querySelector(".historial-fecha-inicio").addEventListener("input", actualizar);
+    row.querySelector(".historial-fecha-fin").addEventListener("input", actualizar);
   });
 }
 
@@ -1008,19 +1077,26 @@ function historialLegadoHTML(campo, etiqueta, valor) {
 function historialEditorHTML() {
   const formacionLegado = candidatoEditando ? historialLegadoHTML("formacion", "Formación", candidatoEditando.formacion) : "";
   const experienciaLegado = candidatoEditando ? historialLegadoHTML("experiencia", "Experiencia", candidatoEditando.experiencia) : "";
+  // Desplegable y cerrado de por sí -- antes toda la Formación/Experiencia
+  // se veía de golpe nada más abrir la ficha, aunque no hiciera falta
+  // mirarla en ese momento.
   return `
-    <div class="form-field form-field-full" style="margin-bottom:12px;">
-      <label>🎓 Formación</label>
-      <div id="formacion-editor-filas"></div>
-      <button type="button" id="btn-formacion-agregar" class="btn-mini" style="margin-top:6px;">＋ Añadir estudio</button>
-      ${formacionLegado}
-    </div>
-    <div class="form-field form-field-full" style="margin-bottom:12px;">
-      <label>💼 Experiencia</label>
-      <div id="experiencia-editor-filas"></div>
-      <button type="button" id="btn-experiencia-agregar" class="btn-mini" style="margin-top:6px;">＋ Añadir experiencia</button>
-      ${experienciaLegado}
-    </div>`;
+    <details class="ficha-desplegable">
+      <summary>🎓 Ver Formación</summary>
+      <div class="form-field form-field-full" style="margin-bottom:12px;">
+        <div id="formacion-editor-filas"></div>
+        <button type="button" id="btn-formacion-agregar" class="btn-mini" style="margin-top:6px;">＋ Añadir estudio</button>
+        ${formacionLegado}
+      </div>
+    </details>
+    <details class="ficha-desplegable">
+      <summary>💼 Ver Experiencia</summary>
+      <div class="form-field form-field-full" style="margin-bottom:12px;">
+        <div id="experiencia-editor-filas"></div>
+        <button type="button" id="btn-experiencia-agregar" class="btn-mini" style="margin-top:6px;">＋ Añadir experiencia</button>
+        ${experienciaLegado}
+      </div>
+    </details>`;
 }
 
 function renderForm() {
@@ -1141,11 +1217,13 @@ function renderForm() {
           </div>
         </div>
         ${historialEditorHTML()}
-        <div class="form-field form-field-full" style="margin-bottom:12px;">
-          <label>Otros datos (idiomas, carnet de conducir, certificaciones...)</label>
-          <div class="extra-editor" id="extra-editor-filas"></div>
-          <button type="button" id="btn-extra-agregar" class="btn-mini" style="margin-top:6px;">＋ Añadir campo</button>
-        </div>
+        <details class="ficha-desplegable">
+          <summary>📎 Ver otros datos (idiomas, carnet de conducir, certificaciones...)</summary>
+          <div class="form-field form-field-full" style="margin-bottom:12px;">
+            <div class="extra-editor" id="extra-editor-filas"></div>
+            <button type="button" id="btn-extra-agregar" class="btn-mini" style="margin-top:6px;">＋ Añadir campo</button>
+          </div>
+        </details>
         ${archivosHTML}
         ${agregarArchivoHTML}
         <div class="form-actions">
