@@ -2,12 +2,13 @@ import json
 import mimetypes
 import os
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 import auth as auth_module
 import cv_extraction
+import cv_pdf
 import reclutamiento as reclutamiento_module
 from auth_routes import get_current_user
 from informes_routes import require_informes
@@ -367,7 +368,16 @@ async def adjuntar_pdf_lote_confirmar_route(
     lista [{candidato_id, pagina_inicio, pagina_fin}] (rangos ya revisados o
     corregidos a mano en la vista previa). Si a algún candidato le falta el
     rango de páginas (detección no disponible para ese caso), se le adjunta
-    el PDF completo -- mismo comportamiento que la herramienta original."""
+    el PDF completo -- mismo comportamiento que la herramienta original.
+
+    Además, cuando SÍ hay un rango de páginas propio (un recorte limpio de
+    una sola persona), se aprovecha para volver a extraer con IA y rellenar
+    los huecos de la ficha (formación/experiencia estructuradas y cualquier
+    otro campo vacío) -- así resubir el mismo PDF de lote sobre fichas que
+    ya existían las deja al día sin tener que entrar una a una. Nunca pisa
+    datos que el reclutador ya haya rellenado (ver rellenar_huecos_candidato)
+    ni crea fichas nuevas -- eso lo sigue haciendo solo la extracción
+    original al subir el PDF por primera vez."""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Sube el PDF con todos los candidatos")
     try:
@@ -376,22 +386,29 @@ async def adjuntar_pdf_lote_confirmar_route(
         raise HTTPException(status_code=400, detail="mapeo inválido")
     contenido = await file.read()
     adjuntados = 0
+    rellenados = 0
     for item in items:
         candidato_id = item.get("candidato_id")
         if not candidato_id:
             continue
         pagina_inicio = item.get("pagina_inicio")
         pagina_fin = item.get("pagina_fin")
+        recorte = contenido
         if pagina_inicio and pagina_fin:
             try:
                 recorte = cv_extraction.recortar_pdf(contenido, int(pagina_inicio), int(pagina_fin))
             except Exception:
                 recorte = contenido
-        else:
-            recorte = contenido
         reclutamiento_module.agregar_archivo(candidato_id, file.filename, recorte)
         adjuntados += 1
-    return {"ok": True, "adjuntados": adjuntados}
+        if pagina_inicio and pagina_fin:
+            try:
+                extraidos, _metodo = cv_extraction.extraer_cv(recorte)
+                if extraidos and reclutamiento_module.rellenar_huecos_candidato(candidato_id, extraidos[0]):
+                    rellenados += 1
+            except Exception:
+                pass
+    return {"ok": True, "adjuntados": adjuntados, "rellenados": rellenados}
 
 
 @router.post("/candidatos/{candidato_id}/archivos")
@@ -474,6 +491,24 @@ def foto_candidato_route(candidato_id: int, _user: dict = Depends(require_acceso
         raise HTTPException(status_code=404, detail="Este candidato no tiene foto")
     media_type = mimetypes.guess_type(ruta)[0] or "image/jpeg"
     return FileResponse(ruta, media_type=media_type)
+
+
+@router.get("/candidatos/{candidato_id}/cv.pdf")
+def cv_pdf_route(candidato_id: int, _user: dict = Depends(require_acceso_candidato)):
+    """CV con diseño propio a partir de los datos ya extraídos (formación/
+    experiencia estructuradas, foto, resto de campos) -- para tener algo
+    presentable que descargar y compartir aparte de la ficha web."""
+    candidato = reclutamiento_module.get_candidato(candidato_id)
+    if candidato is None:
+        raise HTTPException(status_code=404, detail="Candidato no encontrado")
+    foto_ruta = reclutamiento_module.get_foto_ruta(candidato_id)
+    pdf_bytes = cv_pdf.generar_cv_pdf(candidato, empresa=candidato.get("empresa", "kk"), foto_ruta=foto_ruta)
+    nombre = f"cv_{(candidato.get('nombre_completo') or 'candidato').replace(' ', '_')}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )
 
 
 @router.delete("/candidatos/{candidato_id}/foto")

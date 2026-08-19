@@ -1037,6 +1037,10 @@ function renderForm() {
     ? `<p class="staff-hint">🔗 Compartido con: ${escapeHTML(candidatoEditando.compartidos.map((x) => x.nombre).join(", "))}</p>`
     : "";
 
+  const descargarCvHTML = esEdicion
+    ? `<a class="btn btn-ghost" href="${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}/cv.pdf" target="_blank" rel="noopener">📄 Descargar CV en PDF</a>`
+    : "";
+
   const faltanDatos = esEdicion && !candidatoEditando.telefono && !candidatoEditando.email
     ? "Faltan el teléfono y el email"
     : esEdicion && !candidatoEditando.telefono
@@ -1088,6 +1092,7 @@ function renderForm() {
   wrap.innerHTML = `
     <div class="candidato-form">
       <h3>${esEdicion ? "Editar candidato" : "Nuevo candidato"}</h3>
+      ${descargarCvHTML}
       ${fotoFormHTML}
       ${compartidoFichaHTML}
       ${avisoDatosHTML}
@@ -1398,7 +1403,7 @@ async function confirmarAdjuntarLote(items) {
     return;
   }
   const data = await res.json();
-  progreso.textContent = `Listo: PDF adjuntado a ${data.adjuntados} ficha(s). Ya puedes usar "🔄 Re-extraer con IA" en cada una si hace falta.`;
+  progreso.textContent = `Listo: PDF adjuntado a ${data.adjuntados} ficha(s), ${data.rellenados} con datos nuevos rellenados automáticamente (formación, experiencia y otros campos que estaban vacíos).`;
   btn.remove();
   await loadCandidatos();
 }

@@ -774,6 +774,36 @@ def actualizar_candidato(candidato_id, campos: dict):
     conn.close()
 
 
+def rellenar_huecos_candidato(candidato_id, extraido: dict):
+    """Como actualizar_candidato, pero solo rellena lo que está vacío --
+    pensado para volver a extraer con IA el CV de una ficha que YA existe
+    (p.ej. al resubir un PDF de lote sobre fichas ya creadas) sin pisar nada
+    que el reclutador ya haya editado a mano. formacion_json/experiencia_json
+    se sustituyen solo si la ficha no tenía ninguna entrada todavía;
+    extra_fields se combina añadiendo solo las claves nuevas."""
+    candidato = get_candidato(candidato_id)
+    if candidato is None:
+        return False
+    campos = {}
+    for campo in CAMPOS:
+        if campo in ("estado", "notas"):
+            continue
+        valor_nuevo = extraido.get(campo)
+        if valor_nuevo and not candidato.get(campo):
+            campos[campo] = valor_nuevo
+    if extraido.get("formacion_json") and not candidato.get("formacion_json"):
+        campos["formacion_json"] = extraido["formacion_json"]
+    if extraido.get("experiencia_json") and not candidato.get("experiencia_json"):
+        campos["experiencia_json"] = extraido["experiencia_json"]
+    extra_nuevo = {k: v for k, v in (extraido.get("extra_fields") or {}).items() if k not in (candidato.get("extra_fields") or {})}
+    if extra_nuevo:
+        campos["extra_fields"] = {**(candidato.get("extra_fields") or {}), **extra_nuevo}
+    if not campos:
+        return False
+    actualizar_candidato(candidato_id, campos)
+    return True
+
+
 def actualizar_estado_multiple(candidato_ids: list[int], estado: str):
     if not candidato_ids:
         return
