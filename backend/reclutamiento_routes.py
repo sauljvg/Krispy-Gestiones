@@ -755,17 +755,47 @@ def foto_candidato_route(candidato_id: int, _user: dict = Depends(require_acceso
 def cv_pdf_route(candidato_id: int, _user: dict = Depends(require_acceso_candidato)):
     """CV con diseño propio a partir de los datos ya extraídos (formación/
     experiencia estructuradas, foto, resto de campos) -- para tener algo
-    presentable que descargar y compartir aparte de la ficha web."""
+    presentable que descargar y compartir aparte de la ficha web.
+
+    Mientras la IA todavía no ha rellenado formación/experiencia
+    estructuradas (ver candidatos_ya_enriquecidos), el nuestro sale
+    prácticamente vacío -- en ese caso se sirve directamente el PDF original
+    que se subió (el recorte de InfoJobs/lote), que sí tiene todo. En cuanto
+    la IA lo enriquece, vuelve a servirse el nuestro. También se cae al
+    original si generar el nuestro falla por lo que sea (dato inesperado de
+    algún CV raro) -- mejor entregar el original que un error 500 sin CV
+    ninguno."""
     candidato = reclutamiento_module.get_candidato(candidato_id)
     if candidato is None:
         raise HTTPException(status_code=404, detail="Candidato no encontrado")
-    foto_ruta = reclutamiento_module.get_foto_ruta(candidato_id)
-    pdf_bytes = cv_pdf.generar_cv_pdf(candidato, empresa=candidato.get("empresa", "kk"), foto_ruta=foto_ruta)
-    nombre = f"cv_{(candidato.get('nombre_completo') or 'candidato').replace(' ', '_')}.pdf"
-    return Response(
-        content=pdf_bytes,
+
+    def _archivo_pdf_original():
+        for archivo in candidato["archivos"]:
+            if archivo["nombre_original"].lower().endswith(".pdf"):
+                return reclutamiento_module.get_archivo(archivo["id"])
+        return None
+
+    ya_enriquecido = candidato_id in reclutamiento_module.candidatos_ya_enriquecidos([candidato_id])
+    original = _archivo_pdf_original() if not ya_enriquecido else None
+    if original is None:
+        try:
+            foto_ruta = reclutamiento_module.get_foto_ruta(candidato_id)
+            pdf_bytes = cv_pdf.generar_cv_pdf(candidato, empresa=candidato.get("empresa", "kk"), foto_ruta=foto_ruta)
+            nombre = f"cv_{(candidato.get('nombre_completo') or 'candidato').replace(' ', '_')}.pdf"
+            return Response(
+                content=pdf_bytes,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+            )
+        except Exception as exc:
+            print(f"[cv.pdf] Fallo generando el CV propio del candidato {candidato_id}, se sirve el original si lo hay: {exc}")
+            original = _archivo_pdf_original()
+            if original is None:
+                raise HTTPException(status_code=500, detail="No se pudo generar el CV") from exc
+    return FileResponse(
+        original["ruta"],
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+        headers={"Content-Disposition": f'inline; filename="{original["nombre_original"]}"'},
     )
 
 

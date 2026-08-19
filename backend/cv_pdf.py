@@ -6,7 +6,14 @@ informes del portal en vez de un volcado plano de campos."""
 import io
 import json
 import os
-from xml.sax.saxutils import escape as _esc
+from xml.sax.saxutils import escape as _esc_str
+
+
+def _esc(valor):
+    # Los campos de un candidato vienen de un CV leído por IA -- no siempre
+    # es texto (p.ej. un teléfono a veces sale como número), y escape()
+    # revienta con TypeError si no le pasas un str.
+    return _esc_str(str(valor)) if valor is not None else ""
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -109,28 +116,42 @@ class BandaCabecera(Flowable):
 
 
 def _linea_fechas(fecha_inicio, fecha_fin):
-    inicio = (fecha_inicio or "").strip()
-    fin = (fecha_fin or "").strip()
+    inicio = str(fecha_inicio).strip() if fecha_inicio else ""
+    fin = str(fecha_fin).strip() if fecha_fin else ""
     if inicio and fin:
         return f"{inicio} — {fin}"
     return inicio or fin or ""
+
+
+# Mismo límite y mismo motivo que LARGO_MAXIMO_VALOR en _sidebar: una
+# descripción de puesto inesperadamente larga (la IA a veces vuelca el
+# párrafo entero del CV ahí) puede producir más contenido del que cabe en
+# una página y tumbar reportlab con un LayoutError.
+LARGO_MAXIMO_DESCRIPCION = 600
 
 
 def _bloque_experiencia(experiencia, estilos):
     if not experiencia:
         return [Paragraph("Sin experiencia laboral registrada.", estilos["vacio"])]
     flow = []
-    for i, exp in enumerate(experiencia):
+    entradas = [e for e in experiencia if isinstance(e, dict)]
+    if not entradas:
+        return [Paragraph("Sin experiencia laboral registrada.", estilos["vacio"])]
+    for i, exp in enumerate(entradas):
         titulo = exp.get("puesto") or "(puesto sin especificar)"
         if exp.get("empresa"):
-            titulo += f" · {exp['empresa']}"
+            titulo = f"{titulo} · {exp['empresa']}"
         flow.append(Paragraph(_esc(titulo), estilos["entrada_titulo"]))
         fechas = _linea_fechas(exp.get("fecha_inicio"), exp.get("fecha_fin"))
         if fechas:
             flow.append(Paragraph(_esc(fechas), estilos["entrada_fechas"]))
-        if exp.get("descripcion"):
-            flow.append(Paragraph(_esc(exp["descripcion"]), estilos["entrada_desc"]))
-        if i < len(experiencia) - 1:
+        descripcion = exp.get("descripcion")
+        if descripcion:
+            descripcion = str(descripcion)
+            if len(descripcion) > LARGO_MAXIMO_DESCRIPCION:
+                descripcion = descripcion[:LARGO_MAXIMO_DESCRIPCION] + "…"
+            flow.append(Paragraph(_esc(descripcion), estilos["entrada_desc"]))
+        if i < len(entradas) - 1:
             flow.append(Spacer(1, 8))
     return flow
 
@@ -139,15 +160,18 @@ def _bloque_formacion(formacion, estilos):
     if not formacion:
         return [Paragraph("Sin formación reglada registrada.", estilos["vacio"])]
     flow = []
-    for i, est in enumerate(formacion):
+    entradas = [e for e in formacion if isinstance(e, dict)]
+    if not entradas:
+        return [Paragraph("Sin formación reglada registrada.", estilos["vacio"])]
+    for i, est in enumerate(entradas):
         titulo = est.get("titulo") or "(título sin especificar)"
         if est.get("centro"):
-            titulo += f" · {est['centro']}"
+            titulo = f"{titulo} · {est['centro']}"
         flow.append(Paragraph(_esc(titulo), estilos["entrada_titulo"]))
         fechas = _linea_fechas(est.get("fecha_inicio"), est.get("fecha_fin"))
         if fechas:
             flow.append(Paragraph(_esc(fechas), estilos["entrada_fechas"]))
-        if i < len(formacion) - 1:
+        if i < len(entradas) - 1:
             flow.append(Spacer(1, 8))
     return flow
 
