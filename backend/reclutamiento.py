@@ -881,15 +881,15 @@ def buscar_candidato_por_nombre(empresa, nombre):
 
 
 def candidatos_ya_enriquecidos(candidato_ids: list[int]) -> set[int]:
-    """De esos ids, a cuáles YA procesó Gemini (ver ia_extraida_en) -- se usa
-    en la vista previa de "Adjuntar PDF a fichas existentes" para no hacer
-    repasar a quien ya quedó bien si un lote se cortó a medias, y en
-    "Descargar CV en PDF" para decidir si ya toca servir nuestro diseño en
-    vez del PDF original. Antes se inferís de si formacion_json/
-    experiencia_json tenían algo, pero un candidato sin estudios ni
-    experiencia que extraer (CV real, Gemini lo procesa bien) se quedaba con
-    esos dos campos vacíos igualmente -- se veía como "no procesado" aunque
-    sí lo estuviera."""
+    """De esos ids, a cuáles YA procesó la extracción de CV (ver
+    ia_extraida_en) -- se usa en la vista previa de "Adjuntar PDF a fichas
+    existentes" para no hacer repasar a quien ya quedó bien si un lote se
+    cortó a medias, y en "Descargar CV en PDF" para decidir si ya toca
+    servir nuestro diseño en vez del PDF original. Antes se inferís de si
+    formacion_json/experiencia_json tenían algo, pero un candidato sin
+    estudios ni experiencia que extraer (CV real) se quedaba con esos dos
+    campos vacíos igualmente -- se veía como "no procesado" aunque sí lo
+    estuviera."""
     if not candidato_ids:
         return set()
     conn = get_connection()
@@ -902,9 +902,9 @@ def candidatos_ya_enriquecidos(candidato_ids: list[int]) -> set[int]:
 
 
 def marcar_ia_extraida(candidato_id: int):
-    """Se llama cada vez que Gemini procesa (con éxito) el CV de este
-    candidato, encuentre o no encuentre formación/experiencia que rellenar
-    -- ver candidatos_ya_enriquecidos."""
+    """Se llama cada vez que se extrae (con éxito) el CV de este candidato,
+    encuentre o no encuentre formación/experiencia que rellenar -- ver
+    candidatos_ya_enriquecidos."""
     conn = get_connection()
     conn.execute("UPDATE candidatos SET ia_extraida_en = datetime('now') WHERE id = ?", (candidato_id,))
     conn.commit()
@@ -936,23 +936,20 @@ def candidatos_con_pdf(empresa=None) -> list[tuple[int, int]]:
     return [(row["candidato_id"], row["archivo_id"]) for row in rows]
 
 
-def crear_lote_ia_pendiente(lote_id: str, usuario_id: int, titulo: str, candidatos_archivos: list[tuple[int, int]], intentar_gemini: bool = True):
+def crear_lote_ia_pendiente(lote_id: str, usuario_id: int, titulo: str, candidatos_archivos: list[tuple[int, int]]):
     """candidatos_archivos: [(candidato_id, archivo_id), ...] -- registra en
-    disco qué le falta por rellenar con IA a este lote, para poder
-    retomarlo solo si el proceso se reinicia a media tanda (ver
-    lotes_ia_incompletos / _reanudar_lotes_al_arrancar en
-    reclutamiento_routes.py). El archivo_id ya apunta a un PDF que
-    agregar_archivo dejó guardado en disco ANTES de programar el relleno en
-    segundo plano, así que no hace falta guardar los bytes aquí también.
-    intentar_gemini queda guardado para que, si el lote se retoma más
-    tarde (reinicio del proceso), se respete la misma elección con la que
-    se lanzó (p.ej. "usar solo el método local")."""
+    disco qué le falta por rellenar a este lote, para poder retomarlo solo
+    si el proceso se reinicia a media tanda (ver lotes_ia_incompletos /
+    _reanudar_lotes_al_arrancar en reclutamiento_routes.py). El archivo_id
+    ya apunta a un PDF que agregar_archivo dejó guardado en disco ANTES de
+    programar el relleno en segundo plano, así que no hace falta guardar
+    los bytes aquí también."""
     if not candidatos_archivos:
         return
     conn = get_connection()
     conn.execute(
-        "INSERT INTO lotes_ia (lote_id, usuario_id, titulo, total, intentar_gemini) VALUES (?, ?, ?, ?, ?)",
-        (lote_id, usuario_id, titulo, len(candidatos_archivos), int(intentar_gemini)),
+        "INSERT INTO lotes_ia (lote_id, usuario_id, titulo, total) VALUES (?, ?, ?, ?)",
+        (lote_id, usuario_id, titulo, len(candidatos_archivos)),
     )
     conn.executemany(
         "INSERT INTO lotes_ia_pendientes (lote_id, candidato_id, archivo_id) VALUES (?, ?, ?)",
@@ -991,7 +988,6 @@ def lotes_ia_incompletos():
         resultado.append({
             "lote_id": lote["lote_id"], "usuario_id": lote["usuario_id"], "titulo": lote["titulo"],
             "total": lote["total"], "pendientes": [(p["candidato_id"], p["archivo_id"]) for p in pendientes],
-            "intentar_gemini": bool(lote["intentar_gemini"]),
         })
     conn.close()
     return resultado

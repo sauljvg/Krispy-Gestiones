@@ -1,211 +1,20 @@
-import base64
 import io
-import json
 import os
 import re
 import unicodedata
 
-import requests
-
-from reclutamiento import CAMPOS
-
-GEMINI_MODEL = "gemini-flash-latest"
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-
-# Campos que tiene sentido pedirle a la IA que extraiga de un CV — estado y
-# notas no salen de un CV, los pone el reclutador. formacion/experiencia se
-# piden aparte como listas estructuradas (formacion_json/experiencia_json,
-# ver _parsear_candidato_gemini) en vez de como texto plano.
-EXTRACTION_FIELDS = [c for c in CAMPOS if c not in ("estado", "notas", "formacion", "experiencia")]
-
-# Claves esperadas en cada entrada de formacion_json/experiencia_json -- si
-# Gemini devuelve alguna con un valor que no sea texto (o directamente la
-# omite), se descarta esa clave en vez de la entrada entera.
-CLAVES_FORMACION = ("titulo", "centro", "fecha_inicio", "fecha_fin")
-CLAVES_EXPERIENCIA = ("puesto", "empresa", "fecha_inicio", "fecha_fin", "descripcion")
-
-
-class GeminiNoConfiguradoError(Exception):
-    pass
-
-
-class GeminiNoDisponibleError(Exception):
-    pass
-
-
-class GeminiLimiteTemporalError(GeminiNoDisponibleError):
-    """429 por límite de peticiones/minuto (RPM), a diferencia de un 429 por
-    cupo diario agotado -- este se libera solo con esperar unos segundos, así
-    que merece la pena reintentar en vez de rendirse con Gemini para el resto
-    del lote (ver retry_after_segundos y _rellenar_huecos_en_segundo_plano en
-    reclutamiento_routes.py)."""
-
-    def __init__(self, mensaje, retry_after_segundos):
-        super().__init__(mensaje)
-        self.retry_after_segundos = retry_after_segundos
-
-
-def _extraer_retry_delay(resp) -> int | None:
-    """Cuando Gemini devuelve 429, suele incluir en el propio cuerpo del
-    error cuánto esperar antes de reintentar (RetryInfo.retryDelay, p.ej.
-    "18s") -- mucho más fiable que adivinar un tiempo de espera fijo, y es la
-    señal de que el 429 es por RPM (temporal) y no por cupo diario agotado."""
-    try:
-        detalles = resp.json().get("error", {}).get("details", [])
-    except Exception:
-        return None
-    for d in detalles:
-        if str(d.get("@type", "")).endswith("RetryInfo"):
-            m = re.match(r"(\d+(?:\.\d+)?)s?$", str(d.get("retryDelay", "")).strip())
-            if m:
-                return int(float(m.group(1))) + 1
-    return None
-
-
-def _parsear_lista_estructurada(valor, claves) -> list[dict]:
-    if not isinstance(valor, list):
-        return []
-    entradas = []
-    for item in valor:
-        if not isinstance(item, dict):
-            continue
-        entrada = {k: item[k] for k in claves if isinstance(item.get(k), str) and item[k].strip()}
-        if entrada:
-            entradas.append(entrada)
-    return entradas
-
-
-def _parsear_candidato_gemini(obj: dict) -> dict:
-    extraido = {f: obj[f] for f in EXTRACTION_FIELDS if isinstance(obj.get(f), str) and obj[f].strip()}
-    extraido["formacion_json"] = _parsear_lista_estructurada(obj.get("formacion_json"), CLAVES_FORMACION)
-    extraido["experiencia_json"] = _parsear_lista_estructurada(obj.get("experiencia_json"), CLAVES_EXPERIENCIA)
-    extra = {}
-    if isinstance(obj.get("extra"), dict):
-        for k, v in obj["extra"].items():
-            if isinstance(v, str) and v.strip():
-                extra[k] = v
-    extraido["extra_fields"] = extra
-    return extraido
-
-
-def extraer_con_gemini(pdf_bytes: bytes) -> list[dict]:
-    """Pide a Gemini la lista de candidatos del PDF — puede ser un único CV o
-    un PDF por lotes con varios CVs concatenados (hasta ~50), muy habitual
-    cuando alguien junta varios currículums en un solo archivo antes de
-    enviarlos. Siempre se pide un array, aunque solo haya un candidato, para
-    no tener dos formatos de respuesta distintos que mantener.
-
-    Pública (a diferencia del resto de _funciones de este módulo) porque
-    reclutamiento_routes.py la llama directamente cuando quiere manejar sus
-    propios reintentos con espera (ver GeminiLimiteTemporalError) en vez de
-    caer automáticamente al método local en el primer fallo, que es lo que
-    hace extraer_cv() más abajo."""
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise GeminiNoConfiguradoError(
-            "No hay ninguna GEMINI_API_KEY configurada. Añádela como variable de entorno para activar la extracción por IA."
-        )
-
-    prompt = (
-        "Eres un asistente de RRHH. Este PDF puede contener el CV de UN SOLO candidato o "
-        "varios CVs de candidatos distintos concatenados en el mismo archivo (por ejemplo, "
-        "hasta 50 currículums juntados en un solo PDF por lotes). Identifica cada candidato "
-        "distinto que aparezca en el documento y extrae sus datos por separado.\n"
-        "Devuelve SOLO un JSON: un array con un objeto por cada candidato encontrado, con esta forma exacta:\n"
-        "[\n  {\n"
-        + ",\n".join(f'    "{f}": "string o vacío"' for f in EXTRACTION_FIELDS)
-        + ',\n    "formacion_json": [ { "titulo": "string", "centro": "string", "fecha_inicio": "string", "fecha_fin": "string" } ],\n'
-        + '    "experiencia_json": [ { "puesto": "string", "empresa": "string", "fecha_inicio": "string", "fecha_fin": "string", "descripcion": "string" } ],\n'
-        + '    "extra": { "nombre_del_campo": "valor" }\n  }\n]\n'
-        "\"formacion_json\": UN OBJETO POR CADA formación reglada (grado, bachillerato, ESO, máster, curso...), "
-        "en el mismo orden en que aparezcan en el CV (normalmente la más reciente primero). \"titulo\" es el "
-        "nombre de la titulación, \"centro\" el nombre del centro/universidad, \"fecha_inicio\"/\"fecha_fin\" tal "
-        "como aparezcan en el CV (p.ej. \"septiembre de 2020\", \"2023\"); si sigue en curso deja \"fecha_fin\" "
-        "vacío o pon \"Actualmente\". Si no hay ninguna formación reglada, devuelve un array vacío.\n"
-        "\"experiencia_json\": UN OBJETO POR CADA puesto de trabajo, en el mismo orden en que aparezcan (normalmente "
-        "el más reciente primero). \"puesto\" es el cargo, \"empresa\" el nombre de la empresa, \"fecha_inicio\"/"
-        "\"fecha_fin\" tal como aparezcan (vacío o \"Actualmente\" si sigue trabajando ahí), y \"descripcion\" un "
-        "resumen breve de las tareas/funciones si el CV las detalla (vacío si no hay detalle). Si no hay ninguna "
-        "experiencia laboral, devuelve un array vacío.\n"
-        "Usa \"extra\" para cualquier dato relevante del CV que no encaje en los campos anteriores ni en "
-        "formacion_json/experiencia_json. Muchos CVs vienen de portales de empleo (InfoJobs y similares) con "
-        "secciones estructuradas -- captura estas SIEMPRE que aparezcan, cada una como un único campo de texto en "
-        "\"extra\" (no las descartes ni las mezcles con los campos fijos de arriba):\n"
-        "- \"Idiomas\": cada idioma con su nivel, separados por \" · \" (ej. \"Español: Nativo · Inglés: Intermedio\").\n"
-        "- \"Conocimientos\": la lista de habilidades/etiquetas, separadas por \", \".\n"
-        "- \"Situación laboral\": si está trabajando y si busca empleo activamente.\n"
-        "- \"Preferencias laborales\": puesto(s) deseado(s), modalidad, provincia, tipo de contrato, jornada y "
-        "salario mínimo, todo en una frase.\n"
-        "- \"Disponibilidad para viajar\" y \"Disponibilidad para cambiar de residencia\": si aparecen como datos "
-        "separados (aparte del campo general de disponibilidad).\n"
-        "- Si el documento trae un cuestionario tipo \"pregunta | puntuación | respuesta\" (AJENO a formación/"
-        "experiencia -- normalmente son preguntas de la oferta, no del historial académico o laboral), NO lo "
-        "juntes en un solo bloque de texto: añade CADA PREGUNTA como su propia clave dentro de \"extra\", usando "
-        "el texto de la pregunta tal cual como clave (recórtalo a unos 80 caracteres si es muy largo) y "
-        "\"Puntuación: X — respuesta\" como valor (ej. clave \"¿Disponibilidad inmediata para trabajar?\", valor "
-        "\"Puntuación: 10 — Sí, inmediata\"). Si aparece una nota total del cuestionario, añádela aparte con "
-        "clave \"Nota del cuestionario\" (ej. \"45/50\"). Estas preguntas van SIEMPRE en \"extra\", nunca dentro "
-        "de formacion_json ni experiencia_json.\n"
-        "Además, cualquier otro dato suelto que no encaje en nada de lo anterior (carnet de conducir, si es "
-        "autónomo, vehículo propio, redes sociales, certificaciones, etc.) también va en \"extra\", cada uno "
-        "con su propia clave.\n"
-        "No inventes datos que no aparezcan en el CV: si no encuentras un dato, deja el campo como cadena vacía "
-        "o no lo incluyas en \"extra\". Si solo hay un candidato, devuelve igualmente un array con un único "
-        "elemento."
-    )
-
-    body = {
-        "contents": [{
-            "parts": [
-                {"inline_data": {"mime_type": "application/pdf", "data": base64.b64encode(pdf_bytes).decode("ascii")}},
-                {"text": prompt},
-            ]
-        }],
-        "generationConfig": {"responseMimeType": "application/json"},
-    }
-
-    try:
-        # 25s en vez de 90s -- con Gemini saturado, encadenar muchas llamadas
-        # (p.ej. al re-extraer un lote de 37 personas) a 90s cada una podía
-        # bloquear el proceso durante casi una hora y tumbar el resto del
-        # sitio para todo el mundo (ver adjuntar_pdf_lote_confirmar_route).
-        resp = requests.post(GEMINI_URL, params={"key": api_key}, json=body, timeout=25)
-    except requests.RequestException as exc:
-        raise GeminiNoDisponibleError(f"No se pudo contactar con Gemini: {exc}")
-
-    if resp.status_code == 503:
-        raise GeminiNoDisponibleError("Google Gemini está saturado ahora mismo (capa gratuita). Inténtalo de nuevo en unos minutos.")
-    if resp.status_code == 429:
-        reintento_en = _extraer_retry_delay(resp)
-        # Si Google indica un retryDelay corto es el límite de peticiones
-        # POR MINUTO (se libera solo con esperar); sin ese dato, o con un
-        # valor largo, se trata como cupo DIARIO agotado (no vale la pena
-        # reintentar en la misma tanda) -- ver GeminiLimiteTemporalError.
-        if reintento_en is not None and reintento_en <= 90:
-            raise GeminiLimiteTemporalError(
-                f"Límite de peticiones por minuto de Gemini alcanzado, reintentando en {reintento_en}s.",
-                reintento_en,
-            )
-        raise GeminiNoDisponibleError("Se ha alcanzado el límite de uso gratuito de Gemini por ahora. Inténtalo de nuevo en unos minutos.")
-    if resp.status_code != 200:
-        raise GeminiNoDisponibleError(f"Gemini devolvió un error ({resp.status_code}): {resp.text[:200]}")
-
-    data = resp.json()
-    try:
-        texto = data["candidates"][0]["content"]["parts"][0]["text"]
-        parsed = json.loads(texto)
-    except (KeyError, IndexError, json.JSONDecodeError) as exc:
-        raise GeminiNoDisponibleError(f"La IA no devolvió un JSON válido al leer el CV: {exc}")
-
-    if isinstance(parsed, dict):
-        parsed = [parsed]
-    if not isinstance(parsed, list) or not parsed:
-        raise GeminiNoDisponibleError("La IA no devolvió ningún candidato reconocible en el PDF")
-
-    return [_parsear_candidato_gemini(obj) for obj in parsed if isinstance(obj, dict)]
-
-
-# --- Extracción local (sin IA), puerto de localCvExtraction.ts ---
+# --- Extracción local del CV, puerto de localCvExtraction.ts ---
+#
+# Este módulo extraía candidatos con Gemini (IA en la nube) cuando había una
+# GEMINI_API_KEY configurada, y solo caía al método local si Gemini fallaba
+# o no había clave. Se quitó Gemini del todo: el plan gratuito tenía muy
+# poco margen (10 peticiones/minuto, cupo diario) para el volumen real de
+# lotes de decenas de candidatos, y una vez el extractor local aprendió a
+# sacar también el historial estructurado (formacion_json/experiencia_json,
+# no solo texto plano -- ver _parsear_formacion_local/_parsear_experiencia_local
+# más abajo) daba resultados igual de buenos sin depender de un servicio
+# externo con esas limitaciones. Ver el historial de git de este archivo si
+# hace falta recuperar la integración con Gemini más adelante.
 
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 PHONE_RE = re.compile(r"(?:\+34[\s.-]?)?\b[6789]\d{2}[\s.-]?\d{3}[\s.-]?\d{3}\b")
@@ -631,8 +440,7 @@ def _extraer_texto_paginas(pdf_bytes: bytes) -> list[str]:
     el orden de lectura real a partir de la posición de cada palabra en la
     página, así que el mismo PDF sale ya bien ordenado sin tener que aplicar
     ninguna heurística de columnas aparte -- comprobado con CVs reales de
-    InfoJobs. Es algo más lento que pypdf, pero aquí no hay prisa (esto solo
-    corre cuando Gemini no está disponible)."""
+    InfoJobs. Es algo más lento que pypdf, pero aquí no hay prisa."""
     import pdfplumber
 
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -723,10 +531,9 @@ def _extraer_local(pdf_bytes: bytes) -> list[dict]:
 def detectar_paginas_por_candidato(pdf_bytes: bytes) -> list[tuple[int, int]]:
     """Rangos de página (1-indexado, ambos extremos incluidos) de cada
     candidato detectado en un PDF por lotes -- usa la misma heurística de
-    segmentación que el extractor local (ver _segmentar_paginas_por_candidato)
-    sin importar si el nombre/campos de cada uno se sacaron con Gemini o en
-    local, para poder recortar el PDF físicamente y adjuntar a cada ficha
-    solo sus páginas (ver /candidatos/adjuntar-pdf-lote)."""
+    segmentación que el extractor local (ver _segmentar_paginas_por_candidato),
+    para poder recortar el PDF físicamente y adjuntar a cada ficha solo sus
+    páginas (ver /candidatos/adjuntar-pdf-lote)."""
     segmentos = _segmentar_paginas_por_candidato(pdf_bytes)
     return [(s["pagina_inicio"], s["pagina_fin"]) for s in segmentos]
 
@@ -747,31 +554,9 @@ def recortar_pdf(pdf_bytes: bytes, pagina_inicio: int, pagina_fin: int) -> bytes
     return salida.getvalue()
 
 
-def extraer_cv(pdf_bytes: bytes, intentar_gemini: bool = True) -> tuple[list[dict], str, str | None]:
-    """Intenta Gemini si hay API key configurada; si falla o no hay key, cae
-    al método local sin IA. El PDF puede traer un único candidato o varios
-    (hasta ~50) concatenados en el mismo archivo — se devuelve SIEMPRE una
-    lista, de un elemento cuando es un solo candidato. Devuelve
-    (lista_de_candidatos, metodo, motivo) -- motivo es None si se usó Gemini,
-    o el mensaje de por qué falló (cuota agotada, saturado, clave inválida...)
-    si se cayó al método local, para poder enseñárselo a quien subió el PDF
-    en vez de solo dejarlo en los logs.
-
-    intentar_gemini=False salta directamente al método local sin llamar a la
-    API -- para cuando quien llama ya sabe que Gemini está caído en esta
-    misma tanda (ver adjuntar_pdf_lote_confirmar_route) y no tiene sentido
-    esperar el timeout de nuevo por cada persona."""
-    if intentar_gemini and os.environ.get("GEMINI_API_KEY"):
-        try:
-            return extraer_con_gemini(pdf_bytes), "gemini", None
-        except (GeminiNoConfiguradoError, GeminiNoDisponibleError) as exc:
-            # Antes esto se tragaba en silencio -- no quedaba ningún rastro
-            # de por qué se cayó al método local, así que un fallo real
-            # (clave inválida, cuota agotada) era indistinguible de uno
-            # transitorio (Gemini saturado un momento).
-            print(f"[cv_extraction] Gemini falló, usando extracción local: {exc}")
-            return _extraer_local(pdf_bytes), "local", str(exc)
-    motivo = None if intentar_gemini else "Gemini ya había fallado antes en esta misma tanda."
-    if intentar_gemini and not os.environ.get("GEMINI_API_KEY"):
-        motivo = "No hay ninguna clave de Gemini configurada en el servidor."
-    return _extraer_local(pdf_bytes), "local", motivo
+def extraer_cv(pdf_bytes: bytes) -> list[dict]:
+    """Extrae los candidatos de un PDF con el método local (sin IA externa).
+    El PDF puede traer un único candidato o varios (hasta ~50) concatenados
+    en el mismo archivo — se devuelve SIEMPRE una lista, de un elemento
+    cuando es un solo candidato."""
+    return _extraer_local(pdf_bytes)

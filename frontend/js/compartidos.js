@@ -1425,13 +1425,9 @@ function cerrarForm() {
   refrescarResaltadoAbierta();
 }
 
-function avisoExtraccionHTML(metodo, n, motivoLocal) {
-  const clase = metodo === "gemini" ? "gemini" : "local";
-  const motivoTxt = motivoLocal ? ` Motivo: ${motivoLocal}` : "";
-  const texto = metodo === "gemini"
-    ? `✓ ${n} candidato${n === 1 ? "" : "s"} extraído${n === 1 ? "" : "s"} con IA. Revisa los datos antes de guardar.`
-    : `Se usó el método local (sin IA) para leer el PDF${n > 1 ? ` (${n} candidatos detectados)` : ""}. Revisa los datos con más atención antes de guardar.${motivoTxt}`;
-  return `<p class="extraccion-aviso ${clase}">${escapeHTML(texto)}</p>`;
+function avisoExtraccionHTML(n) {
+  const texto = `✓ ${n} candidato${n === 1 ? "" : "s"} extraído${n === 1 ? "" : "s"} del PDF. Revisa los datos antes de guardar.`;
+  return `<p class="extraccion-aviso local">${escapeHTML(texto)}</p>`;
 }
 
 function rellenarFormConCandidato(campos) {
@@ -1612,16 +1608,14 @@ async function previsualizarLote() {
   const encontrados = items.filter((it) => it.candidato_id);
   const noEncontrados = items.length - encontrados.length;
   // ya_enriquecido lo calcula el backend mirando si formacion_json/
-  // experiencia_json ya tienen algo -- eso solo lo rellena Gemini, así que
-  // no está vacío es señal fiable de "esta ficha ya se reextrajo con IA en
-  // una tanda anterior" (ver candidatos_ya_enriquecidos). Así el reclutador
-  // no tiene que llevar la cuenta de a quién le tocó ya: se desmarcan solos.
+  // experiencia_json ya tienen algo -- así el reclutador no tiene que
+  // llevar la cuenta de a quién le tocó ya: se desmarcan solos.
   const yaListos = encontrados.filter((it) => it.ya_enriquecido).length;
   resultadoWrap.innerHTML = `
-    ${avisoExtraccionHTML(data.metodo, items.length, data.motivo_local)}
+    ${avisoExtraccionHTML(items.length)}
     <p class="staff-hint">${encontrados.length} coincidencia${encontrados.length === 1 ? "" : "s"} encontrada${encontrados.length === 1 ? "" : "s"} de ${items.length}${noEncontrados ? ` (${noEncontrados} sin ficha con ese nombre exacto -- no se les adjunta nada)` : ""}.
     ${data.division_disponible ? "Se ha detectado en qué páginas está cada uno -- se adjunta solo esa parte del PDF (puedes corregir el rango si hace falta)." : "No se pudo dividir el PDF de forma fiable -- se adjuntará el PDF completo a cada ficha encontrada, como antes."}
-    ${yaListos ? ` ${yaListos} ya tienen formación/experiencia con IA de una tanda anterior -- se han desmarcado solas, no se van a repasar salvo que las marques a mano.` : ""}</p>
+    ${yaListos ? ` ${yaListos} ya tienen formación/experiencia extraída de una tanda anterior -- se han desmarcado solas, no se van a repasar salvo que las marques a mano.` : ""}</p>
     ${encontrados.length ? `<div class="lote-saltar-fila">
       <button type="button" id="btn-lote-marcar-todos" class="btn-mini">Marcar todos</button>
       <button type="button" id="btn-lote-desmarcar-todos" class="btn-mini">Desmarcar todos</button>
@@ -1635,7 +1629,7 @@ async function previsualizarLote() {
             <input type="checkbox" class="lote-check" data-idx="${i}" ${it.ya_enriquecido ? "" : "checked"}>
             ${escapeHTML(it.nombre)}
           </label>
-          ${it.ya_enriquecido ? `<span class="lote-ya-listo">✓ ya con IA</span>` : ""}
+          ${it.ya_enriquecido ? `<span class="lote-ya-listo">✓ ya extraído</span>` : ""}
           ${data.division_disponible ? `
             <span class="lote-paginas">
               págs. <input type="number" min="1" class="lote-pagina-inicio" data-idx="${i}" value="${it.pagina_inicio}" style="width:44px;">
@@ -1644,12 +1638,7 @@ async function previsualizarLote() {
         </li>`;
       }).join("")}
     </ul>
-    ${encontrados.length ? `
-    <label class="staff-hint" style="display:flex; align-items:center; gap:6px; margin:8px 0;">
-      <input type="checkbox" id="lote-usar-solo-local">
-      Usar solo el método local (sin Gemini) -- más rápido, sin esperas, sin depender de que Gemini esté disponible ahora mismo
-    </label>
-    <button type="button" id="btn-confirmar-lote" class="btn btn-primary">Adjuntar PDF a las fichas marcadas</button>` : ""}
+    ${encontrados.length ? `<button type="button" id="btn-confirmar-lote" class="btn btn-primary">Adjuntar PDF a las fichas marcadas</button>` : ""}
     <div id="lote-progreso"></div>`;
   if (encontrados.length) {
     document.getElementById("btn-confirmar-lote").addEventListener("click", () => confirmarAdjuntarLote(items));
@@ -1692,8 +1681,6 @@ async function confirmarAdjuntarLote(items) {
   const formData = new FormData();
   formData.append("file", loteArchivoPendiente);
   formData.append("mapeo", JSON.stringify(mapeo));
-  const usarSoloLocal = document.getElementById("lote-usar-solo-local")?.checked;
-  if (usarSoloLocal) formData.append("usar_solo_local", "true");
   const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/adjuntar-pdf-lote/confirmar`, { method: "POST", body: formData });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -1752,38 +1739,29 @@ async function extraerCvYRellenar() {
   await procesarPdfNuevosCandidatos(input.files[0], avisoWrap, {});
 }
 
-// Primero lee el PDF en LOCAL (instantáneo, sin esperar a la IA) para saber
-// cuántos candidatos trae -- si es uno solo, vale la pena esperar a Gemini
-// (un único CV, la espera es corta) y se mantiene la revisión de siempre
-// antes de guardar. Si son varios, no tiene sentido hacer esperar al
-// reclutador por un PDF de 30-50 CVs: se crean ya con estos datos locales y
-// se mejora cada uno con IA en segundo plano nada más crearlos (ver
-// crearCandidatosMultiples).
+// Lee el PDF con el método local -- instantáneo, sin esperas. Si trae un
+// único candidato se mantiene la revisión de siempre antes de guardar; si
+// son varios, no tiene sentido hacer esperar al reclutador por un PDF de
+// 30-50 CVs: se crean ya con estos datos y se completan en segundo plano
+// nada más crearlos (ver crearCandidatosMultiples).
 async function procesarPdfNuevosCandidatos(file, avisoWrap, { vacantePreseleccionadaId = null } = {}) {
   avisoWrap.innerHTML = `<p class="staff-hint">Leyendo el CV...</p>`;
-  const formLocal = new FormData();
-  formLocal.append("file", file);
-  const respLocal = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/extraer-cv?intentar_gemini=false`, {
-    method: "POST", body: formLocal,
-  });
-  if (!respLocal.ok) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const resp = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/extraer-cv`, { method: "POST", body: formData });
+  if (!resp.ok) {
     avisoWrap.innerHTML = `<p class="extraccion-aviso local">No se pudo leer el CV. Rellena los datos a mano.</p>`;
     return;
   }
-  const dataLocal = await respLocal.json();
-  const candidatosLocal = dataLocal.candidatos || [];
-  if (candidatosLocal.length === 0) {
+  const data = await resp.json();
+  const candidatos = data.candidatos || [];
+  if (candidatos.length === 0) {
     avisoWrap.innerHTML = `<p class="extraccion-aviso local">No se reconoció ningún candidato en el PDF. Rellena los datos a mano.</p>`;
     return;
   }
 
-  if (candidatosLocal.length === 1) {
-    const formData = new FormData();
-    formData.append("file", file);
-    const resp = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/extraer-cv`, { method: "POST", body: formData });
-    const data = resp.ok ? await resp.json() : null;
-    const candidatos = data?.candidatos?.length ? data.candidatos : candidatosLocal;
-    avisoWrap.innerHTML = avisoExtraccionHTML(data?.metodo || "local", candidatos.length, data?.motivo_local);
+  if (candidatos.length === 1) {
+    avisoWrap.innerHTML = avisoExtraccionHTML(candidatos.length);
     rellenarFormConCandidato(candidatos[0]);
     document.getElementById("input-cv-nuevo").dataset.pendingUpload = "1";
     const selectVacante = document.getElementById("candidato-vacante-form");
@@ -1791,19 +1769,18 @@ async function procesarPdfNuevosCandidatos(file, avisoWrap, { vacantePreseleccio
     return;
   }
 
-  avisoWrap.innerHTML = `<p class="extraccion-aviso local">✓ ${candidatosLocal.length} candidatos detectados (lectura local, instantánea). Se mejorarán solos con IA en segundo plano al crearlos.</p>`;
-  renderRevisionMultiple(candidatosLocal, {
+  avisoWrap.innerHTML = `<p class="extraccion-aviso local">✓ ${candidatos.length} candidatos detectados.</p>`;
+  renderRevisionMultiple(candidatos, {
     file,
-    rangosPaginas: dataLocal.division_disponible ? dataLocal.rangos_paginas : null,
+    rangosPaginas: data.division_disponible ? data.rangos_paginas : null,
     vacantePreseleccionadaId,
   });
 }
 
-// Re-lee un PDF que YA está adjunto a esta ficha con el extractor actual
-// (Gemini si hay clave configurada) -- pensado para candidatos cuyo CV se
-// procesó con el método local antes de tener Gemini disponible, o cuando
-// falló puntualmente en su momento. Rellena el formulario para revisar,
-// igual que al subir un CV nuevo -- no guarda nada por su cuenta.
+// Re-lee un PDF que YA está adjunto a esta ficha -- útil cuando una mejora
+// del extractor deja desactualizada una ficha que se procesó antes del
+// arreglo. Rellena el formulario para revisar, igual que al subir un CV
+// nuevo -- no guarda nada por su cuenta.
 async function reextraerCv(archivoId) {
   const avisoWrap = document.getElementById("extraccion-aviso-wrap-edicion");
   avisoWrap.innerHTML = `<p class="staff-hint">Volviendo a leer el CV...</p>`;
@@ -1817,7 +1794,7 @@ async function reextraerCv(archivoId) {
     return;
   }
   const data = await resp.json();
-  avisoWrap.innerHTML = avisoExtraccionHTML(data.metodo, 1, data.motivo_local);
+  avisoWrap.innerHTML = avisoExtraccionHTML(1);
   rellenarFormConCandidato(data.candidato);
   // Si el PDF adjunto es un lote con varias personas, la foto de la
   // "página 1" no tiene por qué ser la de esta ficha -- no se intenta sacar
@@ -2646,7 +2623,7 @@ async function revincularTests() {
 }
 
 async function reextraerTodosLocal() {
-  if (!confirm("Esto vuelve a leer el CV ya guardado de CADA candidato con el método local (sin Gemini) y sustituye formación/experiencia/idiomas por lo último que encuentre. Puede tardar un rato con muchos candidatos. ¿Continuar?")) return;
+  if (!confirm("Esto vuelve a leer el CV ya guardado de CADA candidato y sustituye formación/experiencia/idiomas por lo último que encuentre. Puede tardar un rato con muchos candidatos. ¿Continuar?")) return;
   const btn = document.getElementById("btn-reextraer-todos");
   const textoOriginal = btn.textContent;
   btn.disabled = true;
