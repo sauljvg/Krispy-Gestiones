@@ -213,21 +213,16 @@ DNI_RE = re.compile(r"\b(\d{8}[A-Za-z]|[XYZxyz]\d{7}[A-Za-z])\b")
 DATE_RE = re.compile(r"\b\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}\b|\b\d{1,2}\s+de\s+[a-zA-Zé]+\s+de\s+\d{4}\b", re.IGNORECASE)
 PAGE_MARKER_RE = re.compile(r"--\s*\d+\s*of\s*\d+\s*--", re.IGNORECASE)
 
-# El ATS repite, en cada salto de página, un pie/cabecera de página tipo
-# "N/M" (visto como "37/10" en un CV exportado desde nuestra propia
-# herramienta y como "1/4" -- página 1 de 4 -- en uno descargado directo de
-# InfoJobs, así que el significado exacto de N/M varía según el origen)
-# seguido del nombre de la vacante a la que se apuntó (p.ej. "Dependiente/a
-# Krispy Kreme"). No es contenido del CV -- es texto que pdfplumber intercala
-# igual que el resto, allí donde caiga el salto de página (a veces a media
-# línea de contenido real, otras veces en su propia línea). Como los números
-# cambian en cada página no sirve detectarlos por repetición; se reconoce por
-# el patrón "N/M" (ambos números cortos -- así no coincide con una fecha tipo
-# "01/2020", con año de 4 cifras) seguido de un salto de línea, y se descarta
-# también esa línea siguiente entera (el nombre de la vacante), sea cual sea
-# su contenido -- así no hace falta conocer de antemano el nombre de la
-# vacante para reconocerlo.
-PIE_PAGINA_VACANTE_RE = re.compile(r"[ \t]*\d{1,3}\s*/\s*\d{1,3}[ \t]*\n[^\n]*\n?")
+# El ATS repite, en CADA página, un pie/cabecera con el nombre de la vacante
+# a la que se apuntó (p.ej. "Dependiente/a Krispy Kreme") como PRIMERA línea
+# de la página, y una marca tipo "N/M" (compatibilidad o página X de Y según
+# el origen del PDF) al final de la ÚLTIMA línea. Ninguno de los dos es
+# contenido real del CV -- ver _limpiar_pie_pagina_ats, que los recorta
+# usando los límites de página reales (antes de unir todas las páginas en un
+# solo texto) para no arriesgarse a comerse contenido real que caiga justo
+# después, como pasaba con un intento anterior basado en buscar el patrón
+# "N/M" en el texto ya unido sin saber dónde estaban esos límites.
+PIE_PAGINA_SCORE_RE = re.compile(r"[ \t]*\d{1,3}\s*/\s*\d{1,3}\s*$")
 
 SECTIONS = [
     ("experiencia", ["experiencia laboral", "experiencia profesional", "experiencia"], False),
@@ -386,7 +381,15 @@ def _separar_cabeceras_pegadas(texto: str) -> str:
     una cabecera de verdad), solo se separa cuando la letra encontrada está
     en MAYÚSCULA en el texto original -- un chip de verdad siempre empieza
     con mayúscula ("Autónomo", "Vehículo propio"); una mención de paso
-    dentro de una frase, no."""
+    dentro de una frase, no.
+
+    Además hace falta que justo después venga ":" (como en TODO chip real,
+    "Autónomo: No") -- sin este requisito, un puesto de trabajo real que
+    termine en una de estas palabras (p.ej. el puesto "Técnico de Estudios",
+    con "Estudios" en mayúscula y precedido de espacio) se partía igual,
+    convirtiéndolo en "Técnico de" + una falsa cabecera "Estudios" que luego
+    _contenido_de_seccion tomaba como el principio de la sección Formación,
+    tragándose de paso todo el contenido real de Experiencia."""
     texto_norm = _normalizar(texto)
     posiciones = set()
     for kw in ALL_HEADER_KEYWORDS:
@@ -397,7 +400,9 @@ def _separar_cabeceras_pegadas(texto: str) -> str:
             if idx == -1:
                 break
             precedido_por_espacio = idx > 0 and texto[idx - 1] in " \t"
-            if precedido_por_espacio and texto[idx].isupper():
+            fin_kw = idx + len(kw_norm)
+            le_sigue_dos_puntos = texto_norm[fin_kw:].lstrip(" \t").startswith(":")
+            if precedido_por_espacio and texto[idx].isupper() and le_sigue_dos_puntos:
                 posiciones.add(idx)
             pos = idx + 1
     if not posiciones:
@@ -526,7 +531,6 @@ def _parsear_experiencia_local(texto_seccion: str) -> list[dict]:
 
 def _extraer_de_texto(texto_crudo: str) -> dict:
     texto = PAGE_MARKER_RE.sub("", texto_crudo)
-    texto = PIE_PAGINA_VACANTE_RE.sub("\n", texto)
     texto = _separar_cabeceras_pegadas(texto)
     lineas = [l.strip() for l in re.split(r"\r?\n", texto) if l.strip()]
 
@@ -560,7 +564,10 @@ def _extraer_de_texto(texto_crudo: str) -> dict:
         # estudios o trabajos, y _parsear_formacion_local/
         # _parsear_experiencia_local (justo debajo) necesitan el bloque
         # completo para reconocer todas las entradas, no solo la primera.
-        limite = 4000 if campo in ("formacion", "experiencia") else 400
+        # 4000 tampoco bastaba para alguien con varios puestos largos y
+        # detallados (un historial real de 5 experiencias con descripción
+        # extensa ocupaba ~5900 caracteres) -- 10000 deja margen de sobra.
+        limite = 10000 if campo in ("formacion", "experiencia") else 400
         contenido = _contenido_de_seccion(texto, keywords, una_linea, limite)
         if contenido:
             extraido[campo] = contenido
@@ -583,6 +590,37 @@ def _extraer_de_texto(texto_crudo: str) -> dict:
     return extraido
 
 
+def _limpiar_pie_pagina_ats(textos_paginas: list[str]) -> list[str]:
+    """Recorta de cada página el pie/cabecera del ATS descrito junto a
+    PIE_PAGINA_SCORE_RE: la vacante repetida como primera línea, y la marca
+    "N/M" al final de la última. La vacante se reconoce por REPETICIÓN (si
+    el documento tiene 2+ páginas, la primera línea de página es idéntica en
+    todas -- nada que un candidato escriba de verdad encabeza así, palabra
+    por palabra, varias páginas seguidas) en vez de por su contenido, para
+    no tener que conocer de antemano el nombre de la vacante. Con un
+    documento de una sola página no hay repetición que detectar y esa
+    primera línea se deja tal cual -- en la práctica no causa problemas
+    porque nunca coincide con el patrón de nombre de _adivinar_nombre (trae
+    una barra, "Dependiente/a")."""
+    lineas_por_pagina = [[l for l in texto.split("\n") if l.strip()] for texto in textos_paginas]
+
+    primeras = [lineas[0].strip() for lineas in lineas_por_pagina if lineas]
+    conteo: dict[str, int] = {}
+    for l in primeras:
+        conteo[l] = conteo.get(l, 0) + 1
+    cabecera_repetida = {l for l, n in conteo.items() if n >= 2}
+
+    paginas_limpias = []
+    for lineas in lineas_por_pagina:
+        if lineas and lineas[0].strip() in cabecera_repetida:
+            lineas = lineas[1:]
+        if lineas:
+            ultima = PIE_PAGINA_SCORE_RE.sub("", lineas[-1])
+            lineas = lineas[:-1] + ([ultima] if ultima.strip() else [])
+        paginas_limpias.append("\n".join(lineas))
+    return paginas_limpias
+
+
 def _extraer_texto_paginas(pdf_bytes: bytes) -> list[str]:
     """pypdf.extract_text() lee el texto en el orden en que quedó escrito en
     el propio stream del PDF, que en los CVs exportados por ATS (InfoJobs...)
@@ -598,7 +636,8 @@ def _extraer_texto_paginas(pdf_bytes: bytes) -> list[str]:
     import pdfplumber
 
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        return [page.extract_text() or "" for page in pdf.pages]
+        textos = [page.extract_text() or "" for page in pdf.pages]
+    return _limpiar_pie_pagina_ats(textos)
 
 
 def _segmentar_paginas_por_candidato(pdf_bytes: bytes) -> list[dict]:
