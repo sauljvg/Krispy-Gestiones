@@ -1061,26 +1061,40 @@ def actualizar_candidato(candidato_id, campos: dict):
 
 def rellenar_huecos_candidato(candidato_id, extraido: dict):
     """Como actualizar_candidato, pero solo rellena lo que está vacío --
-    pensado para volver a extraer con IA el CV de una ficha que YA existe
-    (p.ej. al resubir un PDF de lote sobre fichas ya creadas) sin pisar nada
-    que el reclutador ya haya editado a mano. formacion_json/experiencia_json
-    se sustituyen solo si la ficha no tenía ninguna entrada todavía;
-    extra_fields se combina añadiendo solo las claves nuevas."""
+    pensado para volver a extraer el CV de una ficha que YA existe (p.ej. al
+    resubir un PDF de lote sobre fichas ya creadas) sin pisar nada que el
+    reclutador haya editado a mano. formacion_json/experiencia_json (el
+    historial estructurado, solo lo rellena Gemini) se sustituyen solo si la
+    ficha no tenía ninguna entrada todavía.
+
+    formacion/experiencia (el texto libre "antiguo") y extra_fields
+    (Idiomas, Carnet de conducir...) SÍ se sobrescriben aunque ya tuvieran
+    algo -- a diferencia del resto de campos, casi nunca los escribe un
+    reclutador a mano (la ficha ya marca ese texto como "dato antiguo" con
+    su propio botón de borrar), y son justo los que salían mal con el
+    extractor local de antes de que se corrigiera (ver cv_extraction.py):
+    sin sobrescribir, volver a subir el mismo PDF con el extractor ya
+    arreglado no corregía nada porque el campo "ya tenía algo" (aunque ese
+    algo fuera el dato mezclado de antes)."""
     candidato = get_candidato(candidato_id)
     if candidato is None:
         return False
     campos = {}
     for campo in CAMPOS:
-        if campo in ("estado", "notas"):
+        if campo in ("estado", "notas", "formacion", "experiencia"):
             continue
         valor_nuevo = extraido.get(campo)
         if valor_nuevo and not candidato.get(campo):
+            campos[campo] = valor_nuevo
+    for campo in ("formacion", "experiencia"):
+        valor_nuevo = extraido.get(campo)
+        if valor_nuevo:
             campos[campo] = valor_nuevo
     if extraido.get("formacion_json") and not candidato.get("formacion_json"):
         campos["formacion_json"] = extraido["formacion_json"]
     if extraido.get("experiencia_json") and not candidato.get("experiencia_json"):
         campos["experiencia_json"] = extraido["experiencia_json"]
-    extra_nuevo = {k: v for k, v in (extraido.get("extra_fields") or {}).items() if k not in (candidato.get("extra_fields") or {})}
+    extra_nuevo = extraido.get("extra_fields") or {}
     if extra_nuevo:
         campos["extra_fields"] = {**(candidato.get("extra_fields") or {}), **extra_nuevo}
     if not campos:
