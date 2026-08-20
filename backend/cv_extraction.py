@@ -227,7 +227,25 @@ EXTRA_KEYWORDS = [
     ("Certificaciones", ["certificaciones", "certificados"], True),
 ]
 
-ALL_HEADER_KEYWORDS = [kw for _, kws, _ in SECTIONS for kw in kws] + [kw for _, kws, _ in EXTRA_KEYWORDS for kw in kws]
+# Cabeceras de sección que SÍ aparecen en los PDF de ATS (InfoJobs, Bizneo...)
+# pero que no se extraen como campo propio -- solo sirven de "muro" para que
+# _contenido_de_seccion sepa dónde para el contenido de otra sección. Sin
+# esto, "Idiomas" (una_linea=True, ver EXTRA_KEYWORDS) podía comerse el
+# título de la sección siguiente como si fuera su valor (p.ej. quedaba
+# "Idiomas: Conocimientos" en vez de la lista real de idiomas) cuando el
+# orden del texto que saca pypdf del PDF no coincide con el orden visual
+# (habitual en diseños de columnas/chips como los de InfoJobs).
+BOUNDARY_ONLY_KEYWORDS = [
+    "conocimientos", "preferencias laborales", "puestos deseados", "modalidad",
+    "provincia deseada", "jornada", "preguntas de selección", "preguntas de seleccion",
+    "nota del cuestionario",
+]
+
+ALL_HEADER_KEYWORDS = (
+    [kw for _, kws, _ in SECTIONS for kw in kws]
+    + [kw for _, kws, _ in EXTRA_KEYWORDS for kw in kws]
+    + BOUNDARY_ONLY_KEYWORDS
+)
 
 
 def _normalizar(s: str) -> str:
