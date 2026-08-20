@@ -48,6 +48,23 @@
      abajo, así "Lista + CV" también les queda con la lista a la izquierda y
      la ficha fija a la derecha (ver modo-restringido en loadCompartidos). */
   .compartidos-wrap.vista-combinada.modo-restringido > #compartidos-list { grid-area: lista; }
+  /* Por debajo de este ancho, la columna "lista" (mínimo 300px) no deja
+     hueco real para la de "ficha" (1fr se queda en 0px) -- el panel de la
+     ficha quedaba invisible del todo en vez de solo apretado. En pantallas
+     estrechas, Lista + CV pasa a un grid de un solo carril con las mismas
+     áreas (hero/lista/ficha/compartidos) apiladas en vertical en vez de en
+     dos columnas -- las reglas grid-area de arriba siguen aplicando igual,
+     solo cambia dónde caen esas áreas. La ficha deja de ir fija al scroll,
+     que en una sola columna no aporta nada. */
+  @media (max-width: 800px) {
+    .compartidos-wrap.vista-combinada {
+      grid-template-columns: 1fr;
+      grid-template-areas: "hero" "lista" "ficha" "compartidos";
+    }
+    .compartidos-wrap.vista-combinada > #form-wrap {
+      position: static; max-height: none; overflow-y: visible;
+    }
+  }
   .reclu-seccion { font-size: 18px; margin: 26px 0 12px; }
   .reclu-seccion:first-child { margin-top: 6px; }
   .compartidos-seleccion-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
