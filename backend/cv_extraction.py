@@ -221,9 +221,14 @@ SECTIONS = [
 ]
 
 EXTRA_KEYWORDS = [
-    ("Idiomas", ["idiomas"], True),
+    # Idiomas casi siempre ocupa más de una línea (un idioma por línea, o
+    # dos por línea) -- una_linea=False dejar coger todo el bloque hasta la
+    # siguiente cabecera (p.ej. Conocimientos) en vez de cortar en la
+    # primera línea y perder los demás idiomas.
+    ("Idiomas", ["idiomas"], False),
     ("Carnet de conducir", ["carnet de conducir", "carné de conducir"], True),
     ("Vehículo propio", ["vehículo propio", "vehiculo propio"], True),
+    ("Autónomo", ["autónomo", "autonomo"], True),
     ("Certificaciones", ["certificaciones", "certificados"], True),
 ]
 
@@ -286,6 +291,22 @@ def _adivinar_nombre(lineas: list[str]) -> str:
     return ""
 
 
+def _pagina_parece_inicio_de_candidato(lineas: list[str]) -> bool:
+    """Usado SOLO para decidir si una página (sin marcador "NN%") empieza un
+    candidato nuevo dentro de un PDF por lotes -- a diferencia de
+    _adivinar_nombre a secas (que solo mira si hay una línea con pinta de
+    nombre propio), aquí además se exige un email o teléfono cerca, que es
+    como de verdad se ve el principio de un CV. Sin este segundo requisito,
+    el nombre de una empresa o de un curso en una página de CONTINUACIÓN del
+    mismo candidato (p.ej. "Muy Mucho", "Máster Comunicación") también
+    parece "una línea con mayúsculas" y se confundía con un candidato
+    nuevo, partiendo el CV de una sola persona en varios "candidatos" falsos."""
+    if not _adivinar_nombre(lineas):
+        return False
+    inicio = "\n".join(lineas)
+    return bool(EMAIL_RE.search(inicio) or PHONE_RE.search(inicio))
+
+
 def _buscar_cerca(texto: str, keywords: list[str], patron: re.Pattern) -> str:
     texto_norm = _normalizar(texto)
     for kw in keywords:
@@ -299,10 +320,72 @@ def _buscar_cerca(texto: str, keywords: list[str], patron: re.Pattern) -> str:
     return ""
 
 
+def _indice_de_cabecera(texto_norm: str, kw_norm: str) -> int:
+    """Solo cuenta la aparición de kw que empieza una línea (así es como se
+    ve de verdad una cabecera de sección en el PDF) -- una aparición a media
+    frase NO cuenta, ni siquiera a falta de otra cosa: por ejemplo
+    "certificaciones" dentro de "Otros títulos, certificaciones y carnés"
+    (el título de OTRA sección, no contenido real de Certificaciones), o
+    "formación" dentro de una pregunta de selección tipo "La formación son 2
+    semanas..." (que no tiene nada que ver con la sección Formación/
+    Estudios). Devolver -1 en vez de conformarse con esa aparición deja que
+    el llamador siga probando el resto de sinónimos de la lista (ver
+    SECTIONS/EXTRA_KEYWORDS) en vez de quedarse con contenido de otra parte
+    del CV que no tiene nada que ver."""
+    pos = 0
+    while True:
+        idx = texto_norm.find(kw_norm, pos)
+        if idx == -1:
+            return -1
+        if idx == 0 or texto_norm[idx - 1] == "\n":
+            return idx
+        pos = idx + 1
+
+
+def _separar_cabeceras_pegadas(texto: str) -> str:
+    """Varios "chips" de datos cortos a veces quedan en la MISMA línea del
+    PDF -- p.ej. "Carnet de conducir: B Autónomo: No Vehículo propio: No" --
+    y _indice_de_cabecera exige que cada cabecera empiece línea (para no
+    confundirla con una mención a media frase, ver su docstring). En vez de
+    relajar esa exigencia, aquí se inserta un salto de línea delante de cada
+    cabecera reconocida que no lo tenga ya, para que las tres cuenten igual.
+
+    Para no reintroducir el problema que _indice_de_cabecera evita
+    (confundir "certificaciones" dentro de "...títulos, certificaciones y
+    carnés", o "formación" dentro de "La formación son 2 semanas...", con
+    una cabecera de verdad), solo se separa cuando la letra encontrada está
+    en MAYÚSCULA en el texto original -- un chip de verdad siempre empieza
+    con mayúscula ("Autónomo", "Vehículo propio"); una mención de paso
+    dentro de una frase, no."""
+    texto_norm = _normalizar(texto)
+    posiciones = set()
+    for kw in ALL_HEADER_KEYWORDS:
+        kw_norm = _normalizar(kw)
+        pos = 0
+        while True:
+            idx = texto_norm.find(kw_norm, pos)
+            if idx == -1:
+                break
+            precedido_por_espacio = idx > 0 and texto[idx - 1] in " \t"
+            if precedido_por_espacio and texto[idx].isupper():
+                posiciones.add(idx)
+            pos = idx + 1
+    if not posiciones:
+        return texto
+    partes = []
+    anterior = 0
+    for idx in sorted(posiciones):
+        partes.append(texto[anterior:idx])
+        partes.append("\n")
+        anterior = idx
+    partes.append(texto[anterior:])
+    return "".join(partes)
+
+
 def _contenido_de_seccion(texto: str, keywords: list[str], una_linea: bool) -> str:
     texto_norm = _normalizar(texto)
     for kw in keywords:
-        idx = texto_norm.find(_normalizar(kw))
+        idx = _indice_de_cabecera(texto_norm, _normalizar(kw))
         if idx == -1:
             continue
         inicio = idx + len(kw)
@@ -327,6 +410,7 @@ def _contenido_de_seccion(texto: str, keywords: list[str], una_linea: bool) -> s
 
 def _extraer_de_texto(texto_crudo: str) -> dict:
     texto = PAGE_MARKER_RE.sub("", texto_crudo)
+    texto = _separar_cabeceras_pegadas(texto)
     lineas = [l.strip() for l in re.split(r"\r?\n", texto) if l.strip()]
 
     extraido = {}
@@ -366,7 +450,25 @@ def _extraer_de_texto(texto_crudo: str) -> dict:
     return extraido
 
 
-def _segmentar_paginas_por_candidato(reader) -> list[dict]:
+def _extraer_texto_paginas(pdf_bytes: bytes) -> list[str]:
+    """pypdf.extract_text() lee el texto en el orden en que quedó escrito en
+    el propio stream del PDF, que en los CVs exportados por ATS (InfoJobs...)
+    no tiene por qué coincidir con el orden visual -- en la práctica, los
+    títulos de varias secciones ("Idiomas", "Conocimientos"...) salían todos
+    juntos y su contenido real aparecía mucho más abajo, sin ninguna relación
+    ya con su título (ver _contenido_de_seccion). pdfplumber sí reconstruye
+    el orden de lectura real a partir de la posición de cada palabra en la
+    página, así que el mismo PDF sale ya bien ordenado sin tener que aplicar
+    ninguna heurística de columnas aparte -- comprobado con CVs reales de
+    InfoJobs. Es algo más lento que pypdf, pero aquí no hay prisa (esto solo
+    corre cuando Gemini no está disponible)."""
+    import pdfplumber
+
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        return [page.extract_text() or "" for page in pdf.pages]
+
+
+def _segmentar_paginas_por_candidato(pdf_bytes: bytes) -> list[dict]:
     """Sin IA no hay forma fiable de "entender" dónde termina un CV y
     empieza el siguiente en un PDF por lotes. Primero se comprueba si el
     documento entero usa la marca "Nombre NN%" de exportaciones de ATS (ver
@@ -377,7 +479,7 @@ def _segmentar_paginas_por_candidato(reader) -> list[dict]:
     (p.ej. un CV de varias páginas con un largo historial laboral). Solo si
     el documento NO trae esa marca en ninguna página se usa la heurística
     genérica como respaldo (para PDFs de un único CV suelto, sin esa marca)."""
-    textos_paginas = [page.extract_text() or "" for page in reader.pages]
+    textos_paginas = _extraer_texto_paginas(pdf_bytes)
     primeras_lineas_por_pagina = [
         [l.strip() for l in texto.split("\n") if l.strip()][:10] for texto in textos_paginas
     ]
@@ -388,7 +490,7 @@ def _segmentar_paginas_por_candidato(reader) -> list[dict]:
     actual = []
     actual_inicio = 0
     for i, (texto_pagina, lineas, marcador) in enumerate(zip(textos_paginas, primeras_lineas_por_pagina, marcadores_por_pagina)):
-        es_candidato_nuevo = bool(marcador) if usar_solo_marcador else bool(_adivinar_nombre(lineas[:8]))
+        es_candidato_nuevo = bool(marcador) if usar_solo_marcador else _pagina_parece_inicio_de_candidato(lineas)
         if es_candidato_nuevo and actual:
             # Páginas 1-indexadas (para hablar con el usuario, no con el
             # propio pypdf) -- pagina_fin es la última página INCLUIDA.
@@ -442,10 +544,7 @@ def extraer_foto(pdf_bytes: bytes) -> tuple[bytes, str] | None:
 
 
 def _extraer_local(pdf_bytes: bytes) -> list[dict]:
-    from pypdf import PdfReader
-
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    segmentos = _segmentar_paginas_por_candidato(reader)
+    segmentos = _segmentar_paginas_por_candidato(pdf_bytes)
     return [_extraer_de_texto(seg["texto"]) for seg in segmentos]
 
 
@@ -456,10 +555,7 @@ def detectar_paginas_por_candidato(pdf_bytes: bytes) -> list[tuple[int, int]]:
     sin importar si el nombre/campos de cada uno se sacaron con Gemini o en
     local, para poder recortar el PDF físicamente y adjuntar a cada ficha
     solo sus páginas (ver /candidatos/adjuntar-pdf-lote)."""
-    from pypdf import PdfReader
-
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    segmentos = _segmentar_paginas_por_candidato(reader)
+    segmentos = _segmentar_paginas_por_candidato(pdf_bytes)
     return [(s["pagina_inicio"], s["pagina_fin"]) for s in segmentos]
 
 
