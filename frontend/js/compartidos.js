@@ -2645,6 +2645,52 @@ async function revincularTests() {
   }
 }
 
+async function reextraerTodosLocal() {
+  if (!confirm("Esto vuelve a leer el CV ya guardado de CADA candidato con el método local (sin Gemini) y sustituye formación/experiencia/idiomas por lo último que encuentre. Puede tardar un rato con muchos candidatos. ¿Continuar?")) return;
+  const btn = document.getElementById("btn-reextraer-todos");
+  const textoOriginal = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Iniciando...";
+  let res;
+  try {
+    res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/reextraer-todos?empresa=${EMPRESA}`, { method: "POST" });
+  } catch {
+    res = null;
+  }
+  if (!res || !res.ok) {
+    mostrarAviso("No se pudo iniciar la re-extracción.");
+    btn.disabled = false;
+    btn.textContent = textoOriginal;
+    return;
+  }
+  const data = await res.json();
+  if (!data.lote_id) {
+    mostrarAviso("No hay ningún candidato con un PDF adjunto para re-extraer.");
+    btn.disabled = false;
+    btn.textContent = textoOriginal;
+    return;
+  }
+  mostrarAviso(`Re-extrayendo ${data.total} candidato(s) en segundo plano...`);
+  const intervalo = setInterval(async () => {
+    const r = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/adjuntar-pdf-lote/progreso/${data.lote_id}`);
+    if (!r.ok) {
+      clearInterval(intervalo);
+      btn.disabled = false;
+      btn.textContent = textoOriginal;
+      return;
+    }
+    const p = await r.json();
+    btn.textContent = `Reextrayendo ${p.procesados}/${p.total}...`;
+    if (p.terminado) {
+      clearInterval(intervalo);
+      btn.disabled = false;
+      btn.textContent = textoOriginal;
+      mostrarAviso(`Listo: ${p.procesados}/${p.total} candidatos re-extraídos con el método local.`);
+      loadCandidatos();
+    }
+  }, 2000);
+}
+
 async function initBaseCandidatos(user) {
   usuarioActual = user;
   const modulos = user.modulos || [];
@@ -2664,6 +2710,7 @@ async function initBaseCandidatos(user) {
   document.getElementById("btn-nuevo-candidato").addEventListener("click", abrirNuevoCandidato);
   document.getElementById("btn-revincular-tests").addEventListener("click", revincularTests);
   document.getElementById("btn-adjuntar-lote").addEventListener("click", abrirAdjuntarLote);
+  document.getElementById("btn-reextraer-todos").addEventListener("click", reextraerTodosLocal);
   document.getElementById("btn-recordatorio-pendientes").addEventListener("click", abrirRecordatorioPendientes);
   document.getElementById("btn-nueva-vacante").addEventListener("click", abrirNuevaVacante);
   document.getElementById("btn-seleccionar-todos-candidatos").addEventListener("click", seleccionarTodosCandidatos);

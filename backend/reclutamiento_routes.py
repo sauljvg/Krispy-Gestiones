@@ -700,6 +700,32 @@ def iniciar_reintento_periodico_lotes_ia():
     print(f"[adjuntar-pdf-lote] Reintento automático de lotes de IA pausados cada {REINTENTO_GEMINI_INTERVALO_MINUTOS} min", flush=True)
 
 
+@router.post("/candidatos/reextraer-todos")
+def reextraer_todos_route(empresa: str = "kk", user: dict = Depends(require_informes)):
+    """Vuelve a extraer con el método local el PDF YA guardado de cada
+    candidato que tenga uno -- para cuando una mejora del extractor local
+    (ver cv_extraction.py) deja desactualizadas fichas que se procesaron
+    antes del arreglo, sin tener que volver a subir el PDF de lote original
+    ni entrar ficha a ficha con "Re-extraer con IA". Reutiliza exactamente
+    la misma cola durable y el mismo mecanismo de progreso/notificación que
+    /candidatos/adjuntar-pdf-lote/confirmar (ver _rellenar_huecos_en_segundo_plano)
+    -- el banner del topbar y el aviso final al terminar funcionan igual sin
+    nada especial aquí. Siempre en local (intentar_gemini=False): el objetivo
+    es justo no depender de Gemini para esto."""
+    items = reclutamiento_module.candidatos_con_pdf(empresa=empresa)
+    if not items:
+        return {"ok": True, "lote_id": None, "total": 0}
+    lote_id = secrets.token_hex(8)
+    titulo_lote = "Re-extracción de todos los candidatos"
+    _progreso_lotes[lote_id] = {
+        "total": len(items), "procesados": 0, "terminado": False, "eta_segundos": None,
+        "usuario_id": user["id"], "titulo": titulo_lote, "pausado": False,
+    }
+    reclutamiento_module.crear_lote_ia_pendiente(lote_id, user["id"], titulo_lote, items, intentar_gemini=False)
+    _lanzar_relleno(lote_id, items, user["id"], titulo_lote, intentar_gemini=False)
+    return {"ok": True, "lote_id": lote_id, "total": len(items)}
+
+
 @router.post("/candidatos/adjuntar-pdf-lote/confirmar")
 async def adjuntar_pdf_lote_confirmar_route(
     file: UploadFile = File(...),

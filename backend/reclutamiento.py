@@ -911,6 +911,31 @@ def marcar_ia_extraida(candidato_id: int):
     conn.close()
 
 
+def candidatos_con_pdf(empresa=None) -> list[tuple[int, int]]:
+    """[(candidato_id, archivo_id), ...] con el PDF más reciente de CADA
+    candidato que tenga al menos uno adjunto -- para poder re-extraer a
+    todo el mundo de una vez (ver /candidatos/reextraer-todos) sin que el
+    reclutador tenga que volver a subir nada ni entrar ficha a ficha: el PDF
+    ya está guardado en disco desde que se creó o se le adjuntó por lote."""
+    conn = get_connection()
+    clausula_empresa = "AND c.empresa = ?" if empresa else ""
+    params = (empresa,) if empresa else ()
+    rows = conn.execute(f"""
+        SELECT ca.candidato_id, ca.id AS archivo_id
+        FROM candidato_archivos ca
+        JOIN candidatos c ON c.id = ca.candidato_id
+        WHERE ca.nombre_original LIKE '%.pdf'
+        {clausula_empresa}
+        AND ca.id = (
+            SELECT ca2.id FROM candidato_archivos ca2
+            WHERE ca2.candidato_id = ca.candidato_id AND ca2.nombre_original LIKE '%.pdf'
+            ORDER BY ca2.subido_en DESC LIMIT 1
+        )
+    """, params).fetchall()
+    conn.close()
+    return [(row["candidato_id"], row["archivo_id"]) for row in rows]
+
+
 def crear_lote_ia_pendiente(lote_id: str, usuario_id: int, titulo: str, candidatos_archivos: list[tuple[int, int]], intentar_gemini: bool = True):
     """candidatos_archivos: [(candidato_id, archivo_id), ...] -- registra en
     disco qué le falta por rellenar con IA a este lote, para poder
