@@ -310,6 +310,8 @@ h3 {
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
   transition: border-color .15s ease, background-color .15s ease, transform .1s ease, box-shadow .15s ease;
 }
 .btn:hover { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 6%, var(--surface-1)); }

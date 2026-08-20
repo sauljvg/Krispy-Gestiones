@@ -13,7 +13,7 @@
     }
   })();
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260819c">
+<link rel="stylesheet" href="css/styles.css?v=20260820a">
 <style>
   .compartidos-wrap { max-width: 900px; margin: 0 auto; padding: 0 0 60px; }
   /* Vista "Lista + CV" (ver candidatos-vista en compartidos.js) -- imita la
@@ -191,7 +191,7 @@
      estilo InfoJobs -- antes era un <select> con texto, ahora un único
      contenedor partido en celdas iguales por una línea fina. */
   .vista-toggle {
-    display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
     background: var(--surface-page);
   }
   .vista-toggle-btn {
@@ -216,12 +216,26 @@
      final de la página -- este margen la separa un poco de la fila de
      encima para que no se pegue a la tarjeta. */
   .candidatos-lista #form-wrap:not(:empty) { margin-top: -2px; }
+  /* En vista Tarjetas la ficha se inserta igual que en Lista (ver
+     reposicionarFormWrapSiCorresponde en compartidos.js) -- pero el grid de
+     tarjetas reparte sus columnas en celdas de ~260px, así que sin esto la
+     ficha quedaría aplastada en una sola columna en vez de ocupar toda la
+     fila. */
+  .candidatos-grid:not(.candidatos-lista) > #form-wrap { grid-column: 1 / -1; }
   /* Agrupa CV/foto/compartido/aviso/resultado/respuestas del test con
      separación uniforme -- sin esto, cada pieza traía su propio margen (o
      ninguno) y se veían amontonadas sin distinguirse unas de otras. */
   .ficha-cabecera { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-bottom: 16px; }
   .ficha-cabecera:empty { display: none; margin-bottom: 0; }
   .ficha-cabecera > * { margin: 0 !important; }
+  /* El bloque de resultado/respuestas del test solo aparece si el candidato
+     ya respondió -- sin este hueco reservado, la ficha cambiaba de alto
+     según cada candidato (más corta si no había respondido). El alto
+     reservado es el de un candidato con AMBAS líneas (resultado del test +
+     "Respuestas del test" colapsado) medido en el navegador -- así el hueco
+     vacío de quien no respondió queda del mismo tamaño que el de quien sí,
+     en vez de solo un poco más alto que cero. */
+  .ficha-resultado-test-slot { min-height: 148px; }
   .ficha-cabecera > .aviso-datos-faltantes,
   .ficha-cabecera > .respuestas-test-detalle { align-self: stretch; }
   .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 14px; margin-bottom: 12px; }
@@ -502,6 +516,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260724a"></script>
 <script src="js/topbar-menu.js?v=20260820a"></script>
-<script src="js/compartidos.js?v=20260820b"></script>
+<script src="js/compartidos.js?v=20260820c"></script>
 </body>
 </html>

@@ -550,14 +550,12 @@ async function loadCompartidos() {
   // era invisible del todo (sin ningún aviso ni forma de cambiar de marca
   // en esta pantalla): por eso para esta gente se pide TODO, sin filtrar
   // por empresa (el backend ya lo permite -- empresa es opcional).
-  const modulos = usuarioActual?.modulos || [];
-  const esRestringido = !(modulos.includes("informes") || modulos.includes("saona_informes"));
   // Sin el módulo completo, "Base de candidatos" (que ocupa el área "lista"
   // del grid en vista Lista + CV) ni siquiera se pinta -- ver la regla
   // .modo-restringido en compartidos.html, que hace que #compartidos-list
   // ocupe esa misma área en su lugar para esta gente.
-  document.querySelector(".compartidos-wrap")?.classList.toggle("modo-restringido", esRestringido);
-  const filtroEmpresa = esRestringido ? "" : `?empresa=${EMPRESA}`;
+  document.querySelector(".compartidos-wrap")?.classList.toggle("modo-restringido", esUsuarioRestringido);
+  const filtroEmpresa = esUsuarioRestringido ? "" : `?empresa=${EMPRESA}`;
   const [conmigo, porMi, vacantesConmigo, vacantesPorMi] = await Promise.all([
     fetch(`${AUTH_API_BASE}/informes/compartidos${filtroEmpresa}`).then((r) => (r.ok ? r.json() : [])),
     fetch(`${AUTH_API_BASE}/informes/compartidos-por-mi${filtroEmpresa}`).then((r) => (r.ok ? r.json() : [])),
@@ -1269,8 +1267,15 @@ function renderForm() {
     ? `<p class="staff-hint">🔗 Compartido con: ${escapeHTML(candidatoEditando.compartidos.map((x) => x.nombre).join(", "))}</p>`
     : "";
 
-  const descargarCvHTML = esEdicion
+  // Quien no tiene el módulo completo no necesita gestionar ficheros
+  // (agregar, re-extraer...) -- solo descargar el CV, así que ese botón se
+  // mueve abajo del todo (ver descargarCvBotonHTML) en vez de ir aquí arriba
+  // junto con el resto de acciones que esta gente no usa.
+  const descargarCvHTML = esEdicion && !esUsuarioRestringido
     ? `<a class="btn btn-ghost" href="${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}/cv.pdf" target="_blank" rel="noopener">📄 Descargar CV en PDF</a>`
+    : "";
+  const descargarCvBotonHTML = esEdicion && esUsuarioRestringido
+    ? `<a class="btn btn-ghost btn-descargar-cv" href="${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}/cv.pdf" target="_blank" rel="noopener">Descargar CV</a>`
     : "";
 
   const faltanDatos = esEdicion && !candidatoEditando.telefono && !candidatoEditando.email
@@ -1305,7 +1310,16 @@ function renderForm() {
       })()
     : "";
 
-  const archivosHTML = esEdicion && candidatoEditando.archivos.length
+  // Envuelto en un hueco de alto mínimo (ver .ficha-resultado-test-slot) y
+  // SIEMPRE presente en el DOM, tenga o no tenga contenido -- sin esto, la
+  // ficha de quien ya respondió el test salía más alta que la de quien no,
+  // cambiando el tamaño del contenedor según el candidato.
+  const resultadoTestSlotHTML = `<div class="ficha-resultado-test-slot">${resultadoTestHTML}${respuestaTestHTML}</div>`;
+
+  // Ni la lista de ficheros ni "Añadir fichero"/"Re-extraer con IA" le
+  // sirven a quien no tiene el módulo completo -- ver descargarCvBotonHTML,
+  // el único botón que necesita.
+  const archivosHTML = esEdicion && !esUsuarioRestringido && candidatoEditando.archivos.length
     ? `<div class="archivos-lista">${candidatoEditando.archivos.map((a) => `
         <div class="archivo-item-fila">
           <a href="${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}/archivos/${a.id}" target="_blank" rel="noopener">📄 ${escapeHTML(a.nombre_original)}</a>
@@ -1315,7 +1329,7 @@ function renderForm() {
       <div id="extraccion-aviso-wrap-edicion"></div>`
     : "";
 
-  const agregarArchivoHTML = esEdicion ? `
+  const agregarArchivoHTML = esEdicion && !esUsuarioRestringido ? `
     <div class="subir-cv-row">
       <input type="file" id="input-archivo-extra">
       <button type="button" id="btn-agregar-archivo" class="btn btn-ghost">＋ Añadir fichero</button>
@@ -1330,8 +1344,7 @@ function renderForm() {
         ${fotoFormHTML}
         ${compartidoFichaHTML}
         ${avisoDatosHTML}
-        ${resultadoTestHTML}
-        ${respuestaTestHTML}
+        ${resultadoTestSlotHTML}
       </div>
       ${subirCvHTML}
       <div id="single-candidato-wrap">
@@ -1377,6 +1390,7 @@ function renderForm() {
         ${agregarArchivoHTML}
         <div class="form-actions">
           <button type="button" id="btn-guardar-candidato" class="btn btn-primary">Guardar</button>
+          ${descargarCvBotonHTML}
           ${esEdicion ? `<a class="btn btn-ghost" id="btn-whatsapp-candidato" href="https://wa.me/${soloDigitos(candidatoEditando.telefono)}" target="_blank" rel="noopener" ${candidatoEditando.telefono ? "" : "hidden"}>💬 WhatsApp</a>` : ""}
           ${esEdicion ? `<button type="button" id="btn-eliminar-candidato" class="btn btn-ghost">Eliminar</button>` : ""}
           <button type="button" id="btn-cerrar-form" class="btn btn-ghost">Cancelar</button>
@@ -1430,11 +1444,11 @@ function renderForm() {
   }
   // En "Lista + CV" la ficha ya está fija (sticky) a la vista -- desplazar
   // la página entera solo haría perder el sitio en la lista de la izquierda.
-  // En "Lista" el scroll se hace después, en renderCandidatosGrid, una vez
-  // el formulario ya se movió justo debajo de la tarjeta abierta -- si se
-  // hiciera aquí, desplazaría a la posición vieja (al final de la página)
-  // un instante antes de que se reubique.
-  if (candidatosVista === "tarjetas") wrap.scrollIntoView({ behavior: "smooth", block: "start" });
+  // En "Lista" y "Tarjetas" el scroll se hace después, en
+  // reposicionarFormWrapSiCorresponde (llamada tras esto por
+  // refrescarResaltadoAbierta), una vez el formulario ya se movió justo
+  // debajo de la tarjeta abierta -- si se hiciera aquí, desplazaría a la
+  // posición vieja (al final de la página) un instante antes de reubicarse.
 }
 
 function cerrarForm() {
@@ -1942,6 +1956,12 @@ let candidatosPorPagina = Number(localStorage.getItem("kt-candidatos-por-pagina"
 let candidatosOrden = localStorage.getItem("kt-candidatos-orden") || "";
 // tarjetas | lista | combinada (ver .vista-combinada en compartidos.html).
 let candidatosVista = localStorage.getItem("kt-candidatos-vista") || "lista";
+// true para quien no tiene el módulo completo (informes/saona_informes) --
+// solo ve "Compartidos conmigo/por ti", así que en su ficha se ocultan las
+// acciones de gestión de ficheros que no le sirven (ver renderForm). Se fija
+// en initBaseCandidatos, ANTES de que loadCompartidos pueda pintar ninguna
+// ficha, así que siempre está resuelto quien lo consulte.
+let esUsuarioRestringido = false;
 // Distingue "el select muestra Personalizado mientras se escribe el número"
 // de "candidatosPorPagina ya es un valor no estándar" -- si no, al elegir
 // "Personalizado..." el primer repintado (con candidatosPorPagina todavía
@@ -2439,7 +2459,14 @@ function aparcarFormWrapEnSitio() {
 // desde Base de candidatos.
 function reposicionarFormWrapSiCorresponde() {
   aparcarFormWrapEnSitio();
-  if (candidatosVista !== "lista" || !candidatoEditando) return;
+  // Tarjetas se comporta igual que Lista (la ficha se abre pegada a la
+  // tarjeta que se clicó, sin saltar arriba del todo -- ver el CSS
+  // .candidatos-grid:not(.candidatos-lista) > #form-wrap para que ocupe la
+  // fila entera en vez de encajarse en una sola columna). Combinada NO
+  // entra aquí -- #form-wrap se queda aparcado como hijo directo del grid
+  // para que grid-area:ficha lo posicione fijo al lado, no dentro de una
+  // tarjeta.
+  if (candidatosVista === "combinada" || !candidatoEditando) return;
   const formWrap = document.getElementById("form-wrap");
   const cardAbierta = document.querySelector(`.candidato-mini-card[data-candidato-id="${candidatoEditando.id}"]`);
   if (formWrap && cardAbierta) {
@@ -2740,6 +2767,7 @@ async function initBaseCandidatos(user) {
   usuarioActual = user;
   const modulos = user.modulos || [];
   const tieneAcceso = modulos.includes("informes") || modulos.includes("saona_informes");
+  esUsuarioRestringido = !tieneAcceso;
   const wrap = document.getElementById("reclu-candidatos-wrap");
   // El modal de exportar a Excel se usa tanto desde "Base de candidatos"
   // como desde "Compartidos conmigo" (ver btn-exportar-excel-compartidos en
