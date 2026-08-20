@@ -42,6 +42,12 @@
     max-height: calc(100vh - 24px); overflow-y: auto;
   }
   .compartidos-wrap.vista-combinada > #compartidos-list { grid-area: compartidos; }
+  /* Quien no tiene el módulo completo (.reclu-candidatos-wrap se queda con
+     [hidden]) no tiene nada que ocupe el área "lista" -- para esa gente
+     #compartidos-list pasa a ocupar esa columna en vez de la fila entera de
+     abajo, así "Lista + CV" también les queda con la lista a la izquierda y
+     la ficha fija a la derecha (ver modo-restringido en loadCompartidos). */
+  .compartidos-wrap.vista-combinada.modo-restringido > #compartidos-list { grid-area: lista; }
   .reclu-seccion { font-size: 18px; margin: 26px 0 12px; }
   .reclu-seccion:first-child { margin-top: 6px; }
   .compartidos-seleccion-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
@@ -496,6 +502,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260724a"></script>
 <script src="js/topbar-menu.js?v=20260820a"></script>
-<script src="js/compartidos.js?v=20260820a"></script>
+<script src="js/compartidos.js?v=20260820b"></script>
 </body>
 </html>

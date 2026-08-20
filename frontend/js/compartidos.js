@@ -337,7 +337,9 @@ function grupoHTML(grupo, etiquetaOtro, abierta, permitirDejarDeCompartir, permi
       </summary>
       <div class="tanda-body">
         ${eliminarGrupoBtn}
-        ${grupo.items.map((it) => candidatoCardHTML(it, permitirDejarDeCompartir, permitirSeleccion, contexto)).join("")}
+        <div class="candidatos-grid ${candidatosVista !== "tarjetas" ? "candidatos-lista" : ""}">
+          ${grupo.items.map((it) => candidatoCardHTML(it, permitirDejarDeCompartir, permitirSeleccion, contexto)).join("")}
+        </div>
       </div>
     </details>`;
 }
@@ -507,7 +509,7 @@ function vacanteCompartidaHTML(vacante, { soloAptos = false, colapsable = false 
     ? `<button type="button" class="btn-mini btn-exportar-excel-vacante-compartida" data-candidato-ids="${candidatosVisibles.map((c) => c.id).join(",")}">📊 Exportar a Excel...</button>`
     : "";
   const cuerpo = candidatosVisibles.length
-    ? `<div class="candidatos-grid candidatos-lista vacante-compartida-candidatos">${candidatosVisibles.map((c) => candidatoMiniCardHTML(c, { ocultarVacante: true })).join("")}</div>`
+    ? `<div class="candidatos-grid ${candidatosVista !== "tarjetas" ? "candidatos-lista" : ""} vacante-compartida-candidatos">${candidatosVisibles.map((c) => candidatoMiniCardHTML(c, { ocultarVacante: true })).join("")}</div>`
     : `<p class="staff-hint">Ningún candidato apto en esta solicitud todavía.</p>`;
   if (colapsable) {
     const clave = `vacsol-${vacante.id}`;
@@ -550,6 +552,11 @@ async function loadCompartidos() {
   // por empresa (el backend ya lo permite -- empresa es opcional).
   const modulos = usuarioActual?.modulos || [];
   const esRestringido = !(modulos.includes("informes") || modulos.includes("saona_informes"));
+  // Sin el módulo completo, "Base de candidatos" (que ocupa el área "lista"
+  // del grid en vista Lista + CV) ni siquiera se pinta -- ver la regla
+  // .modo-restringido en compartidos.html, que hace que #compartidos-list
+  // ocupe esa misma área en su lugar para esta gente.
+  document.querySelector(".compartidos-wrap")?.classList.toggle("modo-restringido", esRestringido);
   const filtroEmpresa = esRestringido ? "" : `?empresa=${EMPRESA}`;
   const [conmigo, porMi, vacantesConmigo, vacantesPorMi] = await Promise.all([
     fetch(`${AUTH_API_BASE}/informes/compartidos${filtroEmpresa}`).then((r) => (r.ok ? r.json() : [])),
@@ -569,10 +576,22 @@ async function loadCompartidos() {
   compartidosPorMiCache = porMi;
   gruposPorMiCache = gruposPorMi;
 
+  // Toggle de vista propio para quien no ve "Base de candidatos" (donde
+  // vive el otro) -- mismo candidatosVista compartido, ver wireVistaToggle/
+  // aplicarVistaGlobal. Visible siempre (no solo para quien es restringido)
+  // para no tener que distinguir aquí mismo quién lo necesita.
+  const vistaToggleHTML = `
+    <div class="vista-toggle" role="group" aria-label="Cómo ver la lista" style="margin-bottom:12px;">
+      <button type="button" class="vista-toggle-btn" data-vista="lista" title="Lista">📃</button>
+      <button type="button" class="vista-toggle-btn" data-vista="combinada" title="Lista + CV">📃➕</button>
+      <button type="button" class="vista-toggle-btn" data-vista="tarjetas" title="Tarjetas">🗂️</button>
+    </div>`;
+
   // Las vacantes compartidas van primero -- es la forma recomendada de ver
   // todo agrupado; los "Compartidos" sueltos por candidato (tandas) quedan
   // debajo, para candidatos que aún no se asignaron a ninguna solicitud.
-  let html = vacantesCompartidasSeccionHTML("Solicitudes compartidas contigo", vacantesConmigo, "", { soloAptos: true, colapsable: true });
+  let html = vistaToggleHTML;
+  html += vacantesCompartidasSeccionHTML("Solicitudes compartidas contigo", vacantesConmigo, "", { soloAptos: true, colapsable: true });
   html += vacantesCompartidasSeccionHTML("Solicitudes que has compartido", vacantesPorMi, "", { colapsable: true });
 
   html += seccionHTML(
@@ -595,8 +614,11 @@ async function loadCompartidos() {
     html += seccionHTML("por-mi", "Compartidos por ti", gruposPorMi, "compartido con", "", true, true, false);
   }
 
+  aparcarFormWrapEnSitio();
   wrap.innerHTML = html;
   wireCompartidosInteractivos(wrap);
+  wireVistaToggle(wrap, aplicarVistaGlobal);
+  aplicarVistaGlobal();
   // .vacante-compartida-candidatos (no .vacante-compartida-card) porque
   // "Solicitudes compartidas contigo" se pinta colapsable -- ahí el grid de
   // candidatos queda dentro de un <details class="tanda"> igual que
@@ -951,9 +973,6 @@ const CAMPOS_FORM = [
   ["telefono", "Teléfono"],
   ["email", "Email"],
   ["direccion", "Dirección"],
-  ["fecha_nacimiento", "Fecha de nacimiento"],
-  ["dni", "DNI/NIE"],
-  ["puesto_solicitado", "Puesto al que aplica"],
   ["fecha_solicitud", "Fecha de solicitud"],
   ["disponibilidad", "Disponibilidad"],
 ];
@@ -1318,7 +1337,7 @@ function renderForm() {
       <div id="single-candidato-wrap">
         <div class="form-grid">
           <div class="form-field">
-            <label>Vacante asociada</label>
+            <label>Vacante</label>
             ${vacanteSelectHTML(
               esEdicion ? candidatoEditando.vacante_id : vacantePreseleccionada(),
               "candidato-vacante-form",
@@ -2359,20 +2378,52 @@ function renderCandidatosPaginacion(total, totalPaginas) {
   });
 }
 
-function aplicarVistaCandidatos() {
-  const compartidosWrap = document.querySelector(".compartidos-wrap");
-  const grid = document.getElementById("candidatos-grid");
-  grid.classList.toggle("candidatos-lista", candidatosVista !== "tarjetas");
-  compartidosWrap.classList.toggle("vista-combinada", candidatosVista === "combinada");
+// Cablea los botones ".vista-toggle-btn" que haya dentro de `container` en
+// ESTE momento -- hay hasta dos grupos de estos botones en la página (uno
+// fijo en la barra de Base de candidatos, otro que se repinta cada vez que
+// se recarga Compartidos), y cada uno necesita su propio cableado porque
+// wrap.innerHTML destruye los listeners de los botones viejos al repintar.
+// `onChange` es lo que hace falta rehacer tras cambiar de vista -- para
+// Base de candidatos hay que repaginar (renderCandidatosGrid), para
+// Compartidos basta con reaplicar clases (aplicarVistaGlobal, que ya
+// actualiza TODOS los .candidatos-grid de la página, no solo el de aquí).
+function wireVistaToggle(container, onChange) {
+  container.querySelectorAll(".vista-toggle-btn").forEach((b) => {
+    b.addEventListener("click", () => {
+      candidatosVista = b.dataset.vista;
+      localStorage.setItem("kt-candidatos-vista", candidatosVista);
+      onChange();
+    });
+  });
+}
+
+// candidatosVista (tarjetas/lista/combinada) es una preferencia PERSONAL
+// compartida entre "Base de candidatos" y "Compartidos conmigo/por ti" --
+// da igual desde qué toggle se cambie (puede haber dos, ver
+// wireVistaToggle), y afecta a TODOS los .candidatos-grid de la página a la
+// vez (el de Base de candidatos y los que van dentro de cada tanda/
+// solicitud compartida en Compartidos), no solo al que originó el clic.
+function aplicarVistaGlobal() {
+  document.querySelectorAll(".vista-toggle-btn").forEach((b) => {
+    b.classList.toggle("activo", b.dataset.vista === candidatosVista);
+  });
+  document.querySelectorAll(".candidatos-grid").forEach((g) => {
+    g.classList.toggle("candidatos-lista", candidatosVista !== "tarjetas");
+  });
+  document.querySelector(".compartidos-wrap")?.classList.toggle("vista-combinada", candidatosVista === "combinada");
+  reposicionarFormWrapSiCorresponde();
 }
 
 // #form-wrap vive normalmente justo después de #reclu-candidatos-wrap (su
 // sitio de siempre en el HTML). En vista Lista lo trasladamos dentro del
-// grid, justo debajo de la tarjeta abierta, para que la ficha aparezca "ahí
-// mismo" en vez de al final de la página -- pero grid.innerHTML lo borraría
-// sin darse cuenta si se quedara dentro cuando se repinta la lista (buscar,
-// filtrar, paginar...), así que SIEMPRE se aparca de vuelta a su sitio antes
-// de tocar el grid, y se reubica después si toca.
+// grid, justo debajo de la tarjeta abierta (venga de Base de candidatos o
+// de Compartidos, ver reposicionarFormWrapSiCorresponde), para que la ficha
+// aparezca "ahí mismo" en vez de al final de la página -- pero
+// grid.innerHTML/wrap.innerHTML lo borrarían sin darse cuenta si se quedara
+// dentro cuando se repinta la lista (buscar, filtrar, recargar
+// Compartidos...), así que SIEMPRE se aparca de vuelta a su sitio antes de
+// tocar esos contenedores, y se reubica después si toca (ver
+// reposicionarFormWrapSiCorresponde, llamada al final de cada repintado).
 function aparcarFormWrapEnSitio() {
   const formWrap = document.getElementById("form-wrap");
   const home = document.getElementById("reclu-candidatos-wrap");
@@ -2381,9 +2432,24 @@ function aparcarFormWrapEnSitio() {
   }
 }
 
+// Aparca primero (ver aparcarFormWrapEnSitio) y, en vista Lista con una
+// ficha abierta, la reinserta justo debajo de la tarjeta correspondiente --
+// buscándola en TODO el documento, no solo en #candidatos-grid, porque la
+// ficha puede haberse abierto desde una tanda de Compartidos en vez de
+// desde Base de candidatos.
+function reposicionarFormWrapSiCorresponde() {
+  aparcarFormWrapEnSitio();
+  if (candidatosVista !== "lista" || !candidatoEditando) return;
+  const formWrap = document.getElementById("form-wrap");
+  const cardAbierta = document.querySelector(`.candidato-mini-card[data-candidato-id="${candidatoEditando.id}"]`);
+  if (formWrap && cardAbierta) {
+    cardAbierta.insertAdjacentElement("afterend", formWrap);
+    formWrap.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+}
+
 function renderCandidatosGrid() {
   aparcarFormWrapEnSitio();
-  aplicarVistaCandidatos();
   const grid = document.getElementById("candidatos-grid");
   const visibles = candidatosFiltradosPorApto();
   // Los contadores de arriba (Todos/Pendiente/Entrevistado...) solo cuentan
@@ -2405,14 +2471,7 @@ function renderCandidatosGrid() {
     ? pagina.map(candidatoMiniCardHTML).join("")
     : `<p class="staff-hint">${ultimosCandidatosCargados.length ? "Ningún candidato coincide con el filtro de aptos." : "Todavía no hay candidatos en la base de datos."}</p>`;
   renderCandidatosPaginacion(visibles.length, totalPaginas);
-  if (candidatosVista === "lista" && candidatoEditando) {
-    const cardAbierta = grid.querySelector(`.candidato-mini-card[data-candidato-id="${candidatoEditando.id}"]`);
-    if (cardAbierta) {
-      const formWrap = document.getElementById("form-wrap");
-      cardAbierta.insertAdjacentElement("afterend", formWrap);
-      formWrap.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
-  }
+  aplicarVistaGlobal();
   grid.querySelectorAll(".candidato-mini-card").forEach((card) => {
     const id = Number(card.dataset.candidatoId);
     card.querySelector(".candidato-mini-checkbox").addEventListener("click", (e) => {
@@ -2585,7 +2644,16 @@ function abrirMailtoSeleccionados() {
 // solo abre fichas desde "Compartidos", ver reclu-candidatos-wrap).
 function refrescarResaltadoAbierta() {
   const wrap = document.getElementById("reclu-candidatos-wrap");
-  if (wrap && !wrap.hidden) renderCandidatosGrid();
+  if (wrap && !wrap.hidden) {
+    renderCandidatosGrid();
+  } else {
+    // Sin el módulo completo no hay #candidatos-grid que repintar, pero la
+    // ficha puede haberse abierto desde una tarjeta de Compartidos -- solo
+    // hace falta reposicionar #form-wrap (ver reposicionarFormWrapSiCorresponde),
+    // no recargar toda la lista de Compartidos (sería un viaje de red y un
+    // parpadeo innecesarios, los datos no cambiaron).
+    reposicionarFormWrapSiCorresponde();
+  }
 }
 
 async function abrirEdicionCandidato(candidatoId) {
@@ -2726,19 +2794,7 @@ async function initBaseCandidatos(user) {
     candidatosPagina = 1;
     renderCandidatosGrid();
   });
-  const botonesVista = document.querySelectorAll(".vista-toggle-btn");
-  const marcarVistaActiva = () => {
-    botonesVista.forEach((b) => b.classList.toggle("activo", b.dataset.vista === candidatosVista));
-  };
-  marcarVistaActiva();
-  botonesVista.forEach((b) => {
-    b.addEventListener("click", () => {
-      candidatosVista = b.dataset.vista;
-      localStorage.setItem("kt-candidatos-vista", candidatosVista);
-      marcarVistaActiva();
-      renderCandidatosGrid();
-    });
-  });
+  wireVistaToggle(document, renderCandidatosGrid);
   let buscarTimeout;
   document.getElementById("candidatos-buscar").addEventListener("input", () => {
     clearTimeout(buscarTimeout);
