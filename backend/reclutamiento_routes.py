@@ -1,6 +1,7 @@
 import json
 import mimetypes
 import os
+import re
 import secrets
 import threading
 import time
@@ -19,6 +20,24 @@ from informes_routes import require_informes
 from utils import rows_to_xlsx
 
 router = APIRouter()
+
+
+def _nombre_archivo_cv(candidato: dict) -> str:
+    """Nombre de archivo para cualquier PDF que se descargue de la ficha de
+    un candidato (el generado con diseño propio, el original subido...) --
+    antes se servía tal cual el nombre del archivo original (a menudo el del
+    lote entero, tipo "Krispy Kreme 37-cvs-18-08-2026.pdf", nada útil una
+    vez descargado y guardado en el ordenador de quien lo pidió). Se arma
+    como "CV Nombre Apellido Vacante" (el centro de la vacante si la tiene
+    asignada, que es lo que más ayuda a diferenciar entre tiendas -- si no
+    tiene centro se usa el puesto; sin vacante asignada se queda solo con el
+    nombre)."""
+    nombre = candidato.get("nombre_completo") or "Candidato"
+    vacante = candidato.get("vacante_centro") or candidato.get("vacante_puesto") or ""
+    base = f"CV {nombre} {vacante}".strip()
+    base = re.sub(r'[\\/:*?"<>|]', "", base)
+    base = re.sub(r"\s+", " ", base).strip()
+    return f"{base}.pdf"
 
 
 def require_acceso_candidato(candidato_id: int, user: dict = Depends(get_current_user)) -> dict:
@@ -878,7 +897,7 @@ def cv_pdf_route(candidato_id: int, _user: dict = Depends(require_acceso_candida
         try:
             foto_ruta = reclutamiento_module.get_foto_ruta(candidato_id)
             pdf_bytes = cv_pdf.generar_cv_pdf(candidato, empresa=candidato.get("empresa", "kk"), foto_ruta=foto_ruta)
-            nombre = f"cv_{(candidato.get('nombre_completo') or 'candidato').replace(' ', '_')}.pdf"
+            nombre = _nombre_archivo_cv(candidato)
             return Response(
                 content=pdf_bytes,
                 media_type="application/pdf",
@@ -892,7 +911,7 @@ def cv_pdf_route(candidato_id: int, _user: dict = Depends(require_acceso_candida
     return FileResponse(
         original["ruta"],
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{original["nombre_original"]}"'},
+        headers={"Content-Disposition": f'inline; filename="{_nombre_archivo_cv(candidato)}"'},
     )
 
 
@@ -914,6 +933,10 @@ def descargar_archivo_route(candidato_id: int, archivo_id: int, _user: dict = De
     if archivo is None:
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
     nombre = archivo["nombre_original"] or "archivo"
+    # Solo se renombra el PDF (el CV en sí) -- otros adjuntos (fotos, cartas...)
+    # se quedan con su nombre original, que sigue siendo lo más útil para esos.
+    if nombre.lower().endswith(".pdf"):
+        nombre = _nombre_archivo_cv(candidato)
     media_type = mimetypes.guess_type(nombre)[0] or "application/octet-stream"
     return FileResponse(
         archivo["ruta"],
