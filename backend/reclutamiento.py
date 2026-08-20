@@ -1090,10 +1090,17 @@ def rellenar_huecos_candidato(candidato_id, extraido: dict):
         valor_nuevo = extraido.get(campo)
         if valor_nuevo:
             campos[campo] = valor_nuevo
+    # Si ya se puede rellenar el historial ESTRUCTURADO (antes solo lo hacía
+    # Gemini, ahora también el extractor local para los CV con el patrón
+    # habitual -- ver cv_extraction._parsear_formacion_local), el texto
+    # libre "antiguo" de esa misma tanda queda de más: se limpia para que la
+    # ficha muestre solo las tarjetas, no las dos cosas repetidas.
     if extraido.get("formacion_json") and not candidato.get("formacion_json"):
         campos["formacion_json"] = extraido["formacion_json"]
+        campos["formacion"] = None
     if extraido.get("experiencia_json") and not candidato.get("experiencia_json"):
         campos["experiencia_json"] = extraido["experiencia_json"]
+        campos["experiencia"] = None
     extra_nuevo = extraido.get("extra_fields") or {}
     if extra_nuevo:
         campos["extra_fields"] = {**(candidato.get("extra_fields") or {}), **extra_nuevo}

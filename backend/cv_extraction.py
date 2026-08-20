@@ -320,24 +320,38 @@ def _buscar_cerca(texto: str, keywords: list[str], patron: re.Pattern) -> str:
     return ""
 
 
-def _indice_de_cabecera(texto_norm: str, kw_norm: str) -> int:
+def _indice_de_cabecera(texto_norm: str, kw_norm: str, desde: int = 0) -> int:
     """Solo cuenta la aparición de kw que empieza una línea (así es como se
-    ve de verdad una cabecera de sección en el PDF) -- una aparición a media
-    frase NO cuenta, ni siquiera a falta de otra cosa: por ejemplo
-    "certificaciones" dentro de "Otros títulos, certificaciones y carnés"
-    (el título de OTRA sección, no contenido real de Certificaciones), o
+    ve de verdad una cabecera de sección en el PDF) Y que además ocupa (casi)
+    toda esa línea -- una aparición a media frase NO cuenta, ni siquiera a
+    falta de otra cosa: por ejemplo "certificaciones" dentro de "Otros
+    títulos, certificaciones y carnés" (el título de OTRA sección), o
     "formación" dentro de una pregunta de selección tipo "La formación son 2
     semanas..." (que no tiene nada que ver con la sección Formación/
-    Estudios). Devolver -1 en vez de conformarse con esa aparición deja que
-    el llamador siga probando el resto de sinónimos de la lista (ver
-    SECTIONS/EXTRA_KEYWORDS) en vez de quedarse con contenido de otra parte
-    del CV que no tiene nada que ver."""
-    pos = 0
+    Estudios). El segundo requisito (ocupar casi toda la línea) hace falta
+    porque una etiqueta de habilidad como "Formación de personal" (dentro de
+    una nube de etiquetas de Experiencia) SÍ puede caer justo al principio
+    de su propia línea y aun así no ser la cabecera real -- una cabecera de
+    verdad es corta y sola ("Idiomas") o, como mucho, con un valor corto
+    detrás de dos puntos ("Carnet de conducir: B"), nunca sigue en
+    minúsculas como una frase. Devolver -1 en vez de conformarse con esa
+    aparición deja que el llamador siga probando el resto de sinónimos de
+    la lista (ver SECTIONS/EXTRA_KEYWORDS) en vez de quedarse con contenido
+    de otra parte del CV que no tiene nada que ver. También se usa para
+    encontrar dónde ACABA una sección (buscando la cabecera de la
+    siguiente) -- ahí importa todavía más: "Formación de personal" es una
+    etiqueta de habilidad dentro de Experiencia, no una cabecera real, y sin
+    esta misma exigencia cortaba la sección de Experiencia por la mitad."""
+    pos = desde
     while True:
         idx = texto_norm.find(kw_norm, pos)
         if idx == -1:
             return -1
-        if idx == 0 or texto_norm[idx - 1] == "\n":
+        empieza_linea = idx == 0 or texto_norm[idx - 1] == "\n"
+        fin_kw = idx + len(kw_norm)
+        resto_linea = texto_norm[fin_kw:texto_norm.find("\n", fin_kw) if texto_norm.find("\n", fin_kw) != -1 else len(texto_norm)]
+        ocupa_la_linea = resto_linea.strip() == "" or resto_linea.lstrip().startswith(":")
+        if empieza_linea and ocupa_la_linea:
             return idx
         pos = idx + 1
 
@@ -382,7 +396,7 @@ def _separar_cabeceras_pegadas(texto: str) -> str:
     return "".join(partes)
 
 
-def _contenido_de_seccion(texto: str, keywords: list[str], una_linea: bool) -> str:
+def _contenido_de_seccion(texto: str, keywords: list[str], una_linea: bool, limite_max: int = 400) -> str:
     texto_norm = _normalizar(texto)
     for kw in keywords:
         idx = _indice_de_cabecera(texto_norm, _normalizar(kw))
@@ -393,10 +407,10 @@ def _contenido_de_seccion(texto: str, keywords: list[str], una_linea: bool) -> s
         for otra_kw in ALL_HEADER_KEYWORDS:
             if otra_kw in keywords:
                 continue
-            otra_idx = texto_norm.find(_normalizar(otra_kw), inicio)
+            otra_idx = _indice_de_cabecera(texto_norm, _normalizar(otra_kw), inicio)
             if otra_idx != -1 and otra_idx < fin:
                 fin = otra_idx
-        contenido = texto[inicio:min(fin, inicio + 400)]
+        contenido = texto[inicio:min(fin, inicio + limite_max)]
         contenido = re.sub(r"^[:\s]+", "", contenido)
         if una_linea:
             nl = contenido.find("\n")
@@ -406,6 +420,92 @@ def _contenido_de_seccion(texto: str, keywords: list[str], una_linea: bool) -> s
         if contenido:
             return contenido
     return ""
+
+
+# Rango de fechas tal como lo exportan estos CV -- "octubre de 2025 - abril
+# de 2026  (6 meses)", "septiembre de 2023 - agosto de 2025  (1 año y 11
+# meses)". Se usa como "ancla" para partir el bloque de Formación/
+# Experiencia en entradas sueltas (ver _parsear_entradas_fechadas): cada
+# entrada real termina en una de estas líneas, así que sirve tanto para
+# saber dónde acaba una entrada como para sacar sus fechas.
+RANGO_FECHAS_RE = re.compile(
+    r"(?P<inicio>\d{1,2}\s+de\s+[a-záéíóúñ]+\s+de\s+\d{4}|[a-záéíóúñ]+\s+de\s+\d{4})"
+    r"\s*-\s*"
+    r"(?P<fin>\d{1,2}\s+de\s+[a-záéíóúñ]+\s+de\s+\d{4}|[a-záéíóúñ]+\s+de\s+\d{4}|actualidad|actualmente|actual)",
+    re.IGNORECASE,
+)
+
+
+def _parsear_entradas_fechadas(lineas: list[str], n_lineas_contexto: int) -> list[dict]:
+    """Encuentra cada línea que ES un rango de fechas (no una fecha suelta
+    mencionada de pasada dentro de una frase larga -- por eso se exige que
+    el match cubra al menos la mitad de la línea) y devuelve, para cada una,
+    las n_lineas_contexto líneas que la preceden -- en los CV de InfoJobs
+    tanto Formación (tipo/título/centro, 3 líneas) como Experiencia (puesto/
+    empresa, 2 líneas) tienen siempre ese mismo número fijo de líneas justo
+    antes de la fecha, así que sirve para las dos con solo cambiar ese
+    número. Común a _parsear_formacion_local/_parsear_experiencia_local."""
+    entradas = []
+    for i, linea in enumerate(lineas):
+        m = RANGO_FECHAS_RE.search(linea)
+        if not m or len(m.group(0)) < len(linea) * 0.5:
+            continue
+        entradas.append({
+            "idx": i,
+            "contexto": lineas[max(0, i - n_lineas_contexto):i],
+            "fecha_inicio": m.group("inicio").strip(),
+            "fecha_fin": m.group("fin").strip(),
+        })
+    return entradas
+
+
+def _parsear_formacion_local(texto_seccion: str) -> list[dict]:
+    """Formación estructurada (título/centro/fechas) a partir del texto ya
+    extraído de la sección -- incluso sin Gemini, el patrón de estos CV es
+    lo bastante fijo (tipo de título, título concreto, centro, fechas) como
+    para sacarlo con reglas. Si una entrada no trae las 3 líneas de contexto
+    completas (CV con un formato distinto al esperado) se descarta esa
+    entrada en vez de inventar datos a medias -- mejor la ficha se quede sin
+    historial estructurado (con el texto libre de siempre) que con una
+    entrada mal cortada."""
+    lineas = [l.strip() for l in texto_seccion.split("\n") if l.strip()]
+    resultado = []
+    for e in _parsear_entradas_fechadas(lineas, 3):
+        tipo, especifico, centro = e["contexto"] if len(e["contexto"]) == 3 else (None, None, None)
+        if not centro:
+            continue
+        if not especifico or especifico.lower() == (tipo or "").lower():
+            titulo = tipo or especifico
+        else:
+            titulo = f"{tipo} {especifico}" if tipo else especifico
+        resultado.append({
+            "titulo": titulo, "centro": centro,
+            "fecha_inicio": e["fecha_inicio"], "fecha_fin": e["fecha_fin"],
+        })
+    return resultado
+
+
+def _parsear_experiencia_local(texto_seccion: str) -> list[dict]:
+    """Experiencia estructurada (puesto/empresa/fechas/descripción) -- mismo
+    razonamiento que _parsear_formacion_local, pero aquí el patrón fijo son
+    2 líneas (puesto, empresa) antes de la fecha. La descripción se toma de
+    todo lo que queda entre el final de esta entrada y el principio de la
+    siguiente (o el final del bloque si es la última)."""
+    lineas = [l.strip() for l in texto_seccion.split("\n") if l.strip()]
+    entradas = _parsear_entradas_fechadas(lineas, 2)
+    resultado = []
+    for j, e in enumerate(entradas):
+        if len(e["contexto"]) < 2:
+            continue
+        puesto, empresa = e["contexto"][-2], e["contexto"][-1]
+        fin_bloque = entradas[j + 1]["idx"] - 2 if j + 1 < len(entradas) else len(lineas)
+        descripcion = " ".join(lineas[e["idx"] + 1:max(e["idx"] + 1, fin_bloque)]).strip()
+        resultado.append({
+            "puesto": puesto, "empresa": empresa,
+            "fecha_inicio": e["fecha_inicio"], "fecha_fin": e["fecha_fin"],
+            "descripcion": descripcion[:600],
+        })
+    return resultado
 
 
 def _extraer_de_texto(texto_crudo: str) -> dict:
@@ -437,9 +537,25 @@ def _extraer_de_texto(texto_crudo: str) -> dict:
         extraido["fecha_nacimiento"] = nacimiento
 
     for campo, keywords, una_linea in SECTIONS:
-        contenido = _contenido_de_seccion(texto, keywords, una_linea)
+        # Formación/Experiencia necesitan mucho más que 400 caracteres --
+        # ese límite pensado para un campo corto (Disponibilidad, Dirección)
+        # cortaba a la mitad de la segunda entrada de quien tenía varios
+        # estudios o trabajos, y _parsear_formacion_local/
+        # _parsear_experiencia_local (justo debajo) necesitan el bloque
+        # completo para reconocer todas las entradas, no solo la primera.
+        limite = 4000 if campo in ("formacion", "experiencia") else 400
+        contenido = _contenido_de_seccion(texto, keywords, una_linea, limite)
         if contenido:
             extraido[campo] = contenido
+
+    if extraido.get("formacion"):
+        formacion_json = _parsear_formacion_local(extraido["formacion"])
+        if formacion_json:
+            extraido["formacion_json"] = formacion_json
+    if extraido.get("experiencia"):
+        experiencia_json = _parsear_experiencia_local(extraido["experiencia"])
+        if experiencia_json:
+            extraido["experiencia_json"] = experiencia_json
 
     for nombre_extra, keywords, una_linea in EXTRA_KEYWORDS:
         contenido = _contenido_de_seccion(texto, keywords, una_linea)
