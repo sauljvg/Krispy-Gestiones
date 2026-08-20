@@ -213,6 +213,22 @@ DNI_RE = re.compile(r"\b(\d{8}[A-Za-z]|[XYZxyz]\d{7}[A-Za-z])\b")
 DATE_RE = re.compile(r"\b\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}\b|\b\d{1,2}\s+de\s+[a-zA-Zé]+\s+de\s+\d{4}\b", re.IGNORECASE)
 PAGE_MARKER_RE = re.compile(r"--\s*\d+\s*of\s*\d+\s*--", re.IGNORECASE)
 
+# El ATS repite, en cada salto de página, un pie/cabecera de página tipo
+# "N/M" (visto como "37/10" en un CV exportado desde nuestra propia
+# herramienta y como "1/4" -- página 1 de 4 -- en uno descargado directo de
+# InfoJobs, así que el significado exacto de N/M varía según el origen)
+# seguido del nombre de la vacante a la que se apuntó (p.ej. "Dependiente/a
+# Krispy Kreme"). No es contenido del CV -- es texto que pdfplumber intercala
+# igual que el resto, allí donde caiga el salto de página (a veces a media
+# línea de contenido real, otras veces en su propia línea). Como los números
+# cambian en cada página no sirve detectarlos por repetición; se reconoce por
+# el patrón "N/M" (ambos números cortos -- así no coincide con una fecha tipo
+# "01/2020", con año de 4 cifras) seguido de un salto de línea, y se descarta
+# también esa línea siguiente entera (el nombre de la vacante), sea cual sea
+# su contenido -- así no hace falta conocer de antemano el nombre de la
+# vacante para reconocerlo.
+PIE_PAGINA_VACANTE_RE = re.compile(r"[ \t]*\d{1,3}\s*/\s*\d{1,3}[ \t]*\n[^\n]*\n?")
+
 SECTIONS = [
     ("experiencia", ["experiencia laboral", "experiencia profesional", "experiencia"], False),
     ("formacion", ["formación académica", "formacion academica", "formación", "formacion", "estudios", "educación", "educacion"], False),
@@ -510,6 +526,7 @@ def _parsear_experiencia_local(texto_seccion: str) -> list[dict]:
 
 def _extraer_de_texto(texto_crudo: str) -> dict:
     texto = PAGE_MARKER_RE.sub("", texto_crudo)
+    texto = PIE_PAGINA_VACANTE_RE.sub("\n", texto)
     texto = _separar_cabeceras_pegadas(texto)
     lineas = [l.strip() for l in re.split(r"\r?\n", texto) if l.strip()]
 
