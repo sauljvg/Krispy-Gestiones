@@ -1063,19 +1063,26 @@ def rellenar_huecos_candidato(candidato_id, extraido: dict):
     """Como actualizar_candidato, pero solo rellena lo que está vacío --
     pensado para volver a extraer el CV de una ficha que YA existe (p.ej. al
     resubir un PDF de lote sobre fichas ya creadas) sin pisar nada que el
-    reclutador haya editado a mano. formacion_json/experiencia_json (el
-    historial estructurado, solo lo rellena Gemini) se sustituyen solo si la
-    ficha no tenía ninguna entrada todavía.
+    reclutador haya editado a mano.
 
-    formacion/experiencia (el texto libre "antiguo") y extra_fields
-    (Idiomas, Carnet de conducir...) SÍ se sobrescriben aunque ya tuvieran
-    algo -- a diferencia del resto de campos, casi nunca los escribe un
-    reclutador a mano (la ficha ya marca ese texto como "dato antiguo" con
-    su propio botón de borrar), y son justo los que salían mal con el
-    extractor local de antes de que se corrigiera (ver cv_extraction.py):
-    sin sobrescribir, volver a subir el mismo PDF con el extractor ya
-    arreglado no corregía nada porque el campo "ya tenía algo" (aunque ese
-    algo fuera el dato mezclado de antes)."""
+    formacion/experiencia (el texto libre "antiguo"), formacion_json/
+    experiencia_json (el historial estructurado) y extra_fields (Idiomas,
+    Carnet de conducir...) SÍ se sobrescriben aunque ya tuvieran algo --
+    todos son casi siempre resultado de una extracción anterior, nunca algo
+    que un reclutador escriba a mano de cero (formacion/experiencia además
+    ya está marcado en la ficha como "dato antiguo" con su propio botón de
+    borrar). Son justo los que salían mal con el extractor local de antes de
+    que se corrigiera (ver cv_extraction.py) -- incluido formacion_json/
+    experiencia_json, que en un primer intento de este mismo arreglo se
+    dejó protegido "solo si estaba vacío" pensando en no pisar el historial
+    de más confianza que pone Gemini, pero eso también bloqueaba corregir un
+    historial estructurado que el propio extractor local ya había rellenado
+    MAL en una tanda anterior (el caso real que lo reveló: mismo problema
+    que ya se había arreglado para formacion/experiencia, solo que un paso
+    después). Si algún día hace falta proteger una tarjeta que un reclutador
+    añadió a mano con "+ Añadir estudio/experiencia" sin haber vuelto a
+    extraer el PDF, hará falta guardar de qué vino cada tarjeta -- por ahora
+    ese caso no se ha dado y sobrescribir es lo que corrige el problema real."""
     candidato = get_candidato(candidato_id)
     if candidato is None:
         return False
@@ -1090,15 +1097,15 @@ def rellenar_huecos_candidato(candidato_id, extraido: dict):
         valor_nuevo = extraido.get(campo)
         if valor_nuevo:
             campos[campo] = valor_nuevo
-    # Si ya se puede rellenar el historial ESTRUCTURADO (antes solo lo hacía
-    # Gemini, ahora también el extractor local para los CV con el patrón
-    # habitual -- ver cv_extraction._parsear_formacion_local), el texto
-    # libre "antiguo" de esa misma tanda queda de más: se limpia para que la
-    # ficha muestre solo las tarjetas, no las dos cosas repetidas.
-    if extraido.get("formacion_json") and not candidato.get("formacion_json"):
+    # El texto libre "antiguo" de esa misma tanda queda de más en cuanto hay
+    # historial ESTRUCTURADO (antes solo lo rellenaba Gemini, ahora también
+    # el extractor local para los CV con el patrón habitual -- ver
+    # cv_extraction._parsear_formacion_local): se limpia para que la ficha
+    # muestre solo las tarjetas, no las dos cosas repetidas.
+    if extraido.get("formacion_json"):
         campos["formacion_json"] = extraido["formacion_json"]
         campos["formacion"] = None
-    if extraido.get("experiencia_json") and not candidato.get("experiencia_json"):
+    if extraido.get("experiencia_json"):
         campos["experiencia_json"] = extraido["experiencia_json"]
         campos["experiencia"] = None
     extra_nuevo = extraido.get("extra_fields") or {}
