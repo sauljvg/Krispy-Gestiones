@@ -2457,16 +2457,27 @@ function aparcarFormWrapEnSitio() {
 // buscándola en TODO el documento, no solo en #candidatos-grid, porque la
 // ficha puede haberse abierto desde una tanda de Compartidos en vez de
 // desde Base de candidatos.
+// Mismo corte que la media query .compartidos-wrap.vista-combinada de
+// compartidos.html -- por debajo de este ancho, Combinada deja de tener
+// dos columnas de verdad (ver esa regla), así que la ficha ya no tiene
+// ningún panel fijo al que ir: mejor tratarla como Lista (ver más abajo).
+const ANCHO_COMBINADA_UNA_COLUMNA = "(max-width: 800px)";
+
 function reposicionarFormWrapSiCorresponde() {
   aparcarFormWrapEnSitio();
   // Tarjetas se comporta igual que Lista (la ficha se abre pegada a la
   // tarjeta que se clicó, sin saltar arriba del todo -- ver el CSS
   // .candidatos-grid:not(.candidatos-lista) > #form-wrap para que ocupe la
   // fila entera en vez de encajarse en una sola columna). Combinada NO
-  // entra aquí -- #form-wrap se queda aparcado como hijo directo del grid
-  // para que grid-area:ficha lo posicione fijo al lado, no dentro de una
-  // tarjeta.
-  if (candidatosVista === "combinada" || !candidatoEditando) return;
+  // entra aquí en pantallas anchas -- #form-wrap se queda aparcado como
+  // hijo directo del grid para que grid-area:ficha lo posicione fijo al
+  // lado, no dentro de una tarjeta. En pantallas estrechas SÍ entra (ver
+  // ANCHO_COMBINADA_UNA_COLUMNA): ahí Combinada ya no tiene panel fijo al
+  // que ir (se apila en una columna, ver compartidos.html), así que sin
+  // esto la ficha se quedaba aparcada arriba del todo en vez de pegada a
+  // la tarjeta que se clicó.
+  const combinadaComoLista = candidatosVista === "combinada" && window.matchMedia(ANCHO_COMBINADA_UNA_COLUMNA).matches;
+  if ((candidatosVista === "combinada" && !combinadaComoLista) || !candidatoEditando) return;
   const formWrap = document.getElementById("form-wrap");
   const cardAbierta = document.querySelector(`.candidato-mini-card[data-candidato-id="${candidatoEditando.id}"]`);
   if (formWrap && cardAbierta) {
