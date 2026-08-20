@@ -465,7 +465,7 @@ GEMINI_ESPACIADO_SEGUNDOS = 7
 GEMINI_MAX_REINTENTOS_RPM = 2
 
 
-def _rellenar_huecos_en_segundo_plano(lote_id: str, items: list[tuple[int, int]], usuario_id: int, titulo: str):
+def _rellenar_huecos_en_segundo_plano(lote_id: str, items: list[tuple[int, int]], usuario_id: int, titulo: str, intentar_gemini: bool = True):
     """Re-extrae con IA cada candidato pendiente y rellena huecos -- se
     ejecuta en un hilo aparte DESPUÉS de responder al navegador (ver
     _lanzar_relleno más abajo), tanto recién subido el PDF como al retomar
@@ -498,7 +498,15 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, items: list[tuple[int, int]]
     para aquí mismo -- los candidatos que aún no se procesaron se quedan tal
     cual en la cola (lotes_ia_pendientes) y _reintentar_lotes_ia_periodicamente
     los retoma solo, más tarde, sin que haga falta que nadie vuelva a subir
-    nada."""
+    nada.
+
+    intentar_gemini=False salta Gemini del todo y usa el método local para
+    TODOS los candidatos desde el principio -- para cuando se sabe de
+    antemano que no vale la pena esperar a Gemini (rellenar-huecos ya
+    procesó este mismo lote y se quedó pausado, o el reclutador prefiere no
+    esperar) y el método local ya da un resultado suficientemente bueno
+    (ver cv_extraction._extraer_local). Sin las pausas de
+    GEMINI_ESPACIADO_SEGUNDOS, un lote entero termina en segundos."""
     p_inicial = _progreso_lotes.get(lote_id)
     if p_inicial is not None:
         p_inicial["pausado"] = False  # esta pasada ya está corriendo, no esperando
@@ -518,7 +526,7 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, items: list[tuple[int, int]]
                 recorte = f.read()
             extraidos, metodo = None, "local"
             reintentos = 0
-            while True:
+            while intentar_gemini:
                 espera = GEMINI_ESPACIADO_SEGUNDOS - (time.monotonic() - ultimo_intento_gemini)
                 if espera > 0:
                     time.sleep(espera)
@@ -539,6 +547,8 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, items: list[tuple[int, int]]
                     if p is not None:
                         p["pausado"] = True
                     break
+            if not intentar_gemini:
+                extraidos, metodo, _motivo = cv_extraction.extraer_cv(recorte, intentar_gemini=False)
             if pausado_gemini_caido:
                 break  # este candidato NO se marca terminado -- se reintenta entero en la próxima pasada
             if metodo == "gemini":
@@ -608,14 +618,14 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, items: list[tuple[int, int]]
 _lotes_en_ejecucion: set[str] = set()
 
 
-def _lanzar_relleno(lote_id: str, items: list[tuple[int, int]], usuario_id: int, titulo: str):
+def _lanzar_relleno(lote_id: str, items: list[tuple[int, int]], usuario_id: int, titulo: str, intentar_gemini: bool = True):
     if lote_id in _lotes_en_ejecucion:
         return
     _lotes_en_ejecucion.add(lote_id)
 
     def _run():
         try:
-            _rellenar_huecos_en_segundo_plano(lote_id, items, usuario_id, titulo)
+            _rellenar_huecos_en_segundo_plano(lote_id, items, usuario_id, titulo, intentar_gemini)
         finally:
             _lotes_en_ejecucion.discard(lote_id)
 
@@ -642,7 +652,7 @@ def reanudar_lotes_ia_pendientes():
             "usuario_id": lote["usuario_id"], "titulo": lote["titulo"], "pausado": False,
         }
         print(f"[adjuntar-pdf-lote] Retomando lote '{lote['titulo']}' ({ya_hechos}/{lote['total']} ya hechos, {len(lote['pendientes'])} pendientes)", flush=True)
-        _lanzar_relleno(lote["lote_id"], lote["pendientes"], lote["usuario_id"], lote["titulo"])
+        _lanzar_relleno(lote["lote_id"], lote["pendientes"], lote["usuario_id"], lote["titulo"], lote["intentar_gemini"])
 
 
 REINTENTO_GEMINI_INTERVALO_MINUTOS = 30
@@ -676,6 +686,7 @@ async def adjuntar_pdf_lote_confirmar_route(
     file: UploadFile = File(...),
     mapeo: str = Form(...),
     titulo: str | None = Form(None),
+    usar_solo_local: bool = Form(False),
     user: dict = Depends(require_informes),
 ):
     """Recorta y adjunta -- recibe el PDF de lote UNA sola vez (en vez de
@@ -694,7 +705,13 @@ async def adjuntar_pdf_lote_confirmar_route(
     _rellenar_huecos_en_segundo_plano). Nunca pisa datos que el reclutador
     ya haya rellenado (ver rellenar_huecos_candidato) ni crea fichas nuevas
     -- eso lo sigue haciendo solo la extracción original al subir el PDF por
-    primera vez."""
+    primera vez.
+
+    usar_solo_local=True salta Gemini del todo (ver
+    _rellenar_huecos_en_segundo_plano) -- para cuando no vale la pena
+    esperar a Gemini (saturado, cupo agotado...) y el método local, ya
+    mejorado con pdfplumber, da un resultado suficientemente bueno; termina
+    en segundos en vez de minutos."""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Sube el PDF con todos los candidatos")
     try:
@@ -732,8 +749,9 @@ async def adjuntar_pdf_lote_confirmar_route(
         # se reinicia (redeploy, caída...) antes o durante el lote,
         # _reanudar_lotes_al_arrancar lo retoma solo desde aquí sin perder
         # lo que ya se procesó.
-        reclutamiento_module.crear_lote_ia_pendiente(lote_id, user["id"], titulo_lote, items_para_rellenar)
-        _lanzar_relleno(lote_id, items_para_rellenar, user["id"], titulo_lote)
+        intentar_gemini = not usar_solo_local
+        reclutamiento_module.crear_lote_ia_pendiente(lote_id, user["id"], titulo_lote, items_para_rellenar, intentar_gemini)
+        _lanzar_relleno(lote_id, items_para_rellenar, user["id"], titulo_lote, intentar_gemini)
     return {"ok": True, "adjuntados": adjuntados, "procesando_relleno": len(items_para_rellenar), "lote_id": lote_id}
 
 

@@ -1644,7 +1644,12 @@ async function previsualizarLote() {
         </li>`;
       }).join("")}
     </ul>
-    ${encontrados.length ? `<button type="button" id="btn-confirmar-lote" class="btn btn-primary">Adjuntar PDF a las fichas marcadas</button>` : ""}
+    ${encontrados.length ? `
+    <label class="staff-hint" style="display:flex; align-items:center; gap:6px; margin:8px 0;">
+      <input type="checkbox" id="lote-usar-solo-local">
+      Usar solo el método local (sin Gemini) -- más rápido, sin esperas, sin depender de que Gemini esté disponible ahora mismo
+    </label>
+    <button type="button" id="btn-confirmar-lote" class="btn btn-primary">Adjuntar PDF a las fichas marcadas</button>` : ""}
     <div id="lote-progreso"></div>`;
   if (encontrados.length) {
     document.getElementById("btn-confirmar-lote").addEventListener("click", () => confirmarAdjuntarLote(items));
@@ -1687,6 +1692,8 @@ async function confirmarAdjuntarLote(items) {
   const formData = new FormData();
   formData.append("file", loteArchivoPendiente);
   formData.append("mapeo", JSON.stringify(mapeo));
+  const usarSoloLocal = document.getElementById("lote-usar-solo-local")?.checked;
+  if (usarSoloLocal) formData.append("usar_solo_local", "true");
   const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/adjuntar-pdf-lote/confirmar`, { method: "POST", body: formData });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

@@ -269,9 +269,13 @@ def ensure_reclutamiento_tables():
             usuario_id INTEGER NOT NULL,
             titulo TEXT NOT NULL,
             total INTEGER NOT NULL,
+            intentar_gemini INTEGER NOT NULL DEFAULT 1,
             creado_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    cols_lotes_ia = {row[1] for row in conn.execute("PRAGMA table_info(lotes_ia)")}
+    if "intentar_gemini" not in cols_lotes_ia:
+        conn.execute("ALTER TABLE lotes_ia ADD COLUMN intentar_gemini INTEGER NOT NULL DEFAULT 1")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS lotes_ia_pendientes (
             lote_id TEXT NOT NULL REFERENCES lotes_ia(lote_id) ON DELETE CASCADE,
@@ -907,20 +911,23 @@ def marcar_ia_extraida(candidato_id: int):
     conn.close()
 
 
-def crear_lote_ia_pendiente(lote_id: str, usuario_id: int, titulo: str, candidatos_archivos: list[tuple[int, int]]):
+def crear_lote_ia_pendiente(lote_id: str, usuario_id: int, titulo: str, candidatos_archivos: list[tuple[int, int]], intentar_gemini: bool = True):
     """candidatos_archivos: [(candidato_id, archivo_id), ...] -- registra en
     disco qué le falta por rellenar con IA a este lote, para poder
     retomarlo solo si el proceso se reinicia a media tanda (ver
     lotes_ia_incompletos / _reanudar_lotes_al_arrancar en
     reclutamiento_routes.py). El archivo_id ya apunta a un PDF que
     agregar_archivo dejó guardado en disco ANTES de programar el relleno en
-    segundo plano, así que no hace falta guardar los bytes aquí también."""
+    segundo plano, así que no hace falta guardar los bytes aquí también.
+    intentar_gemini queda guardado para que, si el lote se retoma más
+    tarde (reinicio del proceso), se respete la misma elección con la que
+    se lanzó (p.ej. "usar solo el método local")."""
     if not candidatos_archivos:
         return
     conn = get_connection()
     conn.execute(
-        "INSERT INTO lotes_ia (lote_id, usuario_id, titulo, total) VALUES (?, ?, ?, ?)",
-        (lote_id, usuario_id, titulo, len(candidatos_archivos)),
+        "INSERT INTO lotes_ia (lote_id, usuario_id, titulo, total, intentar_gemini) VALUES (?, ?, ?, ?, ?)",
+        (lote_id, usuario_id, titulo, len(candidatos_archivos), int(intentar_gemini)),
     )
     conn.executemany(
         "INSERT INTO lotes_ia_pendientes (lote_id, candidato_id, archivo_id) VALUES (?, ?, ?)",
@@ -959,6 +966,7 @@ def lotes_ia_incompletos():
         resultado.append({
             "lote_id": lote["lote_id"], "usuario_id": lote["usuario_id"], "titulo": lote["titulo"],
             "total": lote["total"], "pendientes": [(p["candidato_id"], p["archivo_id"]) for p in pendientes],
+            "intentar_gemini": bool(lote["intentar_gemini"]),
         })
     conn.close()
     return resultado
