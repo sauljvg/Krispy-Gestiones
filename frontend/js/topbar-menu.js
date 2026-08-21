@@ -26,86 +26,17 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
-// Notificación de "hay respuestas nuevas de Test" junto al menú hamburguesa
-// — solo para quien tiene el módulo Test, así que se comprueba el usuario
-// aquí en vez de depender de que cada página avise (topbar-menu.js se carga
-// en todas por igual). Si falla el fetch (sin acceso, 401, etc.) no se
-// muestra nada; no es un error visible para el usuario.
+// Una sola campanita para las dos fuentes de notificaciones -- antes cada
+// una tenía su propio icono junto al menú hamburguesa (respuestas nuevas de
+// Test por un lado, avisos puntuales de trabajos en segundo plano como el
+// relleno de CVs por otro), lo que dejaba dos campanas casi idénticas una
+// al lado de la otra. Se combinan en un único botón/panel: el contador
+// suma los dos totales, y el panel desplegable muestra ambas secciones
+// (solo la(s) que tengan algo). Si ninguna de las dos fuentes tiene nada
+// que mostrar (o fallan los fetch, p.ej. sin acceso), no se crea nada.
 document.addEventListener("DOMContentLoaded", async () => {
   const wrap = document.querySelector(".hamburger-wrap");
   if (!wrap) return;
-  let data;
-  try {
-    const res = await fetch(`${window.location.origin}/api/encuestas/notificaciones`);
-    if (!res.ok) return;
-    data = await res.json();
-  } catch {
-    return;
-  }
-  if (!data || data.total === 0) return;
-
-  const escapeHTML = (str) => {
-    const div = document.createElement("div");
-    div.textContent = str ?? "";
-    return div.innerHTML;
-  };
-
-  const badgeWrap = document.createElement("div");
-  badgeWrap.className = "notif-badge-wrap";
-  badgeWrap.innerHTML = `
-    <button type="button" id="btn-notif-tests" class="btn btn-ghost notif-badge-btn" aria-label="Respuestas nuevas de Test" aria-haspopup="true" aria-expanded="false">
-      🔔<span class="notif-badge-count">${data.total}</span>
-    </button>
-    <div id="notif-tests-panel" class="notif-tests-panel" hidden>
-      <p class="notif-tests-titulo">Respuestas nuevas</p>
-      <ul class="notif-tests-lista">
-        ${data.tests
-          .map((t) => `<li><a href="/tests.html">${escapeHTML(t.titulo)}<span class="notif-tests-n">${t.nuevas}</span></a></li>`)
-          .join("")}
-      </ul>
-    </div>`;
-  wrap.parentElement.insertBefore(badgeWrap, wrap);
-
-  const notifBtn = badgeWrap.querySelector("#btn-notif-tests");
-  const notifPanel = badgeWrap.querySelector("#notif-tests-panel");
-  notifBtn.addEventListener("click", async (e) => {
-    e.stopPropagation();
-    notifPanel.hidden = !notifPanel.hidden;
-    notifBtn.setAttribute("aria-expanded", String(!notifPanel.hidden));
-    if (!notifPanel.hidden) {
-      notifBtn.querySelector(".notif-badge-count")?.remove();
-      await fetch(`${window.location.origin}/api/encuestas/notificaciones/marcar-vistas`, { method: "POST" });
-    }
-  });
-  notifPanel.addEventListener("click", (e) => e.stopPropagation());
-  document.addEventListener("click", () => {
-    if (!notifPanel.hidden) {
-      notifPanel.hidden = true;
-      notifBtn.setAttribute("aria-expanded", "false");
-    }
-  });
-});
-
-// Campanita genérica de avisos (distinta de la de "respuestas nuevas de
-// Test" de arriba, que es un contador por encuesta) -- para avisos puntuales
-// de trabajos en segundo plano que ya terminaron (ver notificaciones.py /
-// crear_notificacion), como el relleno de CVs de un lote grande: el usuario
-// puede haber navegado a otra pantalla mientras tanto, así que necesita algo
-// que le avise al volver en vez de tener que quedarse mirando la barra de
-// progreso. Disponible para cualquier usuario con sesión (no depende de
-// ningún módulo concreto).
-document.addEventListener("DOMContentLoaded", async () => {
-  const wrap = document.querySelector(".hamburger-wrap");
-  if (!wrap) return;
-  let data;
-  try {
-    const res = await fetch(`${window.location.origin}/api/notificaciones`);
-    if (!res.ok) return;
-    data = await res.json();
-  } catch {
-    return;
-  }
-  if (!data || !data.notificaciones || data.notificaciones.length === 0) return;
 
   const escapeHTML = (str) => {
     const div = document.createElement("div");
@@ -120,28 +51,61 @@ document.addEventListener("DOMContentLoaded", async () => {
     return d.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
   };
 
+  async function fetchJSON(url) {
+    try {
+      const res = await fetch(`${window.location.origin}${url}`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  const [datosTests, datosAvisos] = await Promise.all([
+    fetchJSON("/api/encuestas/notificaciones"),
+    fetchJSON("/api/notificaciones"),
+  ]);
+
+  const tests = (datosTests && datosTests.tests) || [];
+  const avisos = (datosAvisos && datosAvisos.notificaciones) || [];
+  const total = (datosTests?.total || 0) + (datosAvisos?.total || 0);
+  if (tests.length === 0 && avisos.length === 0) return;
+
+  const seccionTests = tests.length
+    ? `<p class="notif-tests-titulo">Respuestas nuevas</p>
+       <ul class="notif-tests-lista">
+         ${tests
+           .map((t) => `<li><a href="/tests.html">${escapeHTML(t.titulo)}<span class="notif-tests-n">${t.nuevas}</span></a></li>`)
+           .join("")}
+       </ul>`
+    : "";
+  const seccionAvisos = avisos.length
+    ? `<p class="notif-tests-titulo">Avisos</p>
+       <ul class="notif-tests-lista">
+         ${avisos
+           .map(
+             (n) => `<li><a href="${escapeHTML(n.url || "#")}" class="notif-aviso-item ${n.vista_en ? "" : "notif-aviso-no-vista"}">
+               <span>${escapeHTML(n.mensaje)}</span><span class="notif-aviso-fecha">${formatFecha(n.creada_en)}</span>
+             </a></li>`
+           )
+           .join("")}
+       </ul>`
+    : "";
+
   const badgeWrap = document.createElement("div");
   badgeWrap.className = "notif-badge-wrap";
   badgeWrap.innerHTML = `
-    <button type="button" id="btn-notif-avisos" class="btn btn-ghost notif-badge-btn" aria-label="Avisos" aria-haspopup="true" aria-expanded="false">
-      🔔${data.total > 0 ? `<span class="notif-badge-count">${data.total}</span>` : ""}
+    <button type="button" id="btn-notif" class="btn btn-ghost notif-badge-btn" aria-label="Notificaciones" aria-haspopup="true" aria-expanded="false">
+      🔔${total > 0 ? `<span class="notif-badge-count">${total}</span>` : ""}
     </button>
-    <div id="notif-avisos-panel" class="notif-tests-panel" hidden>
-      <p class="notif-tests-titulo">Avisos</p>
-      <ul class="notif-tests-lista">
-        ${data.notificaciones
-          .map(
-            (n) => `<li><a href="${escapeHTML(n.url || "#")}" class="notif-aviso-item ${n.vista_en ? "" : "notif-aviso-no-vista"}">
-              <span>${escapeHTML(n.mensaje)}</span><span class="notif-aviso-fecha">${formatFecha(n.creada_en)}</span>
-            </a></li>`
-          )
-          .join("")}
-      </ul>
+    <div id="notif-panel" class="notif-tests-panel" hidden>
+      ${seccionTests}
+      ${seccionAvisos}
     </div>`;
   wrap.parentElement.insertBefore(badgeWrap, wrap);
 
-  const notifBtn = badgeWrap.querySelector("#btn-notif-avisos");
-  const notifPanel = badgeWrap.querySelector("#notif-avisos-panel");
+  const notifBtn = badgeWrap.querySelector("#btn-notif");
+  const notifPanel = badgeWrap.querySelector("#notif-panel");
   notifBtn.addEventListener("click", async (e) => {
     e.stopPropagation();
     notifPanel.hidden = !notifPanel.hidden;
@@ -149,7 +113,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!notifPanel.hidden) {
       notifBtn.querySelector(".notif-badge-count")?.remove();
       notifPanel.querySelectorAll(".notif-aviso-no-vista").forEach((a) => a.classList.remove("notif-aviso-no-vista"));
-      await fetch(`${window.location.origin}/api/notificaciones/marcar-vistas`, { method: "POST" });
+      await Promise.all([
+        fetch(`${window.location.origin}/api/encuestas/notificaciones/marcar-vistas`, { method: "POST" }),
+        fetch(`${window.location.origin}/api/notificaciones/marcar-vistas`, { method: "POST" }),
+      ]);
     }
   });
   notifPanel.addEventListener("click", (e) => e.stopPropagation());
