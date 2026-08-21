@@ -82,6 +82,14 @@ def ensure_encuestas_tables():
         # (activado) para no cambiar el comportamiento de los tests ya
         # existentes, que ya cuentan con este mensaje configurado.
         conn.execute("ALTER TABLE encuestas ADD COLUMN usar_mensaje_no_apto INTEGER NOT NULL DEFAULT 1")
+    if "fecha_cierre" not in cols_encuestas:
+        # Fecha de caducidad (opcional): el test deja de estar disponible
+        # automáticamente al llegar esta fecha, a las 23:59 hora de Madrid
+        # (ver _vencido) -- sin tener que acordarse de pulsar "Despublicar".
+        # NO se pisa el campo "estado" al vencer: si luego se alarga la
+        # fecha, el test vuelve a estar disponible solo con cambiar la
+        # fecha, sin tener que volver a publicarlo a mano.
+        conn.execute("ALTER TABLE encuestas ADD COLUMN fecha_cierre TEXT")
     if "clima_oleada_id" not in cols_encuestas:
         # Tercer destino posible (mutuamente excluyente con tipo_informe_clave
         # y tipo_entrevista_empresa, mismo motivo que ese comentario): un test
@@ -431,10 +439,27 @@ def _generar_slug_unico(conn, titulo, excluir_id=None):
     return slug
 
 
+def _vencido(fecha_cierre):
+    """True si la fecha de caducidad (YYYY-MM-DD) ya pasó -- disponible
+    hasta las 23:59:59 de ese día, hora de Madrid (mismo huso que "Fecha
+    del test" en guardar_respuesta, para que caducidad y fecha del test
+    hablen del mismo día para quien lo administra)."""
+    if not fecha_cierre:
+        return False
+    try:
+        limite = datetime.datetime.strptime(fecha_cierre, "%Y-%m-%d").replace(
+            hour=23, minute=59, second=59, tzinfo=ZoneInfo("Europe/Madrid")
+        )
+    except ValueError:
+        return False
+    return datetime.datetime.now(ZoneInfo("Europe/Madrid")) > limite
+
+
 def _row_encuesta(r):
     d = dict(r)
     d["tiene_fondo"] = d.pop("fondo_ruta", None) is not None
     d["evitar_duplicados"] = bool(d["evitar_duplicados"])
+    d["vencido"] = _vencido(d.get("fecha_cierre"))
     return d
 
 
@@ -516,7 +541,7 @@ def get_encuesta_publica(identificador):
     al candidato)."""
     conn = get_connection()
     row = _fila_por_slug_o_codigo(conn, identificador)
-    if not row or row["estado"] != "abierta":
+    if not row or row["estado"] != "abierta" or _vencido(row["fecha_cierre"]):
         conn.close()
         return None
     encuesta = _row_encuesta(row)
@@ -540,16 +565,17 @@ def create_encuesta(titulo):
     return encuesta_id
 
 
-def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None, evitar_duplicados=False, mensaje_no_apto=None, clima_oleada_id=None, usar_mensaje_no_apto=True):
+def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None, evitar_duplicados=False, mensaje_no_apto=None, clima_oleada_id=None, usar_mensaje_no_apto=True, fecha_cierre=None):
     conn = get_connection()
     conn.execute(
         "UPDATE encuestas SET titulo = ?, mensaje_final = ?, color_boton = ?, tipo_informe_clave = ?, "
         "tipo_entrevista_empresa = ?, enlace_corto = ?, evitar_duplicados = ?, mensaje_no_apto = ?, "
-        "clima_oleada_id = ?, usar_mensaje_no_apto = ? WHERE id = ?",
+        "clima_oleada_id = ?, usar_mensaje_no_apto = ?, fecha_cierre = ? WHERE id = ?",
         (titulo.strip(), mensaje_final.strip(), color_boton.strip(), tipo_informe_clave or None,
          tipo_entrevista_empresa or None, (enlace_corto or "").strip() or None,
          1 if evitar_duplicados else 0, (mensaje_no_apto or "").strip() or mensaje_final.strip(),
-         clima_oleada_id or None, 1 if usar_mensaje_no_apto else 0, encuesta_id),
+         clima_oleada_id or None, 1 if usar_mensaje_no_apto else 0, (fecha_cierre or "").strip() or None,
+         encuesta_id),
     )
     conn.commit()
     conn.close()
@@ -814,7 +840,7 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
     su enunciado, igual que en el Excel de Forms)."""
     conn = get_connection()
     row = _fila_por_slug_o_codigo(conn, identificador)
-    if not row or row["estado"] != "abierta":
+    if not row or row["estado"] != "abierta" or _vencido(row["fecha_cierre"]):
         conn.close()
         raise ValueError("Esta encuesta no está abierta actualmente")
     encuesta_id = row["id"]

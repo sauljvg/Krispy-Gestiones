@@ -136,7 +136,7 @@ async function loadTests() {
     <tr>
       <td>${escapeHTML(t.titulo)}</td>
       <td>
-        <span class="badge ${t.estado === "abierta" ? "badge-abierta" : "badge-cerrada"}">${t.estado === "abierta" ? "Abierta" : "Cerrada"}</span>
+        <span class="badge ${t.estado === "abierta" && !t.vencido ? "badge-abierta" : "badge-cerrada"}">${t.estado === "abierta" ? (t.vencido ? "Vencida" : "Abierta") : "Cerrada"}</span>
         <span class="en-vivo-badge" data-id="${t.id}" hidden>🟢 <span class="en-vivo-n"></span> en vivo</span>
       </td>
       <td>${enlaceRespuestasTest(t)}</td>
@@ -204,6 +204,7 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("test-enlace-publico").value = `${location.origin}/encuesta.html?slug=${codigoCorto}`;
     document.getElementById("test-enlace-corto").value = currentTest.enlace_corto || "";
     document.getElementById("test-evitar-duplicados").checked = !!currentTest.evitar_duplicados;
+    document.getElementById("test-fecha-cierre").value = currentTest.fecha_cierre || "";
     document.getElementById("fondo-preview").hidden = !currentTest.tiene_fondo;
     if (currentTest.tiene_fondo) {
       document.getElementById("fondo-preview").src = `${AUTH_API_BASE}/encuestas/encuestas/${testId}/fondo?t=${Date.now()}`;
@@ -229,6 +230,7 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("test-enlace-publico").value = "";
     document.getElementById("test-enlace-corto").value = "";
     document.getElementById("test-evitar-duplicados").checked = false;
+    document.getElementById("test-fecha-cierre").value = "";
     document.getElementById("fondo-preview").hidden = true;
     document.getElementById("btn-publicar-test").hidden = true;
     document.getElementById("btn-despublicar-test").hidden = true;
@@ -279,6 +281,7 @@ async function guardarTest() {
     enlace_corto: document.getElementById("test-enlace-corto").value.trim() || null,
     evitar_duplicados: document.getElementById("test-evitar-duplicados").checked,
     usar_mensaje_no_apto: document.getElementById("test-usar-mensaje-no-apto").checked,
+    fecha_cierre: document.getElementById("test-fecha-cierre").value || null,
   };
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}`, {
     method: "PUT",
