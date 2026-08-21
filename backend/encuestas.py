@@ -198,9 +198,50 @@ def ensure_encuestas_tables():
     cols_sesiones = {row[1] for row in conn.execute("PRAGMA table_info(encuesta_sesiones)")}
     if "ip" not in cols_sesiones:
         conn.execute("ALTER TABLE encuesta_sesiones ADD COLUMN ip TEXT")
+    _deduplicar_sesiones_repetidas(conn)
     conn.commit()
     conn.close()
     os.makedirs(FONDOS_DIR, exist_ok=True)
+
+
+def _deduplicar_sesiones_repetidas(conn):
+    """get_embudo() ya agrupa por ip al contar (ver ahí), pero la tabla en
+    sí puede seguir teniendo varias filas para la misma persona (recargó la
+    página, volvió a abrir el enlace...) de antes de ese cambio. Se
+    fusionan aquí una sola vez: por cada (encuesta_id, ip) con más de una
+    fila, se queda la más antigua (menor id) con la página más lejana
+    alcanzada por cualquiera de ellas y marcada como completada si
+    CUALQUIERA llegó a enviarse, y se borran las demás. Idempotente (tras
+    la primera pasada ya no queda ningún grupo con más de una fila). No
+    toca las filas sin ip (de antes de que existiera esa columna): esas
+    siguen contando cada una por separado, igual que en get_embudo()."""
+    grupos = conn.execute("""
+        SELECT encuesta_id, ip FROM encuesta_sesiones
+        WHERE ip IS NOT NULL AND ip != ''
+        GROUP BY encuesta_id, ip
+        HAVING COUNT(*) > 1
+    """).fetchall()
+    for grupo in grupos:
+        filas = conn.execute("""
+            SELECT id, pagina_maxima, completado, iniciado_en, ultima_actividad
+            FROM encuesta_sesiones WHERE encuesta_id = ? AND ip = ? ORDER BY id
+        """, (grupo["encuesta_id"], grupo["ip"])).fetchall()
+        superviviente = filas[0]["id"]
+        conn.execute("""
+            UPDATE encuesta_sesiones
+            SET pagina_maxima = ?, completado = ?, iniciado_en = ?, ultima_actividad = ?
+            WHERE id = ?
+        """, (
+            max(f["pagina_maxima"] for f in filas),
+            max(f["completado"] for f in filas),
+            min(f["iniciado_en"] for f in filas),
+            max(f["ultima_actividad"] for f in filas),
+            superviviente,
+        ))
+        conn.executemany(
+            "DELETE FROM encuesta_sesiones WHERE id = ?",
+            [(f["id"],) for f in filas if f["id"] != superviviente],
+        )
 
 
 # Igual que EN_LINEA_MINUTOS en auth.py (usuarios internos) — aquí es cuánto
