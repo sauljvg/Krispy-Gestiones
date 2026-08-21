@@ -1486,7 +1486,7 @@ function renderForm() {
   // En "Lista + CV" la ficha ya está fija (sticky) a la vista -- desplazar
   // la página entera solo haría perder el sitio en la lista de la izquierda.
   // En "Lista" y "Tarjetas" el scroll se hace después, en
-  // reposicionarFormWrapSiCorresponde (llamada tras esto por
+  // reposicionarFormWrapYScroll (llamada tras esto por
   // refrescarResaltadoAbierta), una vez el formulario ya se movió justo
   // debajo de la tarjeta abierta -- si se hiciera aquí, desplazaría a la
   // posición vieja (al final de la página) un instante antes de reubicarse.
@@ -2472,19 +2472,24 @@ function aplicarVistaGlobal() {
     g.classList.toggle("candidatos-lista", candidatosVista !== "tarjetas");
   });
   document.querySelector(".compartidos-wrap")?.classList.toggle("vista-combinada", candidatosVista === "combinada");
-  reposicionarFormWrapSiCorresponde();
+  // Sin scroll -- esto se llama en CADA repintado de la lista (marcar una
+  // casilla, filtrar, paginar...), no solo al abrir una ficha. Si hiciera
+  // scroll aquí, cualquier clic que repintara la lista desplazaría la
+  // página sin que nadie lo pidiera (ver reposicionarFormWrapYScroll, que sí
+  // hace scroll pero solo se llama justo después de abrir una ficha).
+  reposicionarFormWrap();
 }
 
 // #form-wrap vive normalmente justo después de #reclu-candidatos-wrap (su
 // sitio de siempre en el HTML). En vista Lista lo trasladamos dentro del
 // grid, justo debajo de la tarjeta abierta (venga de Base de candidatos o
-// de Compartidos, ver reposicionarFormWrapSiCorresponde), para que la ficha
-// aparezca "ahí mismo" en vez de al final de la página -- pero
+// de Compartidos, ver reposicionarFormWrap), para que la ficha aparezca
+// "ahí mismo" en vez de al final de la página -- pero
 // grid.innerHTML/wrap.innerHTML lo borrarían sin darse cuenta si se quedara
 // dentro cuando se repinta la lista (buscar, filtrar, recargar
 // Compartidos...), así que SIEMPRE se aparca de vuelta a su sitio antes de
 // tocar esos contenedores, y se reubica después si toca (ver
-// reposicionarFormWrapSiCorresponde, llamada al final de cada repintado).
+// reposicionarFormWrap, llamada al final de cada repintado).
 function aparcarFormWrapEnSitio() {
   const formWrap = document.getElementById("form-wrap");
   const home = document.getElementById("reclu-candidatos-wrap");
@@ -2504,37 +2509,42 @@ function aparcarFormWrapEnSitio() {
 // ningún panel fijo al que ir: mejor tratarla como Lista (ver más abajo).
 const ANCHO_COMBINADA_UNA_COLUMNA = "(max-width: 800px)";
 
-function reposicionarFormWrapSiCorresponde() {
+// Reubica #form-wrap según la vista actual, SIN hacer scroll -- seguro de
+// llamar en cualquier repintado incidental de la lista (marcar una casilla,
+// filtrar, paginar...) para que una ficha ya abierta no se pierda ni quede
+// mal colocada, sin mover la página bajo los pies de quien solo estaba
+// marcando una casilla.
+function reposicionarFormWrap() {
   aparcarFormWrapEnSitio();
   // Tarjetas se comporta igual que Lista (la ficha se abre pegada a la
-  // tarjeta que se clicó, sin saltar arriba del todo -- ver el CSS
-  // .candidatos-grid:not(.candidatos-lista) > #form-wrap para que ocupe la
-  // fila entera en vez de encajarse en una sola columna). Combinada NO
-  // entra aquí en pantallas anchas -- #form-wrap se queda aparcado como
-  // hijo directo del grid para que grid-area:ficha lo posicione fijo al
-  // lado, no dentro de una tarjeta. En pantallas estrechas SÍ entra (ver
-  // ANCHO_COMBINADA_UNA_COLUMNA): ahí Combinada ya no tiene panel fijo al
-  // que ir (se apila en una columna, ver compartidos.html), así que sin
-  // esto la ficha se quedaba aparcada arriba del todo en vez de pegada a
-  // la tarjeta que se clicó.
+  // tarjeta que se clicó -- ver el CSS .candidatos-grid:not(.candidatos-lista)
+  // > #form-wrap para que ocupe la fila entera en vez de encajarse en una
+  // sola columna). Combinada NO entra aquí en pantallas anchas -- #form-wrap
+  // se queda aparcado como hijo directo del grid para que grid-area:ficha lo
+  // posicione fijo al lado, no dentro de una tarjeta. En pantallas estrechas
+  // SÍ entra (ver ANCHO_COMBINADA_UNA_COLUMNA): ahí Combinada ya no tiene
+  // panel fijo al que ir (se apila en una columna, ver compartidos.html).
   const combinadaComoLista = candidatosVista === "combinada" && window.matchMedia(ANCHO_COMBINADA_UNA_COLUMNA).matches;
   if (candidatosVista === "combinada" && !combinadaComoLista) return;
+  if (!candidatoEditando) return; // alta nueva o nada abierto -- ya aparcado, nada más que hacer
   const formWrap = document.getElementById("form-wrap");
-  if (!candidatoEditando) {
-    // Alta de un candidato NUEVO (no editando uno existente) -- no hay
-    // ninguna tarjeta a la que pegarse, así que el formulario se queda
-    // aparcado en su sitio de siempre, pero SÍ hay que desplazar la vista
-    // hasta él: con la lista ya larga, "+ Nuevo candidato" parecía no hacer
-    // nada porque el formulario se abría bien, solo que muy por debajo de
-    // todos los candidatos existentes, fuera de la pantalla.
-    if (formWrap) formWrap.scrollIntoView({ behavior: "smooth", block: "start" });
-    return;
-  }
   const cardAbierta = document.querySelector(`.candidato-mini-card[data-candidato-id="${candidatoEditando.id}"]`);
   if (formWrap && cardAbierta) {
     cardAbierta.insertAdjacentElement("afterend", formWrap);
-    formWrap.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
+}
+
+// Como reposicionarFormWrap, pero ADEMÁS hace scroll hasta el formulario --
+// solo se llama justo después de abrir una ficha (editar o alta nueva), no
+// desde repintados incidentales (eso es lo que reposicionarFormWrap ya
+// cubre sin mover la página).
+function reposicionarFormWrapYScroll() {
+  reposicionarFormWrap();
+  const combinadaComoLista = candidatosVista === "combinada" && window.matchMedia(ANCHO_COMBINADA_UNA_COLUMNA).matches;
+  if (candidatosVista === "combinada" && !combinadaComoLista) return;
+  const formWrap = document.getElementById("form-wrap");
+  if (!formWrap) return;
+  formWrap.scrollIntoView({ behavior: "smooth", block: candidatoEditando ? "nearest" : "start" });
 }
 
 function renderCandidatosGrid() {
@@ -2736,17 +2746,23 @@ function abrirMailtoSeleccionados() {
 // resalte (ver .candidato-mini-card.abierta) -- se salta a sí misma cuando
 // la lista ni siquiera está visible (usuario sin el módulo completo que
 // solo abre fichas desde "Compartidos", ver reclu-candidatos-wrap).
-function refrescarResaltadoAbierta() {
+// conScroll: solo true justo después de ABRIR una ficha (editar o alta
+// nueva) -- con el valor por defecto (false), como al cerrar, se reposiciona
+// sin mover la página.
+function refrescarResaltadoAbierta(conScroll = false) {
   const wrap = document.getElementById("reclu-candidatos-wrap");
   if (wrap && !wrap.hidden) {
-    renderCandidatosGrid();
-  } else {
+    renderCandidatosGrid(); // ya reposiciona sin scroll (ver aplicarVistaGlobal)
+    if (conScroll) reposicionarFormWrapYScroll();
+  } else if (conScroll) {
     // Sin el módulo completo no hay #candidatos-grid que repintar, pero la
     // ficha puede haberse abierto desde una tarjeta de Compartidos -- solo
-    // hace falta reposicionar #form-wrap (ver reposicionarFormWrapSiCorresponde),
-    // no recargar toda la lista de Compartidos (sería un viaje de red y un
-    // parpadeo innecesarios, los datos no cambiaron).
-    reposicionarFormWrapSiCorresponde();
+    // hace falta reposicionar #form-wrap, no recargar toda la lista de
+    // Compartidos (sería un viaje de red y un parpadeo innecesarios, los
+    // datos no cambiaron).
+    reposicionarFormWrapYScroll();
+  } else {
+    reposicionarFormWrap();
   }
 }
 
@@ -2754,13 +2770,13 @@ async function abrirEdicionCandidato(candidatoId) {
   const candidato = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}`).then((r) => r.json());
   candidatoEditando = candidato;
   renderForm();
-  refrescarResaltadoAbierta();
+  refrescarResaltadoAbierta(true);
 }
 
 function abrirNuevoCandidato() {
   candidatoEditando = null;
   renderForm();
-  refrescarResaltadoAbierta();
+  refrescarResaltadoAbierta(true);
 }
 
 async function revincularTests() {
