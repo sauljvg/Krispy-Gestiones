@@ -26,10 +26,12 @@ function escapeHTML(str) {
 
 // clima-tests.html carga este mismo tests.js (mismo editor, misma API) pero
 // como "Clima Laboral > Test" -- solo se distingue por la URL, no hace
-// falta ningún parámetro ni marca especial en el HTML. Se usa para: (a)
-// enseñar solo los tests que ya alimentan una oleada de Clima Laboral en el
-// listado, y (b) que el desplegable de destino del editor no ofrezca
-// Informes/Entrevista de Salida ahí, que no pintan nada en esa pantalla.
+// falta ningún parámetro ni marca especial en el HTML. Los dos módulos son
+// mutuamente excluyentes a propósito (a petición del usuario, para que la
+// misma oleada nunca se pueda tocar desde dos sitios distintos): el Test
+// general (tests.html, el de la Home) NO enseña ni permite crear tests de
+// Clima Laboral -- eso es exclusivo de esta página. Y viceversa: aquí no
+// aparecen Informes ni Entrevista de Salida.
 function esClimaTests() {
   return window.location.pathname.endsWith("/clima-tests.html");
 }
@@ -38,10 +40,10 @@ async function loadTiposInforme() {
   const clima = esClimaTests();
   const [resInformes, resClima] = await Promise.all([
     clima ? Promise.resolve(null) : fetch(`${AUTH_API_BASE}/encuestas/tipos-informe-disponibles`),
-    fetch(`${AUTH_API_BASE}/encuestas/clima-oleadas-disponibles`),
+    clima ? fetch(`${AUTH_API_BASE}/encuestas/clima-oleadas-disponibles`) : Promise.resolve(null),
   ]);
   const tipos = resInformes ? await resInformes.json() : [];
-  const oleadas = await resClima.json();
+  const oleadas = resClima ? await resClima.json() : [];
   const select = document.getElementById("test-tipo-informe");
   const label = document.getElementById("test-tipo-informe-label");
   if (label && clima) label.textContent = "¿A qué oleada de Clima Laboral alimenta? (opcional)";
@@ -58,23 +60,22 @@ async function loadTiposInforme() {
       `<option value="entrevista:kk">Entrevista de Salida — Krispy Kreme</option>` +
       `<option value="entrevista:saona">Entrevista de Salida — SAONA</option>` +
       `</optgroup>`;
-  select.innerHTML =
-    `<option value="">— No calcular puntuación —</option>` +
-    grupoInformes +
-    grupoEntrevista +
-    `<optgroup label="Clima Laboral">` +
-    oleadas
-      .map((o) => {
-        const faseTxt = o.fase === "pulso" ? "Pulso" : "Encuesta completa";
-        const nombre = o.etiqueta || `Oleada #${o.numero} sin nombre`;
-        return `<option value="clima:${o.id}">${escapeHTML(nombre)} (${faseTxt})</option>`;
-      })
-      .join("") +
-    `<option value="clima:nueva:kk:completa">+ Nueva Encuesta completa de Clima Laboral — Krispy Kreme</option>` +
-    `<option value="clima:nueva:kk:pulso">+ Nuevo Pulso de Clima Laboral — Krispy Kreme</option>` +
-    `<option value="clima:nueva:saona:completa">+ Nueva Encuesta completa de Clima Laboral — SAONA</option>` +
-    `<option value="clima:nueva:saona:pulso">+ Nuevo Pulso de Clima Laboral — SAONA</option>` +
-    `</optgroup>`;
+  const grupoClima = !clima
+    ? ""
+    : `<optgroup label="Clima Laboral">` +
+      oleadas
+        .map((o) => {
+          const faseTxt = o.fase === "pulso" ? "Pulso" : "Encuesta completa";
+          const nombre = o.etiqueta || `Oleada #${o.numero} sin nombre`;
+          return `<option value="clima:${o.id}">${escapeHTML(nombre)} (${faseTxt})</option>`;
+        })
+        .join("") +
+      `<option value="clima:nueva:kk:completa">+ Nueva Encuesta completa de Clima Laboral — Krispy Kreme</option>` +
+      `<option value="clima:nueva:kk:pulso">+ Nuevo Pulso de Clima Laboral — Krispy Kreme</option>` +
+      `<option value="clima:nueva:saona:completa">+ Nueva Encuesta completa de Clima Laboral — SAONA</option>` +
+      `<option value="clima:nueva:saona:pulso">+ Nuevo Pulso de Clima Laboral — SAONA</option>` +
+      `</optgroup>`;
+  select.innerHTML = `<option value="">— No calcular puntuación —</option>` + grupoInformes + grupoEntrevista + grupoClima;
 }
 
 // Clima Laboral es el único destino donde el test necesita configuración
@@ -173,7 +174,7 @@ function enlaceRespuestasTest(t) {
 async function loadTests() {
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas`);
   let tests = await res.json();
-  if (esClimaTests()) tests = tests.filter((t) => t.clima_oleada_id);
+  tests = esClimaTests() ? tests.filter((t) => t.clima_oleada_id) : tests.filter((t) => !t.clima_oleada_id);
   const tbody = document.getElementById("tests-tbody");
   if (tests.length === 0) {
     tbody.innerHTML = `<tr><td colspan="4" class="staff-hint">Todavía no has creado ningún test.</td></tr>`;

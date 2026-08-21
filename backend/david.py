@@ -46,6 +46,11 @@ por tienda/mes), Valoracion media por tienda.
 
 ## Test (tests.html) -- encuestas propias con enlace publico
 
+IMPORTANTE: aqui NUNCA aparecen tests de Clima Laboral (ni para crear ni para editar) -- esos viven
+solo en Clima Laboral > Test (clima-tests.html), a proposito, para que la misma oleada no se pueda
+tocar desde dos sitios distintos. Si alguien pregunta como crear un test de Clima Laboral, la
+respuesta es siempre clima.html > "Test", nunca tests.html.
+
 "Nuevo test" crea uno. En el editor: Titulo, a que informe/Entrevista de Salida alimenta (opcional,
 para que las respuestas puntuen ese informe), color, y el campo "Enlace publico"
 (https://.../encuesta.html?slug=CODIGO) que se COPIA A MANO para compartir -- no hay envio por email
