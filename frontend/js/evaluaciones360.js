@@ -432,7 +432,7 @@ async function guardarPuesto() {
 
 async function desactivarPuesto() {
   if (!editandoPuestoId) return;
-  if (!(await pedirConfirmacion("¿Desactivar este puesto? Las personas que lo tengan asignado lo conservan, pero dejará de aparecer para asignar a más gente."))) return;
+  if (!(await pedirConfirmacion("¿Desactivar este puesto? Las personas que lo tengan asignado lo conservan, pero dejará de aparecer para asignar a más gente. Si tenía subpuestos debajo, pasan a depender directamente de a quién reportaba este."))) return;
   await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos/${editandoPuestoId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },

@@ -257,6 +257,19 @@ def actualizar_puesto(puesto_id, nombre=None, activo=None, puesto_padre_id=-1):
     conn = get_connection()
     if nombre is not None:
         conn.execute("UPDATE eval360_puestos SET nombre = ? WHERE id = ?", (nombre, puesto_id))
+    if activo is False:
+        # Al desactivar un puesto, sus subpuestos no se quedan huérfanos
+        # (invisibles en el árbol, colgando de un padre que ya no aparece):
+        # pasan a depender directamente de a quién reportaba este puesto --
+        # "sus reportes pasan al gerente siguiente", como pidió el usuario.
+        padre_actual = conn.execute(
+            "SELECT puesto_padre_id FROM eval360_puestos WHERE id = ?", (puesto_id,)
+        ).fetchone()
+        nuevo_padre_para_hijos = padre_actual["puesto_padre_id"] if padre_actual else None
+        conn.execute(
+            "UPDATE eval360_puestos SET puesto_padre_id = ? WHERE puesto_padre_id = ?",
+            (nuevo_padre_para_hijos, puesto_id),
+        )
     if activo is not None:
         conn.execute("UPDATE eval360_puestos SET activo = ? WHERE id = ?", (1 if activo else 0, puesto_id))
     if puesto_padre_id != -1:
