@@ -623,8 +623,54 @@ def reextraer_todos_route(empresa: str = "kk", user: dict = Depends(require_info
     return {"ok": True, "lote_id": lote_id, "total": len(items)}
 
 
+_limpiezas_fotos: dict[str, dict] = {}
+
+
+def _limpiar_fotos_en_segundo_plano(limpieza_id: str, items: list[tuple[int, int]], usuario_id: int):
+    """Ver limpiar_fotos_de_lote_compartido_route -- separado en su propio
+    hilo por la misma razón que _rellenar_huecos_en_segundo_plano: releer y
+    re-analizar un PDF por candidato (pdfplumber, no es instantáneo) para
+    decenas de candidatos de golpe, SÍNCRONO dentro de la petición HTTP,
+    bloqueó el único worker de la app entera durante más de un minuto la
+    primera vez que se probó esto en producción -- la propia petición acabó
+    en 502 y de paso dejó sin responder al resto de usuarios mientras tanto.
+    Aquí, igual que el relleno de lotes, responde al momento con un id y
+    hace el trabajo de fondo."""
+    quitadas = []
+    revisados = 0
+    for candidato_id, archivo_id in items:
+        archivo = reclutamiento_module.get_archivo(archivo_id)
+        if archivo is None or not os.path.exists(archivo["ruta"]):
+            continue
+        revisados += 1
+        try:
+            with open(archivo["ruta"], "rb") as f:
+                contenido = f.read()
+            extraidos = cv_extraction.extraer_cv(contenido)
+            if len(extraidos) != 1:
+                candidato = reclutamiento_module.get_candidato(candidato_id)
+                reclutamiento_module.quitar_foto(candidato_id)
+                quitadas.append({"id": candidato_id, "nombre": candidato["nombre_completo"] if candidato else None})
+        except Exception as exc:
+            print(f"[limpiar-fotos] Fallo revisando al candidato {candidato_id}: {exc}")
+        finally:
+            estado = _limpiezas_fotos.get(limpieza_id)
+            if estado is not None:
+                estado["procesados"] += 1
+    estado = _limpiezas_fotos.get(limpieza_id)
+    if estado is not None:
+        estado["terminado"] = True
+        estado["revisados"] = revisados
+        estado["fotos_quitadas"] = quitadas
+    notificaciones_module.crear_notificacion(
+        usuario_id,
+        f"Limpieza de fotos de lote compartido terminada: {len(quitadas)} foto(s) quitada(s) de {revisados} revisado(s).",
+        "/compartidos.html",
+    )
+
+
 @router.post("/candidatos/limpiar-fotos-de-lote-compartido")
-def limpiar_fotos_de_lote_compartido_route(empresa: str = "kk", _user: dict = Depends(require_informes)):
+def limpiar_fotos_de_lote_compartido_route(empresa: str = "kk", user: dict = Depends(require_informes)):
     """Corrige el daño de un bug real: "Reextraer todos los CV" sacaba la
     foto de "la página 1" del PDF más reciente adjunto a cada candidato sin
     comprobar antes si ese PDF era de verdad SOLO suyo -- para fichas
@@ -638,26 +684,24 @@ def limpiar_fotos_de_lote_compartido_route(empresa: str = "kk", _user: dict = De
     Revisa cada candidato que hoy tiene foto: si su PDF más reciente vuelve
     a extraerse como MÁS DE UN candidato, esa foto no es de fiar -> se
     quita (queda sin foto, no se inventa una nueva). No toca a quien su PDF
-    sí es de una sola persona -- su foto actual sigue siendo válida."""
+    sí es de una sola persona -- su foto actual sigue siendo válida. Corre
+    en segundo plano (ver _limpiar_fotos_en_segundo_plano) -- consulta el
+    progreso con GET .../limpiar-fotos-de-lote-compartido/progreso/{id}."""
     items = reclutamiento_module.candidatos_con_pdf_y_foto(empresa=empresa)
-    revisados = 0
-    quitadas = []
-    for candidato_id, archivo_id in items:
-        archivo = reclutamiento_module.get_archivo(archivo_id)
-        if archivo is None or not os.path.exists(archivo["ruta"]):
-            continue
-        revisados += 1
-        with open(archivo["ruta"], "rb") as f:
-            contenido = f.read()
-        try:
-            extraidos = cv_extraction.extraer_cv(contenido)
-        except Exception:
-            continue
-        if len(extraidos) != 1:
-            candidato = reclutamiento_module.get_candidato(candidato_id)
-            reclutamiento_module.quitar_foto(candidato_id)
-            quitadas.append({"id": candidato_id, "nombre": candidato["nombre_completo"] if candidato else None})
-    return {"ok": True, "revisados": revisados, "fotos_quitadas": quitadas}
+    limpieza_id = secrets.token_hex(8)
+    _limpiezas_fotos[limpieza_id] = {"total": len(items), "procesados": 0, "terminado": False}
+    threading.Thread(
+        target=_limpiar_fotos_en_segundo_plano, args=(limpieza_id, items, user["id"]), daemon=True
+    ).start()
+    return {"ok": True, "limpieza_id": limpieza_id, "total": len(items)}
+
+
+@router.get("/candidatos/limpiar-fotos-de-lote-compartido/progreso/{limpieza_id}")
+def limpiar_fotos_progreso_route(limpieza_id: str, _user: dict = Depends(require_informes)):
+    estado = _limpiezas_fotos.get(limpieza_id)
+    if estado is None:
+        raise HTTPException(status_code=404, detail="No hay ninguna limpieza en marcha con ese id")
+    return estado
 
 
 @router.post("/candidatos/adjuntar-pdf-lote/confirmar")
