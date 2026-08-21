@@ -390,6 +390,37 @@ def renombrar_oleada(oleada_id, etiqueta):
     conn.close()
 
 
+def eliminar_oleada(oleada_id):
+    """Borra por completo una oleada (p.ej. una de prueba creada mientras se
+    exploraba "+ Nueva oleada") y todo lo que tenga dentro -- respuestas,
+    plantilla e importaciones. Se niega si algún Test todavía la tiene
+    configurada como destino, mismo motivo que informes.eliminar_tipo:
+    borrarla igual dejaría a ese Test apuntando a una oleada inexistente, y
+    su próxima respuesta fallaría en vez de guardarse."""
+    conn = get_connection()
+    row = conn.execute("SELECT id FROM clima_oleadas WHERE id = ?", (oleada_id,)).fetchone()
+    if row is None:
+        conn.close()
+        raise ValueError(f"Oleada de Clima Laboral desconocida: {oleada_id}")
+    tests_conectados = [r["titulo"] for r in conn.execute(
+        "SELECT titulo FROM encuestas WHERE clima_oleada_id = ?", (oleada_id,)
+    ).fetchall()]
+    if tests_conectados:
+        conn.close()
+        lista = ", ".join(f'"{t}"' for t in tests_conectados)
+        plural = "test" if len(tests_conectados) == 1 else "tests"
+        raise ValueError(
+            f"No se puede eliminar: todavía la alimenta el {plural} {lista}. "
+            "Cambia primero a qué oleada alimenta (o ciérralo) antes de borrar esta oleada."
+        )
+    conn.execute("DELETE FROM clima_respuestas WHERE oleada_id = ?", (oleada_id,))
+    conn.execute("DELETE FROM clima_plantilla WHERE oleada_id = ?", (oleada_id,))
+    conn.execute("DELETE FROM clima_importaciones WHERE oleada_id = ?", (oleada_id,))
+    conn.execute("DELETE FROM clima_oleadas WHERE id = ?", (oleada_id,))
+    conn.commit()
+    conn.close()
+
+
 def get_plantilla(oleada_id):
     conn = get_connection()
     rows = conn.execute(

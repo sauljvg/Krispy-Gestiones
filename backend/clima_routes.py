@@ -81,6 +81,15 @@ def renombrar_oleada_route(oleada_id: int, body: RenombrarOleadaBody, _user: dic
     return {"ok": True}
 
 
+@router.delete("/{oleada_id}")
+def eliminar_oleada_route(oleada_id: int, _user: dict = Depends(require_clima_oleada)):
+    try:
+        clima_module.eliminar_oleada(oleada_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
 @router.get("/{oleada_id}/plantilla")
 def get_plantilla_route(oleada_id: int, _user: dict = Depends(require_clima_oleada)):
     return clima_module.get_plantilla(oleada_id)

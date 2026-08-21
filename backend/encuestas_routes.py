@@ -230,6 +230,17 @@ def add_pagina_route(encuesta_id: int, body: PaginaIn, _user: dict = Depends(req
     return {"ok": True, "id": pagina_id}
 
 
+@router.post("/encuestas/{encuesta_id}/plantilla-clima-completa")
+def crear_plantilla_clima_route(encuesta_id: int, _user: dict = Depends(require_tests)):
+    """Para "+ Nueva Encuesta completa de Clima Laboral" en el editor de
+    Test (ver tests.js) -- rellena el test con las 26 preguntas reales del
+    cuestionario en vez de dejarlo en blanco."""
+    if not encuestas_module.get_encuesta(encuesta_id):
+        raise HTTPException(status_code=404, detail="Encuesta no encontrada")
+    encuestas_module.crear_plantilla_clima_encuesta_completa(encuesta_id)
+    return {"ok": True}
+
+
 @router.put("/paginas/{pagina_id}")
 def update_pagina_route(pagina_id: int, body: PaginaIn, _user: dict = Depends(require_tests)):
     encuestas_module.update_pagina(pagina_id, body.instrucciones, body.condicion_pregunta_id, body.condicion_valores)

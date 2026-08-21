@@ -720,6 +720,79 @@ def add_pregunta(pagina_id, tipo, etiqueta, obligatoria=True, opciones=None, mos
     return pregunta_id
 
 
+# Cuestionario real de "Clima Laboral — Encuesta completa" (Krispy Kreme):
+# centro de trabajo + 25 preguntas de escala en 5 secciones (5+5+5+4+6) + 2
+# abiertas, mismo texto y orden que el PDF que se usaba en Microsoft Forms.
+# Cada pregunta se etiqueta "Sección.Pregunta" -- mismo formato que ya
+# reconoce clima._column_roles() para los Excel de Forms, así que Clima
+# Laboral categoriza bien "Resultados de Engagement" (primera sección) vs
+# "Impulsores de Engagement" (el resto) sin ningún cambio en ese lado.
+CLIMA_CENTROS = ["ParqueSur Tienda", "ParqueSur Fábrica", "Princesa", "Caleido", "La Gavia", "Gran Plaza 2", "Oficinas"]
+CLIMA_SECCIONES = [
+    ("Satisfacción y compromiso", [
+        "Estoy contento/a con mi trabajo en Krispy Kreme",
+        "Recomendaría Krispy Kreme como un gran lugar para trabajar",
+        "Espero seguir trabajando en Krispy Kreme en los próximos seis meses",
+        "Me siento personalmente comprometido a ayudar a Krispy Kreme a alcanzar el éxito",
+        "Me siento lleno de energía cuando hago mi trabajo",
+    ]),
+    ("Desarrollo y apoyo al desempeño", [
+        "Tengo oportunidades de aprender y crecer en mi trabajo",
+        "Recibo la capacitación que necesito para hacer bien mi trabajo",
+        "Mi gerente valora mis opiniones y comentarios",
+        "Mi gerente me brinda comentarios oportunos que ayudan a mejorar mi desempeño",
+        "Tengo oportunidades constantes de utilizar mis fortalezas en el trabajo",
+    ]),
+    ("Recursos y reconocimiento", [
+        "Recibo la información que necesito para tener un buen desempeño",
+        "Recibo reconocimiento por el trabajo que hago",
+        "Confío en los otros miembros del equipo de mi tienda/fábrica/oficina",
+        "Considero que mi trabajo es gratificante",
+        "Mis compañeros de trabajo están comprometidos a brindar una gran experiencia a nuestros clientes",
+    ]),
+    ("Liderazgo y cultura de equipo", [
+        "Mi gerente está comprometido a brindar una gran experiencia a cada cliente",
+        "Recomendaría a otras personas a trabajar para mi gerente",
+        "El equipo gerencial habla a menudo con nuestro equipo sobre los comentarios de los clientes",
+        "Mi gerente se preocupa por mí",
+    ]),
+    ("Bienestar, condiciones y pertenencia", [
+        "En mi tienda, todos se tratan con respeto",
+        "Siento que estoy trabajando en un lugar seguro",
+        "Considero mi retribución competitiva en comparación con el mercado",
+        "Tengo un equilibrio adecuado entre el trabajo y la vida personal",
+        "Me siento identificado con los valores de Krispy Kreme",
+        "Me siento orgulloso de trabajar en Krispy Kreme",
+    ]),
+]
+CLIMA_ABIERTAS = [
+    "¿Qué es lo que más te gusta de trabajar con nosotros?",
+    "¿Qué consideras que podemos mejorar?",
+]
+
+
+def crear_plantilla_clima_encuesta_completa(encuesta_id):
+    """Rellena un test recién creado (y todavía vacío) con la Encuesta
+    completa estándar de Clima Laboral -- para "+ Nueva Encuesta completa de
+    Clima Laboral" en el editor de Test (ver tests.js): en vez de partir de
+    un test en blanco, ya queda con las 26 preguntas reales listas para
+    revisar/editar antes de publicar. No se usa para "+ Nuevo Pulso" (un
+    pulso normalmente lleva un subconjunto más corto, decidido caso a
+    caso -- ver conversación con el usuario)."""
+    pagina_centro = add_pagina(encuesta_id, "")
+    add_pregunta(
+        pagina_centro, "opcion_simple", "¿Cuál es tu centro de trabajo?", True,
+        CLIMA_CENTROS, False, [False] * len(CLIMA_CENTROS),
+    )
+    for nombre_seccion, preguntas in CLIMA_SECCIONES:
+        pagina_id = add_pagina(encuesta_id, "")
+        for pregunta in preguntas:
+            add_pregunta(pagina_id, "likert", f"{nombre_seccion}.{pregunta}", True, LIKERT_OPCIONES, False)
+    pagina_abiertas = add_pagina(encuesta_id, "")
+    for pregunta in CLIMA_ABIERTAS:
+        add_pregunta(pagina_abiertas, "abierta", pregunta, True)
+
+
 def update_pregunta(pregunta_id, etiqueta, obligatoria, opciones=None, mostrar_dashboard=False, opciones_descarta=None):
     conn = get_connection()
     conn.execute(

@@ -52,6 +52,11 @@ async function loadTiposInforme() {
 // guarda aparte (no en el body de guardarTest) porque vive en su propia
 // tabla (clima_plantilla), no en la fila de la encuesta.
 let climaPlantillaOleadaId = null;
+// true solo justo después de crear una oleada nueva de fase "completa" (no
+// "pulso", que normalmente lleva un subconjunto más corto decidido caso a
+// caso) -- guardarTest() lo consume una sola vez para rellenar el test con
+// las 26 preguntas reales de la Encuesta completa en vez de dejarlo vacío.
+let climaCargarPlantillaCompleta = false;
 
 function filaClimaPlantillaHTML(centro = "", empleados = "") {
   return `
@@ -183,7 +188,10 @@ setInterval(() => {
 // (por defecto) se mantiene para abrir el editor por primera vez (desde la
 // lista o "Nuevo test"), donde sí conviene llevar la vista hacia la tarjeta.
 async function abrirEditor(testId, { scroll = true } = {}) {
-  if (testId !== currentTestId) editandoPreguntas.clear();
+  if (testId !== currentTestId) {
+    editandoPreguntas.clear();
+    climaCargarPlantillaCompleta = false;
+  }
   currentTestId = testId;
   const editorCard = document.getElementById("editor-card");
   editorCard.hidden = false;
@@ -258,6 +266,7 @@ async function abrirEditor(testId, { scroll = true } = {}) {
 function cerrarEditor() {
   currentTestId = null;
   currentTest = null;
+  climaCargarPlantillaCompleta = false;
   document.getElementById("editor-card").hidden = true;
 }
 
@@ -317,6 +326,10 @@ async function guardarTest() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ plantilla }),
     });
+  }
+  if (climaCargarPlantillaCompleta) {
+    climaCargarPlantillaCompleta = false;
+    await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/plantilla-clima-completa`, { method: "POST" });
   }
   await loadTests();
   await abrirEditor(currentTestId, { scroll: false });
@@ -1066,6 +1079,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const data = await res.json();
       await loadTiposInforme();
       e.target.value = `clima:${data.id}`;
+      climaCargarPlantillaCompleta = fase !== "pulso" && !(currentTest?.paginas?.length);
     }
     actualizarVisibilidadMensajeNoApto();
     await actualizarVistaClimaPlantilla();

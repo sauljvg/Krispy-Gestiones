@@ -476,6 +476,24 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadOleadas();
   });
 
+  document.getElementById("btn-eliminar-oleada").addEventListener("click", async () => {
+    if (!currentOleada) return;
+    const select = document.getElementById("select-oleada");
+    const nombre = select.options[select.selectedIndex]?.textContent || "esta oleada";
+    if (!(await pedirConfirmacion(
+      `¿Eliminar por completo "${nombre}"? Esto borra todas sus respuestas, plantilla e importaciones. No es reversible.`
+    ))) return;
+    const res = await fetch(`${AUTH_API_BASE}/clima/${currentOleada}`, { method: "DELETE" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      mostrarAviso(err.detail || "No se pudo eliminar la oleada.");
+      return;
+    }
+    document.getElementById("reporte-wrap").hidden = true;
+    document.getElementById("btn-exportar-pdf").hidden = true;
+    await loadOleadas();
+  });
+
   document.getElementById("input-clima-upload").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
