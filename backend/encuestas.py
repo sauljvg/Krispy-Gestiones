@@ -27,6 +27,18 @@ LIKERT_OPCIONES = [
     "De acuerdo", "Totalmente de acuerdo",
 ]
 
+# El módulo de Test guarda el PUNTO (1-5) de una pregunta de escala, no el
+# texto de la leyenda (igual que ya asume _likert_points_strict en
+# scoring_valores.py) -- pero Clima Laboral (clima.py) espera el texto tal
+# cual lo trae un Excel de Forms. Se traduce aquí, SOLO para lo que se
+# manda a clima_module.ingest_respuesta_directa (ver guardar_respuesta),
+# nunca dentro de clima.py: esa función recalcula en caliente TODAS las
+# oleadas -- incluidas las importadas por Excel hace tiempo -- cada vez que
+# se abre un informe, así que traducir números ahí tendría efecto
+# retroactivo sobre informes ya entregados si algún dato histórico tuviera
+# por casualidad un valor numérico suelto.
+LIKERT_TEXTO_POR_PUNTO = {"1": LIKERT_OPCIONES[0], "2": LIKERT_OPCIONES[1], "3": LIKERT_OPCIONES[2], "4": LIKERT_OPCIONES[3], "5": LIKERT_OPCIONES[4]}
+
 
 def ensure_encuestas_tables():
     conn = get_connection()
@@ -886,6 +898,7 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
     # a Scoring/Dashboard para verlas de un vistazo (ver
     # scoring_valores.calcular()).
     fila_por_etiqueta = {}
+    clave_a_pid = {}
     columnas_extra = set()
     for pid, etiqueta in etiqueta_por_id.items():
         if pid not in respuestas_por_pregunta:
@@ -897,6 +910,7 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
             clave = f"{etiqueta} ({sufijo})"
             sufijo += 1
         fila_por_etiqueta[clave] = valor
+        clave_a_pid[clave] = pid
         if mostrar_dashboard_por_id[pid]:
             columnas_extra.add(clave)
 
@@ -986,8 +1000,19 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
         # es completamente anónimo: fila_por_etiqueta se reenvía tal cual
         # (solo el centro y las respuestas de escala/abiertas) igual que si
         # viniera del Excel de Forms -- un test de Clima real no tiene
-        # pregunta de nombre/teléfono/email que reenviar.
-        clima_module.ingest_respuesta_directa(row["clima_oleada_id"], centro_clima, fila_por_etiqueta)
+        # pregunta de nombre/teléfono/email que reenviar. Las preguntas de
+        # tipo "likert" sí se traducen de punto (1-5) a texto de leyenda
+        # antes de mandarlas (ver LIKERT_TEXTO_POR_PUNTO) -- clima.py espera
+        # el texto tal cual trae un Excel de Forms, no el punto crudo. Se
+        # identifica la pregunta por id (clave_a_pid), no por su texto, para
+        # que dos preguntas de escala con el mismo enunciado (posible si se
+        # repite la misma frase en dos páginas) no se confundan entre sí.
+        tipo_por_id = {str(p["id"]): p["tipo"] for p in preguntas}
+        fila_para_clima = {
+            clave: (LIKERT_TEXTO_POR_PUNTO.get(str(valor), valor) if tipo_por_id.get(clave_a_pid[clave]) == "likert" else valor)
+            for clave, valor in fila_por_etiqueta.items()
+        }
+        clima_module.ingest_respuesta_directa(row["clima_oleada_id"], centro_clima, fila_para_clima)
 
     marcar_sesion_completada(token)
     mostrar_no_apto = es_no_apto and bool(row["usar_mensaje_no_apto"])

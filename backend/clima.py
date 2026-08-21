@@ -33,26 +33,19 @@ LIKERT_ALIASES = {
     "ni de acuerdo ni en desacuerdo": "Neutral",
 }
 
-# El módulo de Test (a diferencia de un Excel de Forms, que trae el texto
-# de la leyenda tal cual) envía el PUNTO (1-5) de una pregunta de escala,
-# igual que ya asume _likert_points_strict en scoring_valores.py -- mismo
-# orden que LIKERT_OPCIONES en encuestas.py (1 = más en desacuerdo).
-LIKERT_POR_PUNTO = {
-    "1": "Totalmente en desacuerdo",
-    "2": "En desacuerdo",
-    "3": "Neutral",
-    "4": "De acuerdo",
-    "5": "Totalmente de acuerdo",
-}
-
 
 def _canonicalizar_likert(valor):
+    # A propósito NO se reconocen aquí los puntos numéricos ("1"-"5") que
+    # manda el módulo de Test -- esta función recalcula en caliente TODAS
+    # las oleadas, incluidas las importadas por Excel hace tiempo, cada vez
+    # que alguien abre un informe. Reconocer números aquí cambiaría (con
+    # efecto retroactivo) el resultado de informes ya entregados si algún
+    # dato histórico tuviera por casualidad un valor numérico suelto -- la
+    # traducción de punto a texto para las respuestas del Test en vivo se
+    # hace en encuestas.py::guardar_respuesta ANTES de guardar, no aquí.
     if valor in LIKERT_ORDEN:
         return valor
-    texto = str(valor or "").strip()
-    if texto in LIKERT_POR_PUNTO:
-        return LIKERT_POR_PUNTO[texto]
-    return LIKERT_ALIASES.get(texto.lower())
+    return LIKERT_ALIASES.get(str(valor or "").strip().lower())
 
 
 METADATA_HINTS = {
