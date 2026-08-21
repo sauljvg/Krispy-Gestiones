@@ -960,6 +960,24 @@ def candidatos_con_pdf_y_foto(empresa=None) -> list[tuple[int, int]]:
     return [(row["candidato_id"], row["archivo_id"]) for row in rows]
 
 
+def candidatos_con_foto(empresa=None) -> list[dict]:
+    """[{id, nombre_completo, foto_ruta}, ...] de todos los candidatos con
+    foto de perfil -- para poder comparar el CONTENIDO real del archivo
+    entre candidatos (ver detectar_fotos_duplicadas_route) y encontrar así
+    cualquier caso de foto ajena que la limpieza por PDF no haya cogido
+    (p.ej. si el PDF más reciente de la ficha ya cambió desde que se le puso
+    la foto mala, o si el re-análisis del PDF ya no coincide con el de
+    cuando se generó el problema)."""
+    conn = get_connection()
+    clausula_empresa = "WHERE empresa = ? AND foto_ruta IS NOT NULL" if empresa else "WHERE foto_ruta IS NOT NULL"
+    params = (empresa,) if empresa else ()
+    rows = conn.execute(
+        f"SELECT id, nombre_completo, foto_ruta FROM candidatos {clausula_empresa}", params
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def crear_lote_ia_pendiente(lote_id: str, usuario_id: int, titulo: str, candidatos_archivos: list[tuple[int, int]]):
     """candidatos_archivos: [(candidato_id, archivo_id), ...] -- registra en
     disco qué le falta por rellenar a este lote, para poder retomarlo solo

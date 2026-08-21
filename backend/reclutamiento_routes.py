@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import mimetypes
@@ -702,6 +703,40 @@ def limpiar_fotos_progreso_route(limpieza_id: str, _user: dict = Depends(require
     if estado is None:
         raise HTTPException(status_code=404, detail="No hay ninguna limpieza en marcha con ese id")
     return estado
+
+
+@router.get("/candidatos/fotos-duplicadas")
+def fotos_duplicadas_route(empresa: str = "kk", _user: dict = Depends(require_informes)):
+    """Diagnóstico de solo lectura: agrupa a todos los candidatos con foto
+    por el CONTENIDO real del archivo (hash), no por si su PDF vuelve a
+    analizarse como una o varias personas -- esa segunda vía es la que usa
+    limpiar_fotos_de_lote_compartido_route, y depende de que el PDF más
+    reciente adjunto a la ficha siga siendo el mismo de cuando se generó el
+    problema; si alguien subió un CV nuevo después, o el re-análisis ya no
+    coincide, una foto ajena podría colarse sin que esa limpieza la detecte.
+    Aquí no: dos candidatos DISTINTOS con el byte a byte la misma foto es en
+    la práctica imposible que sea casualidad (dos personas no suben la
+    misma imagen exacta), así que cualquier grupo de 2+ aquí es foto
+    compartida por error, sin excepción. No borra nada, solo informa."""
+    candidatos = reclutamiento_module.candidatos_con_foto(empresa=empresa)
+    por_hash: dict[str, list[dict]] = {}
+    sin_archivo = []
+    for c in candidatos:
+        ruta = c["foto_ruta"]
+        if not ruta or not os.path.exists(ruta):
+            sin_archivo.append({"id": c["id"], "nombre": c["nombre_completo"]})
+            continue
+        with open(ruta, "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+        por_hash.setdefault(digest, []).append({"id": c["id"], "nombre": c["nombre_completo"]})
+    grupos_duplicados = [grupo for grupo in por_hash.values() if len(grupo) > 1]
+    return {
+        "ok": True,
+        "total_con_foto": len(candidatos),
+        "grupos_duplicados": grupos_duplicados,
+        "candidatos_afectados": sum(len(g) for g in grupos_duplicados),
+        "sin_archivo_en_disco": sin_archivo,
+    }
 
 
 @router.post("/candidatos/adjuntar-pdf-lote/confirmar")
