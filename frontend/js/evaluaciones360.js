@@ -137,11 +137,44 @@ function esReparentadoValidoPersona(arrastradaId, destinoId) {
 }
 
 async function reparentarPersona(personaId, nuevoJefeId) {
+  // A petición expresa: mover a alguien de jefe directo también mueve su
+  // PUESTO para que dependa del puesto de su nuevo jefe -- así "Por
+  // persona" y "Por puesto de trabajo" no se desincronizan. Como un
+  // puesto puede tener más gente además de quien se arrastra, se avisa
+  // antes si el cambio también los afecta a ellos.
+  const persona = PERSONAS.find((p) => p.id === personaId);
+  const nuevoJefe = nuevoJefeId ? PERSONAS.find((p) => p.id === nuevoJefeId) : null;
+  const nuevoPuestoPadreId = nuevoJefeId ? (nuevoJefe?.puesto_id ?? null) : null;
+  const puedeReasignarPuesto = persona?.puesto_id && (nuevoJefeId === null || nuevoJefe?.puesto_id);
+
+  if (puedeReasignarPuesto) {
+    const puestoActual = PUESTOS.find((p) => p.id === persona.puesto_id);
+    const yaEsPadre = puestoActual && puestoActual.puesto_padre_id === nuevoPuestoPadreId;
+    const esValido = nuevoPuestoPadreId === null || esReparentadoValido(persona.puesto_id, nuevoPuestoPadreId);
+    if (puestoActual && !yaEsPadre && esValido) {
+      const companeros = PERSONAS.filter((p) => p.puesto_id === persona.puesto_id && p.id !== personaId);
+      let continuar = true;
+      if (companeros.length) {
+        continuar = await pedirConfirmacion(
+          `El puesto "${puestoActual.nombre}" también lo ocupan ${companeros.map((c) => c.nombre_completo).join(", ")}. ` +
+          `Moverlo hará que a ellos también les cambie el puesto padre. ¿Continuar?`
+        );
+      }
+      if (continuar) {
+        await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos/${persona.puesto_id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ puesto_padre_id: nuevoPuestoPadreId }),
+        });
+      }
+    }
+  }
   await fetch(`${AUTH_API_BASE}/evaluaciones360/personas/${personaId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jefe_directo_id: nuevoJefeId }),
   });
+  PUESTOS = await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos?empresa=${EMPRESA}`).then((r) => r.json());
   await cargarOrganigrama();
 }
 
@@ -201,7 +234,7 @@ function activarSubvistaOrganigrama(nombre) {
 }
 
 function renderPuestosArbol() {
-  const cont = document.getElementById("puestos-arbol");
+  const cont = document.getElementById("puestos-arbol-inner");
   if (PUESTOS.length === 0) {
     cont.innerHTML = `<p class="staff-hint">Todavía no hay puestos de trabajo. Empieza por el puesto de más arriba (sin puesto al que reporta) y ve añadiendo debajo.</p>`;
     return;
@@ -1076,6 +1109,30 @@ document.addEventListener("DOMContentLoaded", async () => {
     panActivo = false;
     arbolCont.classList.remove("panning");
   });
+  let puestoZoom = 1;
+  const arbolInner = document.getElementById("puestos-arbol-inner");
+  function aplicarZoom() {
+    arbolInner.style.transform = `scale(${puestoZoom})`;
+    document.getElementById("btn-zoom-reset").textContent = `${Math.round(puestoZoom * 100)}%`;
+  }
+  document.getElementById("btn-zoom-mas").addEventListener("click", () => {
+    puestoZoom = Math.min(2, Math.round((puestoZoom + 0.1) * 10) / 10);
+    aplicarZoom();
+  });
+  document.getElementById("btn-zoom-menos").addEventListener("click", () => {
+    puestoZoom = Math.max(0.3, Math.round((puestoZoom - 0.1) * 10) / 10);
+    aplicarZoom();
+  });
+  document.getElementById("btn-zoom-reset").addEventListener("click", () => {
+    puestoZoom = 1;
+    aplicarZoom();
+  });
+  arbolCont.addEventListener("wheel", (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    puestoZoom = Math.min(2, Math.max(0.3, Math.round((puestoZoom + (e.deltaY < 0 ? 0.1 : -0.1)) * 10) / 10));
+    aplicarZoom();
+  }, { passive: false });
   document.getElementById("btn-guardar-puesto").addEventListener("click", guardarPuesto);
   document.getElementById("btn-desactivar-puesto").addEventListener("click", desactivarPuesto);
   document.getElementById("btn-cerrar-editor-puesto").addEventListener("click", cerrarEditorPuesto);

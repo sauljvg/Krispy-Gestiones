@@ -41,8 +41,12 @@
      drag & drop para reasignar el puesto al que reporta cada uno. Patrón
      CSS clásico de organigrama (ul/li anidados + bordes en ::before/::after
      dibujando las líneas), en vez de una librería de diagramas aparte. */
-  .orgchart-scroll { overflow: auto; padding: 24px 12px 40px; margin: 0 -12px; cursor: grab; max-height: 70vh; }
+  .orgchart-scroll {
+    overflow: auto; padding: 24px 12px 40px; margin: 12px -12px 0; cursor: grab; max-height: 70vh;
+    border: 2px solid var(--status-good); border-radius: 12px;
+  }
   .orgchart-scroll.panning { cursor: grabbing; user-select: none; }
+  #puestos-arbol-inner { width: max-content; margin: 0 auto; transform-origin: top center; }
   .orgchart, .orgchart ul { list-style: none; margin: 0; padding: 0; display: flex; justify-content: center; width: max-content; }
   .orgchart { padding-top: 0; margin: 0 auto; }
   .orgchart li { position: relative; padding: 28px 10px 0; text-align: center; }
@@ -290,10 +294,17 @@
 
       <div id="lista-puestos-wrap" hidden>
         <div class="eval360-toolbar">
-          <p class="staff-hint">Arrastra un puesto sobre otro para cambiar a quién reporta. Un mismo puesto puede tener varias personas, por ejemplo los gerentes.</p>
-          <button id="btn-nuevo-puesto-raiz" class="btn btn-primary" type="button">＋ Nuevo puesto</button>
+          <p class="staff-hint">Arrastra una caja sobre otra para cambiar a quién reporta. Arrastra el fondo vacío para moverte por el árbol. Un mismo puesto puede tener varias personas, por ejemplo los gerentes.</p>
+          <div style="display:flex; gap:6px; flex-shrink:0;">
+            <button id="btn-zoom-menos" class="btn btn-ghost btn-mini" type="button" title="Alejar">－</button>
+            <button id="btn-zoom-reset" class="btn btn-ghost btn-mini" type="button" title="Restablecer zoom">100%</button>
+            <button id="btn-zoom-mas" class="btn btn-ghost btn-mini" type="button" title="Acercar">＋</button>
+            <button id="btn-nuevo-puesto-raiz" class="btn btn-primary" type="button">＋ Nuevo puesto</button>
+          </div>
         </div>
-        <div class="orgchart-scroll" id="puestos-arbol"></div>
+        <div class="orgchart-scroll" id="puestos-arbol">
+          <div id="puestos-arbol-inner"></div>
+        </div>
       </div>
 
       <div class="editor-card" id="editor-puesto-card" hidden>
@@ -371,6 +382,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260723f"></script>
 <script src="js/topbar-menu.js?v=20260821a"></script>
-<script src="js/evaluaciones360.js?v=20260821f"></script>
+<script src="js/evaluaciones360.js?v=20260821g"></script>
 </body>
 </html>
