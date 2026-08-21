@@ -17,7 +17,20 @@ import unicodedata
 # hace falta recuperar la integración con Gemini más adelante.
 
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
-PHONE_RE = re.compile(r"(?:\+34[\s.-]?)?\b[6789]\d{2}[\s.-]?\d{3}[\s.-]?\d{3}\b")
+# Dos casos: (a) un prefijo de país "+N" a "+NNN" seguido de 7 a 13 dígitos
+# más, con o sin separador entre cada uno -- así vale igual "+34610633574"
+# (sin separador -- con el regex de antes, \b no encuentra límite de palabra
+# entre el "4" del prefijo y el "6" del número, los dos dígitos, y no
+# reconocía el teléfono en absoluto), "+34 610 633 574" o el formato francés
+# en parejas "+33 6 12 34 56 78" -- ya no hace falta enumerar cada país a
+# mano, cualquier "+" seguido de dígitos vale. (b) un número español "de
+# toda la vida" sin prefijo, 9 dígitos empezando por 6/7/8/9 -- se mantiene
+# aparte porque ahí SÍ hace falta exigir el prefijo 6/7/8/9 (si no, un DNI o
+# cualquier otra tira de 9 dígitos suelta se colaría como teléfono).
+PHONE_RE = re.compile(
+    r"\+\d{1,3}[\s.-]?(?:\d[\s.-]?){6,12}\d"
+    r"|\b[6789]\d{2}[\s.-]?\d{3}[\s.-]?\d{3}\b"
+)
 DNI_RE = re.compile(r"\b(\d{8}[A-Za-z]|[XYZxyz]\d{7}[A-Za-z])\b")
 DATE_RE = re.compile(r"\b\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}\b|\b\d{1,2}\s+de\s+[a-zA-Zé]+\s+de\s+\d{4}\b", re.IGNORECASE)
 PAGE_MARKER_RE = re.compile(r"--\s*\d+\s*of\s*\d+\s*--", re.IGNORECASE)
