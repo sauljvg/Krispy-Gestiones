@@ -69,6 +69,11 @@ function renderClimaPlantillaFilas(plantilla) {
   wireClimaPlantillaFilas();
 }
 
+function actualizarVisibilidadMensajeNoApto() {
+  document.getElementById("test-mensaje-no-apto-wrap").hidden =
+    !document.getElementById("test-usar-mensaje-no-apto").checked;
+}
+
 // Se llama cada vez que cambia el desplegable de destino (y al abrir un
 // test ya guardado) -- muestra/oculta el bloque de plantilla y, si el
 // destino es una oleada existente, precarga lo que ya se había guardado
@@ -173,6 +178,8 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("test-titulo").value = currentTest.titulo;
     document.getElementById("test-mensaje-final").value = currentTest.mensaje_final;
     document.getElementById("test-mensaje-no-apto").value = currentTest.mensaje_no_apto;
+    document.getElementById("test-usar-mensaje-no-apto").checked = currentTest.usar_mensaje_no_apto !== false;
+    actualizarVisibilidadMensajeNoApto();
     document.getElementById("test-color-boton").value = currentTest.color_boton;
     if (currentTest.tipo_entrevista_empresa) {
       document.getElementById("test-tipo-informe").value = `entrevista:${currentTest.tipo_entrevista_empresa}`;
@@ -208,6 +215,8 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("test-titulo").value = "";
     document.getElementById("test-mensaje-final").value = "Gracias por completar el formulario.";
     document.getElementById("test-mensaje-no-apto").value = "Gracias por contestar nuestro test. En esta ocasión no has superado el proceso, pero te deseamos mucha suerte.";
+    document.getElementById("test-usar-mensaje-no-apto").checked = true;
+    actualizarVisibilidadMensajeNoApto();
     document.getElementById("test-color-boton").value = "#5b2a2a";
     document.getElementById("test-tipo-informe").value = "";
     await actualizarVistaClimaPlantilla();
@@ -263,6 +272,7 @@ async function guardarTest() {
     clima_oleada_id: destino.startsWith("clima:") ? Number(destino.slice("clima:".length)) : null,
     enlace_corto: document.getElementById("test-enlace-corto").value.trim() || null,
     evitar_duplicados: document.getElementById("test-evitar-duplicados").checked,
+    usar_mensaje_no_apto: document.getElementById("test-usar-mensaje-no-apto").checked,
   };
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}`, {
     method: "PUT",
@@ -1035,8 +1045,17 @@ document.addEventListener("DOMContentLoaded", async () => {
       await loadTiposInforme();
       e.target.value = `clima:${data.id}`;
     }
+    // Entrevista de Salida y Clima Laboral son solo respuestas (sin
+    // resultado apto/no apto) -- se sugiere desactivar el mensaje de "No
+    // apto" al elegir uno de esos destinos, pero sigue siendo un
+    // interruptor manual: si el admin lo reactiva a mano, se respeta.
+    if (val.startsWith("entrevista:") || val.startsWith("clima:")) {
+      document.getElementById("test-usar-mensaje-no-apto").checked = false;
+      actualizarVisibilidadMensajeNoApto();
+    }
     await actualizarVistaClimaPlantilla();
   });
+  document.getElementById("test-usar-mensaje-no-apto").addEventListener("change", actualizarVisibilidadMensajeNoApto);
   document.getElementById("btn-clima-plantilla-agregar").addEventListener("click", () => {
     document.getElementById("clima-plantilla-filas").insertAdjacentHTML("beforeend", filaClimaPlantillaHTML());
     wireClimaPlantillaFilas();

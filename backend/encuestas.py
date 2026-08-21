@@ -73,6 +73,15 @@ def ensure_encuestas_tables():
         # pueda responder dos veces. Por defecto desactivada (0), para no
         # cambiar el comportamiento de los tests ya existentes.
         conn.execute("ALTER TABLE encuestas ADD COLUMN evitar_duplicados INTEGER NOT NULL DEFAULT 0")
+    if "usar_mensaje_no_apto" not in cols_encuestas:
+        # Interruptor en Ajustes: el concepto de "No apto" (por puntuación de
+        # scoring_valores o por una opción marcada como descalificatoria)
+        # solo tiene sentido en tests que SE EVALÚAN -- para Entrevista de
+        # Salida o Clima Laboral, que son solo respuestas sin resultado
+        # apto/no apto, mostrar y usar ese mensaje no encaja. Default 1
+        # (activado) para no cambiar el comportamiento de los tests ya
+        # existentes, que ya cuentan con este mensaje configurado.
+        conn.execute("ALTER TABLE encuestas ADD COLUMN usar_mensaje_no_apto INTEGER NOT NULL DEFAULT 1")
     if "clima_oleada_id" not in cols_encuestas:
         # Tercer destino posible (mutuamente excluyente con tipo_informe_clave
         # y tipo_entrevista_empresa, mismo motivo que ese comentario): un test
@@ -531,16 +540,16 @@ def create_encuesta(titulo):
     return encuesta_id
 
 
-def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None, evitar_duplicados=False, mensaje_no_apto=None, clima_oleada_id=None):
+def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None, evitar_duplicados=False, mensaje_no_apto=None, clima_oleada_id=None, usar_mensaje_no_apto=True):
     conn = get_connection()
     conn.execute(
         "UPDATE encuestas SET titulo = ?, mensaje_final = ?, color_boton = ?, tipo_informe_clave = ?, "
         "tipo_entrevista_empresa = ?, enlace_corto = ?, evitar_duplicados = ?, mensaje_no_apto = ?, "
-        "clima_oleada_id = ? WHERE id = ?",
+        "clima_oleada_id = ?, usar_mensaje_no_apto = ? WHERE id = ?",
         (titulo.strip(), mensaje_final.strip(), color_boton.strip(), tipo_informe_clave or None,
          tipo_entrevista_empresa or None, (enlace_corto or "").strip() or None,
          1 if evitar_duplicados else 0, (mensaje_no_apto or "").strip() or mensaje_final.strip(),
-         clima_oleada_id or None, encuesta_id),
+         clima_oleada_id or None, 1 if usar_mensaje_no_apto else 0, encuesta_id),
     )
     conn.commit()
     conn.close()
@@ -955,7 +964,8 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
         clima_module.ingest_respuesta_directa(row["clima_oleada_id"], centro_clima, fila_por_etiqueta)
 
     marcar_sesion_completada(token)
-    return {"ok": True, "mensaje": row["mensaje_no_apto"] if es_no_apto else row["mensaje_final"]}
+    mostrar_no_apto = es_no_apto and bool(row["usar_mensaje_no_apto"])
+    return {"ok": True, "mensaje": row["mensaje_no_apto"] if mostrar_no_apto else row["mensaje_final"]}
 
 
 def list_respuestas(encuesta_id):
