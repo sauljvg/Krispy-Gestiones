@@ -8,6 +8,16 @@ const ICONO_FLECHA_ABAJO = `<svg width="12" height="12" viewBox="0 0 24 24" fill
 const ICONO_LAPIZ = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
 const ICONO_ARRASTRAR = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>`;
 
+function claveDesdeNombre(nombre) {
+  return nombre
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
 function escapeHTML(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";
@@ -26,6 +36,8 @@ async function loadTiposInforme() {
     `<option value="">— No calcular puntuación —</option>` +
     `<optgroup label="Informes">` +
     tipos.map((t) => `<option value="informe:${escapeHTML(t.clave)}">${escapeHTML(t.nombre)}</option>`).join("") +
+    `<option value="informe:nueva:kk">+ Nuevo tipo de Informe — Krispy Kreme</option>` +
+    `<option value="informe:nueva:saona">+ Nuevo tipo de Informe — SAONA</option>` +
     `</optgroup>` +
     `<optgroup label="Entrevista de Salida">` +
     `<option value="entrevista:kk">Entrevista de Salida — Krispy Kreme</option>` +
@@ -1060,7 +1072,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (val.startsWith("clima:nueva:")) {
       const [, , empresa, fase] = val.split(":");
       const sugerido = fase === "pulso" ? "2026 · Pulso" : "2026 · Encuesta completa";
-      const etiqueta = prompt(`Nombre de esta oleada de Clima Laboral (ej. "${sugerido}"):`);
+      const etiqueta = await pedirTexto(`Nombre de esta oleada de Clima Laboral (ej. "${sugerido}"):`);
       if (!etiqueta || !etiqueta.trim()) {
         e.target.value = currentTest?.clima_oleada_id ? `clima:${currentTest.clima_oleada_id}` : "";
         return;
@@ -1080,6 +1092,32 @@ document.addEventListener("DOMContentLoaded", async () => {
       await loadTiposInforme();
       e.target.value = `clima:${data.id}`;
       climaCargarPlantillaCompleta = fase !== "pulso" && !(currentTest?.paginas?.length);
+    } else if (val.startsWith("informe:nueva:")) {
+      // El nombre de este nuevo tipo de informe es el MISMO título que el
+      // test ya tiene puesto arriba -- no tiene sentido volver a preguntarlo
+      // (el test y el tipo de informe que alimenta siempre van a llamarse
+      // igual en la práctica) ni interrumpir con un prompt() nativo del
+      // navegador para ello.
+      const empresa = val.split(":")[2];
+      const nombre = document.getElementById("test-titulo").value.trim();
+      if (!nombre) {
+        await mostrarAviso("Escribe primero el título del test, arriba: se usará también como nombre de este nuevo tipo de informe.");
+        e.target.value = currentTest?.tipo_informe_clave ? `informe:${currentTest.tipo_informe_clave}` : "";
+        return;
+      }
+      const res = await fetch(`${AUTH_API_BASE}/informes/tipos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clave: claveDesdeNombre(nombre), nombre, empresa }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        mostrarAviso(err.detail || "No se pudo crear el tipo de informe.");
+        e.target.value = currentTest?.tipo_informe_clave ? `informe:${currentTest.tipo_informe_clave}` : "";
+        return;
+      }
+      await loadTiposInforme();
+      e.target.value = `informe:${claveDesdeNombre(nombre)}`;
     }
     actualizarVisibilidadMensajeNoApto();
     await actualizarVistaClimaPlantilla();

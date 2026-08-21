@@ -585,7 +585,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   document.getElementById("btn-new-tipo").addEventListener("click", async () => {
-    const nombre = prompt("Nombre del nuevo tipo de informe (ej. 'Encuesta de Onboarding'):");
+    const nombre = await pedirTexto("Nombre del nuevo tipo de informe (ej. 'Encuesta de Onboarding'):");
     if (!nombre || !nombre.trim()) return;
     const clave = nombre
       .trim()

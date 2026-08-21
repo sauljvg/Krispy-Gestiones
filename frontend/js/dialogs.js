@@ -9,6 +9,9 @@
 // Uso: await mostrarAviso("mensaje") en vez de alert("mensaje");
 //      if (!(await pedirConfirmacion("mensaje"))) return; en vez de
 //      if (!confirm("mensaje")) return;
+//      const texto = await pedirTexto("mensaje", "valor inicial"); en vez de
+//      const texto = prompt("mensaje", "valor inicial"); -- null si se
+//      cancela, string (puede ser vacío) si se acepta.
 (function () {
   const ESTILOS = `
     .kdialog-overlay {
@@ -32,6 +35,11 @@
     }
     .kdialog-acciones { display: flex; justify-content: flex-end; gap: 8px; }
     .kdialog-acciones .btn { min-width: 84px; }
+    .kdialog-input {
+      width: 100%; box-sizing: border-box; margin: -8px 22px 20px 0; padding: 8px 10px;
+      border: 1px solid var(--border); border-radius: 8px; background: var(--surface-page);
+      color: var(--text-primary); font-size: 14px; font-family: inherit;
+    }
   `;
 
   let overlay = null;
@@ -103,5 +111,50 @@
       { texto: "Cancelar", clase: "btn-ghost", valor: false },
       { texto: "Aceptar", clase: "btn-primary", valor: true },
     ]);
+  };
+
+  window.pedirTexto = function (mensaje, valorInicial = "") {
+    asegurarOverlay();
+    return new Promise((resolve) => {
+      mensajeEl.textContent = mensaje;
+      accionesEl.innerHTML = "";
+      let resuelto = false;
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "kdialog-input";
+      input.value = valorInicial;
+      mensajeEl.insertAdjacentElement("afterend", input);
+      const terminar = (valor) => {
+        if (resuelto) return;
+        resuelto = true;
+        overlay.classList.remove("visible");
+        document.removeEventListener("keydown", onKeydown);
+        input.remove();
+        resolve(valor);
+      };
+      const aceptar = document.createElement("button");
+      aceptar.type = "button";
+      aceptar.className = "btn btn-primary";
+      aceptar.textContent = "Aceptar";
+      aceptar.addEventListener("click", () => terminar(input.value));
+      const cancelar = document.createElement("button");
+      cancelar.type = "button";
+      cancelar.className = "btn btn-ghost";
+      cancelar.textContent = "Cancelar";
+      cancelar.addEventListener("click", () => terminar(null));
+      accionesEl.appendChild(cancelar);
+      accionesEl.appendChild(aceptar);
+      overlay.querySelector(".kdialog-cerrar").onclick = () => terminar(null);
+      function onKeydown(e) {
+        if (e.key === "Escape") terminar(null);
+        else if (e.key === "Enter") terminar(input.value);
+      }
+      document.addEventListener("keydown", onKeydown);
+      overlay.classList.add("visible");
+      requestAnimationFrame(() => {
+        input.focus();
+        input.select();
+      });
+    });
   };
 })();
