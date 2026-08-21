@@ -387,6 +387,16 @@ def crear_oleada(etiqueta, empresa="kk", fase="completa"):
     return get_or_create_oleada(True, etiqueta=etiqueta, empresa=empresa, fase=fase)
 
 
+def renombrar_oleada(oleada_id, etiqueta):
+    """Para poder ponerle nombre a una oleada que se creó sin uno (p.ej. las
+    importadas por Excel antes de que "+ Nueva oleada" pidiera un nombre) --
+    no toca fase ni empresa, solo la etiqueta que se ve en los desplegables."""
+    conn = get_connection()
+    conn.execute("UPDATE clima_oleadas SET etiqueta = ? WHERE id = ?", (etiqueta.strip(), oleada_id))
+    conn.commit()
+    conn.close()
+
+
 def get_plantilla(oleada_id):
     conn = get_connection()
     rows = conn.execute(

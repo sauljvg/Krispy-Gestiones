@@ -457,6 +457,25 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadCentros();
   });
 
+  document.getElementById("btn-renombrar-oleada").addEventListener("click", async () => {
+    if (!currentOleada) return;
+    const select = document.getElementById("select-oleada");
+    const actual = select.options[select.selectedIndex]?.textContent.split(" (")[0] || "";
+    const nombre = prompt("Nuevo nombre para esta oleada:", actual);
+    if (!nombre || !nombre.trim()) return;
+    const res = await fetch(`${AUTH_API_BASE}/clima/${currentOleada}/etiqueta`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ etiqueta: nombre.trim() }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      mostrarAviso(err.detail || "No se pudo renombrar la oleada.");
+      return;
+    }
+    await loadOleadas();
+  });
+
   document.getElementById("input-clima-upload").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;

@@ -69,6 +69,18 @@ def crear_oleada_route(body: NuevaOleadaBody, user: dict = Depends(get_current_u
     return {"ok": True, "id": oleada_id}
 
 
+class RenombrarOleadaBody(BaseModel):
+    etiqueta: str
+
+
+@router.put("/{oleada_id}/etiqueta")
+def renombrar_oleada_route(oleada_id: int, body: RenombrarOleadaBody, _user: dict = Depends(require_clima_oleada)):
+    if not body.etiqueta.strip():
+        raise HTTPException(status_code=400, detail="Ponle un nombre a la oleada")
+    clima_module.renombrar_oleada(oleada_id, body.etiqueta.strip())
+    return {"ok": True}
+
+
 @router.get("/{oleada_id}/plantilla")
 def get_plantilla_route(oleada_id: int, _user: dict = Depends(require_clima_oleada)):
     return clima_module.get_plantilla(oleada_id)
