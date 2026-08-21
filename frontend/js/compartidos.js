@@ -2088,6 +2088,7 @@ function actualizarBotonWhatsappSeleccionados() {
   btnCompartir.disabled = sinSeleccion;
   btnAsignarVacante.disabled = sinSeleccion;
   document.getElementById("btn-exportar-excel-seleccionados").disabled = sinSeleccion;
+  document.getElementById("btn-descargar-pdfs-seleccionados").disabled = sinSeleccion;
   estadoMasivo.disabled = sinSeleccion;
   // "Seleccionar todos" toma TODOS los candidatos cargados actualmente en la
   // pantalla (respetando el filtro de vacante/búsqueda aplicado), no solo
@@ -2106,6 +2107,50 @@ function deseleccionarTodosCandidatos() {
   candidatosSeleccionadosIds.clear();
   actualizarBotonWhatsappSeleccionados();
   renderCandidatosGrid();
+}
+
+// Un único PDF con el CV de cada seleccionado, en el MISMO orden en que se
+// fueron marcando (candidatosSeleccionadosIds es un Set -- conserva el orden
+// de inserción, así que [...] ya da ese orden sin más) -- cada uno con el
+// PDF que le tocaría en su ficha individual (diseño propio si ya está
+// enriquecido, recorte original si no), fusionados por el backend (ver
+// descargar_pdfs_lote_route).
+async function descargarPdfsSeleccionados() {
+  const ids = [...candidatosSeleccionadosIds];
+  if (ids.length === 0) return;
+  const btn = document.getElementById("btn-descargar-pdfs-seleccionados");
+  const textoOriginal = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Generando PDF...";
+  try {
+    const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/descargar-pdfs-lote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ candidato_ids: ids }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      mostrarAviso(err.detail || "No se pudieron descargar los PDF.");
+      return;
+    }
+    const omitidosHeader = res.headers.get("X-Omitidos");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `CVs seleccionados (${ids.length}).pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    if (omitidosHeader) {
+      const omitidos = JSON.parse(omitidosHeader);
+      mostrarAviso(`El PDF se descargó, pero no se pudo incluir el CV de: ${omitidos.join(", ")}.`);
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = textoOriginal;
+  }
 }
 
 async function cambiarEstadoSeleccionados(estado) {
@@ -2893,6 +2938,7 @@ async function initBaseCandidatos(user) {
   document.getElementById("btn-asignar-vacante-cancelar").addEventListener("click", cerrarModalAsignarVacante);
   document.getElementById("btn-asignar-vacante-confirmar").addEventListener("click", confirmarAsignarVacante);
   document.getElementById("btn-exportar-excel-seleccionados").addEventListener("click", () => abrirModalExportarExcel("grid"));
+  document.getElementById("btn-descargar-pdfs-seleccionados").addEventListener("click", descargarPdfsSeleccionados);
   document.getElementById("btn-cambiar-destinatario-cancelar").addEventListener("click", cerrarModalCambiarDestinatario);
   document.getElementById("btn-cambiar-destinatario-confirmar").addEventListener("click", confirmarCambiarDestinatario);
   document.getElementById("btn-fusionar-vacante-cancelar").addEventListener("click", cerrarModalFusionarVacante);

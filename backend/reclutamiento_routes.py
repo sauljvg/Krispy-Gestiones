@@ -1,3 +1,4 @@
+import io
 import json
 import mimetypes
 import os
@@ -701,7 +702,16 @@ def reextraer_archivo_route(candidato_id: int, archivo_id: int, _user: dict = De
     una mejora del extractor local deja desactualizada una ficha que se
     procesó antes del arreglo. No sobreescribe nada por su cuenta: el
     frontend rellena el formulario con el resultado para que el reclutador
-    lo revise antes de guardar, igual que al subir un CV nuevo."""
+    lo revise antes de guardar, igual que al subir un CV nuevo.
+
+    Si la lectura sale bien, se marca ia_extraida_en aquí mismo (igual que
+    hace el relleno en segundo plano del lote, ver
+    _rellenar_huecos_en_segundo_plano) -- esta es la ÚNICA otra vía por la
+    que una ficha puede llegar a tenerlo si el relleno automático del lote
+    falló para ella en su momento (PDF de ese candidato dañado, recorte con
+    páginas mal detectadas...) y se quedó sirviendo el PDF original en vez
+    del diseño propio. Sin esto, "Re-extraer con IA" solo actualizaba el
+    formulario pero nunca destrababa esa ficha."""
     contenido = _leer_archivo_pdf(candidato_id, archivo_id)
     try:
         candidatos = cv_extraction.extraer_cv(contenido)
@@ -710,6 +720,7 @@ def reextraer_archivo_route(candidato_id: int, archivo_id: int, _user: dict = De
     if not candidatos:
         raise HTTPException(status_code=422, detail="No se reconoció ningún candidato en este PDF")
     if len(candidatos) == 1:
+        reclutamiento_module.marcar_ia_extraida(candidato_id)
         return {"ok": True, "candidato": candidatos[0], "de_lote": False}
     # El PDF adjunto es un lote con varias personas (ver
     # /candidatos/adjuntar-pdf-lote, que adjunta la misma copia a cada
@@ -726,6 +737,7 @@ def reextraer_archivo_route(candidato_id: int, archivo_id: int, _user: dict = De
             detail="Este PDF trae varios candidatos y no se pudo identificar cuál es este por el nombre. "
                    "Comprueba que el campo \"Nombre completo\" de la ficha coincide exactamente con el del PDF.",
         )
+    reclutamiento_module.marcar_ia_extraida(candidato_id)
     return {"ok": True, "candidato": encontrado, "de_lote": True}
 
 
@@ -753,6 +765,43 @@ def foto_candidato_route(candidato_id: int, _user: dict = Depends(require_acceso
     return FileResponse(ruta, media_type=media_type)
 
 
+def _archivo_pdf_original(candidato: dict):
+    for archivo in candidato["archivos"]:
+        if archivo["nombre_original"].lower().endswith(".pdf"):
+            return reclutamiento_module.get_archivo(archivo["id"])
+    return None
+
+
+def _cv_pdf_bytes(candidato_id: int) -> tuple[bytes, str, bool] | None:
+    """Bytes del CV que se le mostraría a este candidato en /cv.pdf --
+    diseño propio si ya está enriquecido, PDF original (recorte de InfoJobs/
+    lote o el que sea) si no. Compartido entre cv_pdf_route (descarga
+    individual) y descargar_pdfs_lote_route (fusión de varios candidatos, ver
+    más abajo) para que las dos vías decidan exactamente igual cuál PDF le
+    corresponde a cada uno. El tercer valor (es_generado) distingue cuál de
+    los dos fue, para que cv_pdf_route pueda mantener el mismo
+    Content-Disposition que tenía cada rama antes de este refactor
+    (attachment para el generado, inline para el original). None si no hay
+    ficha con ese id."""
+    candidato = reclutamiento_module.get_candidato(candidato_id)
+    if candidato is None:
+        return None
+    ya_enriquecido = candidato_id in reclutamiento_module.candidatos_ya_enriquecidos([candidato_id])
+    original = _archivo_pdf_original(candidato) if not ya_enriquecido else None
+    if original is None:
+        try:
+            foto_ruta = reclutamiento_module.get_foto_ruta(candidato_id)
+            pdf_bytes = cv_pdf.generar_cv_pdf(candidato, empresa=candidato.get("empresa", "kk"), foto_ruta=foto_ruta)
+            return pdf_bytes, _nombre_archivo_cv(candidato), True
+        except Exception as exc:
+            print(f"[cv.pdf] Fallo generando el CV propio del candidato {candidato_id}, se sirve el original si lo hay: {exc}")
+            original = _archivo_pdf_original(candidato)
+            if original is None:
+                return None
+    with open(original["ruta"], "rb") as f:
+        return f.read(), _nombre_archivo_cv(candidato), False
+
+
 @router.get("/candidatos/{candidato_id}/cv.pdf")
 def cv_pdf_route(candidato_id: int, _user: dict = Depends(require_acceso_candidato)):
     """CV con diseño propio a partir de los datos ya extraídos (formación/
@@ -767,38 +816,60 @@ def cv_pdf_route(candidato_id: int, _user: dict = Depends(require_acceso_candida
     original si generar el nuestro falla por lo que sea (dato inesperado de
     algún CV raro) -- mejor entregar el original que un error 500 sin CV
     ninguno."""
-    candidato = reclutamiento_module.get_candidato(candidato_id)
-    if candidato is None:
+    if reclutamiento_module.get_candidato(candidato_id) is None:
         raise HTTPException(status_code=404, detail="Candidato no encontrado")
-
-    def _archivo_pdf_original():
-        for archivo in candidato["archivos"]:
-            if archivo["nombre_original"].lower().endswith(".pdf"):
-                return reclutamiento_module.get_archivo(archivo["id"])
-        return None
-
-    ya_enriquecido = candidato_id in reclutamiento_module.candidatos_ya_enriquecidos([candidato_id])
-    original = _archivo_pdf_original() if not ya_enriquecido else None
-    if original is None:
-        try:
-            foto_ruta = reclutamiento_module.get_foto_ruta(candidato_id)
-            pdf_bytes = cv_pdf.generar_cv_pdf(candidato, empresa=candidato.get("empresa", "kk"), foto_ruta=foto_ruta)
-            nombre = _nombre_archivo_cv(candidato)
-            return Response(
-                content=pdf_bytes,
-                media_type="application/pdf",
-                headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
-            )
-        except Exception as exc:
-            print(f"[cv.pdf] Fallo generando el CV propio del candidato {candidato_id}, se sirve el original si lo hay: {exc}")
-            original = _archivo_pdf_original()
-            if original is None:
-                raise HTTPException(status_code=500, detail="No se pudo generar el CV") from exc
-    return FileResponse(
-        original["ruta"],
+    resultado = _cv_pdf_bytes(candidato_id)
+    if resultado is None:
+        raise HTTPException(status_code=500, detail="No se pudo generar el CV")
+    pdf_bytes, nombre, es_generado = resultado
+    disposicion = "attachment" if es_generado else "inline"
+    return Response(
+        content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{_nombre_archivo_cv(candidato)}"'},
+        headers={"Content-Disposition": f'{disposicion}; filename="{nombre}"'},
     )
+
+
+class DescargarPdfsLoteBody(BaseModel):
+    candidato_ids: list[int]
+
+
+@router.post("/candidatos/descargar-pdfs-lote")
+def descargar_pdfs_lote_route(body: DescargarPdfsLoteBody, _user: dict = Depends(require_informes)):
+    """Un único PDF con el CV de cada candidato seleccionado (el mismo que
+    saldría en /cv.pdf para cada uno -- diseño propio o recorte original,
+    lo que toque) fusionado en el orden EXACTO en que se pasan los ids, que
+    es el orden en que el reclutador los fue marcando en el listado -- así
+    el PDF final sale ordenado igual que la selección, sin que haya que
+    reordenar nada a mano después de descargarlo."""
+    from pypdf import PdfReader, PdfWriter
+
+    if not body.candidato_ids:
+        raise HTTPException(status_code=400, detail="No se ha seleccionado ningún candidato")
+    writer = PdfWriter()
+    omitidos = []
+    for candidato_id in body.candidato_ids:
+        resultado = _cv_pdf_bytes(candidato_id)
+        if resultado is None:
+            candidato = reclutamiento_module.get_candidato(candidato_id)
+            omitidos.append(candidato["nombre_completo"] if candidato else f"#{candidato_id}")
+            continue
+        pdf_bytes, _nombre, _es_generado = resultado
+        try:
+            for pagina in PdfReader(io.BytesIO(pdf_bytes)).pages:
+                writer.add_page(pagina)
+        except Exception as exc:
+            print(f"[descargar-pdfs-lote] PDF ilegible para el candidato {candidato_id}, se omite: {exc}")
+            candidato = reclutamiento_module.get_candidato(candidato_id)
+            omitidos.append(candidato["nombre_completo"] if candidato else f"#{candidato_id}")
+    if len(writer.pages) == 0:
+        raise HTTPException(status_code=500, detail="No se pudo generar ningún CV de los seleccionados")
+    salida = io.BytesIO()
+    writer.write(salida)
+    headers = {"Content-Disposition": 'attachment; filename="CVs seleccionados.pdf"'}
+    if omitidos:
+        headers["X-Omitidos"] = json.dumps(omitidos, ensure_ascii=True)
+    return Response(content=salida.getvalue(), media_type="application/pdf", headers=headers)
 
 
 @router.delete("/candidatos/{candidato_id}/foto")
