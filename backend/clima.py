@@ -799,7 +799,7 @@ def compute_reporte(oleada_id, centro=None, centros_permitidos=None, solo_tipo=N
         nube_palabras[header] = [{"palabra": p, "veces": c} for p, c in top_palabras]
 
     anterior = get_anterior_score(centro, oleada_id)
-    satisfaccion = get_satisfaccion_cliente(centro, oleada_id)
+    satisfaccion = get_satisfaccion_cliente(centro, oleada_id, solo_tipo)
 
     conn.close()
     return {
@@ -862,7 +862,7 @@ def _tiendas_para_centro(centro, empresa="kk"):
     return _CENTRO_A_TIENDAS.get(_normaliza_header(centro))
 
 
-def get_satisfaccion_cliente(centro, oleada_id):
+def get_satisfaccion_cliente(centro, oleada_id, solo_tipo=None):
     """Satisfacción de cliente (estrellas de Google) para el mismo centro,
     para mostrarla junto al engagement. Presente = media de todas las
     reseñas a día de hoy. Anterior = media de reseñas hasta la fecha de la
@@ -871,7 +871,12 @@ def get_satisfaccion_cliente(centro, oleada_id):
     compara contra la fecha de un Pulso intermedio -- ver fase en
     ensure_clima_tables). None si el centro no tiene tienda física (p.ej.
     Oficinas), no hay reseñas, o la oleada es de otra empresa sin Reseñas
-    propias conectadas."""
+    propias conectadas. solo_tipo="fabrica": vista agregada "Todas las
+    fábricas" (centro=None) -- sin esto, al no tener centro concreto caía en
+    la rama "empresa entera" y mostraba la satisfacción de las TIENDAS, como
+    si las fábricas tuvieran clientes propios (no los tienen)."""
+    if solo_tipo == "fabrica":
+        return None
     empresa = get_oleada_empresa(oleada_id) or "kk"
     fase = get_oleada_fase(oleada_id) or "completa"
     tiendas = _tiendas_para_centro(centro, empresa)
