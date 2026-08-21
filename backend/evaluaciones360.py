@@ -75,6 +75,29 @@ def ensure_eval360_tables():
             creado_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # eval360_personas.puesto_id de arriba se queda en la tabla sin usarse
+    # (una persona real puede ocupar más de un puesto a la vez -- ej. Jesús
+    # Collado es Director Financiero Y Director de Desarrollo -- así que un
+    # solo FK no bastaba) pero no se borra la columna para no depender de
+    # ALTER TABLE ... DROP COLUMN (soporte desigual según la versión de
+    # SQLite). Toda la asignación real de puestos vive desde aquí en esta
+    # tabla puente, que si permite muchos-a-muchos.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS eval360_persona_puestos (
+            persona_id INTEGER NOT NULL REFERENCES eval360_personas(id),
+            puesto_id INTEGER NOT NULL REFERENCES eval360_puestos(id),
+            PRIMARY KEY (persona_id, puesto_id)
+        )
+    """)
+    # Migración única: las personas que ya tenían un puesto_id asignado (el
+    # modelo viejo, uno-a-uno) pasan a tener esa misma asignación en la
+    # tabla puente, para no perder datos ya cargados al desplegar esto.
+    if not conn.execute("SELECT 1 FROM eval360_persona_puestos LIMIT 1").fetchone():
+        for row in conn.execute("SELECT id, puesto_id FROM eval360_personas WHERE puesto_id IS NOT NULL"):
+            conn.execute(
+                "INSERT OR IGNORE INTO eval360_persona_puestos (persona_id, puesto_id) VALUES (?, ?)",
+                (row["id"], row["puesto_id"]),
+            )
     conn.execute("""
         CREATE TABLE IF NOT EXISTS eval360_preguntas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -280,11 +303,38 @@ def actualizar_puesto(puesto_id, nombre=None, activo=None, puesto_padre_id=-1):
 
 def list_personas_de_puesto(puesto_id):
     conn = get_connection()
-    rows = conn.execute(
-        "SELECT * FROM eval360_personas WHERE puesto_id = ? AND activo = 1 ORDER BY nombre_completo", (puesto_id,)
-    ).fetchall()
+    rows = conn.execute("""
+        SELECT p.* FROM eval360_personas p
+        JOIN eval360_persona_puestos pp ON pp.persona_id = p.id
+        WHERE pp.puesto_id = ? AND p.activo = 1
+        ORDER BY p.nombre_completo
+    """, (puesto_id,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def list_puestos_de_persona(persona_id):
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT pu.* FROM eval360_puestos pu
+        JOIN eval360_persona_puestos pp ON pp.puesto_id = pu.id
+        WHERE pp.persona_id = ?
+        ORDER BY pu.nombre
+    """, (persona_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def set_puestos_de_persona(persona_id, puesto_ids: list):
+    conn = get_connection()
+    conn.execute("DELETE FROM eval360_persona_puestos WHERE persona_id = ?", (persona_id,))
+    for puesto_id in puesto_ids:
+        conn.execute(
+            "INSERT OR IGNORE INTO eval360_persona_puestos (persona_id, puesto_id) VALUES (?, ?)",
+            (persona_id, puesto_id),
+        )
+    conn.commit()
+    conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -292,24 +342,41 @@ def list_personas_de_puesto(puesto_id):
 # ---------------------------------------------------------------------------
 
 def list_personas(empresa="kk", solo_activos=True):
+    """Cada persona trae su lista de puestos (una persona real puede ocupar
+    más de uno a la vez, ej. Jesús Collado = Director Financiero + Director
+    de Desarrollo) en vez de un único puesto_nombre -- ver eval360_persona_puestos."""
     conn = get_connection()
     clauses = ["p.empresa = ?"]
     params = [empresa]
     if solo_activos:
         clauses.append("p.activo = 1")
     rows = conn.execute(f"""
-        SELECT p.*, pu.nombre AS puesto_nombre,
+        SELECT p.*,
                jefe.nombre_completo AS jefe_directo_nombre,
                u.nombre AS usuario_nombre, u.username AS usuario_username
         FROM eval360_personas p
-        LEFT JOIN eval360_puestos pu ON pu.id = p.puesto_id
         LEFT JOIN eval360_personas jefe ON jefe.id = p.jefe_directo_id
         LEFT JOIN usuarios u ON u.id = p.usuario_id
         WHERE {' AND '.join(clauses)}
         ORDER BY p.orden, p.nombre_completo
     """, params).fetchall()
+    personas = [dict(r) for r in rows]
+    if personas:
+        placeholders = ",".join("?" for _ in personas)
+        puesto_rows = conn.execute(f"""
+            SELECT pp.persona_id, pu.id, pu.nombre
+            FROM eval360_persona_puestos pp
+            JOIN eval360_puestos pu ON pu.id = pp.puesto_id
+            WHERE pp.persona_id IN ({placeholders})
+            ORDER BY pu.nombre
+        """, [p["id"] for p in personas]).fetchall()
+        puestos_por_persona = {}
+        for r in puesto_rows:
+            puestos_por_persona.setdefault(r["persona_id"], []).append({"id": r["id"], "nombre": r["nombre"]})
+        for persona in personas:
+            persona["puestos"] = puestos_por_persona.get(persona["id"], [])
     conn.close()
-    return [dict(r) for r in rows]
+    return personas
 
 
 def get_persona(persona_id):
@@ -333,23 +400,30 @@ def get_persona_por_usuario(usuario_id, empresa=None):
     return dict(row) if row else None
 
 
-def crear_persona(empresa, nombre_completo, puesto_id=None, jefe_directo_id=None, usuario_id=None):
+def crear_persona(empresa, nombre_completo, puesto_ids=None, jefe_directo_id=None, usuario_id=None):
     conn = get_connection()
     cur = conn.execute(
-        """INSERT INTO eval360_personas (empresa, nombre_completo, puesto_id, jefe_directo_id, usuario_id)
-           VALUES (?, ?, ?, ?, ?)""",
-        (empresa, nombre_completo, puesto_id, jefe_directo_id, usuario_id),
+        """INSERT INTO eval360_personas (empresa, nombre_completo, jefe_directo_id, usuario_id)
+           VALUES (?, ?, ?, ?)""",
+        (empresa, nombre_completo, jefe_directo_id, usuario_id),
     )
     persona_id = cur.lastrowid
     conn.commit()
     conn.close()
+    if puesto_ids:
+        set_puestos_de_persona(persona_id, puesto_ids)
     return persona_id
 
 
 def actualizar_persona(persona_id, campos: dict):
     if not campos:
         return
-    permitidos = {"nombre_completo", "puesto_id", "jefe_directo_id", "usuario_id", "activo", "orden"}
+    # puesto_ids ya no vive en la propia tabla de personas (ver
+    # eval360_persona_puestos) -- se gestiona aparte porque es una lista,
+    # no una columna simple.
+    if "puesto_ids" in campos:
+        set_puestos_de_persona(persona_id, campos["puesto_ids"] or [])
+    permitidos = {"nombre_completo", "jefe_directo_id", "usuario_id", "activo", "orden"}
     sets, params = [], []
     for campo, valor in campos.items():
         if campo in permitidos:

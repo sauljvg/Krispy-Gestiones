@@ -46,14 +46,14 @@ class PuestoEditBody(BaseModel):
 class PersonaBody(BaseModel):
     empresa: str = "kk"
     nombre_completo: str
-    puesto_id: int | None = None
+    puesto_ids: list[int] = []
     jefe_directo_id: int | None = None
     usuario_id: int | None = None
 
 
 class PersonaEditBody(BaseModel):
     nombre_completo: str | None = None
-    puesto_id: int | None = None
+    puesto_ids: list[int] | None = None
     jefe_directo_id: int | None = None
     usuario_id: int | None = None
     activo: bool | None = None
@@ -174,7 +174,7 @@ def get_relaciones_route(persona_id: int, user: dict = Depends(get_current_user)
 def crear_persona_route(body: PersonaBody, user: dict = Depends(get_current_user)):
     _require_acceso_empresa(user, body.empresa)
     persona_id = eval360_module.crear_persona(
-        body.empresa, body.nombre_completo.strip(), body.puesto_id, body.jefe_directo_id, body.usuario_id
+        body.empresa, body.nombre_completo.strip(), body.puesto_ids, body.jefe_directo_id, body.usuario_id
     )
     return {"ok": True, "id": persona_id}
 

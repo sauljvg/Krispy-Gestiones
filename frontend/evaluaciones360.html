@@ -148,6 +148,23 @@
   .escala-likert label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
   .form-pregunta-abierta { padding: 10px 0; }
   .form-pregunta-abierta p { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+
+  #buscar-nuevo-evaluador {
+    width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 14px; font-family: inherit;
+    box-sizing: border-box;
+  }
+  .autocomplete-sugerencias {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 5;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    max-height: 220px; overflow-y: auto; box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+  }
+  .autocomplete-sugerencias button {
+    display: block; width: 100%; text-align: left; padding: 8px 10px; border: none; background: none;
+    color: var(--text-primary); font-size: 14px; cursor: pointer;
+  }
+  .autocomplete-sugerencias button:hover { background: var(--surface-2); }
+  .autocomplete-sugerencias .sin-resultados { padding: 8px 10px; color: var(--text-secondary); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -252,6 +269,10 @@
         </div>
 
         <div id="picker-evaluados-wrap" hidden>
+          <div class="editor-actions" style="margin-top:0; margin-bottom:8px;">
+            <button id="btn-seleccionar-todos-evaluados" class="btn btn-ghost btn-mini" type="button">Seleccionar todos</button>
+            <button id="btn-deseleccionar-todos-evaluados" class="btn btn-ghost btn-mini" type="button">Ninguno</button>
+          </div>
           <div class="picker-lista" id="picker-evaluados-lista"></div>
           <div class="editor-actions">
             <button id="btn-confirmar-evaluados" class="btn btn-primary" type="button">Añadir seleccionados</button>
@@ -266,9 +287,12 @@
         <button type="button" class="btn btn-ghost btn-mini" id="btn-volver-evaluados">← Volver</button>
         <h2 id="evaluadores-titulo" style="margin-bottom:14px;"></h2>
         <ul class="lista-simple" id="evaluadores-lista"></ul>
-        <div class="eval360-toolbar">
-          <select id="select-nuevo-evaluador" style="flex:1;"></select>
-          <button id="btn-anadir-evaluador-manual" class="btn btn-ghost" type="button">＋ Añadir</button>
+        <div class="eval360-toolbar" style="position:relative; align-items:flex-start;">
+          <div style="flex:1; position:relative;">
+            <input type="text" id="buscar-nuevo-evaluador" placeholder="Escribe un nombre para buscarlo..." autocomplete="off">
+            <div class="autocomplete-sugerencias" id="sugerencias-evaluador" hidden></div>
+          </div>
+          <button id="btn-anadir-evaluador-manual" class="btn btn-ghost" type="button" disabled>＋ Añadir</button>
         </div>
         <div id="resultados-wrap" hidden>
           <h3>Resultados</h3>
@@ -337,12 +361,8 @@
         </div>
 
         <div class="editor-field">
-          <label for="persona-puesto">Puesto</label>
-          <select id="persona-puesto">
-            <option value="">— Sin puesto asignado —</option>
-          </select>
-        </div>
-        <div class="editor-field">
+          <label>Puestos (puede tener más de uno, ej. un director interino de dos áreas)</label>
+          <div class="picker-lista" id="persona-puestos-lista"></div>
           <button type="button" class="btn btn-ghost btn-mini" id="btn-nuevo-puesto">＋ Nuevo puesto</button>
         </div>
 
@@ -382,6 +402,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260723f"></script>
 <script src="js/topbar-menu.js?v=20260821a"></script>
-<script src="js/evaluaciones360.js?v=20260821g"></script>
+<script src="js/evaluaciones360.js?v=20260821i"></script>
 </body>
 </html>

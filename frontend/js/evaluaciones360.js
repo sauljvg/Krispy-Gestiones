@@ -104,7 +104,9 @@ function filaPersona(persona, profundidad) {
   const cuenta = persona.usuario_nombre
     ? `<span class="badge-cuenta">🔑 ${escapeHTML(persona.usuario_nombre)}</span>`
     : `<span class="badge-sin-cuenta">Sin cuenta vinculada</span>`;
-  const puesto = persona.puesto_nombre ? `<span class="persona-puesto">${escapeHTML(persona.puesto_nombre)}</span>` : "";
+  const puesto = persona.puestos?.length
+    ? `<span class="persona-puesto">${persona.puestos.map((p) => escapeHTML(p.nombre)).join(", ")}</span>`
+    : "";
   return `
     <li style="margin-left:${profundidad * 26}px;">
       <div class="persona-row" draggable="true" data-persona-id="${persona.id}">
@@ -139,20 +141,25 @@ function esReparentadoValidoPersona(arrastradaId, destinoId) {
 async function reparentarPersona(personaId, nuevoJefeId) {
   // A petición expresa: mover a alguien de jefe directo también mueve su
   // PUESTO para que dependa del puesto de su nuevo jefe -- así "Por
-  // persona" y "Por puesto de trabajo" no se desincronizan. Como un
-  // puesto puede tener más gente además de quien se arrastra, se avisa
-  // antes si el cambio también los afecta a ellos.
+  // persona" y "Por puesto de trabajo" no se desincronizan. Como una
+  // persona puede tener más de un puesto (ej. alguien con dos direcciones
+  // a la vez) o el nuevo jefe también, solo se reasigna el puesto cuando
+  // no hay ambigüedad posible: exactamente un puesto a cada lado.
   const persona = PERSONAS.find((p) => p.id === personaId);
   const nuevoJefe = nuevoJefeId ? PERSONAS.find((p) => p.id === nuevoJefeId) : null;
-  const nuevoPuestoPadreId = nuevoJefeId ? (nuevoJefe?.puesto_id ?? null) : null;
-  const puedeReasignarPuesto = persona?.puesto_id && (nuevoJefeId === null || nuevoJefe?.puesto_id);
+  const puestoUnicoPersona = persona?.puestos?.length === 1 ? persona.puestos[0].id : null;
+  const puestoUnicoJefe = nuevoJefeId === null ? null : (nuevoJefe?.puestos?.length === 1 ? nuevoJefe.puestos[0].id : undefined);
+  const puedeReasignarPuesto = puestoUnicoPersona && puestoUnicoJefe !== undefined;
 
   if (puedeReasignarPuesto) {
-    const puestoActual = PUESTOS.find((p) => p.id === persona.puesto_id);
+    const nuevoPuestoPadreId = puestoUnicoJefe;
+    const puestoActual = PUESTOS.find((p) => p.id === puestoUnicoPersona);
     const yaEsPadre = puestoActual && puestoActual.puesto_padre_id === nuevoPuestoPadreId;
-    const esValido = nuevoPuestoPadreId === null || esReparentadoValido(persona.puesto_id, nuevoPuestoPadreId);
+    const esValido = nuevoPuestoPadreId === null || esReparentadoValido(puestoUnicoPersona, nuevoPuestoPadreId);
     if (puestoActual && !yaEsPadre && esValido) {
-      const companeros = PERSONAS.filter((p) => p.puesto_id === persona.puesto_id && p.id !== personaId);
+      const companeros = PERSONAS.filter(
+        (p) => p.id !== personaId && (p.puestos || []).some((pu) => pu.id === puestoUnicoPersona)
+      );
       let continuar = true;
       if (companeros.length) {
         continuar = await pedirConfirmacion(
@@ -161,7 +168,7 @@ async function reparentarPersona(personaId, nuevoJefeId) {
         );
       }
       if (continuar) {
-        await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos/${persona.puesto_id}`, {
+        await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos/${puestoUnicoPersona}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ puesto_padre_id: nuevoPuestoPadreId }),
@@ -241,9 +248,10 @@ function renderPuestosArbol() {
   }
   const personasPorPuesto = new Map();
   for (const persona of PERSONAS) {
-    if (!persona.puesto_id) continue;
-    if (!personasPorPuesto.has(persona.puesto_id)) personasPorPuesto.set(persona.puesto_id, []);
-    personasPorPuesto.get(persona.puesto_id).push(persona);
+    for (const puesto of persona.puestos || []) {
+      if (!personasPorPuesto.has(puesto.id)) personasPorPuesto.set(puesto.id, []);
+      personasPorPuesto.get(puesto.id).push(persona);
+    }
   }
   const porPadre = new Map();
   for (const p of PUESTOS) {
@@ -310,8 +318,10 @@ async function reparentarPuesto(puestoId, nuevoPadreId) {
   // pasa a tener como jefe directo a quien ocupe el nuevo puesto padre --
   // es la misma empresa, las dos vistas del organigrama no pueden quedar
   // desincronizadas por moverlo desde un solo lado.
-  const nuevoJefeId = nuevoPadreId ? (PERSONAS.find((p) => p.puesto_id === nuevoPadreId)?.id ?? null) : null;
-  const ocupantes = PERSONAS.filter((p) => p.puesto_id === puestoId);
+  const nuevoJefeId = nuevoPadreId
+    ? (PERSONAS.find((p) => (p.puestos || []).some((pu) => pu.id === nuevoPadreId))?.id ?? null)
+    : null;
+  const ocupantes = PERSONAS.filter((p) => (p.puestos || []).some((pu) => pu.id === puestoId));
   for (const persona of ocupantes) {
     await fetch(`${AUTH_API_BASE}/evaluaciones360/personas/${persona.id}`, {
       method: "PATCH",
@@ -457,10 +467,14 @@ async function desactivarPuesto() {
   renderPuestosArbol();
 }
 
-function poblarSelectsPersona() {
-  const selPuesto = document.getElementById("persona-puesto");
-  selPuesto.innerHTML = `<option value="">— Sin puesto asignado —</option>` +
-    PUESTOS.map((p) => `<option value="${p.id}">${escapeHTML(p.nombre)}</option>`).join("");
+function poblarSelectsPersona(puestosMarcados) {
+  const listaPuestos = document.getElementById("persona-puestos-lista");
+  const marcados = new Set(puestosMarcados || []);
+  listaPuestos.innerHTML = PUESTOS.length
+    ? PUESTOS.map((p) => `
+        <label><input type="checkbox" value="${p.id}" ${marcados.has(p.id) ? "checked" : ""}> ${escapeHTML(p.nombre)}</label>
+      `).join("")
+    : `<p class="staff-hint" style="margin:0;">Todavía no hay puestos creados.</p>`;
 
   const selJefe = document.getElementById("persona-jefe");
   const candidatos = PERSONAS.filter((p) => p.id !== editandoPersonaId);
@@ -479,11 +493,10 @@ function poblarSelectsPersona() {
 
 function abrirEditorPersona(personaId) {
   editandoPersonaId = personaId || null;
-  poblarSelectsPersona();
   const persona = personaId ? PERSONAS.find((p) => p.id === personaId) : null;
+  poblarSelectsPersona(persona?.puestos?.map((p) => p.id));
   document.getElementById("editor-titulo-h2").textContent = persona ? "Editar persona" : "Nueva persona";
   document.getElementById("persona-nombre").value = persona ? persona.nombre_completo : "";
-  document.getElementById("persona-puesto").value = persona?.puesto_id || "";
   document.getElementById("persona-jefe").value = persona?.jefe_directo_id || "";
   document.getElementById("persona-usuario").value = persona?.usuario_id || "";
   document.getElementById("btn-eliminar-persona").hidden = !persona;
@@ -504,9 +517,10 @@ async function guardarPersona() {
     await mostrarAviso("Ponle un nombre a la persona.");
     return;
   }
+  const puestoIds = [...document.querySelectorAll("#persona-puestos-lista input:checked")].map((i) => Number(i.value));
   const body = {
     nombre_completo: nombre,
-    puesto_id: document.getElementById("persona-puesto").value ? Number(document.getElementById("persona-puesto").value) : null,
+    puesto_ids: puestoIds,
     jefe_directo_id: document.getElementById("persona-jefe").value ? Number(document.getElementById("persona-jefe").value) : null,
     usuario_id: document.getElementById("persona-usuario").value ? Number(document.getElementById("persona-usuario").value) : null,
   };
@@ -551,11 +565,11 @@ async function nuevoPuesto() {
     return;
   }
   const { id } = await res.json();
+  const puestosMarcados = [...document.querySelectorAll("#persona-puestos-lista input:checked")].map((i) => Number(i.value));
   const jefeActual = document.getElementById("persona-jefe").value;
   const usuarioActual = document.getElementById("persona-usuario").value;
   PUESTOS = await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos?empresa=${EMPRESA}`).then((r) => r.json());
-  poblarSelectsPersona();
-  document.getElementById("persona-puesto").value = id;
+  poblarSelectsPersona([...puestosMarcados, id]);
   document.getElementById("persona-jefe").value = jefeActual;
   document.getElementById("persona-usuario").value = usuarioActual;
 }
@@ -851,10 +865,12 @@ async function renderEvaluadores() {
 
   if (PERSONAS.length === 0) await cargarOrganigrama();
   const yaEvaluadores = new Set(evaluadores.map((a) => a.evaluador_persona_id));
-  const select = document.getElementById("select-nuevo-evaluador");
-  select.innerHTML = PERSONAS.filter((p) => !yaEvaluadores.has(p.id))
-    .map((p) => `<option value="${p.id}">${escapeHTML(p.nombre_completo)}</option>`)
-    .join("");
+  personasDisponiblesParaEvaluador = PERSONAS.filter((p) => !yaEvaluadores.has(p.id));
+  evaluadorSeleccionadoId = null;
+  const buscador = document.getElementById("buscar-nuevo-evaluador");
+  buscador.value = "";
+  document.getElementById("sugerencias-evaluador").hidden = true;
+  document.getElementById("btn-anadir-evaluador-manual").disabled = true;
 
   const resultadosWrap = document.getElementById("resultados-wrap");
   const puedeVerResultados = CURRENT_USER?.rol === "admin" && currentCampana.estado !== "borrador";
@@ -862,13 +878,42 @@ async function renderEvaluadores() {
   if (puedeVerResultados) await renderResultados();
 }
 
+let personasDisponiblesParaEvaluador = [];
+let evaluadorSeleccionadoId = null;
+
+function filtrarSugerenciasEvaluador(query) {
+  const cont = document.getElementById("sugerencias-evaluador");
+  const q = query.trim().toLowerCase();
+  if (!q) {
+    cont.hidden = true;
+    return;
+  }
+  // Búsqueda por substring en cualquier parte del nombre -- "am" tiene que
+  // encontrar tanto a "Ramon" como a "Amparo", no solo nombres que empiecen así.
+  const coincidencias = personasDisponiblesParaEvaluador
+    .filter((p) => p.nombre_completo.toLowerCase().includes(q))
+    .slice(0, 8);
+  cont.innerHTML = coincidencias.length
+    ? coincidencias.map((p) => `<button type="button" data-persona-id="${p.id}">${escapeHTML(p.nombre_completo)}</button>`).join("")
+    : `<p class="sin-resultados">Sin coincidencias</p>`;
+  cont.querySelectorAll("[data-persona-id]").forEach((btn) => {
+    btn.addEventListener("mousedown", (e) => {
+      e.preventDefault(); // que no se dispare "blur" del input antes del click
+      evaluadorSeleccionadoId = Number(btn.dataset.personaId);
+      document.getElementById("buscar-nuevo-evaluador").value = btn.textContent;
+      cont.hidden = true;
+      document.getElementById("btn-anadir-evaluador-manual").disabled = false;
+    });
+  });
+  cont.hidden = false;
+}
+
 async function anadirEvaluadorManual() {
-  const select = document.getElementById("select-nuevo-evaluador");
-  if (!select.value) return;
+  if (!evaluadorSeleccionadoId) return;
   await fetch(`${AUTH_API_BASE}/evaluaciones360/campanas/${currentCampana.id}/evaluados/${currentEvaluadoId}/evaluadores`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ evaluador_persona_id: Number(select.value) }),
+    body: JSON.stringify({ evaluador_persona_id: evaluadorSeleccionadoId }),
   });
   await renderEvaluadores();
 }
@@ -1164,10 +1209,24 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btn-cancelar-evaluados").addEventListener("click", () => {
     document.getElementById("picker-evaluados-wrap").hidden = true;
   });
+  document.getElementById("btn-seleccionar-todos-evaluados").addEventListener("click", () => {
+    document.querySelectorAll("#picker-evaluados-lista input[type=checkbox]").forEach((i) => (i.checked = true));
+  });
+  document.getElementById("btn-deseleccionar-todos-evaluados").addEventListener("click", () => {
+    document.querySelectorAll("#picker-evaluados-lista input[type=checkbox]").forEach((i) => (i.checked = false));
+  });
   document.getElementById("btn-lanzar-campana").addEventListener("click", lanzarCampana);
   document.getElementById("btn-cerrar-campana-formal").addEventListener("click", cerrarCampanaFormal);
   document.getElementById("btn-volver-evaluados").addEventListener("click", volverAEvaluados);
   document.getElementById("btn-anadir-evaluador-manual").addEventListener("click", anadirEvaluadorManual);
+  document.getElementById("buscar-nuevo-evaluador").addEventListener("input", (e) => {
+    evaluadorSeleccionadoId = null;
+    document.getElementById("btn-anadir-evaluador-manual").disabled = true;
+    filtrarSugerenciasEvaluador(e.target.value);
+  });
+  document.getElementById("buscar-nuevo-evaluador").addEventListener("blur", () => {
+    document.getElementById("sugerencias-evaluador").hidden = true;
+  });
 
   document.getElementById("btn-finalizar-evaluacion").addEventListener("click", finalizarEvaluacion);
   document.getElementById("btn-cerrar-responder").addEventListener("click", cerrarResponder);
