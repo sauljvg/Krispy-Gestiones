@@ -106,14 +106,29 @@ function actualizarEnlacesCampana() {
     const link = document.querySelector(`.btn-whatsapp-campana[data-idx="${i}"]`);
     if (!link) return;
     const primerNombre = (c.nombre_completo || "").trim().split(/\s+/)[0] || "";
-    const mensaje = plantilla.replaceAll("{nombre}", primerNombre).replaceAll("{enlace}", campanaEnlaceTest);
+    const vacanteTxt = c.vacante_puesto ? `${c.vacante_puesto}${c.vacante_centro ? ` · ${c.vacante_centro}` : ""}` : "";
+    const mensaje = plantilla
+      .replaceAll("{nombre}", primerNombre)
+      .replaceAll("{nombre_completo}", c.nombre_completo || "")
+      .replaceAll("{mail}", c.email || "")
+      .replaceAll("{telefono}", c.telefono || "")
+      .replaceAll("{vacante}", vacanteTxt)
+      .replaceAll("{enlace}", campanaEnlaceTest);
     link.href = `https://wa.me/${soloDigitos(c.telefono)}?text=${encodeURIComponent(mensaje)}`;
   });
 }
 
 function onCambiaTestCampana() {
   const select = document.getElementById("campana-test");
-  campanaEnlaceTest = select.value ? `${location.origin}/encuesta.html?slug=${select.value}` : "";
+  // Si el test tiene un enlace corto configurado (Tests -> Ajustes del
+  // test -- p.ej. un TinyURL), se manda ese en vez del nuestro largo
+  // (origin + /encuesta.html?slug=NNNN) -- más limpio para quien lo recibe
+  // por WhatsApp. Si no tiene uno configurado, se sigue usando el largo
+  // como hasta ahora (siempre funciona, solo que no es tan corto).
+  const testSeleccionado = campanaTestsAbiertos.find((t) => String(t.id).padStart(4, "0") === select.value);
+  campanaEnlaceTest = select.value
+    ? (testSeleccionado?.enlace_corto || `${location.origin}/encuesta.html?slug=${select.value}`)
+    : "";
   campanaTestIdSeleccionado = select.value ? Number(select.value) : null;
   const textarea = document.getElementById("campana-mensaje");
   // Primera vez que se elige un test en este envío: si el mensaje todavía no
@@ -142,7 +157,8 @@ async function abrirCampanaWhatsapp(candidatos) {
     <div class="vacante-form">
       <h3>💬 Mensaje por WhatsApp</h3>
       <p class="staff-hint">
-        Escribe el mensaje una sola vez — usa <code>{nombre}</code> para insertar el nombre de pila de cada candidato
+        Escribe el mensaje una sola vez — usa <code>{nombre}</code>, <code>{nombre_completo}</code>, <code>{mail}</code>,
+        <code>{telefono}</code> o <code>{vacante}</code> para insertar datos de cada candidato
         ${campanaTestsAbiertos.length ? `y <code>{enlace}</code> para el enlace del test que elijas abajo` : ""}.
         Cada botón "Enviar" abre WhatsApp con el mensaje ya escrito para esa persona; tú confirmas el envío allí.
       </p>
@@ -2610,7 +2626,12 @@ function campanaEmailTestSelectHTML() {
 
 function onCambiaTestCampanaEmail() {
   const select = document.getElementById("campana-email-test");
-  campanaEmailEnlaceTest = select.value ? `${location.origin}/encuesta.html?slug=${select.value}` : "";
+  // Mismo criterio que onCambiaTestCampana (WhatsApp): si el test tiene un
+  // enlace corto configurado, se usa ese en vez del nuestro largo.
+  const testSeleccionado = campanaEmailTestsAbiertos.find((t) => String(t.id).padStart(4, "0") === select.value);
+  campanaEmailEnlaceTest = select.value
+    ? (testSeleccionado?.enlace_corto || `${location.origin}/encuesta.html?slug=${select.value}`)
+    : "";
   campanaEmailTestIdSeleccionado = select.value ? Number(select.value) : null;
 }
 
