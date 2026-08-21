@@ -31,6 +31,24 @@ function soloDigitos(tel) {
   return (tel || "").replace(/\D/g, "");
 }
 
+// wa.me necesita el número completo CON el código de país -- sin él,
+// WhatsApp intenta adivinarlo a partir de los primeros dígitos y a veces
+// acierta con el país equivocado: un móvil español de toda la vida como
+// "617422547" se interpretaba como "+61 7422547" (Australia) en vez de
+// España, y WhatsApp terminaba diciendo que el número "no existe". Si el
+// teléfono guardado ya trae "+" delante (ver cv_extraction.PHONE_RE, que
+// ahora reconoce el prefijo de cualquier país) se respeta tal cual; si es un
+// número español sin prefijo (9 dígitos, empieza por 6/7/8/9) se le
+// antepone 34. El resto de formatos se dejan tal cual (mejor un enlace que
+// falle de la misma forma que fallaba antes que uno inventado a medias).
+function numeroWhatsapp(tel) {
+  const conPrefijo = (tel || "").trim().startsWith("+");
+  const digitos = soloDigitos(tel);
+  if (conPrefijo) return digitos;
+  if (/^[6789]\d{8}$/.test(digitos)) return `34${digitos}`;
+  return digitos;
+}
+
 // ---------------------------------------------------------------------
 // Campaña de WhatsApp: sin API de WhatsApp Business no hay forma segura de
 // enviar automáticamente (cualquier "auto-clic" en WhatsApp Web viola sus
@@ -121,7 +139,7 @@ function actualizarEnlacesCampana() {
       .replaceAll("{telefono}", c.telefono || "")
       .replaceAll("{vacante}", vacanteTxt)
       .replaceAll("{enlace}", campanaEnlaceTest);
-    link.href = `https://wa.me/${soloDigitos(c.telefono)}?text=${encodeURIComponent(mensaje)}`;
+    link.href = `https://wa.me/${numeroWhatsapp(c.telefono)}?text=${encodeURIComponent(mensaje)}`;
   });
 }
 
@@ -312,7 +330,7 @@ function candidatoCardHTML(item, permitirDejarDeCompartir, permitirSeleccion, co
     ? `<a href="${AUTH_API_BASE}/informes/respuestas/${item.respuesta_id}/cv" target="_blank" rel="noopener" class="btn-mini">📄 Ver CV</a>`
     : "";
   const whatsappBtn = item.telefono
-    ? `<a class="btn-mini" href="https://wa.me/${soloDigitos(item.telefono)}" target="_blank" rel="noopener">💬 WhatsApp</a>`
+    ? `<a class="btn-mini" href="https://wa.me/${numeroWhatsapp(item.telefono)}" target="_blank" rel="noopener">💬 WhatsApp</a>`
     : "";
   const fichaBtn = candId
     ? `<button type="button" class="btn-mini candidato-abrir-ficha" data-candidato-id="${candId}">📋 Ver ficha completa</button>`
@@ -1414,7 +1432,7 @@ function renderForm() {
         <div class="form-actions">
           <button type="button" id="btn-guardar-candidato" class="btn btn-primary">Guardar</button>
           ${descargarCvBotonHTML}
-          ${esEdicion ? `<a class="btn btn-ghost" id="btn-whatsapp-candidato" href="https://wa.me/${soloDigitos(candidatoEditando.telefono)}" target="_blank" rel="noopener" ${candidatoEditando.telefono ? "" : "hidden"}>💬 WhatsApp</a>` : ""}
+          ${esEdicion ? `<a class="btn btn-ghost" id="btn-whatsapp-candidato" href="https://wa.me/${numeroWhatsapp(candidatoEditando.telefono)}" target="_blank" rel="noopener" ${candidatoEditando.telefono ? "" : "hidden"}>💬 WhatsApp</a>` : ""}
           ${esEdicion ? `<button type="button" id="btn-eliminar-candidato" class="btn btn-ghost">Eliminar</button>` : ""}
           <button type="button" id="btn-cerrar-form" class="btn btn-ghost">Cancelar</button>
         </div>
@@ -2500,8 +2518,18 @@ function reposicionarFormWrapSiCorresponde() {
   // esto la ficha se quedaba aparcada arriba del todo en vez de pegada a
   // la tarjeta que se clicó.
   const combinadaComoLista = candidatosVista === "combinada" && window.matchMedia(ANCHO_COMBINADA_UNA_COLUMNA).matches;
-  if ((candidatosVista === "combinada" && !combinadaComoLista) || !candidatoEditando) return;
+  if (candidatosVista === "combinada" && !combinadaComoLista) return;
   const formWrap = document.getElementById("form-wrap");
+  if (!candidatoEditando) {
+    // Alta de un candidato NUEVO (no editando uno existente) -- no hay
+    // ninguna tarjeta a la que pegarse, así que el formulario se queda
+    // aparcado en su sitio de siempre, pero SÍ hay que desplazar la vista
+    // hasta él: con la lista ya larga, "+ Nuevo candidato" parecía no hacer
+    // nada porque el formulario se abría bien, solo que muy por debajo de
+    // todos los candidatos existentes, fuera de la pantalla.
+    if (formWrap) formWrap.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
   const cardAbierta = document.querySelector(`.candidato-mini-card[data-candidato-id="${candidatoEditando.id}"]`);
   if (formWrap && cardAbierta) {
     cardAbierta.insertAdjacentElement("afterend", formWrap);
