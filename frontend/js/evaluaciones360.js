@@ -306,12 +306,26 @@ function esReparentadoValido(arrastradoId, destinoId) {
 }
 
 async function reparentarPuesto(puestoId, nuevoPadreId) {
+  // Sincronizado con "Por persona": quien ocupe el puesto que se mueve
+  // pasa a tener como jefe directo a quien ocupe el nuevo puesto padre --
+  // es la misma empresa, las dos vistas del organigrama no pueden quedar
+  // desincronizadas por moverlo desde un solo lado.
+  const nuevoJefeId = nuevoPadreId ? (PERSONAS.find((p) => p.puesto_id === nuevoPadreId)?.id ?? null) : null;
+  const ocupantes = PERSONAS.filter((p) => p.puesto_id === puestoId);
+  for (const persona of ocupantes) {
+    await fetch(`${AUTH_API_BASE}/evaluaciones360/personas/${persona.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jefe_directo_id: nuevoJefeId }),
+    });
+  }
   await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos/${puestoId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ puesto_padre_id: nuevoPadreId }),
   });
   PUESTOS = await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos?empresa=${EMPRESA}`).then((r) => r.json());
+  PERSONAS = await fetch(`${AUTH_API_BASE}/evaluaciones360/personas?empresa=${EMPRESA}`).then((r) => r.json());
   renderPuestosArbol();
 }
 
