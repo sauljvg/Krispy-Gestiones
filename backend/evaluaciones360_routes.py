@@ -34,11 +34,13 @@ def _require_acceso_persona(persona_id: int, user: dict) -> dict:
 class PuestoBody(BaseModel):
     empresa: str = "kk"
     nombre: str
+    puesto_padre_id: int | None = None
 
 
 class PuestoEditBody(BaseModel):
     nombre: str | None = None
     activo: bool | None = None
+    puesto_padre_id: int | None = None
 
 
 class PersonaBody(BaseModel):
@@ -116,7 +118,7 @@ def list_puestos_route(empresa: str = "kk", _user: dict = Depends(require_eval36
 @router.post("/puestos")
 def crear_puesto_route(body: PuestoBody, user: dict = Depends(get_current_user)):
     _require_acceso_empresa(user, body.empresa)
-    puesto_id = eval360_module.crear_puesto(body.empresa, body.nombre.strip())
+    puesto_id = eval360_module.crear_puesto(body.empresa, body.nombre.strip(), body.puesto_padre_id)
     return {"ok": True, "id": puesto_id}
 
 
@@ -126,8 +128,19 @@ def editar_puesto_route(puesto_id: int, body: PuestoEditBody, user: dict = Depen
     if not puesto:
         raise HTTPException(status_code=404, detail="Puesto no encontrado")
     _require_acceso_empresa(user, puesto["empresa"])
-    eval360_module.actualizar_puesto(puesto_id, nombre=body.nombre, activo=body.activo)
+    campos = body.model_fields_set
+    padre_id = body.puesto_padre_id if "puesto_padre_id" in campos else -1
+    eval360_module.actualizar_puesto(puesto_id, nombre=body.nombre, activo=body.activo, puesto_padre_id=padre_id)
     return {"ok": True}
+
+
+@router.get("/puestos/{puesto_id}/personas")
+def list_personas_de_puesto_route(puesto_id: int, user: dict = Depends(get_current_user)):
+    puesto = eval360_module.get_puesto(puesto_id)
+    if not puesto:
+        raise HTTPException(status_code=404, detail="Puesto no encontrado")
+    _require_acceso_empresa(user, puesto["empresa"])
+    return eval360_module.list_personas_de_puesto(puesto_id)
 
 
 # ---------------------------------------------------------------------------

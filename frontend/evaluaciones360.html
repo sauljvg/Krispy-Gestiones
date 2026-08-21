@@ -28,6 +28,14 @@
   .eval360-tab-btn.activa { color: var(--text-primary); border-bottom-color: var(--accent, var(--status-good)); }
   .eval360-vista { display: none; }
   .eval360-vista.activa { display: block; }
+  .eval360-subtab-btn { padding: 8px 12px; border: none; background: none; color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .eval360-subtab-btn.activa { color: var(--text-primary); border-bottom-color: var(--accent, var(--status-good)); }
+
+  .puesto-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-1); margin-bottom: 8px; flex-wrap: wrap; }
+  .puesto-row .puesto-nombre { font-weight: 600; }
+  .puesto-row .puesto-personas { color: var(--text-secondary); font-size: 13px; }
+  .puesto-row .puesto-vacante { color: var(--text-muted); font-size: 13px; font-style: italic; }
+  .puesto-row .puesto-acciones { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
 
   .organigrama-lista, .lista-simple { list-style: none; margin: 0; padding: 0; }
   .organigrama-lista li { padding: 4px 0; }
@@ -215,12 +223,45 @@
 
     <!-- Organigrama -->
     <div class="eval360-vista" id="vista-organigrama">
+      <div class="eval360-tabs" style="margin-top:0;">
+        <button type="button" class="eval360-subtab-btn" data-subvista="personas">Por persona</button>
+        <button type="button" class="eval360-subtab-btn" data-subvista="puestos">Por puesto de trabajo</button>
+      </div>
+
       <div id="lista-organigrama-wrap">
         <div class="eval360-toolbar">
           <p class="staff-hint">Cada persona necesita un jefe directo para poder calcular sus pares (compañeros con el mismo jefe) y sus reportes.</p>
           <button id="btn-nueva-persona" class="btn btn-primary" type="button">＋ Nueva persona</button>
         </div>
         <ul class="organigrama-lista" id="organigrama-lista"></ul>
+      </div>
+
+      <div id="lista-puestos-wrap" hidden>
+        <div class="eval360-toolbar">
+          <p class="staff-hint">Jerarquía de puestos de trabajo (como en Bizneo): un mismo puesto puede tener varias personas, por ejemplo los gerentes.</p>
+          <button id="btn-nuevo-puesto-raiz" class="btn btn-primary" type="button">＋ Nuevo puesto</button>
+        </div>
+        <ul class="organigrama-lista" id="puestos-lista"></ul>
+      </div>
+
+      <div class="editor-card" id="editor-puesto-card" hidden>
+        <button type="button" class="btn-cerrar-editor-x" id="btn-cerrar-editor-puesto-x">✕</button>
+        <h2 id="editor-puesto-titulo-h2">Nuevo puesto</h2>
+        <div class="editor-field">
+          <label for="puesto-nombre">Nombre del puesto</label>
+          <input type="text" id="puesto-nombre" placeholder="Ej. Gerente de Retail">
+        </div>
+        <div class="editor-field">
+          <label for="puesto-padre">Puesto al que reporta</label>
+          <select id="puesto-padre">
+            <option value="">— Es un puesto raíz —</option>
+          </select>
+        </div>
+        <div class="editor-actions">
+          <button id="btn-guardar-puesto" class="btn btn-primary" type="button">Guardar</button>
+          <button id="btn-desactivar-puesto" class="btn btn-ghost" type="button" hidden>Desactivar</button>
+          <button id="btn-cerrar-editor-puesto" class="btn btn-ghost" type="button">Cerrar</button>
+        </div>
       </div>
 
       <div class="editor-card" id="editor-card" hidden>
@@ -278,6 +319,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260723f"></script>
 <script src="js/topbar-menu.js?v=20260821a"></script>
-<script src="js/evaluaciones360.js?v=20260821c"></script>
+<script src="js/evaluaciones360.js?v=20260821d"></script>
 </body>
 </html>

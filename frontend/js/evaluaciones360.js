@@ -114,6 +114,139 @@ function filaPersona(persona, profundidad) {
     </li>`;
 }
 
+// ---------------------------------------------------------------------------
+// Organigrama por puesto de trabajo
+// ---------------------------------------------------------------------------
+
+let editandoPuestoId = null;
+
+function activarSubvistaOrganigrama(nombre) {
+  document.querySelectorAll(".eval360-subtab-btn").forEach((b) => b.classList.toggle("activa", b.dataset.subvista === nombre));
+  document.getElementById("lista-organigrama-wrap").hidden = nombre !== "personas";
+  document.getElementById("lista-puestos-wrap").hidden = nombre !== "puestos";
+  if (nombre === "puestos") renderPuestosArbol();
+}
+
+function renderPuestosArbol() {
+  const ul = document.getElementById("puestos-lista");
+  if (PUESTOS.length === 0) {
+    ul.innerHTML = `<p class="staff-hint">Todavía no hay puestos de trabajo. Empieza por el puesto de más arriba (sin puesto al que reporta) y ve añadiendo debajo.</p>`;
+    return;
+  }
+  const personasPorPuesto = new Map();
+  for (const persona of PERSONAS) {
+    if (!persona.puesto_id) continue;
+    if (!personasPorPuesto.has(persona.puesto_id)) personasPorPuesto.set(persona.puesto_id, []);
+    personasPorPuesto.get(persona.puesto_id).push(persona);
+  }
+  const porPadre = new Map();
+  for (const p of PUESTOS) {
+    const clave = p.puesto_padre_id || "raiz";
+    if (!porPadre.has(clave)) porPadre.set(clave, []);
+    porPadre.get(clave).push(p);
+  }
+  const html = [];
+  function pintar(clave, profundidad, vistos) {
+    const hijos = porPadre.get(clave) || [];
+    for (const puesto of hijos) {
+      if (vistos.has(puesto.id)) continue;
+      html.push(filaPuesto(puesto, profundidad, personasPorPuesto.get(puesto.id) || []));
+      pintar(puesto.id, profundidad + 1, new Set(vistos).add(puesto.id));
+    }
+  }
+  pintar("raiz", 0, new Set());
+  ul.innerHTML = html.join("");
+  ul.querySelectorAll("[data-editar-puesto]").forEach((btn) => {
+    btn.addEventListener("click", () => abrirEditorPuesto(Number(btn.dataset.editarPuesto)));
+  });
+  ul.querySelectorAll("[data-nuevo-subpuesto]").forEach((btn) => {
+    btn.addEventListener("click", () => abrirEditorPuesto(null, Number(btn.dataset.nuevoSubpuesto)));
+  });
+}
+
+function filaPuesto(puesto, profundidad, personas) {
+  const personasHTML = personas.length
+    ? `<span class="puesto-personas">${personas.map((p) => escapeHTML(p.nombre_completo)).join(", ")}</span>`
+    : `<span class="puesto-vacante">Vacante</span>`;
+  return `
+    <li style="margin-left:${profundidad * 26}px;">
+      <div class="puesto-row">
+        <span class="puesto-nombre">${escapeHTML(puesto.nombre)}</span>
+        ${personasHTML}
+        <div class="puesto-acciones">
+          <button type="button" class="btn btn-ghost btn-mini" data-nuevo-subpuesto="${puesto.id}">＋ Subpuesto</button>
+          <button type="button" class="btn btn-ghost btn-mini" data-editar-puesto="${puesto.id}">Editar</button>
+        </div>
+      </div>
+    </li>`;
+}
+
+function poblarSelectPuestoPadre() {
+  const sel = document.getElementById("puesto-padre");
+  const candidatos = PUESTOS.filter((p) => p.id !== editandoPuestoId);
+  sel.innerHTML = `<option value="">— Es un puesto raíz —</option>` +
+    candidatos.map((p) => `<option value="${p.id}">${escapeHTML(p.nombre)}</option>`).join("");
+}
+
+function abrirEditorPuesto(puestoId, padreSugeridoId) {
+  editandoPuestoId = puestoId || null;
+  poblarSelectPuestoPadre();
+  const puesto = puestoId ? PUESTOS.find((p) => p.id === puestoId) : null;
+  document.getElementById("editor-puesto-titulo-h2").textContent = puesto ? "Editar puesto" : "Nuevo puesto";
+  document.getElementById("puesto-nombre").value = puesto ? puesto.nombre : "";
+  document.getElementById("puesto-padre").value = puesto ? (puesto.puesto_padre_id || "") : (padreSugeridoId || "");
+  document.getElementById("btn-desactivar-puesto").hidden = !puesto;
+  document.getElementById("editor-puesto-card").hidden = false;
+  document.getElementById("lista-puestos-wrap").hidden = true;
+  document.getElementById("puesto-nombre").focus();
+}
+
+function cerrarEditorPuesto() {
+  document.getElementById("editor-puesto-card").hidden = true;
+  document.getElementById("lista-puestos-wrap").hidden = false;
+  editandoPuestoId = null;
+}
+
+async function guardarPuesto() {
+  const nombre = document.getElementById("puesto-nombre").value.trim();
+  if (!nombre) {
+    await mostrarAviso("Ponle un nombre al puesto.");
+    return;
+  }
+  const puestoPadreId = document.getElementById("puesto-padre").value ? Number(document.getElementById("puesto-padre").value) : null;
+  const url = editandoPuestoId
+    ? `${AUTH_API_BASE}/evaluaciones360/puestos/${editandoPuestoId}`
+    : `${AUTH_API_BASE}/evaluaciones360/puestos`;
+  const body = editandoPuestoId
+    ? { nombre, puesto_padre_id: puestoPadreId }
+    : { empresa: EMPRESA, nombre, puesto_padre_id: puestoPadreId };
+  const res = await fetch(url, {
+    method: editandoPuestoId ? "PATCH" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    await mostrarAviso("No se pudo guardar el puesto.");
+    return;
+  }
+  cerrarEditorPuesto();
+  PUESTOS = await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos?empresa=${EMPRESA}`).then((r) => r.json());
+  renderPuestosArbol();
+}
+
+async function desactivarPuesto() {
+  if (!editandoPuestoId) return;
+  if (!(await pedirConfirmacion("¿Desactivar este puesto? Las personas que lo tengan asignado lo conservan, pero dejará de aparecer para asignar a más gente."))) return;
+  await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos/${editandoPuestoId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ activo: false }),
+  });
+  cerrarEditorPuesto();
+  PUESTOS = await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos?empresa=${EMPRESA}`).then((r) => r.json());
+  renderPuestosArbol();
+}
+
 function poblarSelectsPersona() {
   const selPuesto = document.getElementById("persona-puesto");
   selPuesto.innerHTML = `<option value="">— Sin puesto asignado —</option>` +
@@ -723,6 +856,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btn-guardar-persona").addEventListener("click", guardarPersona);
   document.getElementById("btn-eliminar-persona").addEventListener("click", eliminarPersona);
   document.getElementById("btn-nuevo-puesto").addEventListener("click", nuevoPuesto);
+
+  document.querySelectorAll(".eval360-subtab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => activarSubvistaOrganigrama(btn.dataset.subvista));
+  });
+  activarSubvistaOrganigrama("personas");
+  document.getElementById("btn-nuevo-puesto-raiz").addEventListener("click", () => abrirEditorPuesto(null));
+  document.getElementById("btn-guardar-puesto").addEventListener("click", guardarPuesto);
+  document.getElementById("btn-desactivar-puesto").addEventListener("click", desactivarPuesto);
+  document.getElementById("btn-cerrar-editor-puesto").addEventListener("click", cerrarEditorPuesto);
+  document.getElementById("btn-cerrar-editor-puesto-x").addEventListener("click", cerrarEditorPuesto);
 
   document.getElementById("btn-nueva-pregunta").addEventListener("click", nuevaPregunta);
 

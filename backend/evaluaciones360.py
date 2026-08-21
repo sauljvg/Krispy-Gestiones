@@ -54,6 +54,14 @@ def ensure_eval360_tables():
             activo INTEGER NOT NULL DEFAULT 1
         )
     """)
+    # puesto_padre_id se añadió después de crear la tabla -- separado del
+    # jefe_directo_id de eval360_personas a propósito: son dos jerarquías
+    # distintas (organigrama de PUESTOS, tipo Bizneo, donde un puesto puede
+    # tener varias personas -- ej. varios "Gerente de Retail" -- frente al
+    # organigrama de PERSONAS concretas que ya existía).
+    cols_puestos = {row[1] for row in conn.execute("PRAGMA table_info(eval360_puestos)")}
+    if "puesto_padre_id" not in cols_puestos:
+        conn.execute("ALTER TABLE eval360_puestos ADD COLUMN puesto_padre_id INTEGER REFERENCES eval360_puestos(id)")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS eval360_personas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -204,24 +212,31 @@ def actualizar_pregunta(pregunta_id, texto=None, orden=None, activa=None):
 # ---------------------------------------------------------------------------
 
 def list_puestos(empresa="kk", solo_activos=True):
+    """Incluye nombre del puesto padre (para pintar el árbol) y cuántas
+    personas ocupan cada puesto directamente -- ver list_personas_de_puesto
+    para el listado completo, con nombre y no solo el conteo."""
     conn = get_connection()
-    clauses = ["empresa = ?"]
+    clauses = ["p.empresa = ?"]
     params = [empresa]
     if solo_activos:
-        clauses.append("activo = 1")
-    rows = conn.execute(
-        f"SELECT * FROM eval360_puestos WHERE {' AND '.join(clauses)} ORDER BY nombre",
-        params,
-    ).fetchall()
+        clauses.append("p.activo = 1")
+    rows = conn.execute(f"""
+        SELECT p.*, padre.nombre AS puesto_padre_nombre,
+               (SELECT COUNT(*) FROM eval360_personas per WHERE per.puesto_id = p.id AND per.activo = 1) AS num_personas
+        FROM eval360_puestos p
+        LEFT JOIN eval360_puestos padre ON padre.id = p.puesto_padre_id
+        WHERE {' AND '.join(clauses)}
+        ORDER BY p.nombre
+    """, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def crear_puesto(empresa, nombre):
+def crear_puesto(empresa, nombre, puesto_padre_id=None):
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO eval360_puestos (empresa, nombre) VALUES (?, ?)",
-        (empresa, nombre),
+        "INSERT INTO eval360_puestos (empresa, nombre, puesto_padre_id) VALUES (?, ?, ?)",
+        (empresa, nombre, puesto_padre_id),
     )
     puesto_id = cur.lastrowid
     conn.commit()
@@ -236,14 +251,27 @@ def get_puesto(puesto_id):
     return dict(row) if row else None
 
 
-def actualizar_puesto(puesto_id, nombre=None, activo=None):
+def actualizar_puesto(puesto_id, nombre=None, activo=None, puesto_padre_id=-1):
+    """puesto_padre_id usa -1 como centinela de "no tocar" (a diferencia de
+    None, que sí es un valor válido: significa "raíz, sin padre")."""
     conn = get_connection()
     if nombre is not None:
         conn.execute("UPDATE eval360_puestos SET nombre = ? WHERE id = ?", (nombre, puesto_id))
     if activo is not None:
         conn.execute("UPDATE eval360_puestos SET activo = ? WHERE id = ?", (1 if activo else 0, puesto_id))
+    if puesto_padre_id != -1:
+        conn.execute("UPDATE eval360_puestos SET puesto_padre_id = ? WHERE id = ?", (puesto_padre_id, puesto_id))
     conn.commit()
     conn.close()
+
+
+def list_personas_de_puesto(puesto_id):
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM eval360_personas WHERE puesto_id = ? AND activo = 1 ORDER BY nombre_completo", (puesto_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 # ---------------------------------------------------------------------------
