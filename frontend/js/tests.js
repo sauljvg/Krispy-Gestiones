@@ -228,6 +228,11 @@ async function abrirEditor(testId, { scroll = true } = {}) {
   currentTestId = testId;
   const editorCard = document.getElementById("editor-card");
   editorCard.hidden = false;
+  // Mientras se configura un test, la lista entera (toolbar + tabla) se
+  // oculta -- así el editor queda justo debajo de la cabecera, sin tener
+  // que bajar hasta el final de una lista larga, y sin la distracción del
+  // resto de tests mientras se está montando este.
+  document.getElementById("lista-tests-wrap").hidden = true;
   document.getElementById("respuestas-wrap").hidden = true;
 
   if (testId) {
@@ -301,6 +306,7 @@ function cerrarEditor() {
   currentTest = null;
   climaCargarPlantillaCompleta = false;
   document.getElementById("editor-card").hidden = true;
+  document.getElementById("lista-tests-wrap").hidden = false;
 }
 
 async function guardarTest() {
@@ -1073,6 +1079,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("btn-nuevo-test").addEventListener("click", () => abrirEditor(null));
   document.getElementById("btn-cerrar-editor").addEventListener("click", cerrarEditor);
+  document.getElementById("btn-cerrar-editor-x").addEventListener("click", cerrarEditor);
   document.getElementById("btn-guardar-test").addEventListener("click", guardarTest);
   document.getElementById("btn-publicar-test").addEventListener("click", () => publicarTest(true));
   document.getElementById("btn-despublicar-test").addEventListener("click", () => publicarTest(false));

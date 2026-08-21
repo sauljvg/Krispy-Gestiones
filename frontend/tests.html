@@ -16,7 +16,9 @@
 <link rel="stylesheet" href="css/styles.css?v=20260820a">
 <style>
   .tests-wrap { max-width: 1000px; margin: 0 auto; padding: 0 0 60px; }
-  .tests-toolbar { display: flex; justify-content: space-between; align-items: center; margin: 16px 0; }
+  .tests-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 16px 0; }
+  .tests-toolbar p { flex: 1; min-width: 0; }
+  .tests-toolbar .btn { flex-shrink: 0; white-space: nowrap; }
   .tests-table { width: 100%; border-collapse: collapse; font-size: 14px; }
   .tests-table th, .tests-table td { padding: 8px 10px; border-bottom: 1px solid var(--gridline); text-align: left; vertical-align: middle; }
   .badge { padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
@@ -29,7 +31,15 @@
   .embudo-barra-relleno { height: 100%; background: var(--acento); border-radius: 8px; }
   .embudo-valor { width: 90px; flex: none; text-align: right; color: var(--text-secondary); }
 
-  .editor-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-top: 20px; }
+  .editor-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-top: 20px; position: relative; }
+  #editor-titulo-h2 { padding-right: 30px; }
+  .btn-cerrar-editor-x {
+    position: absolute; top: 14px; right: 14px; width: 28px; height: 28px;
+    border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary);
+    border-radius: 50%; font-size: 15px; line-height: 1; cursor: pointer; display: flex;
+    align-items: center; justify-content: center; padding: 0;
+  }
+  .btn-cerrar-editor-x:hover { border-color: var(--acento); color: var(--text-primary); }
   .editor-field { margin-bottom: 12px; }
   .editor-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
   .editor-field input, .editor-field select, .editor-field textarea {
@@ -139,17 +149,20 @@
       <p>Crea encuestas y tests públicos por páginas, sin depender de Microsoft Forms.</p>
     </div>
 
-    <div class="tests-toolbar">
-      <p class="staff-hint">Crea o edita tests (encuestas por páginas) que cualquiera puede responder desde un enlace público. Los tests de Clima Laboral se crean y editan desde Clima Laboral &gt; Test, no aquí.</p>
-      <button id="btn-nuevo-test" class="btn btn-primary" type="button">＋ Nuevo test</button>
+    <div id="lista-tests-wrap">
+      <div class="tests-toolbar">
+        <p class="staff-hint">Crea o edita tests (encuestas por páginas) que cualquiera puede responder desde un enlace público. Los tests de Clima Laboral se crean y editan desde Clima Laboral &gt; Test, no aquí.</p>
+        <button id="btn-nuevo-test" class="btn btn-primary" type="button">＋ Nuevo test</button>
+      </div>
+
+      <table class="tests-table">
+        <thead><tr><th>Título</th><th>Estado</th><th>Respuestas</th><th>Acciones</th></tr></thead>
+        <tbody id="tests-tbody"></tbody>
+      </table>
     </div>
 
-    <table class="tests-table">
-      <thead><tr><th>Título</th><th>Estado</th><th>Respuestas</th><th>Acciones</th></tr></thead>
-      <tbody id="tests-tbody"></tbody>
-    </table>
-
     <div class="editor-card" id="editor-card" hidden>
+      <button type="button" class="btn-cerrar-editor-x" id="btn-cerrar-editor-x" title="Cerrar">✕</button>
       <h2 id="editor-titulo-h2" style="margin-top:0;">Editar test</h2>
 
       <div class="editor-fields-row">
@@ -264,6 +277,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260724a"></script>
 <script src="js/topbar-menu.js?v=20260821a"></script>
-<script src="js/tests.js?v=20260821h"></script>
+<script src="js/tests.js?v=20260821i"></script>
 </body>
 </html>
