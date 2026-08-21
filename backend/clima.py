@@ -586,7 +586,12 @@ def list_centros(oleada_id, centros_permitidos=None):
 
 
 def _es_oficinas(centro):
-    return _normaliza_header(centro) == "oficinas"
+    """Igual criterio que _es_fabrica (por nombre, no por lista fija): antes
+    solo reconocía el nombre exacto "Oficinas", así que una segunda oficina
+    (p.ej. "Oficina Valencia") se habría contado por error como tienda en
+    el desglose -- con esto, cualquier centro que contenga "oficina" queda
+    excluido igual que la oficina original."""
+    return "oficina" in _normaliza_header(centro)
 
 
 def _es_fabrica(centro):
