@@ -12,6 +12,7 @@ import os
 import re
 from zoneinfo import ZoneInfo
 
+import clima as clima_module
 import entrevistas as entrevistas_module
 import informes as informes_module
 import reclutamiento as reclutamiento_module
@@ -72,6 +73,17 @@ def ensure_encuestas_tables():
         # pueda responder dos veces. Por defecto desactivada (0), para no
         # cambiar el comportamiento de los tests ya existentes.
         conn.execute("ALTER TABLE encuestas ADD COLUMN evitar_duplicados INTEGER NOT NULL DEFAULT 0")
+    if "clima_oleada_id" not in cols_encuestas:
+        # Tercer destino posible (mutuamente excluyente con tipo_informe_clave
+        # y tipo_entrevista_empresa, mismo motivo que ese comentario): un test
+        # de Clima Laboral alimenta directamente una oleada del módulo
+        # dedicado (backend/clima.py), reemplazando el paso de exportar de
+        # Microsoft Forms y subir el Excel a mano -- ver guardar_respuesta.
+        # A diferencia de los otros dos destinos (una clave fija por
+        # categoría/empresa), aquí se guarda el id de una oleada concreta
+        # porque cada fase de Clima (encuesta completa, pulso...) es su
+        # propia oleada con su propia plantilla de empleados esperados.
+        conn.execute("ALTER TABLE encuestas ADD COLUMN clima_oleada_id INTEGER REFERENCES clima_oleadas(id)")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS encuesta_paginas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -503,6 +515,7 @@ def get_encuesta_publica(identificador):
     conn.close()
     encuesta.pop("tipo_informe_clave", None)
     encuesta.pop("tipo_entrevista_empresa", None)
+    encuesta.pop("clima_oleada_id", None)
     return encuesta
 
 
@@ -518,14 +531,16 @@ def create_encuesta(titulo):
     return encuesta_id
 
 
-def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None, evitar_duplicados=False, mensaje_no_apto=None):
+def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None, evitar_duplicados=False, mensaje_no_apto=None, clima_oleada_id=None):
     conn = get_connection()
     conn.execute(
         "UPDATE encuestas SET titulo = ?, mensaje_final = ?, color_boton = ?, tipo_informe_clave = ?, "
-        "tipo_entrevista_empresa = ?, enlace_corto = ?, evitar_duplicados = ?, mensaje_no_apto = ? WHERE id = ?",
+        "tipo_entrevista_empresa = ?, enlace_corto = ?, evitar_duplicados = ?, mensaje_no_apto = ?, "
+        "clima_oleada_id = ? WHERE id = ?",
         (titulo.strip(), mensaje_final.strip(), color_boton.strip(), tipo_informe_clave or None,
          tipo_entrevista_empresa or None, (enlace_corto or "").strip() or None,
-         1 if evitar_duplicados else 0, (mensaje_no_apto or "").strip() or mensaje_final.strip(), encuesta_id),
+         1 if evitar_duplicados else 0, (mensaje_no_apto or "").strip() or mensaje_final.strip(),
+         clima_oleada_id or None, encuesta_id),
     )
     conn.commit()
     conn.close()
@@ -856,6 +871,18 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
             conn.close()
             raise ValueError("Ya has respondido este test anteriormente. Si crees que es un error, contacta con quien te lo compartió.")
 
+    # Se valida ANTES de insertar (a diferencia de Informes/Entrevista de
+    # Salida, que se resuelven después): si falta la pregunta de centro de
+    # trabajo, mejor rechazar el envío con un error claro que aceptarlo y
+    # perder en silencio la única forma de que esta respuesta anónima cuente
+    # para su tienda en Clima Laboral.
+    centro_clima = None
+    if row["clima_oleada_id"]:
+        centro_clima = clima_module.detectar_centro(fila_por_etiqueta)
+        if not centro_clima:
+            conn.close()
+            raise ValueError('Falta la pregunta "¿Cuál es tu centro de trabajo?" en este test -- contacta con quien lo configuró.')
+
     dispositivo = _detectar_dispositivo(user_agent)
     cur = conn.execute(
         "INSERT INTO encuesta_respuestas (encuesta_id, datos_json, ip, user_agent, dispositivo) VALUES (?, ?, ?, ?, ?)",
@@ -919,6 +946,13 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
         entrevistas_module.ingest_fila_directa(
             row["tipo_entrevista_empresa"], fila_por_etiqueta, origen=f"Test web: {row['titulo']}"
         )
+    if row["clima_oleada_id"]:
+        # centro_clima ya se validó arriba, antes de insertar. Clima Laboral
+        # es completamente anónimo: fila_por_etiqueta se reenvía tal cual
+        # (solo el centro y las respuestas de escala/abiertas) igual que si
+        # viniera del Excel de Forms -- un test de Clima real no tiene
+        # pregunta de nombre/teléfono/email que reenviar.
+        clima_module.ingest_respuesta_directa(row["clima_oleada_id"], centro_clima, fila_por_etiqueta)
 
     marcar_sesion_completada(token)
     return {"ok": True, "mensaje": row["mensaje_no_apto"] if es_no_apto else row["mensaje_final"]}

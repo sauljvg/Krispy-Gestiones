@@ -105,6 +105,13 @@ function textoOportunidad(o) {
   return `${pct}% no muestra acuerdo total`;
 }
 
+// ?oleada=<id> permite enlazar directo a una oleada concreta (ver
+// enlaceRespuestasTest en tests.js, que enlaza aquí el número de respuestas
+// de un test de Clima Laboral) -- sessionStorage evita un bucle infinito si
+// esa oleada no existe en NINGUNA empresa (se intenta la otra empresa una
+// sola vez, no en cada carga).
+const OLEADA_OBJETIVO = new URLSearchParams(location.search).get("oleada");
+
 async function loadOleadas() {
   const res = await fetch(`${AUTH_API_BASE}/clima/oleadas?${conEmpresa(new URLSearchParams())}`);
   const oleadas = await res.json();
@@ -116,7 +123,16 @@ async function loadOleadas() {
     document.getElementById("centro-grid").innerHTML = `<p class="staff-hint">Todavía no has importado ningún Excel de Clima Laboral.</p>`;
     return;
   }
-  currentOleada = oleadas[0].id;
+  if (OLEADA_OBJETIVO && !oleadas.some((o) => String(o.id) === OLEADA_OBJETIVO)) {
+    const otraEmpresa = EMPRESA === "saona" ? "kk" : "saona";
+    if (!sessionStorage.getItem("kt-clima-oleada-redirect")) {
+      sessionStorage.setItem("kt-clima-oleada-redirect", "1");
+      location.href = `/clima.html?empresa=${otraEmpresa}&oleada=${OLEADA_OBJETIVO}`;
+      return;
+    }
+  }
+  sessionStorage.removeItem("kt-clima-oleada-redirect");
+  currentOleada = OLEADA_OBJETIVO && oleadas.some((o) => String(o.id) === OLEADA_OBJETIVO) ? Number(OLEADA_OBJETIVO) : oleadas[0].id;
   select.value = currentOleada;
   await loadCentros();
 }

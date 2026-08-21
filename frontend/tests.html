@@ -43,6 +43,11 @@
   .editor-fields-row .editor-field { flex: 1; min-width: 160px; }
   .editor-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 20px; }
 
+  .clima-plantilla-fila { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .clima-plantilla-fila input[type="text"] { flex: 2; }
+  .clima-plantilla-fila input[type="number"] { flex: 1; min-width: 90px; }
+  .clima-plantilla-fila button { flex: none; }
+
   .pagina-card { background: var(--surface-page); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
   .pagina-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
   .pagina-condicion { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 8px; margin-bottom: 10px; background: var(--surface-1); border: 1px dashed var(--border); border-radius: 8px; font-size: 12px; }
@@ -153,10 +158,18 @@
           <input type="text" id="test-titulo" placeholder="Título del test">
         </div>
         <div class="editor-field">
-          <label for="test-tipo-informe">¿A qué informe o Entrevista de Salida alimenta? (opcional)</label>
+          <label for="test-tipo-informe">¿A qué informe, Entrevista de Salida o Clima Laboral alimenta? (opcional)</label>
           <select id="test-tipo-informe"><option value="">— No calcular puntuación —</option></select>
         </div>
       </div>
+
+      <div class="editor-field" id="clima-plantilla-wrap" hidden>
+        <label>Empleados esperados por centro (para calcular el % de participación)</label>
+        <p class="staff-hint">Solo cuenta cuántas respuestas llegan de cada centro -- no identifica quién respondió, así que el test sigue siendo anónimo.</p>
+        <div id="clima-plantilla-filas"></div>
+        <button id="btn-clima-plantilla-agregar" class="btn btn-ghost" type="button" style="margin-top:6px;">＋ Añadir centro</button>
+      </div>
+
       <div class="editor-fields-row">
         <div class="editor-field">
           <label for="test-color-boton">Color del botón</label>
@@ -235,6 +248,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260724a"></script>
 <script src="js/topbar-menu.js?v=20260820a"></script>
-<script src="js/tests.js?v=20260730a"></script>
+<script src="js/tests.js?v=20260821a"></script>
 </body>
 </html>

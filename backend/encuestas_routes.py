@@ -3,6 +3,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 import auth as auth_module
+import clima as clima_module
 import encuestas as encuestas_module
 import informes as informes_module
 from auth_routes import get_current_user
@@ -27,6 +28,7 @@ class EncuestaEditarIn(BaseModel):
     color_boton: str = "#5b2a2a"
     tipo_informe_clave: str | None = None
     tipo_entrevista_empresa: str | None = None
+    clima_oleada_id: int | None = None
     enlace_corto: str | None = None
     evitar_duplicados: bool = False
     mensaje_no_apto: str = "Gracias por contestar nuestro test. En esta ocasión no has superado el proceso, pero te deseamos mucha suerte."
@@ -81,6 +83,15 @@ def marcar_notificaciones_route(user: dict = Depends(require_tests)):
 def tipos_informe_disponibles_route(_user: dict = Depends(require_tests)):
     """Para el desplegable "¿A qué informe alimenta?" del editor."""
     return informes_module.list_tipos()
+
+
+@router.get("/clima-oleadas-disponibles")
+def clima_oleadas_disponibles_route(_user: dict = Depends(require_tests)):
+    """Para el mismo desplegable, grupo "Clima Laboral" -- oleadas de las dos
+    empresas juntas (mismo criterio que tipos_informe_disponibles_route: el
+    editor de Tests no filtra por empresa del usuario, solo por si tiene
+    acceso a Tests en general)."""
+    return clima_module.list_oleadas("kk") + clima_module.list_oleadas("saona")
 
 
 @router.get("/encuestas")
@@ -149,7 +160,7 @@ def update_encuesta_route(encuesta_id: int, body: EncuestaEditarIn, _user: dict 
     encuestas_module.update_encuesta(
         encuesta_id, body.titulo, body.mensaje_final, body.color_boton,
         body.tipo_informe_clave, body.tipo_entrevista_empresa, body.enlace_corto, body.evitar_duplicados,
-        body.mensaje_no_apto,
+        body.mensaje_no_apto, body.clima_oleada_id,
     )
     return {"ok": True}
 

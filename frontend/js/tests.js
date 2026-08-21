@@ -15,8 +15,12 @@ function escapeHTML(str) {
 }
 
 async function loadTiposInforme() {
-  const res = await fetch(`${AUTH_API_BASE}/encuestas/tipos-informe-disponibles`);
-  const tipos = await res.json();
+  const [resInformes, resClima] = await Promise.all([
+    fetch(`${AUTH_API_BASE}/encuestas/tipos-informe-disponibles`),
+    fetch(`${AUTH_API_BASE}/encuestas/clima-oleadas-disponibles`),
+  ]);
+  const tipos = await resInformes.json();
+  const oleadas = await resClima.json();
   const select = document.getElementById("test-tipo-informe");
   select.innerHTML =
     `<option value="">— No calcular puntuación —</option>` +
@@ -26,7 +30,63 @@ async function loadTiposInforme() {
     `<optgroup label="Entrevista de Salida">` +
     `<option value="entrevista:kk">Entrevista de Salida — Krispy Kreme</option>` +
     `<option value="entrevista:saona">Entrevista de Salida — SAONA</option>` +
+    `</optgroup>` +
+    `<optgroup label="Clima Laboral">` +
+    oleadas
+      .map((o) => `<option value="clima:${o.id}">${escapeHTML(o.etiqueta || `Oleada #${o.numero} sin nombre`)}</option>`)
+      .join("") +
+    `<option value="clima:nueva:kk">+ Nueva oleada de Clima Laboral — Krispy Kreme</option>` +
+    `<option value="clima:nueva:saona">+ Nueva oleada de Clima Laboral — SAONA</option>` +
     `</optgroup>`;
+}
+
+// Clima Laboral es el único destino donde el test necesita configuración
+// propia además de elegirlo en el desplegable (la plantilla de empleados
+// esperados por centro, ver clima-plantilla-wrap en tests.html) -- se
+// guarda aparte (no en el body de guardarTest) porque vive en su propia
+// tabla (clima_plantilla), no en la fila de la encuesta.
+let climaPlantillaOleadaId = null;
+
+function filaClimaPlantillaHTML(centro = "", empleados = "") {
+  return `
+    <div class="clima-plantilla-fila">
+      <input type="text" class="clima-plantilla-centro" placeholder="Centro de trabajo" value="${escapeHTML(centro)}">
+      <input type="number" class="clima-plantilla-empleados" placeholder="Empleados esperados" min="1" value="${empleados || ""}">
+      <button type="button" class="btn btn-ghost btn-clima-plantilla-quitar">✕</button>
+    </div>`;
+}
+
+function wireClimaPlantillaFilas() {
+  document.querySelectorAll(".btn-clima-plantilla-quitar").forEach((btn) => {
+    btn.addEventListener("click", () => btn.closest(".clima-plantilla-fila").remove());
+  });
+}
+
+function renderClimaPlantillaFilas(plantilla) {
+  const cont = document.getElementById("clima-plantilla-filas");
+  const entradas = Object.entries(plantilla || {});
+  cont.innerHTML = (entradas.length ? entradas : [["", ""]]).map(([c, e]) => filaClimaPlantillaHTML(c, e)).join("");
+  wireClimaPlantillaFilas();
+}
+
+// Se llama cada vez que cambia el desplegable de destino (y al abrir un
+// test ya guardado) -- muestra/oculta el bloque de plantilla y, si el
+// destino es una oleada existente, precarga lo que ya se había guardado
+// para esa oleada (puede venir de un Excel importado antes, no solo de
+// este mismo test).
+async function actualizarVistaClimaPlantilla() {
+  const val = document.getElementById("test-tipo-informe").value;
+  const wrap = document.getElementById("clima-plantilla-wrap");
+  if (!val.startsWith("clima:") || val.startsWith("clima:nueva:")) {
+    wrap.hidden = true;
+    climaPlantillaOleadaId = null;
+    document.getElementById("clima-plantilla-filas").innerHTML = "";
+    return;
+  }
+  climaPlantillaOleadaId = Number(val.slice("clima:".length));
+  wrap.hidden = false;
+  const res = await fetch(`${AUTH_API_BASE}/clima/${climaPlantillaOleadaId}/plantilla`);
+  renderClimaPlantillaFilas(res.ok ? await res.json() : {});
 }
 
 // El numero de respuestas en el listado enlaza al informe donde se acumulan
@@ -44,6 +104,9 @@ function enlaceRespuestasTest(t) {
   if (t.tipo_entrevista_empresa) {
     const params = new URLSearchParams({ empresa: t.tipo_entrevista_empresa });
     return `<a href="/entrevistas.html?${params.toString()}" target="_blank">${t.num_respuestas}</a>`;
+  }
+  if (t.clima_oleada_id) {
+    return `<a href="/clima.html?oleada=${t.clima_oleada_id}" target="_blank">${t.num_respuestas}</a>`;
   }
   return `${t.num_respuestas}`;
 }
@@ -115,9 +178,12 @@ async function abrirEditor(testId, { scroll = true } = {}) {
       document.getElementById("test-tipo-informe").value = `entrevista:${currentTest.tipo_entrevista_empresa}`;
     } else if (currentTest.tipo_informe_clave) {
       document.getElementById("test-tipo-informe").value = `informe:${currentTest.tipo_informe_clave}`;
+    } else if (currentTest.clima_oleada_id) {
+      document.getElementById("test-tipo-informe").value = `clima:${currentTest.clima_oleada_id}`;
     } else {
       document.getElementById("test-tipo-informe").value = "";
     }
+    await actualizarVistaClimaPlantilla();
     // Código corto y correlativo (el propio id, con 4 cifras) en vez del
     // slug de texto — el backend acepta ambos, así que un enlace ya
     // compartido con el slug largo sigue funcionando igual.
@@ -144,6 +210,7 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("test-mensaje-no-apto").value = "Gracias por contestar nuestro test. En esta ocasión no has superado el proceso, pero te deseamos mucha suerte.";
     document.getElementById("test-color-boton").value = "#5b2a2a";
     document.getElementById("test-tipo-informe").value = "";
+    await actualizarVistaClimaPlantilla();
     document.getElementById("test-enlace-publico").value = "";
     document.getElementById("test-enlace-corto").value = "";
     document.getElementById("test-evitar-duplicados").checked = false;
@@ -193,6 +260,7 @@ async function guardarTest() {
     color_boton: document.getElementById("test-color-boton").value,
     tipo_informe_clave: destino.startsWith("informe:") ? destino.slice("informe:".length) : null,
     tipo_entrevista_empresa: destino.startsWith("entrevista:") ? destino.slice("entrevista:".length) : null,
+    clima_oleada_id: destino.startsWith("clima:") ? Number(destino.slice("clima:".length)) : null,
     enlace_corto: document.getElementById("test-enlace-corto").value.trim() || null,
     evitar_duplicados: document.getElementById("test-evitar-duplicados").checked,
   };
@@ -205,6 +273,19 @@ async function guardarTest() {
     const err = await res.json().catch(() => ({}));
     mostrarAviso(err.detail || "No se pudo guardar el test.");
     return;
+  }
+  if (climaPlantillaOleadaId) {
+    const plantilla = {};
+    document.querySelectorAll(".clima-plantilla-fila").forEach((fila) => {
+      const centro = fila.querySelector(".clima-plantilla-centro").value.trim();
+      const empleados = Number(fila.querySelector(".clima-plantilla-empleados").value);
+      if (centro && empleados > 0) plantilla[centro] = empleados;
+    });
+    await fetch(`${AUTH_API_BASE}/clima/${climaPlantillaOleadaId}/plantilla`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plantilla }),
+    });
   }
   await loadTests();
   await abrirEditor(currentTestId, { scroll: false });
@@ -928,5 +1009,36 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!file) return;
     await subirFondo(file);
     e.target.value = "";
+  });
+
+  document.getElementById("test-tipo-informe").addEventListener("change", async (e) => {
+    const val = e.target.value;
+    if (val.startsWith("clima:nueva:")) {
+      const empresa = val.slice("clima:nueva:".length);
+      const etiqueta = prompt('Nombre de esta oleada de Clima Laboral (ej. "2026 · Encuesta completa"):');
+      if (!etiqueta || !etiqueta.trim()) {
+        e.target.value = currentTest?.clima_oleada_id ? `clima:${currentTest.clima_oleada_id}` : "";
+        return;
+      }
+      const res = await fetch(`${AUTH_API_BASE}/clima/oleadas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ etiqueta: etiqueta.trim(), empresa }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        mostrarAviso(err.detail || "No se pudo crear la oleada.");
+        e.target.value = currentTest?.clima_oleada_id ? `clima:${currentTest.clima_oleada_id}` : "";
+        return;
+      }
+      const data = await res.json();
+      await loadTiposInforme();
+      e.target.value = `clima:${data.id}`;
+    }
+    await actualizarVistaClimaPlantilla();
+  });
+  document.getElementById("btn-clima-plantilla-agregar").addEventListener("click", () => {
+    document.getElementById("clima-plantilla-filas").insertAdjacentHTML("beforeend", filaClimaPlantillaHTML());
+    wireClimaPlantillaFilas();
   });
 });

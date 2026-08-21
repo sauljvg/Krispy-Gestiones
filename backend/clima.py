@@ -33,11 +33,26 @@ LIKERT_ALIASES = {
     "ni de acuerdo ni en desacuerdo": "Neutral",
 }
 
+# El módulo de Test (a diferencia de un Excel de Forms, que trae el texto
+# de la leyenda tal cual) envía el PUNTO (1-5) de una pregunta de escala,
+# igual que ya asume _likert_points_strict en scoring_valores.py -- mismo
+# orden que LIKERT_OPCIONES en encuestas.py (1 = más en desacuerdo).
+LIKERT_POR_PUNTO = {
+    "1": "Totalmente en desacuerdo",
+    "2": "En desacuerdo",
+    "3": "Neutral",
+    "4": "De acuerdo",
+    "5": "Totalmente de acuerdo",
+}
+
 
 def _canonicalizar_likert(valor):
     if valor in LIKERT_ORDEN:
         return valor
-    return LIKERT_ALIASES.get(str(valor or "").strip().lower())
+    texto = str(valor or "").strip()
+    if texto in LIKERT_POR_PUNTO:
+        return LIKERT_POR_PUNTO[texto]
+    return LIKERT_ALIASES.get(texto.lower())
 
 
 METADATA_HINTS = {
@@ -339,6 +354,82 @@ def _parse_plantilla(wb):
             except (TypeError, ValueError):
                 continue
     return resultado
+
+
+def detectar_centro(fila_por_etiqueta):
+    """Igual que centro_col en _column_roles (mismo criterio: la primera
+    columna cuyo texto normalizado contiene "centro"), pero para una fila
+    que llega directa del módulo de Test en vez de un Excel -- así el test
+    en vivo y la importación manual reconocen la pregunta de centro de
+    trabajo exactamente de la misma forma."""
+    for etiqueta, valor in fila_por_etiqueta.items():
+        if "centro" in _normaliza_header(etiqueta):
+            return str(valor).strip() if valor else None
+    return None
+
+
+def crear_oleada(etiqueta, empresa="kk"):
+    """Como get_or_create_oleada(nueva=True, ...), pero con nombre más
+    explícito para el caso de uso de "+ Nueva oleada de Clima Laboral" desde
+    el editor de Tests (ver encuestas_routes.py) -- cada fase (encuesta
+    completa, pulso...) es una oleada propia con su propia plantilla."""
+    return get_or_create_oleada(True, etiqueta=etiqueta, empresa=empresa)
+
+
+def get_plantilla(oleada_id):
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT centro, empleados FROM clima_plantilla WHERE oleada_id = ? ORDER BY centro", (oleada_id,)
+    ).fetchall()
+    conn.close()
+    return {r["centro"]: r["empleados"] for r in rows}
+
+
+def set_plantilla(oleada_id, mapa_centro_empleados):
+    """Reemplaza entera la plantilla de una oleada -- pensado para el editor
+    de Tests, donde el admin escribe la lista completa de centros y
+    empleados esperados de una vez (a diferencia de import_excel, que solo
+    añade/actualiza lo que trae el Excel sin borrar lo demás)."""
+    conn = get_connection()
+    conn.execute("DELETE FROM clima_plantilla WHERE oleada_id = ?", (oleada_id,))
+    for centro, empleados in mapa_centro_empleados.items():
+        centro = str(centro).strip()
+        if not centro:
+            continue
+        try:
+            empleados = int(empleados)
+        except (TypeError, ValueError):
+            continue
+        if empleados <= 0:
+            continue
+        conn.execute(
+            "INSERT INTO clima_plantilla (oleada_id, centro, empleados) VALUES (?, ?, ?)",
+            (oleada_id, centro, empleados),
+        )
+    conn.commit()
+    conn.close()
+
+
+def ingest_respuesta_directa(oleada_id, centro, fila_por_etiqueta):
+    """Como import_excel, pero para UNA respuesta que llega en vivo desde el
+    módulo de Test en vez de un Excel subido a mano -- mismo dedup por hash
+    de la fila completa, para no duplicar si el navegador reenvía la misma
+    respuesta dos veces (p.ej. doble clic en Enviar)."""
+    fila_hash = _hash_fila(fila_por_etiqueta)
+    conn = get_connection()
+    existe = conn.execute(
+        "SELECT id FROM clima_respuestas WHERE oleada_id = ? AND fila_hash = ?", (oleada_id, fila_hash)
+    ).fetchone()
+    if existe:
+        conn.close()
+        return
+    datos_json = json.dumps(fila_por_etiqueta, ensure_ascii=False, default=str)
+    conn.execute(
+        "INSERT INTO clima_respuestas (oleada_id, centro, fila_hash, datos_json) VALUES (?, ?, ?, ?)",
+        (oleada_id, centro, fila_hash, datos_json),
+    )
+    conn.commit()
+    conn.close()
 
 
 def get_or_create_oleada(nueva, etiqueta=None, empresa="kk"):
