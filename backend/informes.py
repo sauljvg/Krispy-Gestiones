@@ -115,6 +115,13 @@ def ensure_informe_tables():
     # existentes son todos de Krispy Kreme, de ahí el default.
     if "empresa" not in cols_tipos:
         conn.execute("ALTER TABLE informe_tipos ADD COLUMN empresa TEXT NOT NULL DEFAULT 'kk'")
+    # archivado: para un tipo creado a mano (ver create_tipo/"+ Nuevo tipo")
+    # que ya no se usa pero cuyos datos no se quieren borrar -- deja de
+    # aparecer en la pantalla principal de Informes y en el desplegable de
+    # "a qué informe alimenta" de Tests (ver list_tipos), sin tocar sus
+    # respuestas ya guardadas.
+    if "archivado" not in cols_tipos:
+        conn.execute("ALTER TABLE informe_tipos ADD COLUMN archivado INTEGER NOT NULL DEFAULT 0")
 
     # candidato_id enlaza cada "compartido" con su ficha en candidatos
     # (backend/reclutamiento.py) — se rellena al compartir (ver
@@ -288,14 +295,17 @@ def _hoja_para_conteo(conn, tipo):
     return row["hoja"] if row else None
 
 
-def list_tipos(empresa=None):
+def list_tipos(empresa=None, incluir_archivados=False):
     conn = get_connection()
+    clauses = []
+    params = []
     if empresa:
-        tipos = [dict(r) for r in conn.execute(
-            "SELECT * FROM informe_tipos WHERE empresa = ? ORDER BY id", (empresa,)
-        ).fetchall()]
-    else:
-        tipos = [dict(r) for r in conn.execute("SELECT * FROM informe_tipos ORDER BY id").fetchall()]
+        clauses.append("empresa = ?")
+        params.append(empresa)
+    if not incluir_archivados:
+        clauses.append("(archivado IS NULL OR archivado = 0)")
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    tipos = [dict(r) for r in conn.execute(f"SELECT * FROM informe_tipos {where} ORDER BY id", params).fetchall()]
     for tipo in tipos:
         hoja = _hoja_para_conteo(conn, tipo)
         if hoja is None:
@@ -316,6 +326,53 @@ def create_tipo(clave, nombre, empresa="kk"):
     tipo_id = cur.lastrowid
     conn.close()
     return tipo_id
+
+
+def archivar_tipo(clave, archivado=True):
+    tipo = get_tipo(clave)
+    if tipo is None:
+        raise ValueError(f"Tipo de informe desconocido: {clave}")
+    conn = get_connection()
+    conn.execute("UPDATE informe_tipos SET archivado = ? WHERE id = ?", (1 if archivado else 0, tipo["id"]))
+    conn.commit()
+    conn.close()
+
+
+def eliminar_tipo(clave):
+    """Borra por completo un tipo creado a mano (ver create_tipo) y todo lo
+    que tenga dentro (respuestas, importaciones, hojas, compartidos) — a
+    diferencia de archivar_tipo, esto no es reversible. Se niega si algún
+    Test todavía lo tiene configurado como destino (ver
+    encuestas.tipo_informe_clave): borrarlo igual dejaría a ese Test
+    apuntando a un tipo inexistente, y la próxima respuesta que llegara
+    fallaría en vez de guardarse."""
+    tipo = get_tipo(clave)
+    if tipo is None:
+        raise ValueError(f"Tipo de informe desconocido: {clave}")
+    conn = get_connection()
+    tests_conectados = [r["titulo"] for r in conn.execute(
+        "SELECT titulo FROM encuestas WHERE tipo_informe_clave = ?", (clave,)
+    ).fetchall()]
+    if tests_conectados:
+        conn.close()
+        lista = ", ".join(f'"{t}"' for t in tests_conectados)
+        plural = "test" if len(tests_conectados) == 1 else "tests"
+        raise ValueError(
+            f"No se puede eliminar: todavía lo alimenta el {plural} {lista}. "
+            "Cambia primero a qué informe alimenta (o ciérralo) antes de borrar este informe."
+        )
+    conn.execute("""
+        DELETE FROM informe_compartidos WHERE respuesta_id IN (
+            SELECT id FROM informe_respuestas WHERE tipo_id = ?
+        )
+    """, (tipo["id"],))
+    conn.execute("DELETE FROM informe_respuestas WHERE tipo_id = ?", (tipo["id"],))
+    conn.execute("DELETE FROM informe_importaciones WHERE tipo_id = ?", (tipo["id"],))
+    conn.execute("DELETE FROM informe_hojas_ocultas WHERE tipo_id = ?", (tipo["id"],))
+    conn.execute("DELETE FROM usuario_informe_tipos WHERE tipo_clave = ?", (clave,))
+    conn.execute("DELETE FROM informe_tipos WHERE id = ?", (tipo["id"],))
+    conn.commit()
+    conn.close()
 
 
 def list_hojas(tipo_clave, incluir_ocultas=True):

@@ -48,6 +48,10 @@ class NewTipoBody(BaseModel):
     empresa: str = "kk"
 
 
+class ArchivarTipoBody(BaseModel):
+    archivado: bool = True
+
+
 class CompartirBody(BaseModel):
     respuesta_ids: list[int]
     usuario_id: int
@@ -75,7 +79,7 @@ class HojaNombreBody(BaseModel):
 
 
 @router.get("/tipos")
-def list_tipos_route(empresa: str | None = None, user: dict = Depends(require_informes)):
+def list_tipos_route(empresa: str | None = None, incluir_archivados: bool = False, user: dict = Depends(require_informes)):
     # empresa=None (p.ej. desde la pantalla de Usuarios, para armar el
     # checklist de permisos) devuelve los tipos de las dos empresas juntos —
     # require_informes ya exige tener acceso a alguna. Si se pide una empresa
@@ -86,7 +90,7 @@ def list_tipos_route(empresa: str | None = None, user: dict = Depends(require_in
         modulo = "saona_informes" if empresa == "saona" else "informes"
         if not auth_module.tiene_modulo(user, modulo):
             raise HTTPException(status_code=403, detail="No tienes acceso a ese módulo de Informes")
-    tipos = informes_module.list_tipos(empresa=empresa)
+    tipos = informes_module.list_tipos(empresa=empresa, incluir_archivados=incluir_archivados)
     permitidos = informes_module.get_tipos_permitidos(user["id"])
     if permitidos:
         tipos = [t for t in tipos if t["clave"] in permitidos]
@@ -103,6 +107,24 @@ def create_tipo_route(body: NewTipoBody, user: dict = Depends(require_informes))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"No se pudo crear el tipo (¿clave duplicada?): {exc}")
     return {"ok": True, "id": tipo_id}
+
+
+@router.post("/tipos/{tipo_clave}/archivar")
+def archivar_tipo_route(tipo_clave: str, body: ArchivarTipoBody, _user: dict = Depends(require_tipo_acceso)):
+    try:
+        informes_module.archivar_tipo(tipo_clave, body.archivado)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"ok": True}
+
+
+@router.delete("/tipos/{tipo_clave}")
+def eliminar_tipo_route(tipo_clave: str, _user: dict = Depends(require_tipo_acceso)):
+    try:
+        informes_module.eliminar_tipo(tipo_clave)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
 
 
 @router.get("/usuarios-para-compartir")

@@ -18,6 +18,13 @@
   .informes-wrap { max-width: 1200px; margin: 0 auto; padding: 0 0 60px; }
   .informes-wrap .home-grid { margin: 20px 0 28px; }
   .informes-wrap .home-card { cursor: pointer; }
+  .informes-wrap .home-card.tipo-archivado { opacity: 0.55; }
+  .tipo-archivado-badge {
+    font-size: 11px; font-weight: normal; color: var(--text-secondary); background: var(--surface-page);
+    border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; margin-left: 6px; vertical-align: middle;
+  }
+  .tipo-card-acciones { display: flex; gap: 6px; margin-top: 10px; }
+  .tipo-card-acciones .btn { font-size: 11px; padding: 4px 8px; }
   .informes-header { display: flex; justify-content: space-between; align-items: center; }
   #tipo-detail-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
   .table-scroll { overflow-x: auto; }
@@ -128,7 +135,12 @@
 
     <div class="informes-header">
       <h2 style="font-size:18px; margin:0;">Selecciona un informe</h2>
-      <button id="btn-new-tipo" class="btn btn-ghost">+ Nuevo tipo</button>
+      <div style="display:flex; align-items:center; gap:14px;">
+        <label class="staff-hint" style="display:flex; align-items:center; gap:6px;">
+          <input type="checkbox" id="tipos-ver-archivados"> Ver archivados
+        </label>
+        <button id="btn-new-tipo" class="btn btn-ghost">+ Nuevo tipo</button>
+      </div>
     </div>
     <div class="home-grid" id="tipos-grid"></div>
 
@@ -236,6 +248,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260820a"></script>
-<script src="js/informes.js?v=20260819a"></script>
+<script src="js/informes.js?v=20260821a"></script>
 </body>
 </html>

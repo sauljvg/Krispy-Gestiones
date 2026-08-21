@@ -168,23 +168,59 @@ function formatFechaCorta(valor) {
 }
 
 async function loadTipos() {
-  const res = await fetch(`${AUTH_API_BASE}/informes/tipos?empresa=${EMPRESA}`);
+  const verArchivados = document.getElementById("tipos-ver-archivados").checked;
+  const res = await fetch(`${AUTH_API_BASE}/informes/tipos?empresa=${EMPRESA}&incluir_archivados=${verArchivados}`);
   const tipos = await res.json();
   const grid = document.getElementById("tipos-grid");
   grid.innerHTML = tipos
     .map(
       (t) => `
-      <a href="#" class="home-card" data-clave="${t.clave}" data-nombre="${escapeHTML(t.nombre)}">
+      <div class="home-card${t.archivado ? " tipo-archivado" : ""}" data-clave="${t.clave}" data-nombre="${escapeHTML(t.nombre)}">
         <span class="home-icon">📋</span>
-        <h2>${escapeHTML(t.nombre)}</h2>
+        <h2>${escapeHTML(t.nombre)}${t.archivado ? '<span class="tipo-archivado-badge">Archivado</span>' : ""}</h2>
         <p>${t.num_respuestas} respuesta(s) importada(s).</p>
-      </a>`
+        <div class="tipo-card-acciones">
+          <button type="button" class="btn btn-ghost btn-archivar-tipo" data-clave="${t.clave}" data-archivado="${t.archivado ? 1 : 0}">
+            ${t.archivado ? "♻️ Desarchivar" : "🗄️ Archivar"}
+          </button>
+          <button type="button" class="btn btn-ghost btn-eliminar-tipo" data-clave="${t.clave}" data-nombre="${escapeHTML(t.nombre)}">🗑️ Eliminar</button>
+        </div>
+      </div>`
     )
     .join("");
   grid.querySelectorAll(".home-card").forEach((card) => {
-    card.addEventListener("click", (e) => {
-      e.preventDefault();
-      openTipo(card.dataset.clave, card.dataset.nombre);
+    card.addEventListener("click", () => openTipo(card.dataset.clave, card.dataset.nombre));
+  });
+  grid.querySelectorAll(".btn-archivar-tipo").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const archivarAhora = btn.dataset.archivado !== "1";
+      const res2 = await fetch(`${AUTH_API_BASE}/informes/tipos/${btn.dataset.clave}/archivar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archivado: archivarAhora }),
+      });
+      if (!res2.ok) {
+        const err = await res2.json().catch(() => ({}));
+        mostrarAviso(err.detail || "No se pudo archivar el tipo.");
+        return;
+      }
+      await loadTipos();
+    });
+  });
+  grid.querySelectorAll(".btn-eliminar-tipo").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!(await pedirConfirmacion(
+        `¿Eliminar por completo "${btn.dataset.nombre}"? Esto borra todas sus respuestas e importaciones. No es reversible -- si solo quieres dejar de verlo, usa "Archivar" en vez de esto.`
+      ))) return;
+      const res2 = await fetch(`${AUTH_API_BASE}/informes/tipos/${btn.dataset.clave}`, { method: "DELETE" });
+      if (!res2.ok) {
+        const err = await res2.json().catch(() => ({}));
+        mostrarAviso(err.detail || "No se pudo eliminar el tipo.");
+        return;
+      }
+      await loadTipos();
     });
   });
 }
@@ -570,6 +606,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     await loadTipos();
   });
+
+  document.getElementById("tipos-ver-archivados").addEventListener("change", () => loadTipos());
 
   ["f-buscar"].forEach((id) => {
     document.getElementById(id).addEventListener("input", () => loadRespuestas());
