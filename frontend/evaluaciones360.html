@@ -19,16 +19,34 @@
   .eval360-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 16px 0; }
   .eval360-toolbar p { flex: 1; min-width: 0; }
   .eval360-toolbar .btn { flex-shrink: 0; white-space: nowrap; }
-  .organigrama-lista { list-style: none; margin: 0; padding: 0; }
+
+  .eval360-tabs { display: flex; gap: 6px; margin: 20px 0 4px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .eval360-tab-btn {
+    padding: 10px 14px; border: none; background: none; color: var(--text-secondary);
+    font-size: 14px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .eval360-tab-btn.activa { color: var(--text-primary); border-bottom-color: var(--accent, var(--status-good)); }
+  .eval360-vista { display: none; }
+  .eval360-vista.activa { display: block; }
+
+  .organigrama-lista, .lista-simple { list-style: none; margin: 0; padding: 0; }
   .organigrama-lista li { padding: 4px 0; }
-  .persona-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-1); }
-  .persona-row .persona-nombre { font-weight: 600; }
+  .persona-row, .fila-simple {
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-1); margin-bottom: 8px; flex-wrap: wrap;
+  }
+  .persona-row .persona-nombre, .fila-simple .fila-titulo { font-weight: 600; }
   .persona-row .persona-puesto { color: var(--text-secondary); font-size: 13px; }
-  .persona-row .persona-acciones { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
+  .persona-row .persona-acciones, .fila-simple .fila-acciones { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
   .badge-cuenta { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); white-space: nowrap; }
   .badge-sin-cuenta { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-secondary); white-space: nowrap; }
+  .badge-estado { font-size: 11px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .badge-borrador { background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-secondary); }
+  .badge-abierta { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
+  .badge-cerrada { background: color-mix(in srgb, var(--status-bad, #c62828) 18%, transparent); color: var(--status-bad, #c62828); }
+
   .editor-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-top: 20px; position: relative; }
-  #editor-titulo-h2 { margin-top: 0; padding-right: 30px; }
+  .editor-card h2 { margin-top: 0; padding-right: 30px; }
   .btn-cerrar-editor-x {
     position: absolute; top: 14px; right: 14px; width: 28px; height: 28px;
     border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary);
@@ -38,13 +56,34 @@
   .btn-cerrar-editor-x:hover { background: var(--surface-2); color: var(--text-primary); }
   .editor-field { margin-bottom: 12px; }
   .editor-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
-  .editor-field input, .editor-field select {
+  .editor-field input, .editor-field select, .editor-field textarea {
     width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border);
     background: var(--surface-page); color: var(--text-primary); font-size: 14px; font-family: inherit;
     box-sizing: border-box;
   }
   .editor-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
   .staff-hint { color: var(--text-secondary); font-size: 13px; }
+
+  .preguntas-grupo { margin-bottom: 22px; }
+  .preguntas-grupo h3 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary); margin: 0 0 8px; }
+  .pregunta-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--gridline); }
+  .pregunta-row input[type="text"] {
+    flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 13px;
+  }
+  .pregunta-row input[type="text"]:disabled { opacity: 0.5; }
+
+  .campana-detalle { margin-top: 20px; }
+  .picker-lista { max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 10px; }
+  .picker-lista label { display: flex; align-items: center; gap: 8px; padding: 4px 2px; font-size: 14px; cursor: pointer; }
+  .relacion-tag { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); color: var(--text-secondary); }
+
+  .form-pregunta-likert { padding: 10px 0; border-bottom: 1px solid var(--gridline); }
+  .form-pregunta-likert p { margin: 0 0 8px; font-size: 14px; }
+  .escala-likert { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+  .escala-likert label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .form-pregunta-abierta { padding: 10px 0; }
+  .form-pregunta-abierta p { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -54,7 +93,7 @@
       <span class="brand-icon" id="brand-icon">🍩</span>
       <div>
         <h1 id="brand-title">Krispy Gestiones</h1>
-        <p class="subtitle">Evaluaciones 360° · Organigrama</p>
+        <p class="subtitle">Evaluaciones 360°</p>
       </div>
     </div>
     <div class="topbar-actions">
@@ -74,57 +113,164 @@
   <div class="eval360-wrap">
     <div class="hero-banner">
       <span class="eyebrow">Portal interno</span>
-      <h1>Organigrama</h1>
-      <p>Da de alta a cada persona con su puesto y su jefe directo -- de aquí sale quién evalúa a quién en cada campaña de Evaluación 360°.</p>
+      <h1>Evaluaciones 360°</h1>
+      <p>Organigrama, campañas de evaluación y tus propias evaluaciones pendientes.</p>
     </div>
 
-    <div id="lista-organigrama-wrap">
+    <div class="eval360-tabs">
+      <button type="button" class="eval360-tab-btn" data-tab="mis">Mis evaluaciones</button>
+      <button type="button" class="eval360-tab-btn" data-tab="campanas">Campañas</button>
+      <button type="button" class="eval360-tab-btn" data-tab="organigrama">Organigrama</button>
+      <button type="button" class="eval360-tab-btn" data-tab="preguntas">Preguntas</button>
+    </div>
+
+    <!-- Mis evaluaciones -->
+    <div class="eval360-vista" id="vista-mis">
+      <div id="mis-lista-wrap">
+        <p class="staff-hint">Evaluaciones que te han asignado y siguen sin responder.</p>
+        <ul class="lista-simple" id="mis-pendientes-lista"></ul>
+      </div>
+
+      <div class="editor-card" id="form-responder-card" hidden>
+        <button type="button" class="btn-cerrar-editor-x" id="btn-cerrar-responder">✕</button>
+        <h2 id="responder-titulo">Evaluando a:</h2>
+        <p class="staff-hint">Tus respuestas son anónimas para la persona evaluada. Puedes marcar "N/A" si no te corresponde valorar algo.</p>
+        <div id="responder-preguntas"></div>
+        <div class="editor-actions">
+          <button id="btn-finalizar-evaluacion" class="btn btn-primary" type="button">Enviar evaluación</button>
+          <button id="btn-cerrar-responder-2" class="btn btn-ghost" type="button">Guardar y salir más tarde</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Campañas -->
+    <div class="eval360-vista" id="vista-campanas">
+      <div id="campanas-lista-wrap">
+        <div class="eval360-toolbar">
+          <p class="staff-hint">Cada campaña agrupa a quién se evalúa, quién evalúa a quién, y sus resultados.</p>
+          <button id="btn-nueva-campana" class="btn btn-primary" type="button">＋ Nueva campaña</button>
+        </div>
+        <ul class="lista-simple" id="campanas-lista"></ul>
+      </div>
+
+      <div class="editor-card" id="form-campana-card" hidden>
+        <button type="button" class="btn-cerrar-editor-x" id="btn-cerrar-campana">✕</button>
+        <h2>Nueva campaña</h2>
+        <div class="editor-field">
+          <label for="campana-nombre">Nombre</label>
+          <input type="text" id="campana-nombre" placeholder="Evaluación 360 2026">
+        </div>
+        <div class="editor-field">
+          <label for="campana-desde">Periodo desde</label>
+          <input type="date" id="campana-desde">
+        </div>
+        <div class="editor-field">
+          <label for="campana-hasta">Periodo hasta</label>
+          <input type="date" id="campana-hasta">
+        </div>
+        <div class="editor-actions">
+          <button id="btn-guardar-campana" class="btn btn-primary" type="button">Crear</button>
+          <button id="btn-cerrar-campana-2" class="btn btn-ghost" type="button">Cancelar</button>
+        </div>
+      </div>
+
+      <div class="campana-detalle" id="campana-detalle" hidden>
+        <button type="button" class="btn btn-ghost btn-mini" id="btn-volver-campanas">← Volver a campañas</button>
+        <h2 id="campana-detalle-titulo" style="margin-bottom:2px;"></h2>
+        <p class="staff-hint" id="campana-detalle-periodo"></p>
+        <div class="eval360-toolbar">
+          <p class="staff-hint" id="campana-detalle-hint"></p>
+          <div style="display:flex; gap:8px;">
+            <button id="btn-anadir-evaluados" class="btn btn-ghost" type="button">＋ Añadir evaluados</button>
+            <button id="btn-lanzar-campana" class="btn btn-primary" type="button">🚀 Lanzar campaña</button>
+            <button id="btn-cerrar-campana-formal" class="btn btn-ghost" type="button" hidden>Cerrar campaña</button>
+          </div>
+        </div>
+
+        <div id="picker-evaluados-wrap" hidden>
+          <div class="picker-lista" id="picker-evaluados-lista"></div>
+          <div class="editor-actions">
+            <button id="btn-confirmar-evaluados" class="btn btn-primary" type="button">Añadir seleccionados</button>
+            <button id="btn-cancelar-evaluados" class="btn btn-ghost" type="button">Cancelar</button>
+          </div>
+        </div>
+
+        <ul class="lista-simple" id="campana-evaluados-lista"></ul>
+      </div>
+
+      <div class="campana-detalle" id="evaluadores-detalle" hidden>
+        <button type="button" class="btn btn-ghost btn-mini" id="btn-volver-evaluados">← Volver</button>
+        <h2 id="evaluadores-titulo" style="margin-bottom:14px;"></h2>
+        <ul class="lista-simple" id="evaluadores-lista"></ul>
+        <div class="eval360-toolbar">
+          <select id="select-nuevo-evaluador" style="flex:1;"></select>
+          <button id="btn-anadir-evaluador-manual" class="btn btn-ghost" type="button">＋ Añadir</button>
+        </div>
+        <div id="resultados-wrap" hidden>
+          <h3>Resultados</h3>
+          <div id="resultados-contenido"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Organigrama -->
+    <div class="eval360-vista" id="vista-organigrama">
+      <div id="lista-organigrama-wrap">
+        <div class="eval360-toolbar">
+          <p class="staff-hint">Cada persona necesita un jefe directo para poder calcular sus pares (compañeros con el mismo jefe) y sus reportes.</p>
+          <button id="btn-nueva-persona" class="btn btn-primary" type="button">＋ Nueva persona</button>
+        </div>
+        <ul class="organigrama-lista" id="organigrama-lista"></ul>
+      </div>
+
+      <div class="editor-card" id="editor-card" hidden>
+        <button type="button" class="btn-cerrar-editor-x" id="btn-cerrar-editor-x" title="Cerrar">✕</button>
+        <h2 id="editor-titulo-h2">Nueva persona</h2>
+
+        <div class="editor-field">
+          <label for="persona-nombre">Nombre completo</label>
+          <input type="text" id="persona-nombre" placeholder="Nombre y apellidos">
+        </div>
+
+        <div class="editor-field">
+          <label for="persona-puesto">Puesto</label>
+          <select id="persona-puesto">
+            <option value="">— Sin puesto asignado —</option>
+          </select>
+        </div>
+        <div class="editor-field">
+          <button type="button" class="btn btn-ghost btn-mini" id="btn-nuevo-puesto">＋ Nuevo puesto</button>
+        </div>
+
+        <div class="editor-field">
+          <label for="persona-jefe">Jefe directo</label>
+          <select id="persona-jefe">
+            <option value="">— Sin jefe (raíz del organigrama) —</option>
+          </select>
+        </div>
+
+        <div class="editor-field">
+          <label for="persona-usuario">Cuenta vinculada (para que le aparezcan sus evaluaciones al entrar)</label>
+          <select id="persona-usuario">
+            <option value="">— Sin vincular —</option>
+          </select>
+        </div>
+
+        <div class="editor-actions">
+          <button id="btn-guardar-persona" class="btn btn-primary" type="button">Guardar</button>
+          <button id="btn-eliminar-persona" class="btn btn-ghost" type="button" hidden>Eliminar</button>
+          <button id="btn-cerrar-editor" class="btn btn-ghost" type="button">Cerrar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Preguntas -->
+    <div class="eval360-vista" id="vista-preguntas">
       <div class="eval360-toolbar">
-        <p class="staff-hint">Cada persona necesita un jefe directo para poder calcular sus pares (compañeros con el mismo jefe) y sus reportes.</p>
-        <button id="btn-nueva-persona" class="btn btn-primary" type="button">＋ Nueva persona</button>
+        <p class="staff-hint">Escala Likert de 5 niveles + N/A. Los cambios de texto se guardan solos al salir del campo.</p>
+        <button id="btn-nueva-pregunta" class="btn btn-ghost" type="button">＋ Nueva pregunta</button>
       </div>
-
-      <ul class="organigrama-lista" id="organigrama-lista"></ul>
-    </div>
-
-    <div class="editor-card" id="editor-card" hidden>
-      <button type="button" class="btn-cerrar-editor-x" id="btn-cerrar-editor-x" title="Cerrar">✕</button>
-      <h2 id="editor-titulo-h2">Nueva persona</h2>
-
-      <div class="editor-field">
-        <label for="persona-nombre">Nombre completo</label>
-        <input type="text" id="persona-nombre" placeholder="Nombre y apellidos">
-      </div>
-
-      <div class="editor-field">
-        <label for="persona-puesto">Puesto</label>
-        <select id="persona-puesto">
-          <option value="">— Sin puesto asignado —</option>
-        </select>
-      </div>
-      <div class="editor-field">
-        <button type="button" class="btn btn-ghost btn-mini" id="btn-nuevo-puesto">＋ Nuevo puesto</button>
-      </div>
-
-      <div class="editor-field">
-        <label for="persona-jefe">Jefe directo</label>
-        <select id="persona-jefe">
-          <option value="">— Sin jefe (raíz del organigrama) —</option>
-        </select>
-      </div>
-
-      <div class="editor-field">
-        <label for="persona-usuario">Cuenta vinculada (para que le aparezcan sus evaluaciones al entrar)</label>
-        <select id="persona-usuario">
-          <option value="">— Sin vincular —</option>
-        </select>
-      </div>
-
-      <div class="editor-actions">
-        <button id="btn-guardar-persona" class="btn btn-primary" type="button">Guardar</button>
-        <button id="btn-eliminar-persona" class="btn btn-ghost" type="button" hidden>Eliminar</button>
-        <button id="btn-cerrar-editor" class="btn btn-ghost" type="button">Cerrar</button>
-      </div>
+      <div id="preguntas-contenido"></div>
     </div>
   </div>
 </div>
@@ -132,6 +278,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260723f"></script>
 <script src="js/topbar-menu.js?v=20260821a"></script>
-<script src="js/evaluaciones360.js?v=20260821b"></script>
+<script src="js/evaluaciones360.js?v=20260821c"></script>
 </body>
 </html>

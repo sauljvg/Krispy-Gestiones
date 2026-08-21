@@ -1,9 +1,28 @@
 const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" ? "saona" : "kk";
 
+let CURRENT_USER = null;
 let PERSONAS = [];
 let PUESTOS = [];
 let USUARIOS = [];
 let editandoPersonaId = null;
+
+let PREGUNTAS = [];
+
+let CAMPANAS = [];
+let currentCampana = null;
+let currentEvaluadoId = null;
+
+let MIS_PENDIENTES = [];
+let currentAsignacionId = null;
+let currentFormulario = null;
+
+const RELACION_LABEL = {
+  autoevaluacion: "Autoevaluación",
+  superior: "Superior",
+  par: "Par",
+  reporte: "Reporte",
+  manual: "Añadido a mano",
+};
 
 function aplicarBrandingEmpresa() {
   if (EMPRESA !== "saona") return;
@@ -20,7 +39,24 @@ function escapeHTML(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-async function cargarTodo() {
+// ---------------------------------------------------------------------------
+// Pestañas
+// ---------------------------------------------------------------------------
+
+async function activarTab(nombre) {
+  document.querySelectorAll(".eval360-tab-btn").forEach((b) => b.classList.toggle("activa", b.dataset.tab === nombre));
+  document.querySelectorAll(".eval360-vista").forEach((v) => v.classList.toggle("activa", v.id === `vista-${nombre}`));
+  if (nombre === "organigrama" && PERSONAS.length === 0) await cargarOrganigrama();
+  if (nombre === "preguntas" && PREGUNTAS.length === 0) await cargarPreguntas();
+  if (nombre === "campanas" && CAMPANAS.length === 0) await cargarCampanas();
+  if (nombre === "mis") await cargarMisPendientes();
+}
+
+// ---------------------------------------------------------------------------
+// Organigrama
+// ---------------------------------------------------------------------------
+
+async function cargarOrganigrama() {
   const [personas, puestos, usuarios] = await Promise.all([
     fetch(`${AUTH_API_BASE}/evaluaciones360/personas?empresa=${EMPRESA}`).then((r) => r.json()),
     fetch(`${AUTH_API_BASE}/evaluaciones360/puestos?empresa=${EMPRESA}`).then((r) => r.json()),
@@ -48,7 +84,7 @@ function renderOrganigrama() {
   function pintar(clave, profundidad, vistos) {
     const hijos = porJefe.get(clave) || [];
     for (const persona of hijos) {
-      if (vistos.has(persona.id)) continue; // corta ciclos si alguna edición manual creara uno
+      if (vistos.has(persona.id)) continue;
       html.push(filaPersona(persona, profundidad));
       pintar(persona.id, profundidad + 1, new Set(vistos).add(persona.id));
     }
@@ -56,7 +92,7 @@ function renderOrganigrama() {
   pintar("raiz", 0, new Set());
   ul.innerHTML = html.join("");
   ul.querySelectorAll("[data-editar]").forEach((btn) => {
-    btn.addEventListener("click", () => abrirEditor(Number(btn.dataset.editar)));
+    btn.addEventListener("click", () => abrirEditorPersona(Number(btn.dataset.editar)));
   });
 }
 
@@ -78,7 +114,7 @@ function filaPersona(persona, profundidad) {
     </li>`;
 }
 
-function poblarSelects() {
+function poblarSelectsPersona() {
   const selPuesto = document.getElementById("persona-puesto");
   selPuesto.innerHTML = `<option value="">— Sin puesto asignado —</option>` +
     PUESTOS.map((p) => `<option value="${p.id}">${escapeHTML(p.nombre)}</option>`).join("");
@@ -98,9 +134,9 @@ function poblarSelects() {
       .join("");
 }
 
-function abrirEditor(personaId) {
+function abrirEditorPersona(personaId) {
   editandoPersonaId = personaId || null;
-  poblarSelects();
+  poblarSelectsPersona();
   const persona = personaId ? PERSONAS.find((p) => p.id === personaId) : null;
   document.getElementById("editor-titulo-h2").textContent = persona ? "Editar persona" : "Nueva persona";
   document.getElementById("persona-nombre").value = persona ? persona.nombre_completo : "";
@@ -113,7 +149,7 @@ function abrirEditor(personaId) {
   document.getElementById("persona-nombre").focus();
 }
 
-function cerrarEditor() {
+function cerrarEditorPersona() {
   document.getElementById("editor-card").hidden = true;
   document.getElementById("lista-organigrama-wrap").hidden = false;
   editandoPersonaId = null;
@@ -143,8 +179,8 @@ async function guardarPersona() {
     await mostrarAviso("No se pudo guardar. Inténtalo de nuevo.");
     return;
   }
-  cerrarEditor();
-  await cargarTodo();
+  cerrarEditorPersona();
+  await cargarOrganigrama();
 }
 
 async function eliminarPersona() {
@@ -155,8 +191,8 @@ async function eliminarPersona() {
     await mostrarAviso("No se pudo eliminar.");
     return;
   }
-  cerrarEditor();
-  await cargarTodo();
+  cerrarEditorPersona();
+  await cargarOrganigrama();
 }
 
 async function nuevoPuesto() {
@@ -172,17 +208,497 @@ async function nuevoPuesto() {
     return;
   }
   const { id } = await res.json();
-  // poblarSelects() reconstruye los 3 <select> desde cero -- hay que
-  // conservar lo que ya se había elegido en jefe/usuario, o se pierde
-  // silenciosamente cada vez que se crea un puesto nuevo desde el editor.
   const jefeActual = document.getElementById("persona-jefe").value;
   const usuarioActual = document.getElementById("persona-usuario").value;
   PUESTOS = await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos?empresa=${EMPRESA}`).then((r) => r.json());
-  poblarSelects();
+  poblarSelectsPersona();
   document.getElementById("persona-puesto").value = id;
   document.getElementById("persona-jefe").value = jefeActual;
   document.getElementById("persona-usuario").value = usuarioActual;
 }
+
+// ---------------------------------------------------------------------------
+// Preguntas
+// ---------------------------------------------------------------------------
+
+async function cargarPreguntas() {
+  PREGUNTAS = await fetch(`${AUTH_API_BASE}/evaluaciones360/preguntas?empresa=${EMPRESA}`).then((r) => r.json());
+  renderPreguntas();
+}
+
+function renderPreguntas() {
+  const cont = document.getElementById("preguntas-contenido");
+  if (PREGUNTAS.length === 0) {
+    cont.innerHTML = `<p class="staff-hint">Sin preguntas todavía. Usa "＋ Nueva pregunta" para empezar el cuestionario de ${EMPRESA === "saona" ? "SAONA" : "Krispy Kreme"}.</p>`;
+    return;
+  }
+  const grupos = new Map();
+  const abiertas = [];
+  for (const p of PREGUNTAS) {
+    if (p.tipo === "abierta") {
+      abiertas.push(p);
+      continue;
+    }
+    const clave = p.grupo || "(sin grupo)";
+    if (!grupos.has(clave)) grupos.set(clave, []);
+    grupos.get(clave).push(p);
+  }
+  let html = "";
+  for (const [grupo, preguntas] of grupos) {
+    html += `<div class="preguntas-grupo"><h3>${escapeHTML(grupo)}</h3>${preguntas.map(filaPregunta).join("")}</div>`;
+  }
+  if (abiertas.length) {
+    html += `<div class="preguntas-grupo"><h3>Preguntas abiertas</h3>${abiertas.map(filaPregunta).join("")}</div>`;
+  }
+  cont.innerHTML = html;
+  cont.querySelectorAll("[data-pregunta-texto]").forEach((input) => {
+    input.addEventListener("change", () => guardarPreguntaCampo(Number(input.dataset.preguntaTexto), { texto: input.value.trim() }));
+  });
+  cont.querySelectorAll("[data-pregunta-activa]").forEach((chk) => {
+    chk.addEventListener("change", () => guardarPreguntaCampo(Number(chk.dataset.preguntaActiva), { activa: chk.checked }));
+  });
+}
+
+function filaPregunta(p) {
+  return `
+    <div class="pregunta-row">
+      <input type="checkbox" data-pregunta-activa="${p.id}" ${p.activa ? "checked" : ""} title="Activa">
+      <input type="text" data-pregunta-texto="${p.id}" value="${escapeHTML(p.texto)}" ${p.activa ? "" : "disabled"}>
+    </div>`;
+}
+
+async function guardarPreguntaCampo(preguntaId, campos) {
+  const res = await fetch(`${AUTH_API_BASE}/evaluaciones360/preguntas/${preguntaId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(campos),
+  });
+  if (!res.ok) {
+    await mostrarAviso("No se pudo guardar el cambio.");
+    return;
+  }
+  await cargarPreguntas();
+}
+
+async function nuevaPregunta() {
+  const grupo = await pedirTexto("Grupo/categoría (déjalo vacío si es una pregunta abierta):");
+  if (grupo === null) return;
+  const texto = await pedirTexto("Texto de la pregunta:");
+  if (!texto || !texto.trim()) return;
+  const res = await fetch(`${AUTH_API_BASE}/evaluaciones360/preguntas`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      empresa: EMPRESA,
+      tipo: grupo.trim() ? "likert" : "abierta",
+      grupo: grupo.trim() || null,
+      texto: texto.trim(),
+    }),
+  });
+  if (!res.ok) {
+    await mostrarAviso("No se pudo crear la pregunta.");
+    return;
+  }
+  await cargarPreguntas();
+}
+
+// ---------------------------------------------------------------------------
+// Campañas
+// ---------------------------------------------------------------------------
+
+async function cargarCampanas() {
+  CAMPANAS = await fetch(`${AUTH_API_BASE}/evaluaciones360/campanas?empresa=${EMPRESA}`).then((r) => r.json());
+  renderCampanas();
+}
+
+function renderCampanas() {
+  const ul = document.getElementById("campanas-lista");
+  if (CAMPANAS.length === 0) {
+    ul.innerHTML = `<p class="staff-hint">Todavía no hay campañas. Crea la primera con "＋ Nueva campaña".</p>`;
+    return;
+  }
+  ul.innerHTML = CAMPANAS.map((c) => `
+    <li>
+      <div class="fila-simple">
+        <span class="fila-titulo">${escapeHTML(c.nombre)}</span>
+        <span class="badge-estado badge-${c.estado}">${c.estado}</span>
+        ${c.periodo_desde ? `<span class="staff-hint">${c.periodo_desde} → ${c.periodo_hasta || "?"}</span>` : ""}
+        <div class="fila-acciones">
+          <button type="button" class="btn btn-ghost btn-mini" data-abrir-campana="${c.id}">Abrir</button>
+        </div>
+      </div>
+    </li>`).join("");
+  ul.querySelectorAll("[data-abrir-campana]").forEach((btn) => {
+    btn.addEventListener("click", () => abrirCampana(Number(btn.dataset.abrirCampana)));
+  });
+}
+
+function abrirFormCampana() {
+  document.getElementById("campana-nombre").value = "";
+  document.getElementById("campana-desde").value = "";
+  document.getElementById("campana-hasta").value = "";
+  document.getElementById("form-campana-card").hidden = false;
+  document.getElementById("campanas-lista-wrap").hidden = true;
+  document.getElementById("campana-nombre").focus();
+}
+
+function cerrarFormCampana() {
+  document.getElementById("form-campana-card").hidden = true;
+  document.getElementById("campanas-lista-wrap").hidden = false;
+}
+
+async function guardarCampana() {
+  const nombre = document.getElementById("campana-nombre").value.trim();
+  if (!nombre) {
+    await mostrarAviso("Ponle un nombre a la campaña.");
+    return;
+  }
+  const res = await fetch(`${AUTH_API_BASE}/evaluaciones360/campanas`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      empresa: EMPRESA,
+      nombre,
+      periodo_desde: document.getElementById("campana-desde").value || null,
+      periodo_hasta: document.getElementById("campana-hasta").value || null,
+    }),
+  });
+  if (!res.ok) {
+    await mostrarAviso("No se pudo crear la campaña.");
+    return;
+  }
+  const { id } = await res.json();
+  cerrarFormCampana();
+  await cargarCampanas();
+  await abrirCampana(id);
+}
+
+async function abrirCampana(campanaId) {
+  currentCampana = await fetch(`${AUTH_API_BASE}/evaluaciones360/campanas/${campanaId}`).then((r) => r.json());
+  document.getElementById("campanas-lista-wrap").hidden = true;
+  document.getElementById("campana-detalle").hidden = false;
+  document.getElementById("evaluadores-detalle").hidden = true;
+  renderCampanaDetalle();
+}
+
+function volverACampanas() {
+  currentCampana = null;
+  document.getElementById("campana-detalle").hidden = true;
+  document.getElementById("campanas-lista-wrap").hidden = false;
+  cargarCampanas();
+}
+
+function renderCampanaDetalle() {
+  const c = currentCampana;
+  document.getElementById("campana-detalle-titulo").textContent = `${c.nombre} · ${c.estado}`;
+  document.getElementById("campana-detalle-periodo").textContent = c.periodo_desde ? `${c.periodo_desde} → ${c.periodo_hasta || "?"}` : "Sin periodo definido";
+  const esBorrador = c.estado === "borrador";
+  document.getElementById("btn-anadir-evaluados").hidden = !esBorrador;
+  document.getElementById("btn-lanzar-campana").hidden = !esBorrador;
+  document.getElementById("btn-cerrar-campana-formal").hidden = c.estado !== "abierta";
+  document.getElementById("picker-evaluados-wrap").hidden = true;
+  document.getElementById("campana-detalle-hint").textContent = esBorrador
+    ? "Añade evaluados, revisa quién evalúa a quién y lanza cuando esté listo."
+    : "Campaña ya lanzada -- puedes seguir ajustando evaluadores concretos.";
+
+  const ul = document.getElementById("campana-evaluados-lista");
+  if (c.evaluados.length === 0) {
+    ul.innerHTML = `<p class="staff-hint">Todavía no hay evaluados en esta campaña.</p>`;
+    return;
+  }
+  ul.innerHTML = c.evaluados.map((e) => `
+    <li>
+      <div class="fila-simple">
+        <span class="fila-titulo">${escapeHTML(e.nombre_completo)}</span>
+        <span class="staff-hint">${e.completadas}/${e.total_evaluadores} evaluadores respondieron</span>
+        <div class="fila-acciones">
+          <button type="button" class="btn btn-ghost btn-mini" data-ver-evaluadores="${e.id}">Evaluadores</button>
+          ${esBorrador ? `<button type="button" class="btn btn-ghost btn-mini" data-quitar-evaluado="${e.id}">Quitar</button>` : ""}
+        </div>
+      </div>
+    </li>`).join("");
+  ul.querySelectorAll("[data-ver-evaluadores]").forEach((btn) => {
+    btn.addEventListener("click", () => abrirEvaluadores(Number(btn.dataset.verEvaluadores)));
+  });
+  ul.querySelectorAll("[data-quitar-evaluado]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!(await pedirConfirmacion("¿Quitar a esta persona de la campaña? Se pierde su lista de evaluadores propuesta."))) return;
+      await fetch(`${AUTH_API_BASE}/evaluaciones360/campanas/${currentCampana.id}/evaluados/${btn.dataset.quitarEvaluado}`, { method: "DELETE" });
+      await abrirCampana(currentCampana.id);
+    });
+  });
+}
+
+async function abrirPickerEvaluados() {
+  if (PERSONAS.length === 0) await cargarOrganigrama();
+  const yaAnadidos = new Set(currentCampana.evaluados.map((e) => e.id));
+  const disponibles = PERSONAS.filter((p) => !yaAnadidos.has(p.id));
+  const lista = document.getElementById("picker-evaluados-lista");
+  if (disponibles.length === 0) {
+    lista.innerHTML = `<p class="staff-hint">Ya están todos los del organigrama en esta campaña.</p>`;
+  } else {
+    lista.innerHTML = disponibles.map((p) => `
+      <label><input type="checkbox" value="${p.id}"> ${escapeHTML(p.nombre_completo)}</label>
+    `).join("");
+  }
+  document.getElementById("picker-evaluados-wrap").hidden = false;
+}
+
+async function confirmarAnadirEvaluados() {
+  const seleccionados = [...document.querySelectorAll("#picker-evaluados-lista input:checked")].map((i) => Number(i.value));
+  for (const personaId of seleccionados) {
+    await fetch(`${AUTH_API_BASE}/evaluaciones360/campanas/${currentCampana.id}/evaluados`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ persona_id: personaId }),
+    });
+  }
+  document.getElementById("picker-evaluados-wrap").hidden = true;
+  await abrirCampana(currentCampana.id);
+}
+
+async function lanzarCampana() {
+  if (!(await pedirConfirmacion(`¿Lanzar "${currentCampana.nombre}"? Los evaluadores empezarán a ver sus evaluaciones pendientes.`))) return;
+  const res = await fetch(`${AUTH_API_BASE}/evaluaciones360/campanas/${currentCampana.id}/lanzar`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    await mostrarAviso(err.detail || "No se pudo lanzar la campaña.");
+    return;
+  }
+  await abrirCampana(currentCampana.id);
+}
+
+async function cerrarCampanaFormal() {
+  if (!(await pedirConfirmacion("¿Cerrar esta campaña? Dejará de aparecer en las pendientes de los evaluadores."))) return;
+  await fetch(`${AUTH_API_BASE}/evaluaciones360/campanas/${currentCampana.id}/cerrar`, { method: "POST" });
+  await abrirCampana(currentCampana.id);
+}
+
+async function abrirEvaluadores(personaId) {
+  currentEvaluadoId = personaId;
+  document.getElementById("campana-detalle").hidden = true;
+  document.getElementById("evaluadores-detalle").hidden = false;
+  const persona = currentCampana.evaluados.find((e) => e.id === personaId);
+  document.getElementById("evaluadores-titulo").textContent = `Evaluadores de ${persona.nombre_completo}`;
+  await renderEvaluadores();
+}
+
+async function renderEvaluadores() {
+  const evaluadores = await fetch(
+    `${AUTH_API_BASE}/evaluaciones360/campanas/${currentCampana.id}/evaluados/${currentEvaluadoId}/evaluadores`
+  ).then((r) => r.json());
+  const ul = document.getElementById("evaluadores-lista");
+  ul.innerHTML = evaluadores.map((a) => `
+    <li>
+      <div class="fila-simple">
+        <span class="fila-titulo">${escapeHTML(a.evaluador_nombre)}</span>
+        <span class="relacion-tag">${RELACION_LABEL[a.relacion] || a.relacion}</span>
+        ${a.estado === "completada" ? `<span class="badge-estado badge-abierta">respondida</span>` : `<span class="staff-hint">pendiente</span>`}
+        <div class="fila-acciones">
+          ${a.estado !== "completada" ? `<button type="button" class="btn btn-ghost btn-mini" data-quitar-asignacion="${a.id}">Quitar</button>` : ""}
+        </div>
+      </div>
+    </li>`).join("");
+  ul.querySelectorAll("[data-quitar-asignacion]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      await fetch(`${AUTH_API_BASE}/evaluaciones360/asignaciones/${btn.dataset.quitarAsignacion}`, { method: "DELETE" });
+      await renderEvaluadores();
+    });
+  });
+
+  if (PERSONAS.length === 0) await cargarOrganigrama();
+  const yaEvaluadores = new Set(evaluadores.map((a) => a.evaluador_persona_id));
+  const select = document.getElementById("select-nuevo-evaluador");
+  select.innerHTML = PERSONAS.filter((p) => !yaEvaluadores.has(p.id))
+    .map((p) => `<option value="${p.id}">${escapeHTML(p.nombre_completo)}</option>`)
+    .join("");
+
+  const resultadosWrap = document.getElementById("resultados-wrap");
+  const puedeVerResultados = CURRENT_USER?.rol === "admin" && currentCampana.estado !== "borrador";
+  resultadosWrap.hidden = !puedeVerResultados;
+  if (puedeVerResultados) await renderResultados();
+}
+
+async function anadirEvaluadorManual() {
+  const select = document.getElementById("select-nuevo-evaluador");
+  if (!select.value) return;
+  await fetch(`${AUTH_API_BASE}/evaluaciones360/campanas/${currentCampana.id}/evaluados/${currentEvaluadoId}/evaluadores`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ evaluador_persona_id: Number(select.value) }),
+  });
+  await renderEvaluadores();
+}
+
+async function renderResultados() {
+  const r = await fetch(
+    `${AUTH_API_BASE}/evaluaciones360/campanas/${currentCampana.id}/evaluados/${currentEvaluadoId}/resultados`
+  ).then((res) => (res.ok ? res.json() : null));
+  const cont = document.getElementById("resultados-contenido");
+  if (!r) {
+    cont.innerHTML = `<p class="staff-hint">Sin resultados todavía.</p>`;
+    return;
+  }
+  const filasGrupo = Object.entries(r.promedio_por_grupo).map(([g, v]) => `<li>${escapeHTML(g)}: <strong>${v}</strong> / 5</li>`).join("");
+  const filasRelacion = Object.entries(r.promedio_por_relacion).map(([rel, v]) => `<li>${RELACION_LABEL[rel] || rel}: <strong>${v}</strong> / 5</li>`).join("");
+  const comentarios = r.comentarios_abiertos.map((c) => `
+    <li style="margin-bottom:10px;">
+      <span class="relacion-tag">${RELACION_LABEL[c.relacion] || c.relacion}</span>
+      <strong>${escapeHTML(c.evaluador_nombre)}</strong> — <em>${escapeHTML(c.pregunta_texto)}</em>
+      <p style="margin:4px 0 0;">${escapeHTML(c.comentario)}</p>
+    </li>`).join("");
+  cont.innerHTML = `
+    <p><strong>Promedio general:</strong> ${r.promedio_general ?? "—"} / 5</p>
+    <p><strong>Por competencia:</strong></p>
+    <ul>${filasGrupo || "<li>Sin respuestas todavía</li>"}</ul>
+    <p><strong>Por tipo de evaluador:</strong></p>
+    <ul>${filasRelacion || "<li>Sin respuestas todavía</li>"}</ul>
+    <p><strong>Comentarios abiertos:</strong></p>
+    <ul style="list-style:none; padding:0;">${comentarios || "<li>Sin comentarios todavía</li>"}</ul>`;
+}
+
+function volverAEvaluados() {
+  document.getElementById("evaluadores-detalle").hidden = true;
+  document.getElementById("campana-detalle").hidden = false;
+  abrirCampana(currentCampana.id);
+}
+
+// ---------------------------------------------------------------------------
+// Mis evaluaciones
+// ---------------------------------------------------------------------------
+
+async function cargarMisPendientes() {
+  MIS_PENDIENTES = await fetch(`${AUTH_API_BASE}/evaluaciones360/mis-pendientes`).then((r) => r.json());
+  renderMisPendientes();
+}
+
+function renderMisPendientes() {
+  const ul = document.getElementById("mis-pendientes-lista");
+  if (MIS_PENDIENTES.length === 0) {
+    ul.innerHTML = `<p class="staff-hint">No tienes evaluaciones pendientes ahora mismo.</p>`;
+    return;
+  }
+  ul.innerHTML = MIS_PENDIENTES.map((a) => `
+    <li>
+      <div class="fila-simple">
+        <span class="fila-titulo">Evaluando a: ${escapeHTML(a.evaluado_nombre)}</span>
+        <span class="relacion-tag">${RELACION_LABEL[a.relacion] || a.relacion}</span>
+        <span class="staff-hint">${escapeHTML(a.campana_nombre)}</span>
+        <div class="fila-acciones">
+          <button type="button" class="btn btn-primary btn-mini" data-responder="${a.asignacion_id}">Responder</button>
+        </div>
+      </div>
+    </li>`).join("");
+  ul.querySelectorAll("[data-responder]").forEach((btn) => {
+    btn.addEventListener("click", () => abrirResponder(Number(btn.dataset.responder)));
+  });
+}
+
+async function abrirResponder(asignacionId) {
+  currentAsignacionId = asignacionId;
+  currentFormulario = await fetch(`${AUTH_API_BASE}/evaluaciones360/asignacion/${asignacionId}`).then((r) => r.json());
+  document.getElementById("responder-titulo").textContent = `Evaluando a: ${currentFormulario.evaluado_nombre}`;
+  renderFormularioResponder();
+  document.getElementById("mis-lista-wrap").hidden = true;
+  document.getElementById("form-responder-card").hidden = false;
+}
+
+function renderFormularioResponder() {
+  const { preguntas, respuestas } = currentFormulario;
+  const grupos = new Map();
+  const abiertas = [];
+  for (const p of preguntas) {
+    if (p.tipo === "abierta") {
+      abiertas.push(p);
+      continue;
+    }
+    const clave = p.grupo || "(sin grupo)";
+    if (!grupos.has(clave)) grupos.set(clave, []);
+    grupos.get(clave).push(p);
+  }
+  let html = "";
+  for (const [grupo, lista] of grupos) {
+    html += `<div class="preguntas-grupo"><h3>${escapeHTML(grupo)}</h3>${lista.map((p) => filaLikert(p, respuestas[p.id])).join("")}</div>`;
+  }
+  if (abiertas.length) {
+    html += `<div class="preguntas-grupo"><h3>Comentarios</h3>${abiertas.map((p) => filaAbierta(p, respuestas[p.id])).join("")}</div>`;
+  }
+  document.getElementById("responder-preguntas").innerHTML = html;
+
+  document.querySelectorAll("[data-likert]").forEach((radio) => {
+    radio.addEventListener("change", () => guardarRespuestaLikert(Number(radio.name.replace("p", ""))));
+  });
+  document.querySelectorAll("[data-abierta]").forEach((textarea) => {
+    textarea.addEventListener("blur", () => guardarRespuestaAbierta(Number(textarea.dataset.abierta)));
+  });
+}
+
+function filaLikert(pregunta, respuesta) {
+  const valorActual = respuesta ? respuesta.valor : undefined;
+  const opciones = [
+    [1, "Muy rara vez"], [2, "Pocas veces"], [3, "A veces"], [4, "Muy a menudo"], [5, "Siempre"],
+  ];
+  const radios = opciones.map(([v, label]) => `
+    <label><input type="radio" name="p${pregunta.id}" value="${v}" data-likert ${valorActual === v ? "checked" : ""}> ${v} · ${label}</label>
+  `).join("");
+  const naChecked = respuesta && respuesta.valor === null ? "checked" : "";
+  return `
+    <div class="form-pregunta-likert">
+      <p>${escapeHTML(pregunta.texto)}</p>
+      <div class="escala-likert">
+        ${radios}
+        <label><input type="radio" name="p${pregunta.id}" value="na" data-likert ${naChecked}> N/A</label>
+      </div>
+    </div>`;
+}
+
+function filaAbierta(pregunta, respuesta) {
+  return `
+    <div class="form-pregunta-abierta">
+      <p>${escapeHTML(pregunta.texto)}</p>
+      <textarea rows="3" data-abierta="${pregunta.id}">${escapeHTML(respuesta?.comentario || "")}</textarea>
+    </div>`;
+}
+
+async function guardarRespuestaLikert(preguntaId) {
+  const seleccionado = document.querySelector(`input[name="p${preguntaId}"]:checked`);
+  if (!seleccionado) return;
+  const valor = seleccionado.value === "na" ? null : Number(seleccionado.value);
+  await fetch(`${AUTH_API_BASE}/evaluaciones360/asignacion/${currentAsignacionId}/respuestas`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pregunta_id: preguntaId, valor, comentario: null }),
+  });
+}
+
+async function guardarRespuestaAbierta(preguntaId) {
+  const textarea = document.querySelector(`[data-abierta="${preguntaId}"]`);
+  await fetch(`${AUTH_API_BASE}/evaluaciones360/asignacion/${currentAsignacionId}/respuestas`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pregunta_id: preguntaId, valor: null, comentario: textarea.value }),
+  });
+}
+
+async function finalizarEvaluacion() {
+  const res = await fetch(`${AUTH_API_BASE}/evaluaciones360/asignacion/${currentAsignacionId}/finalizar`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    await mostrarAviso(err.detail || "No se pudo enviar la evaluación.");
+    return;
+  }
+  cerrarResponder();
+  await cargarMisPendientes();
+}
+
+function cerrarResponder() {
+  document.getElementById("form-responder-card").hidden = true;
+  document.getElementById("mis-lista-wrap").hidden = false;
+  currentAsignacionId = null;
+  currentFormulario = null;
+}
+
+// ---------------------------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", async () => {
   const user = await checkAuth("/evaluaciones360.html");
@@ -192,15 +708,40 @@ document.addEventListener("DOMContentLoaded", async () => {
     window.location.href = "/";
     return;
   }
+  CURRENT_USER = user;
   wireUserBar(user);
   aplicarBrandingEmpresa();
 
-  await cargarTodo();
+  document.querySelectorAll(".eval360-tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => activarTab(btn.dataset.tab));
+  });
+  await activarTab("mis");
 
-  document.getElementById("btn-nueva-persona").addEventListener("click", () => abrirEditor(null));
-  document.getElementById("btn-cerrar-editor").addEventListener("click", cerrarEditor);
-  document.getElementById("btn-cerrar-editor-x").addEventListener("click", cerrarEditor);
+  document.getElementById("btn-nueva-persona").addEventListener("click", () => abrirEditorPersona(null));
+  document.getElementById("btn-cerrar-editor").addEventListener("click", cerrarEditorPersona);
+  document.getElementById("btn-cerrar-editor-x").addEventListener("click", cerrarEditorPersona);
   document.getElementById("btn-guardar-persona").addEventListener("click", guardarPersona);
   document.getElementById("btn-eliminar-persona").addEventListener("click", eliminarPersona);
   document.getElementById("btn-nuevo-puesto").addEventListener("click", nuevoPuesto);
+
+  document.getElementById("btn-nueva-pregunta").addEventListener("click", nuevaPregunta);
+
+  document.getElementById("btn-nueva-campana").addEventListener("click", abrirFormCampana);
+  document.getElementById("btn-cerrar-campana").addEventListener("click", cerrarFormCampana);
+  document.getElementById("btn-cerrar-campana-2").addEventListener("click", cerrarFormCampana);
+  document.getElementById("btn-guardar-campana").addEventListener("click", guardarCampana);
+  document.getElementById("btn-volver-campanas").addEventListener("click", volverACampanas);
+  document.getElementById("btn-anadir-evaluados").addEventListener("click", abrirPickerEvaluados);
+  document.getElementById("btn-confirmar-evaluados").addEventListener("click", confirmarAnadirEvaluados);
+  document.getElementById("btn-cancelar-evaluados").addEventListener("click", () => {
+    document.getElementById("picker-evaluados-wrap").hidden = true;
+  });
+  document.getElementById("btn-lanzar-campana").addEventListener("click", lanzarCampana);
+  document.getElementById("btn-cerrar-campana-formal").addEventListener("click", cerrarCampanaFormal);
+  document.getElementById("btn-volver-evaluados").addEventListener("click", volverAEvaluados);
+  document.getElementById("btn-anadir-evaluador-manual").addEventListener("click", anadirEvaluadorManual);
+
+  document.getElementById("btn-finalizar-evaluacion").addEventListener("click", finalizarEvaluacion);
+  document.getElementById("btn-cerrar-responder").addEventListener("click", cerrarResponder);
+  document.getElementById("btn-cerrar-responder-2").addEventListener("click", cerrarResponder);
 });

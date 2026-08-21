@@ -136,6 +136,70 @@ def list_usuarios_seleccionables():
 
 
 # ---------------------------------------------------------------------------
+# Preguntas
+# ---------------------------------------------------------------------------
+
+def list_preguntas(empresa="kk", solo_activas=False):
+    conn = get_connection()
+    clauses = ["empresa = ?"]
+    params = [empresa]
+    if solo_activas:
+        clauses.append("activa = 1")
+    rows = conn.execute(
+        f"SELECT * FROM eval360_preguntas WHERE {' AND '.join(clauses)} ORDER BY orden",
+        params,
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def crear_pregunta(empresa, tipo, grupo, texto):
+    """Para SAONA, que no hereda los 7 valores de Krispy Kreme -- la semilla
+    de PREGUNTAS_SEED solo se inserta para 'kk' (ver ensure_eval360_tables),
+    así que cada empresa nueva construye su propio cuestionario desde cero
+    en la pantalla de Preguntas."""
+    conn = get_connection()
+    siguiente_orden = conn.execute(
+        "SELECT COALESCE(MAX(orden), -1) + 1 FROM eval360_preguntas WHERE empresa = ?", (empresa,)
+    ).fetchone()[0]
+    cur = conn.execute(
+        "INSERT INTO eval360_preguntas (empresa, tipo, grupo, texto, orden) VALUES (?, ?, ?, ?, ?)",
+        (empresa, tipo, grupo, texto, siguiente_orden),
+    )
+    pregunta_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return pregunta_id
+
+
+def get_pregunta(pregunta_id):
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM eval360_preguntas WHERE id = ?", (pregunta_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def actualizar_pregunta(pregunta_id, texto=None, orden=None, activa=None):
+    sets, params = [], []
+    if texto is not None:
+        sets.append("texto = ?")
+        params.append(texto)
+    if orden is not None:
+        sets.append("orden = ?")
+        params.append(orden)
+    if activa is not None:
+        sets.append("activa = ?")
+        params.append(1 if activa else 0)
+    if not sets:
+        return
+    conn = get_connection()
+    params.append(pregunta_id)
+    conn.execute(f"UPDATE eval360_preguntas SET {', '.join(sets)} WHERE id = ?", params)
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Puestos
 # ---------------------------------------------------------------------------
 
@@ -296,6 +360,298 @@ def reportes_de(persona_id):
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Campañas
+# ---------------------------------------------------------------------------
+
+def list_campanas(empresa="kk"):
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM eval360_campanas WHERE empresa = ? ORDER BY creado_en DESC", (empresa,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_campana(campana_id):
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM eval360_campanas WHERE id = ?", (campana_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def crear_campana(empresa, nombre, periodo_desde=None, periodo_hasta=None, creado_por=None):
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO eval360_campanas (empresa, nombre, periodo_desde, periodo_hasta, creado_por)
+           VALUES (?, ?, ?, ?, ?)""",
+        (empresa, nombre, periodo_desde, periodo_hasta, creado_por),
+    )
+    campana_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return campana_id
+
+
+def actualizar_campana(campana_id, campos: dict):
+    permitidos = {"nombre", "periodo_desde", "periodo_hasta"}
+    sets, params = [], []
+    for campo, valor in campos.items():
+        if campo in permitidos:
+            sets.append(f"{campo} = ?")
+            params.append(valor)
+    if not sets:
+        return
+    conn = get_connection()
+    params.append(campana_id)
+    conn.execute(f"UPDATE eval360_campanas SET {', '.join(sets)} WHERE id = ?", params)
+    conn.commit()
+    conn.close()
+
+
+def contar_asignaciones(campana_id):
+    conn = get_connection()
+    total = conn.execute(
+        "SELECT COUNT(*) FROM eval360_asignaciones WHERE campana_id = ?", (campana_id,)
+    ).fetchone()[0]
+    conn.close()
+    return total
+
+
+def lanzar_campana(campana_id):
+    conn = get_connection()
+    conn.execute("UPDATE eval360_campanas SET estado = 'abierta' WHERE id = ? AND estado = 'borrador'", (campana_id,))
+    conn.commit()
+    conn.close()
+
+
+def cerrar_campana(campana_id):
+    conn = get_connection()
+    conn.execute("UPDATE eval360_campanas SET estado = 'cerrada' WHERE id = ?", (campana_id,))
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Asignaciones (quién evalúa a quién) y autopropuesta
+# ---------------------------------------------------------------------------
+
+def _insertar_asignacion(campana_id, evaluado_persona_id, evaluador_persona_id, relacion):
+    conn = get_connection()
+    conn.execute(
+        """INSERT OR IGNORE INTO eval360_asignaciones
+           (campana_id, evaluado_persona_id, evaluador_persona_id, relacion)
+           VALUES (?, ?, ?, ?)""",
+        (campana_id, evaluado_persona_id, evaluador_persona_id, relacion),
+    )
+    conn.commit()
+    conn.close()
+
+
+def autopropuesta_evaluadores(persona_id):
+    """Superior + pares + reportes desde el organigrama, más la
+    autoevaluación -- la sugerencia inicial que se le muestra a RRHH al
+    añadir un evaluado a una campaña, siempre editable después."""
+    propuesta = [(persona_id, "autoevaluacion")]
+    superior = superior_de(persona_id)
+    if superior:
+        propuesta.append((superior["id"], "superior"))
+    for par in pares_de(persona_id):
+        propuesta.append((par["id"], "par"))
+    for reporte in reportes_de(persona_id):
+        propuesta.append((reporte["id"], "reporte"))
+    return propuesta
+
+
+def agregar_evaluado_a_campana(campana_id, evaluado_persona_id):
+    """No hace nada si ya se había añadido antes -- así reabrir el panel de
+    un evaluado ya añadido no duplica evaluadores ni pisa ajustes manuales
+    que RRHH ya hubiera hecho sobre esa lista."""
+    conn = get_connection()
+    ya_existe = conn.execute(
+        "SELECT 1 FROM eval360_asignaciones WHERE campana_id = ? AND evaluado_persona_id = ? LIMIT 1",
+        (campana_id, evaluado_persona_id),
+    ).fetchone()
+    conn.close()
+    if ya_existe:
+        return
+    for evaluador_id, relacion in autopropuesta_evaluadores(evaluado_persona_id):
+        _insertar_asignacion(campana_id, evaluado_persona_id, evaluador_id, relacion)
+
+
+def quitar_evaluado_de_campana(campana_id, evaluado_persona_id):
+    conn = get_connection()
+    conn.execute(
+        "DELETE FROM eval360_asignaciones WHERE campana_id = ? AND evaluado_persona_id = ? AND estado != 'completada'",
+        (campana_id, evaluado_persona_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def agregar_evaluador_manual(campana_id, evaluado_persona_id, evaluador_persona_id):
+    _insertar_asignacion(campana_id, evaluado_persona_id, evaluador_persona_id, "manual")
+
+
+def get_asignacion(asignacion_id):
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM eval360_asignaciones WHERE id = ?", (asignacion_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def quitar_asignacion(asignacion_id):
+    """No quita evaluaciones ya completadas -- RRHH puede arrepentirse de un
+    evaluador antes de que responda, pero no puede hacer desaparecer una
+    respuesta ya dada."""
+    conn = get_connection()
+    conn.execute("DELETE FROM eval360_asignaciones WHERE id = ? AND estado != 'completada'", (asignacion_id,))
+    conn.commit()
+    conn.close()
+
+
+def list_evaluados_de_campana(campana_id):
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT p.id, p.nombre_completo, p.puesto_id,
+               COUNT(a.id) AS total_evaluadores,
+               SUM(CASE WHEN a.estado = 'completada' THEN 1 ELSE 0 END) AS completadas
+        FROM eval360_asignaciones a
+        JOIN eval360_personas p ON p.id = a.evaluado_persona_id
+        WHERE a.campana_id = ?
+        GROUP BY p.id
+        ORDER BY p.nombre_completo
+    """, (campana_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def list_evaluadores_de_evaluado(campana_id, evaluado_persona_id):
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT a.*, p.nombre_completo AS evaluador_nombre
+        FROM eval360_asignaciones a
+        JOIN eval360_personas p ON p.id = a.evaluador_persona_id
+        WHERE a.campana_id = ? AND a.evaluado_persona_id = ?
+        ORDER BY a.relacion, p.nombre_completo
+    """, (campana_id, evaluado_persona_id)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Responder evaluaciones
+# ---------------------------------------------------------------------------
+
+def personas_de_usuario(usuario_id):
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM eval360_personas WHERE usuario_id = ? AND activo = 1", (usuario_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def mis_pendientes(usuario_id):
+    ids = [p["id"] for p in personas_de_usuario(usuario_id)]
+    if not ids:
+        return []
+    conn = get_connection()
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(f"""
+        SELECT a.id AS asignacion_id, a.relacion, a.estado,
+               ev.nombre_completo AS evaluado_nombre,
+               c.id AS campana_id, c.nombre AS campana_nombre
+        FROM eval360_asignaciones a
+        JOIN eval360_campanas c ON c.id = a.campana_id
+        JOIN eval360_personas ev ON ev.id = a.evaluado_persona_id
+        WHERE a.evaluador_persona_id IN ({placeholders}) AND a.estado = 'pendiente' AND c.estado = 'abierta'
+        ORDER BY c.creado_en DESC, ev.nombre_completo
+    """, ids).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_formulario_asignacion(asignacion_id):
+    asignacion = get_asignacion(asignacion_id)
+    if not asignacion:
+        return None
+    evaluado = get_persona(asignacion["evaluado_persona_id"])
+    preguntas = list_preguntas(evaluado["empresa"], solo_activas=True)
+    conn = get_connection()
+    respuestas = {
+        r["pregunta_id"]: dict(r)
+        for r in conn.execute("SELECT * FROM eval360_respuestas WHERE asignacion_id = ?", (asignacion_id,)).fetchall()
+    }
+    conn.close()
+    return {
+        "asignacion": asignacion,
+        "evaluado_nombre": evaluado["nombre_completo"],
+        "preguntas": preguntas,
+        "respuestas": respuestas,
+    }
+
+
+def guardar_respuesta(asignacion_id, pregunta_id, valor=None, comentario=None):
+    conn = get_connection()
+    conn.execute("""
+        INSERT INTO eval360_respuestas (asignacion_id, pregunta_id, valor, comentario)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(asignacion_id, pregunta_id) DO UPDATE SET valor = excluded.valor, comentario = excluded.comentario
+    """, (asignacion_id, pregunta_id, valor, comentario))
+    conn.commit()
+    conn.close()
+
+
+def finalizar_asignacion(asignacion_id):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE eval360_asignaciones SET estado = 'completada', completado_en = datetime('now') WHERE id = ?",
+        (asignacion_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Resultados (solo admin, ver evaluaciones360_routes.py)
+# ---------------------------------------------------------------------------
+
+def resultados_evaluado(campana_id, evaluado_persona_id):
+    conn = get_connection()
+    filas_likert = conn.execute("""
+        SELECT a.relacion, pr.grupo, r.valor
+        FROM eval360_respuestas r
+        JOIN eval360_asignaciones a ON a.id = r.asignacion_id
+        JOIN eval360_preguntas pr ON pr.id = r.pregunta_id
+        WHERE a.campana_id = ? AND a.evaluado_persona_id = ? AND a.estado = 'completada'
+              AND pr.tipo = 'likert' AND r.valor IS NOT NULL
+    """, (campana_id, evaluado_persona_id)).fetchall()
+    comentarios = conn.execute("""
+        SELECT a.relacion, ev.nombre_completo AS evaluador_nombre, pr.texto AS pregunta_texto, r.comentario
+        FROM eval360_respuestas r
+        JOIN eval360_asignaciones a ON a.id = r.asignacion_id
+        JOIN eval360_preguntas pr ON pr.id = r.pregunta_id
+        JOIN eval360_personas ev ON ev.id = a.evaluador_persona_id
+        WHERE a.campana_id = ? AND a.evaluado_persona_id = ? AND a.estado = 'completada'
+              AND pr.tipo = 'abierta' AND r.comentario IS NOT NULL AND r.comentario != ''
+        ORDER BY a.relacion, ev.nombre_completo
+    """, (campana_id, evaluado_persona_id)).fetchall()
+    conn.close()
+
+    por_grupo, por_relacion = {}, {}
+    for f in filas_likert:
+        por_grupo.setdefault(f["grupo"], []).append(f["valor"])
+        por_relacion.setdefault(f["relacion"], []).append(f["valor"])
+    promedio = lambda valores: round(sum(valores) / len(valores), 2)
+    return {
+        "promedio_por_grupo": {g: promedio(v) for g, v in por_grupo.items()},
+        "promedio_por_relacion": {r: promedio(v) for r, v in por_relacion.items()},
+        "promedio_general": promedio([v for vs in por_grupo.values() for v in vs]) if por_grupo else None,
+        "comentarios_abiertos": [dict(c) for c in comentarios],
+    }
 
 
 ensure_eval360_tables()
