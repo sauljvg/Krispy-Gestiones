@@ -37,6 +37,44 @@
   .puesto-row .puesto-vacante { color: var(--text-muted); font-size: 13px; font-style: italic; }
   .puesto-row .puesto-acciones { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
 
+  /* Árbol visual de puestos, tipo Bizneo: nodos conectados por líneas, con
+     drag & drop para reasignar el puesto al que reporta cada uno. Patrón
+     CSS clásico de organigrama (ul/li anidados + bordes en ::before/::after
+     dibujando las líneas), en vez de una librería de diagramas aparte. */
+  .orgchart-scroll { overflow-x: auto; padding: 24px 12px 40px; margin: 0 -12px; }
+  .orgchart, .orgchart ul { list-style: none; margin: 0; padding: 0; display: flex; justify-content: center; }
+  .orgchart { padding-top: 0; }
+  .orgchart li { position: relative; padding: 28px 10px 0; text-align: center; }
+  .orgchart li ul { padding-top: 28px; position: relative; }
+  .orgchart li ul::before {
+    content: ""; position: absolute; top: 0; left: 50%; width: 0; height: 28px;
+    border-left: 2px solid var(--border);
+  }
+  .orgchart li::before, .orgchart li::after {
+    content: ""; position: absolute; top: 0; right: 50%; width: 50%; height: 28px;
+    border-top: 2px solid var(--border);
+  }
+  .orgchart li::after { right: auto; left: 50%; border-left: 2px solid var(--border); }
+  .orgchart li:only-child::before, .orgchart li:only-child::after { display: none; }
+  .orgchart li:first-child::before { border: 0 none; }
+  .orgchart li:last-child::after { border: 0 none; }
+  .orgchart li:last-child::before { border-radius: 0 8px 0 0; }
+  .orgchart li:first-child::after { border-radius: 8px 0 0 0; }
+  .orgchart-box {
+    display: inline-block; min-width: 130px; padding: 8px 12px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface-1); cursor: grab; text-align: left;
+  }
+  .orgchart-box:active { cursor: grabbing; }
+  .orgchart-box.arrastrando { opacity: 0.4; }
+  .orgchart-box.drop-valido { border-color: var(--status-good); box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-good) 40%, transparent); }
+  .orgchart-box.drop-invalido { border-color: var(--status-bad, #c62828); }
+  .orgchart-box .puesto-nombre { display: block; font-weight: 600; font-size: 13px; white-space: nowrap; }
+  .orgchart-box .puesto-personas { display: block; color: var(--text-secondary); font-size: 12px; margin-top: 2px; max-width: 200px; white-space: normal; }
+  .orgchart-box .puesto-vacante { display: block; color: var(--text-muted); font-size: 12px; font-style: italic; margin-top: 2px; }
+  .orgchart-box .puesto-acciones { display: flex; gap: 4px; margin-top: 6px; }
+  .orgchart-box .puesto-acciones button { font-size: 11px; padding: 2px 6px; }
+  .orgchart-raiz-extra { margin-top: 10px; }
+
   .organigrama-lista, .lista-simple { list-style: none; margin: 0; padding: 0; }
   .organigrama-lista li { padding: 4px 0; }
   .persona-row, .fila-simple {
@@ -238,10 +276,10 @@
 
       <div id="lista-puestos-wrap" hidden>
         <div class="eval360-toolbar">
-          <p class="staff-hint">Jerarquía de puestos de trabajo (como en Bizneo): un mismo puesto puede tener varias personas, por ejemplo los gerentes.</p>
+          <p class="staff-hint">Arrastra un puesto sobre otro para cambiar a quién reporta. Un mismo puesto puede tener varias personas, por ejemplo los gerentes.</p>
           <button id="btn-nuevo-puesto-raiz" class="btn btn-primary" type="button">＋ Nuevo puesto</button>
         </div>
-        <ul class="organigrama-lista" id="puestos-lista"></ul>
+        <div class="orgchart-scroll" id="puestos-arbol"></div>
       </div>
 
       <div class="editor-card" id="editor-puesto-card" hidden>
@@ -319,6 +357,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260723f"></script>
 <script src="js/topbar-menu.js?v=20260821a"></script>
-<script src="js/evaluaciones360.js?v=20260821d"></script>
+<script src="js/evaluaciones360.js?v=20260821e"></script>
 </body>
 </html>

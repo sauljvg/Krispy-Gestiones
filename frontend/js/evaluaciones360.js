@@ -119,6 +119,7 @@ function filaPersona(persona, profundidad) {
 // ---------------------------------------------------------------------------
 
 let editandoPuestoId = null;
+let puestoArrastradoId = null;
 
 function activarSubvistaOrganigrama(nombre) {
   document.querySelectorAll(".eval360-subtab-btn").forEach((b) => b.classList.toggle("activa", b.dataset.subvista === nombre));
@@ -128,9 +129,9 @@ function activarSubvistaOrganigrama(nombre) {
 }
 
 function renderPuestosArbol() {
-  const ul = document.getElementById("puestos-lista");
+  const cont = document.getElementById("puestos-arbol");
   if (PUESTOS.length === 0) {
-    ul.innerHTML = `<p class="staff-hint">Todavía no hay puestos de trabajo. Empieza por el puesto de más arriba (sin puesto al que reporta) y ve añadiendo debajo.</p>`;
+    cont.innerHTML = `<p class="staff-hint">Todavía no hay puestos de trabajo. Empieza por el puesto de más arriba (sin puesto al que reporta) y ve añadiendo debajo.</p>`;
     return;
   }
   const personasPorPuesto = new Map();
@@ -145,40 +146,116 @@ function renderPuestosArbol() {
     if (!porPadre.has(clave)) porPadre.set(clave, []);
     porPadre.get(clave).push(p);
   }
-  const html = [];
-  function pintar(clave, profundidad, vistos) {
-    const hijos = porPadre.get(clave) || [];
-    for (const puesto of hijos) {
-      if (vistos.has(puesto.id)) continue;
-      html.push(filaPuesto(puesto, profundidad, personasPorPuesto.get(puesto.id) || []));
-      pintar(puesto.id, profundidad + 1, new Set(vistos).add(puesto.id));
-    }
+  const raices = porPadre.get("raiz") || [];
+  if (raices.length === 0) {
+    cont.innerHTML = `<p class="staff-hint">Todos los puestos tienen un padre -- algo no cuadra. Revisa el listado.</p>`;
+    return;
   }
-  pintar("raiz", 0, new Set());
-  ul.innerHTML = html.join("");
-  ul.querySelectorAll("[data-editar-puesto]").forEach((btn) => {
-    btn.addEventListener("click", () => abrirEditorPuesto(Number(btn.dataset.editarPuesto)));
-  });
-  ul.querySelectorAll("[data-nuevo-subpuesto]").forEach((btn) => {
-    btn.addEventListener("click", () => abrirEditorPuesto(null, Number(btn.dataset.nuevoSubpuesto)));
-  });
+  cont.innerHTML = raices
+    .map((raiz, i) => `<ul class="orgchart${i > 0 ? " orgchart-raiz-extra" : ""}">${nodoPuestoHTML(raiz, porPadre, personasPorPuesto, new Set())}</ul>`)
+    .join("");
+  wirePuestoBoxes(cont);
 }
 
-function filaPuesto(puesto, profundidad, personas) {
+function nodoPuestoHTML(puesto, porPadre, personasPorPuesto, vistos) {
+  if (vistos.has(puesto.id)) return "";
+  const vistosHijo = new Set(vistos).add(puesto.id);
+  const hijos = (porPadre.get(puesto.id) || []).filter((h) => !vistosHijo.has(h.id));
+  const personas = personasPorPuesto.get(puesto.id) || [];
   const personasHTML = personas.length
     ? `<span class="puesto-personas">${personas.map((p) => escapeHTML(p.nombre_completo)).join(", ")}</span>`
     : `<span class="puesto-vacante">Vacante</span>`;
+  const hijosHTML = hijos.length
+    ? `<ul>${hijos.map((h) => nodoPuestoHTML(h, porPadre, personasPorPuesto, vistosHijo)).join("")}</ul>`
+    : "";
   return `
-    <li style="margin-left:${profundidad * 26}px;">
-      <div class="puesto-row">
+    <li>
+      <div class="orgchart-box" draggable="true" data-puesto-id="${puesto.id}">
         <span class="puesto-nombre">${escapeHTML(puesto.nombre)}</span>
         ${personasHTML}
         <div class="puesto-acciones">
-          <button type="button" class="btn btn-ghost btn-mini" data-nuevo-subpuesto="${puesto.id}">＋ Subpuesto</button>
-          <button type="button" class="btn btn-ghost btn-mini" data-editar-puesto="${puesto.id}">Editar</button>
+          <button type="button" class="btn btn-ghost btn-mini" data-nuevo-subpuesto="${puesto.id}">＋</button>
+          <button type="button" class="btn btn-ghost btn-mini" data-editar-puesto="${puesto.id}">✎</button>
         </div>
       </div>
+      ${hijosHTML}
     </li>`;
+}
+
+function esReparentadoValido(arrastradoId, destinoId) {
+  if (arrastradoId === destinoId) return false;
+  // El destino no puede ser descendiente de lo que se arrastra -- si lo
+  // fuera, soltarlo ahí crearía un ciclo (un puesto reportando, por una
+  // cadena de padres, a sí mismo).
+  let cursor = PUESTOS.find((p) => p.id === destinoId);
+  while (cursor && cursor.puesto_padre_id) {
+    if (cursor.puesto_padre_id === arrastradoId) return false;
+    cursor = PUESTOS.find((p) => p.id === cursor.puesto_padre_id);
+  }
+  return true;
+}
+
+async function reparentarPuesto(puestoId, nuevoPadreId) {
+  await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos/${puestoId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ puesto_padre_id: nuevoPadreId }),
+  });
+  PUESTOS = await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos?empresa=${EMPRESA}`).then((r) => r.json());
+  renderPuestosArbol();
+}
+
+function wirePuestoBoxes(cont) {
+  cont.querySelectorAll("[data-editar-puesto]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      abrirEditorPuesto(Number(btn.dataset.editarPuesto));
+    });
+  });
+  cont.querySelectorAll("[data-nuevo-subpuesto]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      abrirEditorPuesto(null, Number(btn.dataset.nuevoSubpuesto));
+    });
+  });
+
+  cont.querySelectorAll(".orgchart-box").forEach((box) => {
+    box.addEventListener("dragstart", (e) => {
+      puestoArrastradoId = Number(box.dataset.puestoId);
+      box.classList.add("arrastrando");
+      e.dataTransfer.effectAllowed = "move";
+    });
+    box.addEventListener("dragend", () => {
+      puestoArrastradoId = null;
+      cont.querySelectorAll(".arrastrando, .drop-valido, .drop-invalido").forEach((b) => {
+        b.classList.remove("arrastrando", "drop-valido", "drop-invalido");
+      });
+    });
+    box.addEventListener("dragover", (e) => {
+      if (puestoArrastradoId === null) return;
+      e.preventDefault();
+    });
+    box.addEventListener("dragenter", (e) => {
+      if (puestoArrastradoId === null) return;
+      e.preventDefault();
+      const destinoId = Number(box.dataset.puestoId);
+      box.classList.toggle("drop-valido", esReparentadoValido(puestoArrastradoId, destinoId));
+      box.classList.toggle("drop-invalido", !esReparentadoValido(puestoArrastradoId, destinoId));
+    });
+    box.addEventListener("dragleave", () => {
+      box.classList.remove("drop-valido", "drop-invalido");
+    });
+    box.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      box.classList.remove("drop-valido", "drop-invalido");
+      const destinoId = Number(box.dataset.puestoId);
+      const arrastradoId = puestoArrastradoId;
+      puestoArrastradoId = null;
+      if (arrastradoId === null || !esReparentadoValido(arrastradoId, destinoId)) return;
+      await reparentarPuesto(arrastradoId, destinoId);
+    });
+  });
 }
 
 function poblarSelectPuestoPadre() {
@@ -862,6 +939,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   activarSubvistaOrganigrama("personas");
   document.getElementById("btn-nuevo-puesto-raiz").addEventListener("click", () => abrirEditorPuesto(null));
+  const arbolCont = document.getElementById("puestos-arbol");
+  arbolCont.addEventListener("dragover", (e) => {
+    if (puestoArrastradoId !== null) e.preventDefault();
+  });
+  arbolCont.addEventListener("drop", async (e) => {
+    if (e.target.closest(".orgchart-box")) return; // ya lo gestiona la caja concreta
+    e.preventDefault();
+    const arrastradoId = puestoArrastradoId;
+    puestoArrastradoId = null;
+    if (arrastradoId === null) return;
+    await reparentarPuesto(arrastradoId, null);
+  });
   document.getElementById("btn-guardar-puesto").addEventListener("click", guardarPuesto);
   document.getElementById("btn-desactivar-puesto").addEventListener("click", desactivarPuesto);
   document.getElementById("btn-cerrar-editor-puesto").addEventListener("click", cerrarEditorPuesto);
