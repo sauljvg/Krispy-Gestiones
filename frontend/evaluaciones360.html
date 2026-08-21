@@ -236,6 +236,7 @@
       <button type="button" class="eval360-tab-btn" data-tab="campanas">Campañas</button>
       <button type="button" class="eval360-tab-btn" data-tab="organigrama">Organigrama</button>
       <button type="button" class="eval360-tab-btn" data-tab="preguntas">Preguntas</button>
+      <button type="button" class="eval360-tab-btn" data-tab="accesos">Accesos</button>
     </div>
 
     <!-- Mis evaluaciones -->
@@ -413,6 +414,11 @@
           </select>
         </div>
 
+        <div class="editor-field">
+          <label for="persona-email">Email</label>
+          <input type="email" id="persona-email" placeholder="nombre.inicialdeapellido@krispykreme.es">
+        </div>
+
         <div class="editor-actions">
           <button id="btn-guardar-persona" class="btn btn-primary" type="button">Guardar</button>
           <button id="btn-eliminar-persona" class="btn btn-ghost" type="button" hidden>Eliminar</button>
@@ -429,12 +435,21 @@
       </div>
       <div id="preguntas-contenido"></div>
     </div>
+
+    <!-- Accesos -->
+    <div class="eval360-vista" id="vista-accesos">
+      <div class="eval360-toolbar">
+        <p class="staff-hint">Personas del organigrama sin cuenta de portal todavía -- para que puedan entrar y responder sus evaluaciones. No incluye a quien ya tiene cuenta para el día a día (gerentes, area manager, etc.), esos no se tocan.</p>
+        <button id="btn-crear-todos-accesos" class="btn btn-primary" type="button">Crear todos los accesos que faltan</button>
+      </div>
+      <ul class="lista-simple" id="accesos-lista"></ul>
+    </div>
   </div>
 </div>
 <script src="js/theme.js?v=20260723f"></script>
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260723f"></script>
 <script src="js/topbar-menu.js?v=20260821a"></script>
-<script src="js/evaluaciones360.js?v=20260821n"></script>
+<script src="js/evaluaciones360.js?v=20260821o"></script>
 </body>
 </html>

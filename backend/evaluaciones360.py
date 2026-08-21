@@ -1,3 +1,7 @@
+import re
+import unicodedata
+
+import auth
 from db import get_connection
 
 # Las 31 preguntas Likert + 3 abiertas del proceso "Evaluación 360 Krispy
@@ -75,6 +79,14 @@ def ensure_eval360_tables():
             creado_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # Email de contacto de cada persona -- no tiene por qué coincidir con el
+    # de su cuenta de portal (usuario_id, si tiene una): sirve para poder
+    # escribirle por fuera (botón mailto en campañas) aunque no tenga acceso
+    # al portal todavía, y como base para sugerirle un username al crearle
+    # un acceso (ver crear_acceso_para_persona).
+    cols_personas_email = {row[1] for row in conn.execute("PRAGMA table_info(eval360_personas)")}
+    if "email" not in cols_personas_email:
+        conn.execute("ALTER TABLE eval360_personas ADD COLUMN email TEXT")
     # eval360_personas.puesto_id de arriba se queda en la tabla sin usarse
     # (una persona real puede ocupar más de un puesto a la vez -- ej. Jesús
     # Collado es Director Financiero Y Director de Desarrollo -- así que un
@@ -400,12 +412,12 @@ def get_persona_por_usuario(usuario_id, empresa=None):
     return dict(row) if row else None
 
 
-def crear_persona(empresa, nombre_completo, puesto_ids=None, jefe_directo_id=None, usuario_id=None):
+def crear_persona(empresa, nombre_completo, puesto_ids=None, jefe_directo_id=None, usuario_id=None, email=None):
     conn = get_connection()
     cur = conn.execute(
-        """INSERT INTO eval360_personas (empresa, nombre_completo, jefe_directo_id, usuario_id)
-           VALUES (?, ?, ?, ?)""",
-        (empresa, nombre_completo, jefe_directo_id, usuario_id),
+        """INSERT INTO eval360_personas (empresa, nombre_completo, jefe_directo_id, usuario_id, email)
+           VALUES (?, ?, ?, ?, ?)""",
+        (empresa, nombre_completo, jefe_directo_id, usuario_id, email),
     )
     persona_id = cur.lastrowid
     conn.commit()
@@ -423,7 +435,7 @@ def actualizar_persona(persona_id, campos: dict):
     # no una columna simple.
     if "puesto_ids" in campos:
         set_puestos_de_persona(persona_id, campos["puesto_ids"] or [])
-    permitidos = {"nombre_completo", "jefe_directo_id", "usuario_id", "activo", "orden"}
+    permitidos = {"nombre_completo", "jefe_directo_id", "usuario_id", "activo", "orden", "email"}
     sets, params = [], []
     for campo, valor in campos.items():
         if campo in permitidos:
@@ -630,7 +642,7 @@ def quitar_asignacion(asignacion_id):
 def list_evaluados_de_campana(campana_id):
     conn = get_connection()
     rows = conn.execute("""
-        SELECT p.id, p.nombre_completo, p.puesto_id,
+        SELECT p.id, p.nombre_completo, p.puesto_id, p.email,
                COUNT(a.id) AS total_evaluadores,
                SUM(CASE WHEN a.estado = 'completada' THEN 1 ELSE 0 END) AS completadas
         FROM eval360_asignaciones a
@@ -646,7 +658,7 @@ def list_evaluados_de_campana(campana_id):
 def list_evaluadores_de_evaluado(campana_id, evaluado_persona_id):
     conn = get_connection()
     rows = conn.execute("""
-        SELECT a.*, p.nombre_completo AS evaluador_nombre
+        SELECT a.*, p.nombre_completo AS evaluador_nombre, p.email AS evaluador_email
         FROM eval360_asignaciones a
         JOIN eval360_personas p ON p.id = a.evaluador_persona_id
         WHERE a.campana_id = ? AND a.evaluado_persona_id = ?
@@ -767,6 +779,67 @@ def resultados_evaluado(campana_id, evaluado_persona_id):
         "promedio_general": promedio([v for vs in por_grupo.values() for v in vs]) if por_grupo else None,
         "comentarios_abiertos": [dict(c) for c in comentarios],
     }
+
+
+# ---------------------------------------------------------------------------
+# Accesos: crear cuentas de portal para personas del organigrama que todavía
+# no tienen una (para poder entrar y responder sus evaluaciones). Separado a
+# propósito de "vincular a cuenta existente" (el selector de la ficha de
+# persona) -- esto CREA cuentas nuevas, así que solo aplica a quien todavía
+# no tiene ninguna, para no pisar jamás las cuentas reales del día a día
+# (gerentes, area manager, etc. que ya usan el portal para otras cosas).
+# ---------------------------------------------------------------------------
+
+def _sin_tildes(texto: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c))
+
+
+def sugerir_local_part(nombre_completo: str) -> str:
+    """De 'Saul Vasquez Garcia' saca 'saul.v' -- primer nombre + inicial del
+    primer apellido, sin tildes ni espacios. Mismo patrón que ya usa la
+    empresa para el email (nombre.inicialdeapellido@krispykreme.es); se
+    reutiliza tal cual como base del username al crear un acceso."""
+    partes = (nombre_completo or "").strip().split()
+    if not partes:
+        return "persona"
+    nombre = re.sub(r"[^a-z0-9]", "", _sin_tildes(partes[0]).lower())
+    inicial = re.sub(r"[^a-z0-9]", "", _sin_tildes(partes[1]).lower())[:1] if len(partes) > 1 else ""
+    base = f"{nombre}.{inicial}" if inicial else nombre
+    return base or "persona"
+
+
+def list_personas_sin_acceso(empresa="kk"):
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT id, nombre_completo, email FROM eval360_personas
+        WHERE empresa = ? AND activo = 1 AND usuario_id IS NULL
+        ORDER BY nombre_completo
+    """, (empresa,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def crear_acceso_para_persona(persona_id):
+    """Username desambiguado contra TODOS los usuarios existentes (los del
+    día a día incluidos) para que nunca choquen. El PIN no lo reparte el
+    admin -- se lo crea la propia persona la primera vez que entra con su
+    username, igual que el resto de cuentas (ver auth.set_pin_si_no_tiene)."""
+    persona = get_persona(persona_id)
+    if not persona:
+        return None
+    if persona["usuario_id"]:
+        return {"error": "ya_tiene_cuenta"}
+    base = sugerir_local_part(persona["nombre_completo"])
+    username = base
+    sufijo = 2
+    while not auth.username_disponible(username):
+        username = f"{base}{sufijo}"
+        sufijo += 1
+    usuario_id = auth.create_user(username, persona["nombre_completo"], "colaborador")
+    modulo = "saona_evaluaciones360" if persona["empresa"] == "saona" else "evaluaciones360"
+    auth.set_modulos_permitidos(usuario_id, [modulo])
+    actualizar_persona(persona_id, {"usuario_id": usuario_id})
+    return {"usuario_id": usuario_id, "username": username}
 
 
 ensure_eval360_tables()

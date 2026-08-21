@@ -7,6 +7,7 @@ let USUARIOS = [];
 let editandoPersonaId = null;
 
 let PREGUNTAS = [];
+let ACCESOS = [];
 
 let CAMPANAS = [];
 let currentCampana = null;
@@ -50,6 +51,7 @@ async function activarTab(nombre) {
   if (nombre === "preguntas" && PREGUNTAS.length === 0) await cargarPreguntas();
   if (nombre === "campanas" && CAMPANAS.length === 0) await cargarCampanas();
   if (nombre === "mis") await cargarMisPendientes();
+  if (nombre === "accesos") await cargarAccesos();
 }
 
 // ---------------------------------------------------------------------------
@@ -735,6 +737,23 @@ function poblarSelectsPersona(puestosMarcados) {
       .join("");
 }
 
+// De "Saul Vasquez Garcia" saca "saul.v@krispykreme.es" -- primer nombre +
+// inicial del primer apellido, sin tildes ni espacios, patrón de email que
+// ya usa la empresa. Solo una sugerencia de partida: el campo sigue siendo
+// libre de editar.
+function sugerirEmailDesdeNombre(nombreCompleto) {
+  const partes = (nombreCompleto || "").trim().split(/\s+/).filter(Boolean);
+  if (!partes.length) return "";
+  // NFD separa cada letra con tilde en (letra + marca de acento aparte);
+  // el filtro [^a-z0-9] de abajo descarta esa marca junto con cualquier
+  // otro carácter no alfanumérico, así que el resultado ya queda sin tildes.
+  const limpiar = (s) => s.normalize("NFD").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const nombre = limpiar(partes[0]);
+  const inicial = partes.length > 1 ? limpiar(partes[1]).slice(0, 1) : "";
+  const local = inicial ? `${nombre}.${inicial}` : nombre;
+  return local ? `${local}@krispykreme.es` : "";
+}
+
 function abrirEditorPersona(personaId) {
   editandoPersonaId = personaId || null;
   const persona = personaId ? PERSONAS.find((p) => p.id === personaId) : null;
@@ -743,6 +762,12 @@ function abrirEditorPersona(personaId) {
   document.getElementById("persona-nombre").value = persona ? persona.nombre_completo : "";
   document.getElementById("persona-jefe").value = persona?.jefe_directo_id || "";
   document.getElementById("persona-usuario").value = persona?.usuario_id || "";
+  const emailInput = document.getElementById("persona-email");
+  emailInput.value = persona?.email || "";
+  // Auto=1 mientras el campo siga tal cual la sugerencia (o vacío en una
+  // persona nueva) -- en cuanto alguien lo edita a mano, se marca auto=0 y
+  // deja de reescribirse solo aunque seguir cambiando el nombre.
+  emailInput.dataset.auto = persona?.email ? "0" : "1";
   document.getElementById("btn-eliminar-persona").hidden = !persona;
   document.getElementById("editor-card").hidden = false;
   document.getElementById("lista-organigrama-wrap").hidden = true;
@@ -767,6 +792,7 @@ async function guardarPersona() {
     puesto_ids: puestoIds,
     jefe_directo_id: document.getElementById("persona-jefe").value ? Number(document.getElementById("persona-jefe").value) : null,
     usuario_id: document.getElementById("persona-usuario").value ? Number(document.getElementById("persona-usuario").value) : null,
+    email: document.getElementById("persona-email").value.trim() || null,
   };
   const url = editandoPersonaId
     ? `${AUTH_API_BASE}/evaluaciones360/personas/${editandoPersonaId}`
@@ -1171,10 +1197,24 @@ async function abrirEvaluadores(personaId) {
   await renderEvaluadores();
 }
 
+// Recordatorio por mailto (abre el cliente de correo del propio usuario --
+// no se envía nada desde el servidor) para un evaluador con una evaluación
+// pendiente. Sin email registrado en su ficha, no hay a quién escribirle.
+function enlaceMailtoRecordatorio(asignacion, evaluado) {
+  if (!asignacion.evaluador_email) {
+    return `<span class="staff-hint" title="Añádele un email desde Organigrama para poder escribirle">Sin email</span>`;
+  }
+  const asunto = `Evaluación 360° pendiente${evaluado ? ` -- ${evaluado.nombre_completo}` : ""}`;
+  const cuerpo = `Hola ${asignacion.evaluador_nombre},\n\nTienes una evaluación 360° pendiente de responder en Krispy Gestiones${evaluado ? ` sobre ${evaluado.nombre_completo}` : ""}.\n\nGracias.`;
+  const href = `mailto:${asignacion.evaluador_email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+  return `<a class="btn btn-ghost btn-mini" href="${escapeHTML(href)}" title="Abrir un correo de recordatorio para ${escapeHTML(asignacion.evaluador_nombre)}">✉ Recordar</a>`;
+}
+
 async function renderEvaluadores() {
   const evaluadores = await fetch(
     `${AUTH_API_BASE}/evaluaciones360/campanas/${currentCampana.id}/evaluados/${currentEvaluadoId}/evaluadores`
   ).then((r) => r.json());
+  const evaluado = currentCampana.evaluados.find((e) => e.id === currentEvaluadoId);
   const ul = document.getElementById("evaluadores-lista");
   ul.innerHTML = evaluadores.map((a) => `
     <li>
@@ -1183,6 +1223,7 @@ async function renderEvaluadores() {
         <span class="relacion-tag">${RELACION_LABEL[a.relacion] || a.relacion}</span>
         ${a.estado === "completada" ? `<span class="badge-estado badge-abierta">respondida</span>` : `<span class="staff-hint">pendiente</span>`}
         <div class="fila-acciones">
+          ${a.estado !== "completada" ? enlaceMailtoRecordatorio(a, evaluado) : ""}
           ${a.estado !== "completada" ? `<button type="button" class="btn btn-ghost btn-mini" data-quitar-asignacion="${a.id}">Quitar</button>` : ""}
         </div>
       </div>
@@ -1418,6 +1459,64 @@ function cerrarResponder() {
 }
 
 // ---------------------------------------------------------------------------
+// Accesos: crear cuentas de portal (usuario + PIN que se crea la propia
+// persona al entrar por primera vez) para quien todavía no tenga una
+// vinculada -- separado a propósito de "Cuenta vinculada" en la ficha de
+// persona (eso es para enlazar una cuenta YA existente; esto crea cuentas
+// nuevas, así que solo toca a quien no tiene ninguna todavía).
+// ---------------------------------------------------------------------------
+
+async function cargarAccesos() {
+  ACCESOS = await fetch(`${AUTH_API_BASE}/evaluaciones360/accesos?empresa=${EMPRESA}`).then((r) => r.json());
+  renderAccesos();
+}
+
+function renderAccesos() {
+  const ul = document.getElementById("accesos-lista");
+  const btnTodos = document.getElementById("btn-crear-todos-accesos");
+  if (ACCESOS.length === 0) {
+    ul.innerHTML = `<p class="staff-hint">Todo el mundo en el organigrama ya tiene una cuenta de portal vinculada.</p>`;
+    btnTodos.hidden = true;
+    return;
+  }
+  btnTodos.hidden = false;
+  ul.innerHTML = ACCESOS.map((p) => `
+    <li>
+      <div class="fila-simple" data-fila-acceso="${p.id}">
+        <span class="fila-titulo">${escapeHTML(p.nombre_completo)}</span>
+        <span class="staff-hint">${p.email ? escapeHTML(p.email) : "sin email registrado"}</span>
+        <div class="fila-acciones">
+          <button type="button" class="btn btn-ghost btn-mini" data-crear-acceso="${p.id}">Crear acceso</button>
+        </div>
+      </div>
+    </li>`).join("");
+  ul.querySelectorAll("[data-crear-acceso]").forEach((btn) => {
+    btn.addEventListener("click", () => crearAcceso(Number(btn.dataset.crearAcceso)));
+  });
+}
+
+async function crearAcceso(personaId) {
+  const res = await fetch(`${AUTH_API_BASE}/evaluaciones360/accesos/${personaId}/crear`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    await mostrarAviso(err.detail || "No se pudo crear el acceso.");
+    return false;
+  }
+  const { username } = await res.json();
+  const fila = document.querySelector(`[data-fila-acceso="${personaId}"] .fila-acciones`);
+  if (fila) fila.innerHTML = `<span class="badge-estado badge-abierta">usuario: ${escapeHTML(username)}</span>`;
+  return true;
+}
+
+async function crearTodosAccesos() {
+  if (!(await pedirConfirmacion(`¿Crear una cuenta de portal para las ${ACCESOS.length} personas de esta lista? Cada una entrará por primera vez con su usuario y creará su propio PIN.`))) return;
+  for (const p of ACCESOS) {
+    await crearAcceso(p.id);
+  }
+  await cargarAccesos();
+}
+
+// ---------------------------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", async () => {
   const user = await checkAuth("/evaluaciones360.html");
@@ -1436,11 +1535,21 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   await activarTab("mis");
 
+  document.getElementById("btn-crear-todos-accesos").addEventListener("click", crearTodosAccesos);
   document.getElementById("btn-nueva-persona").addEventListener("click", () => abrirEditorPersona(null));
   document.getElementById("btn-cerrar-editor").addEventListener("click", cerrarEditorPersona);
   document.getElementById("btn-cerrar-editor-x").addEventListener("click", cerrarEditorPersona);
   document.getElementById("btn-guardar-persona").addEventListener("click", guardarPersona);
   document.getElementById("btn-eliminar-persona").addEventListener("click", eliminarPersona);
+  document.getElementById("persona-nombre").addEventListener("input", (e) => {
+    const emailInput = document.getElementById("persona-email");
+    if (emailInput.dataset.auto === "0") return; // ya lo editaron a mano, no se lo pisamos
+    emailInput.value = sugerirEmailDesdeNombre(e.target.value);
+    emailInput.dataset.auto = "1";
+  });
+  document.getElementById("persona-email").addEventListener("input", (e) => {
+    e.target.dataset.auto = "0";
+  });
   document.getElementById("btn-nuevo-puesto").addEventListener("click", nuevoPuesto);
   const personasCont = document.getElementById("organigrama-lista");
   personasCont.addEventListener("dragover", (e) => {

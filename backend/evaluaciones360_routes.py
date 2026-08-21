@@ -49,6 +49,7 @@ class PersonaBody(BaseModel):
     puesto_ids: list[int] = []
     jefe_directo_id: int | None = None
     usuario_id: int | None = None
+    email: str | None = None
 
 
 class PersonaEditBody(BaseModel):
@@ -57,6 +58,7 @@ class PersonaEditBody(BaseModel):
     jefe_directo_id: int | None = None
     usuario_id: int | None = None
     activo: bool | None = None
+    email: str | None = None
 
 
 class PreguntaBody(BaseModel):
@@ -173,8 +175,9 @@ def get_relaciones_route(persona_id: int, user: dict = Depends(get_current_user)
 @router.post("/personas")
 def crear_persona_route(body: PersonaBody, user: dict = Depends(get_current_user)):
     _require_acceso_empresa(user, body.empresa)
+    email = body.email.strip() or None if body.email else None
     persona_id = eval360_module.crear_persona(
-        body.empresa, body.nombre_completo.strip(), body.puesto_ids, body.jefe_directo_id, body.usuario_id
+        body.empresa, body.nombre_completo.strip(), body.puesto_ids, body.jefe_directo_id, body.usuario_id, email
     )
     return {"ok": True, "id": persona_id}
 
@@ -185,6 +188,8 @@ def editar_persona_route(persona_id: int, body: PersonaEditBody, user: dict = De
     campos = body.model_dump(exclude_unset=True)
     if "nombre_completo" in campos and campos["nombre_completo"]:
         campos["nombre_completo"] = campos["nombre_completo"].strip()
+    if "email" in campos:
+        campos["email"] = campos["email"].strip() or None if campos["email"] else None
     eval360_module.actualizar_persona(persona_id, campos)
     return {"ok": True}
 
@@ -383,3 +388,25 @@ def finalizar_asignacion_route(asignacion_id: int, user: dict = Depends(get_curr
         raise HTTPException(status_code=400, detail=f"Faltan {len(faltantes)} preguntas por responder")
     eval360_module.finalizar_asignacion(asignacion_id)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Accesos: crear cuentas de portal para personas del organigrama que aún no
+# tienen una vinculada. Admin-only -- crea cuentas reales, a diferencia del
+# resto del módulo que solo pide tener el módulo evaluaciones360 concedido.
+# ---------------------------------------------------------------------------
+
+@router.get("/accesos")
+def list_accesos_route(empresa: str = "kk", _user: dict = Depends(require_eval360)):
+    return eval360_module.list_personas_sin_acceso(empresa)
+
+
+@router.post("/accesos/{persona_id}/crear")
+def crear_acceso_route(persona_id: int, user: dict = Depends(get_current_user)):
+    if user["rol"] != "admin":
+        raise HTTPException(status_code=403, detail="Solo un administrador puede crear accesos")
+    _require_acceso_persona(persona_id, user)
+    resultado = eval360_module.crear_acceso_para_persona(persona_id)
+    if not resultado or resultado.get("error"):
+        raise HTTPException(status_code=400, detail="No se pudo crear el acceso (puede que ya tenga una cuenta vinculada).")
+    return {"ok": True, **resultado}

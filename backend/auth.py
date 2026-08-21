@@ -17,6 +17,7 @@ ROLES = {
     "director_operaciones": "Director de Operaciones",
     "area_manager": "Area Manager",
     "gerente": "Gerente",
+    "colaborador": "Colaborador",
 }
 
 # Módulos que se pueden conceder explícitamente por checkbox al crear/editar
