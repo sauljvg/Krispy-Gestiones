@@ -329,9 +329,9 @@ def enviar_respuesta_route(slug: str, body: RespuestaIn, request: Request):
 
 
 @router_publico.post("/{slug}/sesion")
-def registrar_sesion_route(slug: str, body: SesionIn):
+def registrar_sesion_route(slug: str, body: SesionIn, request: Request):
     """Late para trackear aperturas/abandono: encuesta.js llama esto al
     cargar y cada vez que cambia de página (más un heartbeat cada 20s en la
     misma página) — nunca bloquea ni rompe el formulario si falla."""
-    encuestas_module.registrar_sesion(slug, body.token, body.pagina)
+    encuestas_module.registrar_sesion(slug, body.token, body.pagina, ip=_ip_cliente(request))
     return {"ok": True}

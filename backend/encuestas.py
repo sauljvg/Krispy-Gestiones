@@ -189,6 +189,15 @@ def ensure_encuestas_tables():
             ultima_actividad TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # ip: cada apertura del enlace genera un token nuevo (ver comentario de
+    # arriba), así que la misma persona recargando la página o volviendo a
+    # abrir el enlace varias veces contaba como varias "aperturas" distintas
+    # en el embudo. Con la ip guardada, get_embudo() puede agrupar por
+    # persona (misma idea que _es_respuesta_duplicada en guardar_respuesta)
+    # en vez de por sesión suelta.
+    cols_sesiones = {row[1] for row in conn.execute("PRAGMA table_info(encuesta_sesiones)")}
+    if "ip" not in cols_sesiones:
+        conn.execute("ALTER TABLE encuesta_sesiones ADD COLUMN ip TEXT")
     conn.commit()
     conn.close()
     os.makedirs(FONDOS_DIR, exist_ok=True)
@@ -202,19 +211,19 @@ def ensure_encuestas_tables():
 EN_VIVO_MINUTOS = 2
 
 
-def registrar_sesion(identificador, token, pagina):
+def registrar_sesion(identificador, token, pagina, ip=None):
     conn = get_connection()
     row = _fila_por_slug_o_codigo(conn, identificador)
     if not row:
         conn.close()
         return
     conn.execute("""
-        INSERT INTO encuesta_sesiones (encuesta_id, token, pagina_maxima)
-        VALUES (?, ?, ?)
+        INSERT INTO encuesta_sesiones (encuesta_id, token, pagina_maxima, ip)
+        VALUES (?, ?, ?, ?)
         ON CONFLICT(token) DO UPDATE SET
             pagina_maxima = MAX(pagina_maxima, excluded.pagina_maxima),
             ultima_actividad = datetime('now')
-    """, (row["id"], token, pagina))
+    """, (row["id"], token, pagina, ip))
     conn.commit()
     conn.close()
 
@@ -269,26 +278,37 @@ def borrar_sesiones(encuesta_id):
 
 
 def get_embudo(encuesta_id):
-    """Aperturas vs completados y, página a página, cuántas sesiones
+    """Aperturas vs completados y, página a página, cuántas personas
     llegaron al menos hasta ahí — para ver dónde se cae la gente en un test
-    largo, no solo cuántos lo acaban."""
+    largo, no solo cuántos lo acaban.
+
+    Cada apertura del enlace genera un token de sesión nuevo (ver
+    ensure_encuestas_tables), así que la misma persona recargando la página
+    o volviendo a abrir el enlace varias veces generaría varias filas en
+    encuesta_sesiones. Para no contarla varias veces, se agrupa por ip en
+    vez de por fila -- si dos sesiones comparten ip se tratan como la misma
+    persona (se queda con la página más lejana a la que llegó, y cuenta
+    como completada si CUALQUIERA de sus sesiones se completó). Las
+    sesiones sin ip (registradas antes de que existiera esta columna) se
+    cuentan cada una por separado, con COALESCE(ip, 'sesion:'||id), para no
+    fusionarlas entre sí por error."""
     conn = get_connection()
     total_paginas = conn.execute(
         "SELECT COUNT(*) FROM encuesta_paginas WHERE encuesta_id = ?", (encuesta_id,)
     ).fetchone()[0]
-    aperturas = conn.execute(
-        "SELECT COUNT(*) FROM encuesta_sesiones WHERE encuesta_id = ?", (encuesta_id,)
-    ).fetchone()[0]
-    completados = conn.execute(
-        "SELECT COUNT(*) FROM encuesta_sesiones WHERE encuesta_id = ? AND completado = 1", (encuesta_id,)
-    ).fetchone()[0]
+    personas = conn.execute("""
+        SELECT COALESCE(ip, 'sesion:' || id) AS persona,
+               MAX(pagina_maxima) AS pagina_maxima,
+               MAX(completado) AS completado
+        FROM encuesta_sesiones WHERE encuesta_id = ?
+        GROUP BY persona
+    """, (encuesta_id,)).fetchall()
+    aperturas = len(personas)
+    completados = sum(1 for p in personas if p["completado"])
     por_pagina = []
     if aperturas:
         for pagina in range(1, total_paginas + 1):
-            n = conn.execute(
-                "SELECT COUNT(*) FROM encuesta_sesiones WHERE encuesta_id = ? AND pagina_maxima >= ?",
-                (encuesta_id, pagina),
-            ).fetchone()[0]
+            n = sum(1 for p in personas if p["pagina_maxima"] >= pagina)
             por_pagina.append({"pagina": pagina, "llegaron": n})
     conn.close()
     return {"aperturas": aperturas, "completados": completados, "total_paginas": total_paginas, "por_pagina": por_pagina}
