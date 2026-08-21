@@ -232,6 +232,7 @@ function wirePersonaRows(ul) {
 let editandoPuestoId = null;
 let puestoArrastradoId = null;
 const puestosColapsados = new Set();
+let personasPorPuestoActual = new Map();
 
 function activarSubvistaOrganigrama(nombre) {
   document.querySelectorAll(".eval360-subtab-btn").forEach((b) => b.classList.toggle("activa", b.dataset.subvista === nombre));
@@ -253,6 +254,7 @@ function renderPuestosArbol() {
       personasPorPuesto.get(puesto.id).push(persona);
     }
   }
+  personasPorPuestoActual = personasPorPuesto; // para los handlers de drag, fuera de esta función
   const porPadre = new Map();
   for (const p of PUESTOS) {
     const clave = p.puesto_padre_id || "raiz";
@@ -275,8 +277,12 @@ function nodoPuestoHTML(puesto, porPadre, personasPorPuesto, vistos) {
   const vistosHijo = new Set(vistos).add(puesto.id);
   const hijos = (porPadre.get(puesto.id) || []).filter((h) => !vistosHijo.has(h.id));
   const personas = personasPorPuesto.get(puesto.id) || [];
+  // Cada persona es su propia ficha arrastrable -- cuando un puesto lo
+  // comparten varios (ej. "Gerente de Retail"), cada uno puede tener un
+  // jefe directo distinto (su encargado de turno concreto), no todos el
+  // mismo por defecto solo por compartir puesto.
   const personasHTML = personas.length
-    ? `<span class="puesto-personas">${personas.map((p) => escapeHTML(p.nombre_completo)).join(", ")}</span>`
+    ? `<span class="puesto-personas">${personas.map((p) => `<span class="persona-chip" draggable="true" data-persona-id="${p.id}" title="Arrastra para cambiar su jefe directo">${escapeHTML(p.nombre_completo)}</span>`).join("")}</span>`
     : `<span class="puesto-vacante">Vacante</span>`;
   const colapsado = puestosColapsados.has(puesto.id);
   const toggleHTML = hijos.length
@@ -362,6 +368,23 @@ function wirePuestoBoxes(cont) {
     });
   });
 
+  cont.querySelectorAll(".persona-chip").forEach((chip) => {
+    chip.addEventListener("dragstart", (e) => {
+      e.stopPropagation(); // que no dispare también el drag de la caja del puesto
+      personaArrastradaId = Number(chip.dataset.personaId);
+      chip.classList.add("arrastrando");
+      e.dataTransfer.effectAllowed = "move";
+    });
+    chip.addEventListener("dragend", (e) => {
+      e.stopPropagation();
+      personaArrastradaId = null;
+      cont.querySelectorAll(".arrastrando, .drop-valido, .drop-invalido").forEach((b) => {
+        b.classList.remove("arrastrando", "drop-valido", "drop-invalido");
+      });
+    });
+    chip.addEventListener("click", (e) => e.stopPropagation());
+  });
+
   cont.querySelectorAll(".orgchart-box").forEach((box) => {
     box.addEventListener("dragstart", (e) => {
       puestoArrastradoId = Number(box.dataset.puestoId);
@@ -375,13 +398,20 @@ function wirePuestoBoxes(cont) {
       });
     });
     box.addEventListener("dragover", (e) => {
-      if (puestoArrastradoId === null) return;
+      if (puestoArrastradoId === null && personaArrastradaId === null) return;
       e.preventDefault();
     });
     box.addEventListener("dragenter", (e) => {
+      const destinoId = Number(box.dataset.puestoId);
+      if (personaArrastradaId !== null) {
+        e.preventDefault();
+        const valido = esValidoSoltarPersonaEnPuesto(personaArrastradaId, destinoId);
+        box.classList.toggle("drop-valido", valido);
+        box.classList.toggle("drop-invalido", !valido);
+        return;
+      }
       if (puestoArrastradoId === null) return;
       e.preventDefault();
-      const destinoId = Number(box.dataset.puestoId);
       box.classList.toggle("drop-valido", esReparentadoValido(puestoArrastradoId, destinoId));
       box.classList.toggle("drop-invalido", !esReparentadoValido(puestoArrastradoId, destinoId));
     });
@@ -393,12 +423,46 @@ function wirePuestoBoxes(cont) {
       e.stopPropagation();
       box.classList.remove("drop-valido", "drop-invalido");
       const destinoId = Number(box.dataset.puestoId);
+
+      if (personaArrastradaId !== null) {
+        const arrastradaId = personaArrastradaId;
+        personaArrastradaId = null;
+        if (!esValidoSoltarPersonaEnPuesto(arrastradaId, destinoId)) {
+          await mostrarAviso("Ese puesto no tiene un único responsable claro (está vacante o lo comparte más de una persona), así que no se puede usar directamente como jefe. Ábrelo y asigna el jefe directo a mano si hace falta.");
+          return;
+        }
+        const nuevoJefeId = (personasPorPuestoActual.get(destinoId) || [])[0].id;
+        await asignarJefeDirectoSolo(arrastradaId, nuevoJefeId);
+        return;
+      }
+
       const arrastradoId = puestoArrastradoId;
       puestoArrastradoId = null;
       if (arrastradoId === null || !esReparentadoValido(arrastradoId, destinoId)) return;
       await reparentarPuesto(arrastradoId, destinoId);
     });
   });
+}
+
+async function asignarJefeDirectoSolo(personaId, nuevoJefeId) {
+  // A diferencia de reparentarPersona(), esto NO mueve el puesto -- es
+  // justo lo contrario de lo que se busca al arrastrar una ficha individual
+  // dentro de un puesto compartido: que cada persona pueda tener un jefe
+  // directo distinto sin arrastrar consigo a sus compañeros de puesto.
+  await fetch(`${AUTH_API_BASE}/evaluaciones360/personas/${personaId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jefe_directo_id: nuevoJefeId }),
+  });
+  await cargarOrganigrama();
+  renderPuestosArbol();
+}
+
+function esValidoSoltarPersonaEnPuesto(personaId, puestoDestinoId) {
+  const ocupantes = personasPorPuestoActual.get(puestoDestinoId) || [];
+  if (ocupantes.length !== 1) return false;
+  if (ocupantes[0].id === personaId) return false; // no puede ser su propio jefe
+  return true;
 }
 
 function poblarSelectPuestoPadre() {
@@ -449,9 +513,15 @@ async function guardarPuesto() {
     await mostrarAviso("No se pudo guardar el puesto.");
     return;
   }
+  const nuevoId = editandoPuestoId || (await res.json()).id;
   cerrarEditorPuesto();
   PUESTOS = await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos?empresa=${EMPRESA}`).then((r) => r.json());
   renderPuestosArbol();
+  // Un puesto nuevo (sobre todo si es raíz, tipo "JV") puede aparecer lejos
+  // de donde se estaba mirando -- se centra la vista en él para que no
+  // parezca que se perdió por ahí fuera.
+  const cajaNueva = document.querySelector(`.orgchart-box[data-puesto-id="${nuevoId}"]`);
+  if (cajaNueva) cajaNueva.scrollIntoView({ block: "center", inline: "center" });
 }
 
 async function desactivarPuesto() {
@@ -602,10 +672,18 @@ function renderPreguntas() {
   }
   let html = "";
   for (const [grupo, preguntas] of grupos) {
-    html += `<div class="preguntas-grupo"><h3>${escapeHTML(grupo)}</h3>${preguntas.map(filaPregunta).join("")}</div>`;
+    html += `
+      <div class="preguntas-grupo">
+        <h3 class="preguntas-grupo-handle" draggable="true" title="Arrastra para reordenar este bloque completo">⠿ ${escapeHTML(grupo)}</h3>
+        <div class="preguntas-grupo-items">${preguntas.map(filaPregunta).join("")}</div>
+      </div>`;
   }
   if (abiertas.length) {
-    html += `<div class="preguntas-grupo"><h3>Preguntas abiertas</h3>${abiertas.map(filaPregunta).join("")}</div>`;
+    html += `
+      <div class="preguntas-grupo">
+        <h3 class="preguntas-grupo-handle" draggable="true" title="Arrastra para reordenar este bloque completo">⠿ Preguntas abiertas</h3>
+        <div class="preguntas-grupo-items">${abiertas.map(filaPregunta).join("")}</div>
+      </div>`;
   }
   cont.innerHTML = html;
   cont.querySelectorAll("[data-pregunta-texto]").forEach((input) => {
@@ -614,14 +692,93 @@ function renderPreguntas() {
   cont.querySelectorAll("[data-pregunta-activa]").forEach((chk) => {
     chk.addEventListener("change", () => guardarPreguntaCampo(Number(chk.dataset.preguntaActiva), { activa: chk.checked }));
   });
+  wireDragReordenPreguntas(cont);
 }
 
 function filaPregunta(p) {
   return `
-    <div class="pregunta-row">
+    <div class="pregunta-row" draggable="true" data-pregunta-id="${p.id}" title="Arrastra para reordenar dentro de este bloque">
+      <span class="pregunta-drag-handle">⠿</span>
       <input type="checkbox" data-pregunta-activa="${p.id}" ${p.activa ? "checked" : ""} title="Activa">
       <input type="text" data-pregunta-texto="${p.id}" value="${escapeHTML(p.texto)}" ${p.activa ? "" : "disabled"}>
     </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Arrastrar para reordenar preguntas: por bloque completo o por item suelto
+// dentro de su mismo bloque.
+// ---------------------------------------------------------------------------
+
+function wireDragReordenPreguntas(cont) {
+  let grupoArrastrado = null;
+  let filaArrastrada = null;
+
+  cont.querySelectorAll(".preguntas-grupo-handle").forEach((handle) => {
+    const bloque = handle.closest(".preguntas-grupo");
+    handle.addEventListener("dragstart", (e) => {
+      grupoArrastrado = bloque;
+      bloque.classList.add("arrastrando");
+      e.dataTransfer.effectAllowed = "move";
+    });
+    handle.addEventListener("dragend", () => {
+      bloque.classList.remove("arrastrando");
+      grupoArrastrado = null;
+      guardarNuevoOrdenPreguntas();
+    });
+  });
+  cont.querySelectorAll(".preguntas-grupo").forEach((bloque) => {
+    bloque.addEventListener("dragover", (e) => {
+      if (!grupoArrastrado || grupoArrastrado === bloque) return;
+      e.preventDefault();
+      const antes = e.clientY < bloque.getBoundingClientRect().top + bloque.offsetHeight / 2;
+      bloque.parentElement.insertBefore(grupoArrastrado, antes ? bloque : bloque.nextSibling);
+    });
+  });
+
+  cont.querySelectorAll(".pregunta-row").forEach((fila) => {
+    fila.addEventListener("dragstart", (e) => {
+      e.stopPropagation();
+      filaArrastrada = fila;
+      fila.classList.add("arrastrando");
+      e.dataTransfer.effectAllowed = "move";
+    });
+    fila.addEventListener("dragend", (e) => {
+      e.stopPropagation();
+      fila.classList.remove("arrastrando");
+      filaArrastrada = null;
+      guardarNuevoOrdenPreguntas();
+    });
+    fila.addEventListener("dragover", (e) => {
+      if (!filaArrastrada || filaArrastrada === fila) return;
+      // Solo se reordena dentro del mismo bloque -- no se mezclan preguntas
+      // de un grupo con otro solo arrastrando un item suelto.
+      if (filaArrastrada.parentElement !== fila.parentElement) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const antes = e.clientY < fila.getBoundingClientRect().top + fila.offsetHeight / 2;
+      fila.parentElement.insertBefore(filaArrastrada, antes ? fila : fila.nextSibling);
+    });
+  });
+}
+
+async function guardarNuevoOrdenPreguntas() {
+  const cambios = [];
+  let orden = 0;
+  document.querySelectorAll("#preguntas-contenido .pregunta-row").forEach((fila) => {
+    const id = Number(fila.dataset.preguntaId);
+    const actual = PREGUNTAS.find((p) => p.id === id);
+    if (actual && actual.orden !== orden) cambios.push({ id, orden });
+    orden++;
+  });
+  if (!cambios.length) return;
+  for (const { id, orden } of cambios) {
+    await fetch(`${AUTH_API_BASE}/evaluaciones360/preguntas/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orden }),
+    });
+  }
+  await cargarPreguntas();
 }
 
 async function guardarPreguntaCampo(preguntaId, campos) {
@@ -1131,11 +1288,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btn-nuevo-puesto-raiz").addEventListener("click", () => abrirEditorPuesto(null));
   const arbolCont = document.getElementById("puestos-arbol");
   arbolCont.addEventListener("dragover", (e) => {
-    if (puestoArrastradoId !== null) e.preventDefault();
+    if (puestoArrastradoId !== null || personaArrastradaId !== null) e.preventDefault();
   });
   arbolCont.addEventListener("drop", async (e) => {
     if (e.target.closest(".orgchart-box")) return; // ya lo gestiona la caja concreta
     e.preventDefault();
+    if (personaArrastradaId !== null) {
+      const arrastradaId = personaArrastradaId;
+      personaArrastradaId = null;
+      await asignarJefeDirectoSolo(arrastradaId, null);
+      return;
+    }
     const arrastradoId = puestoArrastradoId;
     puestoArrastradoId = null;
     if (arrastradoId === null) return;

@@ -87,6 +87,12 @@
   .orgchart-box .puesto-acciones { display: flex; gap: 4px; margin-top: 6px; }
   .orgchart-box .puesto-acciones button { font-size: 11px; padding: 2px 6px; }
   .orgchart-raiz-extra { margin-top: 10px; }
+  .persona-chip {
+    display: inline-block; cursor: grab; border-radius: 4px; padding: 0 2px;
+  }
+  .persona-chip:not(:last-child)::after { content: ", "; color: var(--text-secondary); cursor: default; }
+  .persona-chip:hover { background: var(--surface-2); text-decoration: underline; }
+  .persona-chip.arrastrando { opacity: 0.4; }
 
   .organigrama-lista, .lista-simple { list-style: none; margin: 0; padding: 0; }
   .organigrama-lista li { padding: 4px 0; }
@@ -128,9 +134,17 @@
   .editor-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
   .staff-hint { color: var(--text-secondary); font-size: 13px; }
 
-  .preguntas-grupo { margin-bottom: 22px; }
-  .preguntas-grupo h3 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary); margin: 0 0 8px; }
-  .pregunta-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--gridline); }
+  .preguntas-grupo { margin-bottom: 22px; border-radius: 8px; }
+  .preguntas-grupo.arrastrando { opacity: 0.4; }
+  .preguntas-grupo-handle {
+    font-size: 14px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary);
+    margin: 0 0 8px; cursor: grab; user-select: none;
+  }
+  .preguntas-grupo-handle:active { cursor: grabbing; }
+  .pregunta-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--gridline); cursor: grab; }
+  .pregunta-row.arrastrando { opacity: 0.4; }
+  .pregunta-row:active { cursor: grabbing; }
+  .pregunta-drag-handle { color: var(--text-muted); flex-shrink: 0; }
   .pregunta-row input[type="text"] {
     flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border);
     background: var(--surface-page); color: var(--text-primary); font-size: 13px;
@@ -402,6 +416,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260723f"></script>
 <script src="js/topbar-menu.js?v=20260821a"></script>
-<script src="js/evaluaciones360.js?v=20260821i"></script>
+<script src="js/evaluaciones360.js?v=20260821k"></script>
 </body>
 </html>
