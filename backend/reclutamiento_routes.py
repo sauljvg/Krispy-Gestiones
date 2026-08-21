@@ -504,13 +504,24 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, items: list[tuple[int, int]]
             # guardarCandidato en compartidos.js) o al pulsar "Re-extraer" a
             # mano en una ficha -- antes esto SOLO pasaba en esos dos casos,
             # nunca aquí, así que ningún candidato creado en lote sacaba foto
-            # hasta que alguien entraba a su ficha y la pedía a mano. Como
-            # aquí `recorte` YA es el PDF individual de este candidato (no
-            # el lote entero, ver adjuntar_pdf_lote_confirmar_route), sacar
-            # la foto de su "página 1" sí es de verdad la suya. Solo si
-            # todavía no tiene, para no pisar una que el reclutador haya
-            # subido o cambiado a mano mientras el lote seguía procesando.
-            if not reclutamiento_module.get_foto_ruta(candidato_id):
+            # hasta que alguien entraba a su ficha y la pedía a mano. Cuando
+            # este bucle viene de adjuntar_pdf_lote_confirmar_route, `recorte`
+            # YA es el PDF individual de este candidato -- pero cuando viene
+            # de reextraer_todos_route, candidatos_con_pdf() puede devolver
+            # el PDF del LOTE ENTERO tal cual (fichas antiguas de antes de
+            # que existiera el recorte por candidato, o casos sin división
+            # de páginas disponible), compartido por varios candidatos. Sacar
+            # "la foto de la página 1" de un PDF así le pone a TODOS esos
+            # candidatos la foto de quien sea que salga primero en el lote
+            # (bug real, visto en producción: la misma cara repetida en
+            # decenas de fichas). len(extraidos) == 1 es la misma condición
+            # que ya usa el botón manual "Re-extraer" (ver de_lote en
+            # reextraerCv, compartidos.js) para decidir esto mismo -- solo se
+            # saca la foto cuando el PDF adjunto es, de verdad, el de una
+            # sola persona. Solo si todavía no tiene, para no pisar una que
+            # el reclutador haya subido o cambiado a mano mientras el lote
+            # seguía procesando.
+            if len(extraidos) == 1 and not reclutamiento_module.get_foto_ruta(candidato_id):
                 foto = cv_extraction.extraer_foto(recorte)
                 if foto is not None:
                     datos_foto, ext_foto = foto
@@ -593,7 +604,7 @@ def reextraer_todos_route(empresa: str = "kk", user: dict = Depends(require_info
     candidato que tenga uno -- para cuando una mejora del extractor local
     (ver cv_extraction.py) deja desactualizadas fichas que se procesaron
     antes del arreglo, sin tener que volver a subir el PDF de lote original
-    ni entrar ficha a ficha con "Re-extraer con IA". Reutiliza exactamente
+    ni entrar ficha a ficha con "Re-extraer". Reutiliza exactamente
     la misma cola durable y el mismo mecanismo de progreso/notificación que
     /candidatos/adjuntar-pdf-lote/confirmar (ver _rellenar_huecos_en_segundo_plano)
     -- el banner del topbar y el aviso final al terminar funcionan igual sin
@@ -610,6 +621,43 @@ def reextraer_todos_route(empresa: str = "kk", user: dict = Depends(require_info
     reclutamiento_module.crear_lote_ia_pendiente(lote_id, user["id"], titulo_lote, items)
     _lanzar_relleno(lote_id, items, user["id"], titulo_lote)
     return {"ok": True, "lote_id": lote_id, "total": len(items)}
+
+
+@router.post("/candidatos/limpiar-fotos-de-lote-compartido")
+def limpiar_fotos_de_lote_compartido_route(empresa: str = "kk", _user: dict = Depends(require_informes)):
+    """Corrige el daño de un bug real: "Reextraer todos los CV" sacaba la
+    foto de "la página 1" del PDF más reciente adjunto a cada candidato sin
+    comprobar antes si ese PDF era de verdad SOLO suyo -- para fichas
+    antiguas (antes del recorte por candidato) o casos sin división de
+    páginas disponible, ese PDF era el LOTE ENTERO compartido por varias
+    personas, así que a todas les tocó la cara de quien saliera primero en
+    el lote (ver el fix en _rellenar_huecos_en_segundo_plano, que ya no deja
+    que esto vuelva a pasar hacia delante -- esta ruta es solo para arreglar
+    lo que ya quedó mal guardado).
+
+    Revisa cada candidato que hoy tiene foto: si su PDF más reciente vuelve
+    a extraerse como MÁS DE UN candidato, esa foto no es de fiar -> se
+    quita (queda sin foto, no se inventa una nueva). No toca a quien su PDF
+    sí es de una sola persona -- su foto actual sigue siendo válida."""
+    items = reclutamiento_module.candidatos_con_pdf_y_foto(empresa=empresa)
+    revisados = 0
+    quitadas = []
+    for candidato_id, archivo_id in items:
+        archivo = reclutamiento_module.get_archivo(archivo_id)
+        if archivo is None or not os.path.exists(archivo["ruta"]):
+            continue
+        revisados += 1
+        with open(archivo["ruta"], "rb") as f:
+            contenido = f.read()
+        try:
+            extraidos = cv_extraction.extraer_cv(contenido)
+        except Exception:
+            continue
+        if len(extraidos) != 1:
+            candidato = reclutamiento_module.get_candidato(candidato_id)
+            reclutamiento_module.quitar_foto(candidato_id)
+            quitadas.append({"id": candidato_id, "nombre": candidato["nombre_completo"] if candidato else None})
+    return {"ok": True, "revisados": revisados, "fotos_quitadas": quitadas}
 
 
 @router.post("/candidatos/adjuntar-pdf-lote/confirmar")
