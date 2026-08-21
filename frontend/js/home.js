@@ -13,7 +13,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("card-tests").hidden = !modulos.includes("tests");
   document.getElementById("card-disc").hidden = !modulos.includes("disc");
   document.getElementById("card-agregadores").hidden = !modulos.includes("agregadores");
-  const tieneModuloSaona = ["saona_resenas", "saona_informes", "saona_clima"].some((m) => modulos.includes(m));
+  document.getElementById("card-evaluaciones360").hidden = !modulos.includes("evaluaciones360");
+  const tieneModuloSaona = ["saona_resenas", "saona_informes", "saona_clima", "saona_evaluaciones360"].some((m) => modulos.includes(m));
   document.getElementById("card-saona").hidden = !tieneModuloSaona;
   if (user.rol === "admin") {
     document.getElementById("menu-ajustes").hidden = false;

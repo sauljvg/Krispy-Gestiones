@@ -31,15 +31,17 @@ MODULOS = {
     "tests": "Test",
     "disc": "Perfil DISC",
     "agregadores": "Agregadores",
+    "evaluaciones360": "Evaluaciones 360°",
     "saona_resenas": "SAONA · Reseñas",
     "saona_informes": "SAONA · Informes",
     "saona_clima": "SAONA · Clima Laboral",
+    "saona_evaluaciones360": "SAONA · Evaluaciones 360°",
 }
 
 # Módulos que pertenecen al "hub" SAONA en Home — un usuario ve la tarjeta
 # SAONA si tiene al menos uno de estos (o es admin), igual que cada tarjeta
 # individual de Krispy Kreme depende de su propio módulo.
-MODULOS_SAONA = ["saona_resenas", "saona_informes", "saona_clima"]
+MODULOS_SAONA = ["saona_resenas", "saona_informes", "saona_clima", "saona_evaluaciones360"]
 
 PIN_REGEX = re.compile(r"^\d{4}$")
 

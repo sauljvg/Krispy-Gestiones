@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krispy Gestiones · Evaluaciones 360°</title>
+<link rel="icon" type="image/png" href="assets/favicon-kk.png">
+<script>
+  (function () {
+    var guardado = localStorage.getItem("kt-theme");
+    if (guardado === "light" || guardado === "dark") {
+      document.documentElement.dataset.theme = guardado;
+    }
+  })();
+</script>
+<link rel="stylesheet" href="css/styles.css?v=20260820a">
+<style>
+  .eval360-wrap { max-width: 1000px; margin: 0 auto; padding: 0 0 60px; }
+  .eval360-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 16px 0; }
+  .eval360-toolbar p { flex: 1; min-width: 0; }
+  .eval360-toolbar .btn { flex-shrink: 0; white-space: nowrap; }
+  .organigrama-lista { list-style: none; margin: 0; padding: 0; }
+  .organigrama-lista li { padding: 4px 0; }
+  .persona-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-1); }
+  .persona-row .persona-nombre { font-weight: 600; }
+  .persona-row .persona-puesto { color: var(--text-secondary); font-size: 13px; }
+  .persona-row .persona-acciones { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
+  .badge-cuenta { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); white-space: nowrap; }
+  .badge-sin-cuenta { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-secondary); white-space: nowrap; }
+  .editor-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-top: 20px; position: relative; }
+  #editor-titulo-h2 { margin-top: 0; padding-right: 30px; }
+  .btn-cerrar-editor-x {
+    position: absolute; top: 14px; right: 14px; width: 28px; height: 28px;
+    border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary);
+    border-radius: 50%; font-size: 15px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; padding: 0;
+  }
+  .btn-cerrar-editor-x:hover { background: var(--surface-2); color: var(--text-primary); }
+  .editor-field { margin-bottom: 12px; }
+  .editor-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+  .editor-field input, .editor-field select {
+    width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 14px; font-family: inherit;
+    box-sizing: border-box;
+  }
+  .editor-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .staff-hint { color: var(--text-secondary); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon" id="brand-icon">🍩</span>
+      <div>
+        <h1 id="brand-title">Krispy Gestiones</h1>
+        <p class="subtitle">Evaluaciones 360° · Organigrama</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="btn btn-ghost hamburger-btn" title="Atrás" aria-label="Atrás" onclick="history.back()">←</button>
+      <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
+      <div class="hamburger-wrap">
+        <button id="btn-hamburger" class="btn btn-ghost hamburger-btn" aria-label="Menú" aria-haspopup="true" aria-expanded="false">☰</button>
+        <div id="hamburger-menu" class="hamburger-menu" hidden>
+          <span id="topbar-user" class="topbar-user" hidden></span>
+          <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema">🌙 Cambiar tema</button>
+          <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="eval360-wrap">
+    <div class="hero-banner">
+      <span class="eyebrow">Portal interno</span>
+      <h1>Organigrama</h1>
+      <p>Da de alta a cada persona con su puesto y su jefe directo -- de aquí sale quién evalúa a quién en cada campaña de Evaluación 360°.</p>
+    </div>
+
+    <div id="lista-organigrama-wrap">
+      <div class="eval360-toolbar">
+        <p class="staff-hint">Cada persona necesita un jefe directo para poder calcular sus pares (compañeros con el mismo jefe) y sus reportes.</p>
+        <button id="btn-nueva-persona" class="btn btn-primary" type="button">＋ Nueva persona</button>
+      </div>
+
+      <ul class="organigrama-lista" id="organigrama-lista"></ul>
+    </div>
+
+    <div class="editor-card" id="editor-card" hidden>
+      <button type="button" class="btn-cerrar-editor-x" id="btn-cerrar-editor-x" title="Cerrar">✕</button>
+      <h2 id="editor-titulo-h2">Nueva persona</h2>
+
+      <div class="editor-field">
+        <label for="persona-nombre">Nombre completo</label>
+        <input type="text" id="persona-nombre" placeholder="Nombre y apellidos">
+      </div>
+
+      <div class="editor-field">
+        <label for="persona-puesto">Puesto</label>
+        <select id="persona-puesto">
+          <option value="">— Sin puesto asignado —</option>
+        </select>
+      </div>
+      <div class="editor-field">
+        <button type="button" class="btn btn-ghost btn-mini" id="btn-nuevo-puesto">＋ Nuevo puesto</button>
+      </div>
+
+      <div class="editor-field">
+        <label for="persona-jefe">Jefe directo</label>
+        <select id="persona-jefe">
+          <option value="">— Sin jefe (raíz del organigrama) —</option>
+        </select>
+      </div>
+
+      <div class="editor-field">
+        <label for="persona-usuario">Cuenta vinculada (para que le aparezcan sus evaluaciones al entrar)</label>
+        <select id="persona-usuario">
+          <option value="">— Sin vincular —</option>
+        </select>
+      </div>
+
+      <div class="editor-actions">
+        <button id="btn-guardar-persona" class="btn btn-primary" type="button">Guardar</button>
+        <button id="btn-eliminar-persona" class="btn btn-ghost" type="button" hidden>Eliminar</button>
+        <button id="btn-cerrar-editor" class="btn btn-ghost" type="button">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="js/theme.js?v=20260723f"></script>
+<script src="js/dialogs.js?v=20260818a"></script>
+<script src="js/auth-common.js?v=20260723f"></script>
+<script src="js/topbar-menu.js?v=20260821a"></script>
+<script src="js/evaluaciones360.js?v=20260821b"></script>
+</body>
+</html>
