@@ -192,9 +192,32 @@ def ensure_informe_tables():
     for clave, nombre in DEFAULT_TIPOS_SAONA:
         conn.execute("INSERT OR IGNORE INTO informe_tipos (clave, nombre, empresa) VALUES (?, ?, 'saona')", (clave, nombre))
 
+    _backfill_umbral_apto_saona(conn)
+
     conn.commit()
     conn.close()
     os.makedirs(CV_DIR, exist_ok=True)
+
+
+def _backfill_umbral_apto_saona(conn):
+    """Saona pasó a considerar apto desde 65% en vez de 70% (ver
+    scoring_valores.UMBRAL_APTO_POR_EMPRESA) -- esto solo afecta a los tests
+    calculados a partir de aquí. Las respuestas de Saona que ya se habían
+    guardado como "No apto" bajo el 70% viejo, pero que en realidad llegaban
+    a 65%, se corrigen aquí una sola vez para que el historial quede
+    coherente con el criterio nuevo. Idempotente (la condición WHERE deja de
+    encontrar filas una vez corregidas) y a salvo de tocar por error un "No
+    apto" forzado por respuesta descalificatoria (ver forzar_no_apto): ese
+    texto lleva un sufijo extra y no coincide con el '= ❌ No apto' exacto de
+    abajo."""
+    conn.execute("""
+        UPDATE informe_respuestas
+        SET datos_json = json_set(datos_json, '$.RESULTADO', '✅ Alineado')
+        WHERE hoja IN ('Scoring', 'Dashboard')
+          AND json_extract(datos_json, '$.RESULTADO') = '❌ No apto'
+          AND CAST(json_extract(datos_json, '$.SCORE GLOBAL') AS REAL) >= 65
+          AND tipo_id IN (SELECT id FROM informe_tipos WHERE empresa = 'saona')
+    """)
 
 
 def _migrate_legacy_respuestas(conn):
@@ -408,14 +431,15 @@ def read_workbook_sheets(file_bytes):
     return resultado
 
 
-def _quiza_calcular_scoring(hojas, columnas_extra=None):
+def _quiza_calcular_scoring(hojas, columnas_extra=None, empresa=None):
     """Si el Excel trae una hoja "Respuestas" cruda (export directo de Forms,
     sin Dashboard ya calculado) y se reconoce como de Valores y Competencias
     por sus preguntas, calculamos aquí el Scoring/Dashboard — así el usuario
     solo sube el Excel plano sin depender del script externo. Si el Excel ya
     trae su propio Dashboard (el flujo de siempre), no se toca nada. Funciona
     igual para cualquier tipo/empresa (Krispy Kreme, Saona...) porque detecta
-    el cuestionario por su contenido, no por el nombre del tipo.
+    el cuestionario por su contenido, no por el nombre del tipo -- salvo el
+    umbral de apto, que sí depende de la empresa (ver scoring_valores.calcular).
 
     columnas_extra se reenvía tal cual a scoring_valores.calcular() — ver ahí
     su propósito (solo lo usa el módulo de Test, nunca la importación manual
@@ -425,7 +449,7 @@ def _quiza_calcular_scoring(hojas, columnas_extra=None):
         return hojas
     if not scoring_valores.parece_valores_competencias(respuestas):
         return hojas
-    scoring_rows, dashboard_rows = scoring_valores.calcular(respuestas, columnas_extra)
+    scoring_rows, dashboard_rows = scoring_valores.calcular(respuestas, columnas_extra, empresa=empresa)
     nuevas = dict(hojas)
     nuevas["Scoring"] = scoring_rows
     nuevas["Dashboard"] = dashboard_rows
@@ -480,7 +504,7 @@ def import_excel(tipo_clave, file_bytes, archivo_nombre, subido_por):
     hojas = read_workbook_sheets(file_bytes)
     if not hojas:
         raise ValueError("El Excel no tiene filas de datos en ninguna hoja")
-    hojas = _quiza_calcular_scoring(hojas)
+    hojas = _quiza_calcular_scoring(hojas, empresa=tipo.get("empresa"))
 
     conn = get_connection()
     cur = conn.execute(
@@ -515,7 +539,7 @@ def ingest_fila_directa(tipo_clave, fila, origen="Formulario web", columnas_extr
     if tipo is None:
         raise ValueError(f"Tipo de informe desconocido: {tipo_clave}")
 
-    hojas = _quiza_calcular_scoring({"Respuestas": [fila]}, columnas_extra)
+    hojas = _quiza_calcular_scoring({"Respuestas": [fila]}, columnas_extra, empresa=tipo.get("empresa"))
 
     conn = get_connection()
     cur = conn.execute(

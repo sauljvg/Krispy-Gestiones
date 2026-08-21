@@ -15,6 +15,12 @@ LIKERT_THRESHOLD_FOR_LIE = 75
 W_VAL = 0.5
 W_COMP = 0.5
 
+UMBRAL_EXCELENTE = 80
+UMBRAL_APTO_DEFAULT = 70
+# Saona pasa a apto con menos puntuación que Krispy Kreme (65% en vez de
+# 70%) -- decisión de negocio propia de esa empresa, no un error de cálculo.
+UMBRAL_APTO_POR_EMPRESA = {"saona": 65}
+
 LIST_VALUES = ["Integridad", "Positividad", "Generosidad", "Determinación"]
 LIST_COMPS = [
     "Atención al detalle", "Capacidad de análisis", "Comunicación", "Liderazgo",
@@ -294,11 +300,15 @@ def _detectar_fecha(headers, headers_norm):
     return None
 
 
-def calcular(filas, columnas_extra=None):
+def calcular(filas, columnas_extra=None, empresa=None):
     """Recibe las filas crudas de la hoja "Respuestas" (lista de dicts
     columna->valor, tal como las devuelve read_workbook_sheets) y devuelve
     (scoring_rows, dashboard_rows) — mismas columnas que generaba el script
     de Excel, más "Fecha del test" tomada de la hoja de respuestas.
+
+    empresa: 'kk'/'saona'/None -- decide el umbral de apto (ver
+    UMBRAL_APTO_POR_EMPRESA). Si no se reconoce la empresa, se usa el umbral
+    por defecto (Krispy Kreme).
 
     columnas_extra: nombres de columna (normalmente preguntas abiertas o de
     "ordenar prioridades" del módulo de Test) que se copian tal cual, sin
@@ -311,6 +321,7 @@ def calcular(filas, columnas_extra=None):
     if not filas:
         return [], []
     columnas_extra = columnas_extra or set()
+    umbral_apto = UMBRAL_APTO_POR_EMPRESA.get(empresa, UMBRAL_APTO_DEFAULT)
 
     headers = list(filas[0].keys())
     headers_norm = [_normalize(h) for h in headers]
@@ -448,9 +459,9 @@ def calcular(filas, columnas_extra=None):
         r_comp = round(final_comp, 2)
         r_global = round(r_val * W_VAL + r_comp * W_COMP, 2)
 
-        if r_global >= 80:
+        if r_global >= UMBRAL_EXCELENTE:
             resultado = "⭐ Excelente"
-        elif r_global >= 70:
+        elif r_global >= umbral_apto:
             resultado = "✅ Alineado"
         else:
             resultado = "❌ No apto"
