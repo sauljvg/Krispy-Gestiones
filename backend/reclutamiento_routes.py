@@ -500,6 +500,21 @@ def _rellenar_huecos_en_segundo_plano(lote_id: str, items: list[tuple[int, int]]
             reclutamiento_module.marcar_ia_extraida(candidato_id)
             if extraidos:
                 reclutamiento_module.rellenar_huecos_candidato(candidato_id, extraidos[0])
+            # Foto de perfil: igual que al subir un CV suelto (ver
+            # guardarCandidato en compartidos.js) o al pulsar "Re-extraer" a
+            # mano en una ficha -- antes esto SOLO pasaba en esos dos casos,
+            # nunca aquí, así que ningún candidato creado en lote sacaba foto
+            # hasta que alguien entraba a su ficha y la pedía a mano. Como
+            # aquí `recorte` YA es el PDF individual de este candidato (no
+            # el lote entero, ver adjuntar_pdf_lote_confirmar_route), sacar
+            # la foto de su "página 1" sí es de verdad la suya. Solo si
+            # todavía no tiene, para no pisar una que el reclutador haya
+            # subido o cambiado a mano mientras el lote seguía procesando.
+            if not reclutamiento_module.get_foto_ruta(candidato_id):
+                foto = cv_extraction.extraer_foto(recorte)
+                if foto is not None:
+                    datos_foto, ext_foto = foto
+                    reclutamiento_module.guardar_foto(candidato_id, datos_foto, ext_foto)
             reclutamiento_module.marcar_candidato_lote_terminado(lote_id, candidato_id)
         except Exception as exc:
             # Error real de ESTE candidato (PDF corrupto, lo que sea) -- se
