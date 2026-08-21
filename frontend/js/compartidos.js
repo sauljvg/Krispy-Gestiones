@@ -106,7 +106,14 @@ function actualizarEnlacesCampana() {
     const link = document.querySelector(`.btn-whatsapp-campana[data-idx="${i}"]`);
     if (!link) return;
     const primerNombre = (c.nombre_completo || "").trim().split(/\s+/)[0] || "";
-    const vacanteTxt = c.vacante_puesto ? `${c.vacante_puesto}${c.vacante_centro ? ` · ${c.vacante_centro}` : ""}` : "";
+    // c.vacante_puesto/vacante_centro NO existen en los candidatos de esta
+    // lista (list_candidatos no hace ese join, a diferencia de get_candidato
+    // para una ficha suelta) -- hay que resolverlo por c.vacante_id contra
+    // vacantesTodasCache, igual que ya hace candidatoMiniCardHTML. Vacío (no
+    // "Sin vacante asignada") si no tiene, para que la frase quede natural
+    // sin tener que reescribir la plantilla según el caso.
+    const vacanteEncontrada = vacantesTodasCache.find((v) => v.id === c.vacante_id);
+    const vacanteTxt = vacanteEncontrada ? `${vacanteEncontrada.puesto}${vacanteEncontrada.centro ? ` · ${vacanteEncontrada.centro}` : ""}` : "";
     const mensaje = plantilla
       .replaceAll("{nombre}", primerNombre)
       .replaceAll("{nombre_completo}", c.nombre_completo || "")
