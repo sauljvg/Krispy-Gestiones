@@ -117,7 +117,10 @@ async function loadOleadas() {
   const oleadas = await res.json();
   const select = document.getElementById("select-oleada");
   select.innerHTML = oleadas
-    .map((o) => `<option value="${o.id}">${o.etiqueta || `Oleada #${o.numero}`} (${o.num_respuestas} respuestas · ${o.creado_en.slice(0, 10)})</option>`)
+    .map((o) => {
+      const faseTxt = o.fase === "pulso" ? "Pulso" : "Encuesta completa";
+      return `<option value="${o.id}">${o.etiqueta || `Oleada #${o.numero}`} · ${faseTxt} (${o.num_respuestas} respuestas · ${o.creado_en.slice(0, 10)})</option>`;
+    })
     .join("");
   if (oleadas.length === 0) {
     document.getElementById("centro-grid").innerHTML = `<p class="staff-hint">Todavía no has importado ningún Excel de Clima Laboral.</p>`;

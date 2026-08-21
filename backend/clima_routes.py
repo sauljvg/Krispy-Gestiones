@@ -13,6 +13,7 @@ router = APIRouter()
 class NuevaOleadaBody(BaseModel):
     etiqueta: str
     empresa: str = "kk"
+    fase: str = "completa"
 
 
 class PlantillaBody(BaseModel):
@@ -63,7 +64,8 @@ def crear_oleada_route(body: NuevaOleadaBody, user: dict = Depends(get_current_u
         raise HTTPException(status_code=403, detail="No tienes acceso a Clima Laboral")
     if not body.etiqueta.strip():
         raise HTTPException(status_code=400, detail="Ponle un nombre a la oleada")
-    oleada_id = clima_module.crear_oleada(body.etiqueta.strip(), body.empresa)
+    fase = body.fase if body.fase in ("completa", "pulso") else "completa"
+    oleada_id = clima_module.crear_oleada(body.etiqueta.strip(), body.empresa, fase)
     return {"ok": True, "id": oleada_id}
 
 

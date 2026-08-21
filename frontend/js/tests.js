@@ -33,10 +33,16 @@ async function loadTiposInforme() {
     `</optgroup>` +
     `<optgroup label="Clima Laboral">` +
     oleadas
-      .map((o) => `<option value="clima:${o.id}">${escapeHTML(o.etiqueta || `Oleada #${o.numero} sin nombre`)}</option>`)
+      .map((o) => {
+        const faseTxt = o.fase === "pulso" ? "Pulso" : "Encuesta completa";
+        const nombre = o.etiqueta || `Oleada #${o.numero} sin nombre`;
+        return `<option value="clima:${o.id}">${escapeHTML(nombre)} (${faseTxt})</option>`;
+      })
       .join("") +
-    `<option value="clima:nueva:kk">+ Nueva oleada de Clima Laboral — Krispy Kreme</option>` +
-    `<option value="clima:nueva:saona">+ Nueva oleada de Clima Laboral — SAONA</option>` +
+    `<option value="clima:nueva:kk:completa">+ Nueva Encuesta completa de Clima Laboral — Krispy Kreme</option>` +
+    `<option value="clima:nueva:kk:pulso">+ Nuevo Pulso de Clima Laboral — Krispy Kreme</option>` +
+    `<option value="clima:nueva:saona:completa">+ Nueva Encuesta completa de Clima Laboral — SAONA</option>` +
+    `<option value="clima:nueva:saona:pulso">+ Nuevo Pulso de Clima Laboral — SAONA</option>` +
     `</optgroup>`;
 }
 
@@ -1024,8 +1030,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("test-tipo-informe").addEventListener("change", async (e) => {
     const val = e.target.value;
     if (val.startsWith("clima:nueva:")) {
-      const empresa = val.slice("clima:nueva:".length);
-      const etiqueta = prompt('Nombre de esta oleada de Clima Laboral (ej. "2026 · Encuesta completa"):');
+      const [, , empresa, fase] = val.split(":");
+      const sugerido = fase === "pulso" ? "2026 · Pulso" : "2026 · Encuesta completa";
+      const etiqueta = prompt(`Nombre de esta oleada de Clima Laboral (ej. "${sugerido}"):`);
       if (!etiqueta || !etiqueta.trim()) {
         e.target.value = currentTest?.clima_oleada_id ? `clima:${currentTest.clima_oleada_id}` : "";
         return;
@@ -1033,7 +1040,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const res = await fetch(`${AUTH_API_BASE}/clima/oleadas`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ etiqueta: etiqueta.trim(), empresa }),
+        body: JSON.stringify({ etiqueta: etiqueta.trim(), empresa, fase }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
