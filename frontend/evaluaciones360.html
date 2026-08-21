@@ -41,11 +41,20 @@
      drag & drop para reasignar el puesto al que reporta cada uno. Patrón
      CSS clásico de organigrama (ul/li anidados + bordes en ::before/::after
      dibujando las líneas), en vez de una librería de diagramas aparte. */
-  .orgchart-scroll { overflow-x: auto; padding: 24px 12px 40px; margin: 0 -12px; }
-  .orgchart, .orgchart ul { list-style: none; margin: 0; padding: 0; display: flex; justify-content: center; }
-  .orgchart { padding-top: 0; }
+  .orgchart-scroll { overflow: auto; padding: 24px 12px 40px; margin: 0 -12px; cursor: grab; max-height: 70vh; }
+  .orgchart-scroll.panning { cursor: grabbing; user-select: none; }
+  .orgchart, .orgchart ul { list-style: none; margin: 0; padding: 0; display: flex; justify-content: center; width: max-content; }
+  .orgchart { padding-top: 0; margin: 0 auto; }
   .orgchart li { position: relative; padding: 28px 10px 0; text-align: center; }
-  .orgchart li ul { padding-top: 28px; position: relative; }
+  .orgchart li ul { padding-top: 28px; position: relative; margin: 0 auto; }
+  .orgchart-toggle {
+    position: absolute; bottom: -9px; left: 50%; transform: translateX(-50%); z-index: 2;
+    width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-secondary); font-size: 10px; line-height: 1;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0;
+  }
+  .orgchart-toggle:hover { background: var(--surface-2); color: var(--text-primary); }
+  .orgchart-box { position: relative; }
   .orgchart li ul::before {
     content: ""; position: absolute; top: 0; left: 50%; width: 0; height: 28px;
     border-left: 2px solid var(--border);
@@ -84,6 +93,11 @@
   .persona-row .persona-nombre, .fila-simple .fila-titulo { font-weight: 600; }
   .persona-row .persona-puesto { color: var(--text-secondary); font-size: 13px; }
   .persona-row .persona-acciones, .fila-simple .fila-acciones { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
+  .persona-row { cursor: grab; }
+  .persona-row:active { cursor: grabbing; }
+  .persona-row.arrastrando { opacity: 0.4; }
+  .persona-row.drop-valido { border-color: var(--status-good); box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-good) 40%, transparent); }
+  .persona-row.drop-invalido { border-color: var(--status-bad, #c62828); }
   .badge-cuenta { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); white-space: nowrap; }
   .badge-sin-cuenta { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-secondary); white-space: nowrap; }
   .badge-estado { font-size: 11px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
@@ -357,6 +371,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260723f"></script>
 <script src="js/topbar-menu.js?v=20260821a"></script>
-<script src="js/evaluaciones360.js?v=20260821e"></script>
+<script src="js/evaluaciones360.js?v=20260821f"></script>
 </body>
 </html>

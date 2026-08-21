@@ -92,8 +92,12 @@ function renderOrganigrama() {
   pintar("raiz", 0, new Set());
   ul.innerHTML = html.join("");
   ul.querySelectorAll("[data-editar]").forEach((btn) => {
-    btn.addEventListener("click", () => abrirEditorPersona(Number(btn.dataset.editar)));
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      abrirEditorPersona(Number(btn.dataset.editar));
+    });
   });
+  wirePersonaRows(ul);
 }
 
 function filaPersona(persona, profundidad) {
@@ -103,7 +107,7 @@ function filaPersona(persona, profundidad) {
   const puesto = persona.puesto_nombre ? `<span class="persona-puesto">${escapeHTML(persona.puesto_nombre)}</span>` : "";
   return `
     <li style="margin-left:${profundidad * 26}px;">
-      <div class="persona-row">
+      <div class="persona-row" draggable="true" data-persona-id="${persona.id}">
         <span class="persona-nombre">${escapeHTML(persona.nombre_completo)}</span>
         ${puesto}
         ${cuenta}
@@ -115,11 +119,79 @@ function filaPersona(persona, profundidad) {
 }
 
 // ---------------------------------------------------------------------------
+// Arrastrar y soltar personas para cambiar su jefe directo
+// ---------------------------------------------------------------------------
+
+let personaArrastradaId = null;
+
+function esReparentadoValidoPersona(arrastradaId, destinoId) {
+  if (arrastradaId === destinoId) return false;
+  // Igual que con los puestos: el destino no puede ser un reporte (directo
+  // o indirecto) de la persona que se arrastra, o se crearía un ciclo.
+  let cursor = PERSONAS.find((p) => p.id === destinoId);
+  while (cursor && cursor.jefe_directo_id) {
+    if (cursor.jefe_directo_id === arrastradaId) return false;
+    cursor = PERSONAS.find((p) => p.id === cursor.jefe_directo_id);
+  }
+  return true;
+}
+
+async function reparentarPersona(personaId, nuevoJefeId) {
+  await fetch(`${AUTH_API_BASE}/evaluaciones360/personas/${personaId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jefe_directo_id: nuevoJefeId }),
+  });
+  await cargarOrganigrama();
+}
+
+function wirePersonaRows(ul) {
+  ul.querySelectorAll(".persona-row").forEach((row) => {
+    row.addEventListener("dragstart", (e) => {
+      personaArrastradaId = Number(row.dataset.personaId);
+      row.classList.add("arrastrando");
+      e.dataTransfer.effectAllowed = "move";
+    });
+    row.addEventListener("dragend", () => {
+      personaArrastradaId = null;
+      ul.querySelectorAll(".arrastrando, .drop-valido, .drop-invalido").forEach((r) => {
+        r.classList.remove("arrastrando", "drop-valido", "drop-invalido");
+      });
+    });
+    row.addEventListener("dragover", (e) => {
+      if (personaArrastradaId === null) return;
+      e.preventDefault();
+    });
+    row.addEventListener("dragenter", (e) => {
+      if (personaArrastradaId === null) return;
+      e.preventDefault();
+      const destinoId = Number(row.dataset.personaId);
+      row.classList.toggle("drop-valido", esReparentadoValidoPersona(personaArrastradaId, destinoId));
+      row.classList.toggle("drop-invalido", !esReparentadoValidoPersona(personaArrastradaId, destinoId));
+    });
+    row.addEventListener("dragleave", () => {
+      row.classList.remove("drop-valido", "drop-invalido");
+    });
+    row.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      row.classList.remove("drop-valido", "drop-invalido");
+      const destinoId = Number(row.dataset.personaId);
+      const arrastradaId = personaArrastradaId;
+      personaArrastradaId = null;
+      if (arrastradaId === null || !esReparentadoValidoPersona(arrastradaId, destinoId)) return;
+      await reparentarPersona(arrastradaId, destinoId);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Organigrama por puesto de trabajo
 // ---------------------------------------------------------------------------
 
 let editandoPuestoId = null;
 let puestoArrastradoId = null;
+const puestosColapsados = new Set();
 
 function activarSubvistaOrganigrama(nombre) {
   document.querySelectorAll(".eval360-subtab-btn").forEach((b) => b.classList.toggle("activa", b.dataset.subvista === nombre));
@@ -165,7 +237,11 @@ function nodoPuestoHTML(puesto, porPadre, personasPorPuesto, vistos) {
   const personasHTML = personas.length
     ? `<span class="puesto-personas">${personas.map((p) => escapeHTML(p.nombre_completo)).join(", ")}</span>`
     : `<span class="puesto-vacante">Vacante</span>`;
-  const hijosHTML = hijos.length
+  const colapsado = puestosColapsados.has(puesto.id);
+  const toggleHTML = hijos.length
+    ? `<button type="button" class="orgchart-toggle" data-toggle-puesto="${puesto.id}" title="${colapsado ? "Expandir" : "Colapsar"}">${colapsado ? "+" : "−"}</button>`
+    : "";
+  const hijosHTML = hijos.length && !colapsado
     ? `<ul>${hijos.map((h) => nodoPuestoHTML(h, porPadre, personasPorPuesto, vistosHijo)).join("")}</ul>`
     : "";
   return `
@@ -177,6 +253,7 @@ function nodoPuestoHTML(puesto, porPadre, personasPorPuesto, vistos) {
           <button type="button" class="btn btn-ghost btn-mini" data-nuevo-subpuesto="${puesto.id}">＋</button>
           <button type="button" class="btn btn-ghost btn-mini" data-editar-puesto="${puesto.id}">✎</button>
         </div>
+        ${toggleHTML}
       </div>
       ${hijosHTML}
     </li>`;
@@ -216,6 +293,15 @@ function wirePuestoBoxes(cont) {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       abrirEditorPuesto(null, Number(btn.dataset.nuevoSubpuesto));
+    });
+  });
+  cont.querySelectorAll("[data-toggle-puesto]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = Number(btn.dataset.togglePuesto);
+      if (puestosColapsados.has(id)) puestosColapsados.delete(id);
+      else puestosColapsados.add(id);
+      renderPuestosArbol();
     });
   });
 
@@ -933,6 +1019,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btn-guardar-persona").addEventListener("click", guardarPersona);
   document.getElementById("btn-eliminar-persona").addEventListener("click", eliminarPersona);
   document.getElementById("btn-nuevo-puesto").addEventListener("click", nuevoPuesto);
+  const personasCont = document.getElementById("organigrama-lista");
+  personasCont.addEventListener("dragover", (e) => {
+    if (personaArrastradaId !== null) e.preventDefault();
+  });
+  personasCont.addEventListener("drop", async (e) => {
+    if (e.target.closest(".persona-row")) return; // ya lo gestiona la fila concreta
+    e.preventDefault();
+    const arrastradaId = personaArrastradaId;
+    personaArrastradaId = null;
+    if (arrastradaId === null) return;
+    await reparentarPersona(arrastradaId, null);
+  });
 
   document.querySelectorAll(".eval360-subtab-btn").forEach((btn) => {
     btn.addEventListener("click", () => activarSubvistaOrganigrama(btn.dataset.subvista));
@@ -950,6 +1048,33 @@ document.addEventListener("DOMContentLoaded", async () => {
     puestoArrastradoId = null;
     if (arrastradoId === null) return;
     await reparentarPuesto(arrastradoId, null);
+  });
+  // Arrastrar el fondo (no una caja) para desplazar el árbol -- como el
+  // organigrama es más ancho/alto que el hueco disponible, la barra de
+  // scroll sola no era suficiente, esto imita el "click y arrastra para
+  // moverte" del organigrama de Bizneo.
+  let panActivo = false;
+  let panOrigenX = 0;
+  let panOrigenY = 0;
+  let panScrollX = 0;
+  let panScrollY = 0;
+  arbolCont.addEventListener("mousedown", (e) => {
+    if (e.target.closest(".orgchart-box")) return; // esa caja usa su propio drag (reparent)
+    panActivo = true;
+    panOrigenX = e.clientX;
+    panOrigenY = e.clientY;
+    panScrollX = arbolCont.scrollLeft;
+    panScrollY = arbolCont.scrollTop;
+    arbolCont.classList.add("panning");
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!panActivo) return;
+    arbolCont.scrollLeft = panScrollX - (e.clientX - panOrigenX);
+    arbolCont.scrollTop = panScrollY - (e.clientY - panOrigenY);
+  });
+  window.addEventListener("mouseup", () => {
+    panActivo = false;
+    arbolCont.classList.remove("panning");
   });
   document.getElementById("btn-guardar-puesto").addEventListener("click", guardarPuesto);
   document.getElementById("btn-desactivar-puesto").addEventListener("click", desactivarPuesto);
