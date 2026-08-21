@@ -253,8 +253,14 @@ function wirePersonaRows(ul) {
 
 let editandoPuestoId = null;
 let puestoArrastradoId = null;
+// Claves de colapso (siempre string): el id del puesto para una caja normal
+// o resumen, "persona:<id>" para colapsar los hijos de una caja individual
+// dentro de un puesto compartido ya desplegado.
 const puestosColapsados = new Set();
-let personasPorPuestoActual = new Map();
+// Puestos compartidos (varios ocupantes) que el usuario ha desplegado en
+// "una caja por persona" -- por defecto se muestran como una única caja
+// resumen con todos los nombres juntos.
+const puestosDetalle = new Set();
 
 function activarSubvistaOrganigrama(nombre) {
   document.querySelectorAll(".eval360-subtab-btn").forEach((b) => b.classList.toggle("activa", b.dataset.subvista === nombre));
@@ -276,7 +282,6 @@ function renderPuestosArbol() {
       personasPorPuesto.get(puesto.id).push(persona);
     }
   }
-  personasPorPuestoActual = personasPorPuesto; // para los handlers de drag, fuera de esta función
   const porPadre = new Map();
   for (const p of PUESTOS) {
     const clave = p.puesto_padre_id || "raiz";
@@ -289,43 +294,124 @@ function renderPuestosArbol() {
     return;
   }
   cont.innerHTML = raices
-    .map((raiz, i) => `<ul class="orgchart${i > 0 ? " orgchart-raiz-extra" : ""}">${nodoPuestoHTML(raiz, porPadre, personasPorPuesto, new Set())}</ul>`)
+    .map((raiz, i) => `<ul class="orgchart${i > 0 ? " orgchart-raiz-extra" : ""}">${nodoPuestoHTML(raiz, porPadre, personasPorPuesto, new Set(), undefined)}</ul>`)
     .join("");
   wirePuestoBoxes(cont);
 }
 
-function nodoPuestoHTML(puesto, porPadre, personasPorPuesto, vistos) {
+// `jefeFiltro` (número, null o undefined) determina qué ocupantes de este
+// puesto se listan: undefined = todos (modo normal); un id = solo quien
+// tenga exactamente ese jefe_directo_id -- estamos dentro de la caja
+// individual de una persona concreta (ocupante de un puesto compartido ya
+// desplegado "por persona"), así que sus subordinados (p.ej. sus jefes de
+// turno) se reparten según a quién reportan de verdad, no todos juntos.
+function nodoPuestoHTML(puesto, porPadre, personasPorPuesto, vistos, jefeFiltro) {
   if (vistos.has(puesto.id)) return "";
   const vistosHijo = new Set(vistos).add(puesto.id);
   const hijos = (porPadre.get(puesto.id) || []).filter((h) => !vistosHijo.has(h.id));
-  const personas = personasPorPuesto.get(puesto.id) || [];
-  // Cada persona es su propia ficha arrastrable -- cuando un puesto lo
-  // comparten varios (ej. "Gerente de Retail"), cada uno puede tener un
-  // jefe directo distinto (su encargado de turno concreto), no todos el
-  // mismo por defecto solo por compartir puesto.
-  const personasHTML = personas.length
-    ? `<span class="puesto-personas">${personas.map((p) => `<span class="persona-chip" draggable="true" data-persona-id="${p.id}" title="Arrastra para cambiar su jefe directo">${escapeHTML(p.nombre_completo)}</span>`).join("")}</span>`
-    : `<span class="puesto-vacante">Vacante</span>`;
-  const colapsado = puestosColapsados.has(puesto.id);
-  const toggleHTML = hijos.length
-    ? `<button type="button" class="orgchart-toggle" data-toggle-puesto="${puesto.id}" title="${colapsado ? "Expandir" : "Colapsar"}">${colapsado ? "+" : "−"}</button>`
-    : "";
-  const hijosHTML = hijos.length && !colapsado
-    ? `<ul>${hijos.map((h) => nodoPuestoHTML(h, porPadre, personasPorPuesto, vistosHijo)).join("")}</ul>`
-    : "";
-  return `
-    <li>
-      <div class="orgchart-box" draggable="true" data-puesto-id="${puesto.id}">
-        <span class="puesto-nombre">${escapeHTML(puesto.nombre)}</span>
-        ${personasHTML}
-        <div class="puesto-acciones">
-          <button type="button" class="btn btn-ghost btn-mini" data-nuevo-subpuesto="${puesto.id}">＋</button>
-          <button type="button" class="btn btn-ghost btn-mini" data-editar-puesto="${puesto.id}">✎</button>
+  const todos = personasPorPuesto.get(puesto.id) || [];
+  const ocupantes = jefeFiltro === undefined ? todos : todos.filter((p) => p.jefe_directo_id === jefeFiltro);
+
+  if (ocupantes.length <= 1) {
+    const persona = ocupantes[0] || null;
+    const siguienteFiltro = persona ? persona.id : undefined;
+    const personasHTML = persona
+      ? `<span class="puesto-personas"><span class="persona-chip" draggable="true" data-persona-id="${persona.id}" title="Arrastra para cambiar su jefe directo">${escapeHTML(persona.nombre_completo)}</span></span>`
+      : `<span class="puesto-vacante">Vacante</span>`;
+    const clave = String(puesto.id);
+    const colapsado = puestosColapsados.has(clave);
+    const toggleHTML = hijos.length
+      ? `<button type="button" class="orgchart-toggle" data-toggle-puesto="${clave}" title="${colapsado ? "Expandir" : "Colapsar"}">${colapsado ? "+" : "−"}</button>`
+      : "";
+    const hijosHTML = hijos.length && !colapsado
+      ? `<ul>${hijos.map((h) => nodoPuestoHTML(h, porPadre, personasPorPuesto, vistosHijo, siguienteFiltro)).join("")}</ul>`
+      : "";
+    return `
+      <li>
+        <div class="orgchart-box" draggable="true" data-puesto-id="${puesto.id}" data-jefe-target-id="${persona ? persona.id : ""}">
+          <span class="puesto-nombre">${escapeHTML(puesto.nombre)}</span>
+          ${personasHTML}
+          <div class="puesto-acciones">
+            <button type="button" class="btn btn-ghost btn-mini" data-nuevo-subpuesto="${puesto.id}">＋</button>
+            <button type="button" class="btn btn-ghost btn-mini" data-editar-puesto="${puesto.id}">✎</button>
+          </div>
+          ${toggleHTML}
         </div>
-        ${toggleHTML}
-      </div>
-      ${hijosHTML}
-    </li>`;
+        ${hijosHTML}
+      </li>`;
+  }
+
+  if (!puestosDetalle.has(puesto.id)) {
+    // Resumen: una única caja con todos los nombres juntos (como siempre).
+    const clave = String(puesto.id);
+    const colapsado = puestosColapsados.has(clave);
+    const toggleHTML = hijos.length
+      ? `<button type="button" class="orgchart-toggle" data-toggle-puesto="${clave}" title="${colapsado ? "Expandir" : "Colapsar"}">${colapsado ? "+" : "−"}</button>`
+      : "";
+    const hijosHTML = hijos.length && !colapsado
+      ? `<ul>${hijos.map((h) => nodoPuestoHTML(h, porPadre, personasPorPuesto, vistosHijo, undefined)).join("")}</ul>`
+      : "";
+    const personasHTML = `<span class="puesto-personas">${ocupantes.map((p) => `<span class="persona-chip" draggable="true" data-persona-id="${p.id}" title="Arrastra para cambiar su jefe directo">${escapeHTML(p.nombre_completo)}</span>`).join("")}</span>`;
+    return `
+      <li>
+        <div class="orgchart-box" draggable="true" data-puesto-id="${puesto.id}">
+          <span class="puesto-nombre">${escapeHTML(puesto.nombre)}</span>
+          ${personasHTML}
+          <div class="puesto-acciones">
+            <button type="button" class="btn btn-ghost btn-mini" data-ver-detalle-puesto="${puesto.id}" title="Una caja por persona, cada una con sus propios reportes">⛶</button>
+            <button type="button" class="btn btn-ghost btn-mini" data-nuevo-subpuesto="${puesto.id}">＋</button>
+            <button type="button" class="btn btn-ghost btn-mini" data-editar-puesto="${puesto.id}">✎</button>
+          </div>
+          ${toggleHTML}
+        </div>
+        ${hijosHTML}
+      </li>`;
+  }
+
+  // Desplegado "por persona": una caja por ocupante, cada una con sus
+  // propios hijos (p.ej. cada Gerente de Retail ve solo a SUS jefes de
+  // turno debajo, no los de sus compañeros de puesto).
+  const idsOcupantes = new Set(ocupantes.map((o) => o.id));
+  let cajas = ocupantes
+    .map((persona) => {
+      const clave = `persona:${persona.id}`;
+      const colapsado = puestosColapsados.has(clave);
+      const hijosHTML = hijos.map((h) => nodoPuestoHTML(h, porPadre, personasPorPuesto, vistosHijo, persona.id)).join("");
+      const toggleHTML = hijosHTML
+        ? `<button type="button" class="orgchart-toggle" data-toggle-puesto="${clave}" title="${colapsado ? "Expandir" : "Colapsar"}">${colapsado ? "+" : "−"}</button>`
+        : "";
+      const hijosVisibles = hijosHTML && !colapsado ? `<ul>${hijosHTML}</ul>` : "";
+      return `
+        <li>
+          <div class="orgchart-box orgchart-box-individual" draggable="true" data-puesto-id="${puesto.id}" data-persona-id="${persona.id}" data-jefe-target-id="${persona.id}" title="Arrastra para cambiar su jefe directo">
+            <span class="puesto-nombre">${escapeHTML(puesto.nombre)}</span>
+            <span class="puesto-personas">${escapeHTML(persona.nombre_completo)}</span>
+            <div class="puesto-acciones">
+              <button type="button" class="btn btn-ghost btn-mini" data-ver-resumen-puesto="${puesto.id}" title="Volver a juntar en una única caja resumen">⛶</button>
+            </div>
+            ${toggleHTML}
+          </div>
+          ${hijosVisibles}
+        </li>`;
+    })
+    .join("");
+  // Si algún hijo tiene ocupantes cuyo jefe_directo_id no coincide con
+  // ninguno de los actuales (datos desincronizados), no se ocultan -- salen
+  // aparte con un aviso, para no perder gente de vista.
+  for (const h of hijos) {
+    const todosDelHijo = personasPorPuesto.get(h.id) || [];
+    const huerfanos = todosDelHijo.filter((x) => !idsOcupantes.has(x.jefe_directo_id));
+    if (huerfanos.length) {
+      cajas += `
+        <li>
+          <div class="orgchart-box orgchart-box-huerfanos" title="El jefe directo actual de estas personas no coincide con ninguno de los ocupantes de &quot;${escapeHTML(puesto.nombre)}&quot; -- revisa su jefe directo (arrástralas sobre la caja correcta, o edítalas desde &quot;Por persona&quot;).">
+            <span class="puesto-nombre">⚠ ${escapeHTML(h.nombre)}</span>
+            <span class="puesto-personas">${huerfanos.map((p) => escapeHTML(p.nombre_completo)).join(", ")}</span>
+          </div>
+        </li>`;
+    }
+  }
+  return cajas;
 }
 
 function esReparentadoValido(arrastradoId, destinoId) {
@@ -341,13 +427,16 @@ function esReparentadoValido(arrastradoId, destinoId) {
   return true;
 }
 
-async function reparentarPuesto(puestoId, nuevoPadreId) {
+async function reparentarPuesto(puestoId, nuevoPadreId, nuevoJefeIdOverride) {
   // Sincronizado con "Por persona": quien ocupe el puesto que se mueve
   // pasa a tener como jefe directo a quien ocupe el nuevo puesto padre --
   // es la misma empresa, las dos vistas del organigrama no pueden quedar
-  // desincronizadas por moverlo desde un solo lado.
+  // desincronizadas por moverlo desde un solo lado. Si el drop fue sobre
+  // una caja individual (ocupante único, o una persona concreta desplegada
+  // dentro de un puesto compartido), se usa ese id exacto en vez de
+  // adivinar "el primero que ocupe el puesto".
   const nuevoJefeId = nuevoPadreId
-    ? (PERSONAS.find((p) => (p.puestos || []).some((pu) => pu.id === nuevoPadreId))?.id ?? null)
+    ? (nuevoJefeIdOverride !== undefined ? nuevoJefeIdOverride : (PERSONAS.find((p) => (p.puestos || []).some((pu) => pu.id === nuevoPadreId))?.id ?? null))
     : null;
   const ocupantes = PERSONAS.filter((p) => (p.puestos || []).some((pu) => pu.id === puestoId));
   for (const persona of ocupantes) {
@@ -383,12 +472,32 @@ function wirePuestoBoxes(cont) {
   cont.querySelectorAll("[data-toggle-puesto]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      const id = Number(btn.dataset.togglePuesto);
-      if (puestosColapsados.has(id)) puestosColapsados.delete(id);
-      else puestosColapsados.add(id);
+      const clave = btn.dataset.togglePuesto;
+      if (puestosColapsados.has(clave)) puestosColapsados.delete(clave);
+      else puestosColapsados.add(clave);
       renderPuestosArbol();
     });
   });
+  cont.querySelectorAll("[data-ver-detalle-puesto]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      puestosDetalle.add(Number(btn.dataset.verDetallePuesto));
+      renderPuestosArbol();
+    });
+  });
+  cont.querySelectorAll("[data-ver-resumen-puesto]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      puestosDetalle.delete(Number(btn.dataset.verResumenPuesto));
+      renderPuestosArbol();
+    });
+  });
+
+  const limpiarEstadosDrag = () => {
+    cont.querySelectorAll(".arrastrando, .drop-valido, .drop-invalido").forEach((b) => {
+      b.classList.remove("arrastrando", "drop-valido", "drop-invalido");
+    });
+  };
 
   cont.querySelectorAll(".persona-chip").forEach((chip) => {
     chip.addEventListener("dragstart", (e) => {
@@ -400,14 +509,28 @@ function wirePuestoBoxes(cont) {
     chip.addEventListener("dragend", (e) => {
       e.stopPropagation();
       personaArrastradaId = null;
-      cont.querySelectorAll(".arrastrando, .drop-valido, .drop-invalido").forEach((b) => {
-        b.classList.remove("arrastrando", "drop-valido", "drop-invalido");
-      });
+      limpiarEstadosDrag();
     });
     chip.addEventListener("click", (e) => e.stopPropagation());
   });
 
-  cont.querySelectorAll(".orgchart-box").forEach((box) => {
+  // Caja individual (una persona concreta dentro de un puesto ya desplegado
+  // "por persona"): arrastrarla reasigna solo su jefe directo, nunca el
+  // puesto compartido -- por eso NO se une al grupo de abajo que arrastra
+  // el puesto entero.
+  cont.querySelectorAll(".orgchart-box-individual").forEach((box) => {
+    box.addEventListener("dragstart", (e) => {
+      personaArrastradaId = Number(box.dataset.personaId);
+      box.classList.add("arrastrando");
+      e.dataTransfer.effectAllowed = "move";
+    });
+    box.addEventListener("dragend", () => {
+      personaArrastradaId = null;
+      limpiarEstadosDrag();
+    });
+  });
+
+  cont.querySelectorAll(".orgchart-box:not(.orgchart-box-individual)").forEach((box) => {
     box.addEventListener("dragstart", (e) => {
       puestoArrastradoId = Number(box.dataset.puestoId);
       box.classList.add("arrastrando");
@@ -415,27 +538,33 @@ function wirePuestoBoxes(cont) {
     });
     box.addEventListener("dragend", () => {
       puestoArrastradoId = null;
-      cont.querySelectorAll(".arrastrando, .drop-valido, .drop-invalido").forEach((b) => {
-        b.classList.remove("arrastrando", "drop-valido", "drop-invalido");
-      });
+      limpiarEstadosDrag();
     });
+  });
+
+  // Dragover/drop es común a toda caja (individual o no) -- puede recibir
+  // tanto una ficha de persona (reasignar jefe directo) como otro puesto
+  // arrastrado encima (reasignar su puesto padre).
+  cont.querySelectorAll(".orgchart-box").forEach((box) => {
     box.addEventListener("dragover", (e) => {
       if (puestoArrastradoId === null && personaArrastradaId === null) return;
       e.preventDefault();
     });
     box.addEventListener("dragenter", (e) => {
-      const destinoId = Number(box.dataset.puestoId);
       if (personaArrastradaId !== null) {
         e.preventDefault();
-        const valido = esValidoSoltarPersonaEnPuesto(personaArrastradaId, destinoId);
+        const jefeId = box.dataset.jefeTargetId ? Number(box.dataset.jefeTargetId) : null;
+        const valido = jefeId !== null && jefeId !== personaArrastradaId;
         box.classList.toggle("drop-valido", valido);
         box.classList.toggle("drop-invalido", !valido);
         return;
       }
-      if (puestoArrastradoId === null) return;
+      if (puestoArrastradoId === null || !box.dataset.puestoId) return;
       e.preventDefault();
-      box.classList.toggle("drop-valido", esReparentadoValido(puestoArrastradoId, destinoId));
-      box.classList.toggle("drop-invalido", !esReparentadoValido(puestoArrastradoId, destinoId));
+      const destinoId = Number(box.dataset.puestoId);
+      const valido = esReparentadoValido(puestoArrastradoId, destinoId);
+      box.classList.toggle("drop-valido", valido);
+      box.classList.toggle("drop-invalido", !valido);
     });
     box.addEventListener("dragleave", () => {
       box.classList.remove("drop-valido", "drop-invalido");
@@ -444,24 +573,27 @@ function wirePuestoBoxes(cont) {
       e.preventDefault();
       e.stopPropagation();
       box.classList.remove("drop-valido", "drop-invalido");
-      const destinoId = Number(box.dataset.puestoId);
 
       if (personaArrastradaId !== null) {
         const arrastradaId = personaArrastradaId;
         personaArrastradaId = null;
-        if (!esValidoSoltarPersonaEnPuesto(arrastradaId, destinoId)) {
-          await mostrarAviso("Ese puesto no tiene un único responsable claro (está vacante o lo comparte más de una persona), así que no se puede usar directamente como jefe. Ábrelo y asigna el jefe directo a mano si hace falta.");
+        const jefeId = box.dataset.jefeTargetId ? Number(box.dataset.jefeTargetId) : null;
+        if (jefeId === null) {
+          await mostrarAviso('Ese puesto no tiene un único responsable claro (está vacante o lo comparte más de una persona). Pulsa "⛶" en esa caja y suelta sobre la persona concreta.');
           return;
         }
-        const nuevoJefeId = (personasPorPuestoActual.get(destinoId) || [])[0].id;
-        await asignarJefeDirectoSolo(arrastradaId, nuevoJefeId);
+        if (jefeId === arrastradaId) return;
+        await asignarJefeDirectoSolo(arrastradaId, jefeId);
         return;
       }
 
+      if (puestoArrastradoId === null || !box.dataset.puestoId) return;
       const arrastradoId = puestoArrastradoId;
       puestoArrastradoId = null;
-      if (arrastradoId === null || !esReparentadoValido(arrastradoId, destinoId)) return;
-      await reparentarPuesto(arrastradoId, destinoId);
+      const destinoId = Number(box.dataset.puestoId);
+      if (!esReparentadoValido(arrastradoId, destinoId)) return;
+      const jefeOverride = box.dataset.jefeTargetId ? Number(box.dataset.jefeTargetId) : undefined;
+      await reparentarPuesto(arrastradoId, destinoId, jefeOverride);
     });
   });
 }
@@ -478,13 +610,6 @@ async function asignarJefeDirectoSolo(personaId, nuevoJefeId) {
   });
   await cargarOrganigrama();
   renderPuestosArbol();
-}
-
-function esValidoSoltarPersonaEnPuesto(personaId, puestoDestinoId) {
-  const ocupantes = personasPorPuestoActual.get(puestoDestinoId) || [];
-  if (ocupantes.length !== 1) return false;
-  if (ocupantes[0].id === personaId) return false; // no puede ser su propio jefe
-  return true;
 }
 
 function poblarSelectPuestoPadre() {
