@@ -204,16 +204,18 @@
         <label for="test-mensaje-final">Mensaje final (al terminar el test)</label>
         <textarea id="test-mensaje-final" style="min-height:60px;">Gracias por completar el formulario.</textarea>
       </div>
-      <div class="editor-field">
-        <label class="chk" id="test-usar-mensaje-no-apto-label">
-          <input type="checkbox" id="test-usar-mensaje-no-apto" checked>
-          Mostrar un mensaje distinto si el resultado es "No apto"
-        </label>
-        <p class="staff-hint">Solo aplica a tests que se evalúan (por scoring o por una opción descalificatoria) -- desactívalo para Entrevista de Salida, Clima Laboral o cualquier test que sea solo respuestas.</p>
-      </div>
-      <div class="editor-field" id="test-mensaje-no-apto-wrap">
-        <label for="test-mensaje-no-apto">Mensaje si el resultado es "No apto"</label>
-        <textarea id="test-mensaje-no-apto" style="min-height:60px;">Gracias por contestar nuestro test. En esta ocasión no has superado el proceso, pero te deseamos mucha suerte.</textarea>
+      <div id="test-no-apto-seccion">
+        <div class="editor-field">
+          <label class="chk" id="test-usar-mensaje-no-apto-label">
+            <input type="checkbox" id="test-usar-mensaje-no-apto" checked>
+            Mostrar un mensaje distinto si el resultado es "No apto"
+          </label>
+          <p class="staff-hint">Solo aplica a tests que se evalúan (por scoring o por una opción descalificatoria).</p>
+        </div>
+        <div class="editor-field" id="test-mensaje-no-apto-wrap">
+          <label for="test-mensaje-no-apto">Mensaje si el resultado es "No apto"</label>
+          <textarea id="test-mensaje-no-apto" style="min-height:60px;">Gracias por contestar nuestro test. En esta ocasión no has superado el proceso, pero te deseamos mucha suerte.</textarea>
+        </div>
       </div>
       <div class="editor-field">
         <label>Imagen de fondo</label>
@@ -261,6 +263,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260724a"></script>
 <script src="js/topbar-menu.js?v=20260820a"></script>
-<script src="js/tests.js?v=20260821d"></script>
+<script src="js/tests.js?v=20260821e"></script>
 </body>
 </html>

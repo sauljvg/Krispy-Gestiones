@@ -75,9 +75,21 @@ function renderClimaPlantillaFilas(plantilla) {
   wireClimaPlantillaFilas();
 }
 
+// Entrevista de Salida y Clima Laboral son solo respuestas -- no tienen
+// resultado apto/no apto, así que ni siquiera tiene sentido ofrecer la
+// opción de configurar ese mensaje (a diferencia de Informes o "sin
+// destino", donde sí puede aplicar por scoring o por una opción
+// descalificatoria). La sección entera se oculta para esos dos destinos.
+function destinoUsaConceptoNoApto(destino) {
+  return !destino.startsWith("entrevista:") && !destino.startsWith("clima:");
+}
+
 function actualizarVisibilidadMensajeNoApto() {
+  const destino = document.getElementById("test-tipo-informe").value;
+  const aplica = destinoUsaConceptoNoApto(destino);
+  document.getElementById("test-no-apto-seccion").hidden = !aplica;
   document.getElementById("test-mensaje-no-apto-wrap").hidden =
-    !document.getElementById("test-usar-mensaje-no-apto").checked;
+    !aplica || !document.getElementById("test-usar-mensaje-no-apto").checked;
 }
 
 // Se llama cada vez que cambia el desplegable de destino (y al abrir un
@@ -280,7 +292,7 @@ async function guardarTest() {
     clima_oleada_id: destino.startsWith("clima:") ? Number(destino.slice("clima:".length)) : null,
     enlace_corto: document.getElementById("test-enlace-corto").value.trim() || null,
     evitar_duplicados: document.getElementById("test-evitar-duplicados").checked,
-    usar_mensaje_no_apto: document.getElementById("test-usar-mensaje-no-apto").checked,
+    usar_mensaje_no_apto: destinoUsaConceptoNoApto(destino) && document.getElementById("test-usar-mensaje-no-apto").checked,
     fecha_cierre: document.getElementById("test-fecha-cierre").value || null,
   };
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}`, {
@@ -1055,14 +1067,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       await loadTiposInforme();
       e.target.value = `clima:${data.id}`;
     }
-    // Entrevista de Salida y Clima Laboral son solo respuestas (sin
-    // resultado apto/no apto) -- se sugiere desactivar el mensaje de "No
-    // apto" al elegir uno de esos destinos, pero sigue siendo un
-    // interruptor manual: si el admin lo reactiva a mano, se respeta.
-    if (val.startsWith("entrevista:") || val.startsWith("clima:")) {
-      document.getElementById("test-usar-mensaje-no-apto").checked = false;
-      actualizarVisibilidadMensajeNoApto();
-    }
+    actualizarVisibilidadMensajeNoApto();
     await actualizarVistaClimaPlantilla();
   });
   document.getElementById("test-usar-mensaje-no-apto").addEventListener("change", actualizarVisibilidadMensajeNoApto);
