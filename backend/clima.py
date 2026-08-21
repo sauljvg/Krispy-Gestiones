@@ -874,8 +874,15 @@ def get_satisfaccion_cliente(centro, oleada_id, solo_tipo=None):
     propias conectadas. solo_tipo="fabrica": vista agregada "Todas las
     fábricas" (centro=None) -- sin esto, al no tener centro concreto caía en
     la rama "empresa entera" y mostraba la satisfacción de las TIENDAS, como
-    si las fábricas tuvieran clientes propios (no los tienen)."""
+    si las fábricas tuvieran clientes propios (no los tienen). Pulso: se
+    desactiva SIEMPRE (a propósito, no solo cuando falta el "anterior") --
+    un Pulso mide lo mismo que ya mide el engagement de esa misma oleada, y
+    la comparación "anterior" nunca tendría con qué salir hasta el segundo
+    Pulso que se cree, así que ni siquiera vale la pena mostrar el
+    "presente" para no dar una sensación a medias."""
     if solo_tipo == "fabrica":
+        return None
+    if (get_oleada_fase(oleada_id) or "completa") == "pulso":
         return None
     empresa = get_oleada_empresa(oleada_id) or "kk"
     fase = get_oleada_fase(oleada_id) or "completa"

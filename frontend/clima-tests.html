@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Krispy Gestiones · Test</title>
+<title>Krispy Gestiones · Clima Laboral · Test</title>
 <link rel="icon" type="image/png" href="assets/favicon-kk.png">
 <script>
   (function () {
@@ -16,6 +16,8 @@
 <link rel="stylesheet" href="css/styles.css?v=20260820a">
 <style>
   .tests-wrap { max-width: 1000px; margin: 0 auto; padding: 0 0 60px; }
+  .clima-breadcrumb { font-size: 13px; color: var(--text-secondary); margin: 4px 0 0; }
+  .clima-breadcrumb a { color: var(--text-secondary); }
   .tests-toolbar { display: flex; justify-content: space-between; align-items: center; margin: 16px 0; }
   .tests-table { width: 100%; border-collapse: collapse; font-size: 14px; }
   .tests-table th, .tests-table td { padding: 8px 10px; border-bottom: 1px solid var(--gridline); text-align: left; vertical-align: middle; }
@@ -115,7 +117,7 @@
       <span class="brand-icon" id="brand-icon">🍩</span>
       <div>
         <h1 id="brand-title">Krispy Gestiones</h1>
-        <p class="subtitle">Test</p>
+        <p class="subtitle">Clima Laboral · Test</p>
       </div>
     </div>
     <div class="topbar-actions">
@@ -135,12 +137,13 @@
   <div class="tests-wrap">
     <div class="hero-banner">
       <span class="eyebrow">Portal interno</span>
-      <h1>Test</h1>
-      <p>Crea encuestas y tests públicos por páginas, sin depender de Microsoft Forms.</p>
+      <h1>Clima Laboral · Test</h1>
+      <p>Las oleadas (Encuesta completa o Pulso) de Clima Laboral, sus preguntas y a quién le llegan.</p>
     </div>
+    <p class="clima-breadcrumb"><a id="link-clima-landing" href="clima.html">← Clima Laboral</a></p>
 
     <div class="tests-toolbar">
-      <p class="staff-hint">Crea o edita tests (encuestas por páginas) que cualquiera puede responder desde un enlace público.</p>
+      <p class="staff-hint">Solo se muestran aquí los tests que alimentan una oleada de Clima Laboral.</p>
       <button id="btn-nuevo-test" class="btn btn-primary" type="button">＋ Nuevo test</button>
     </div>
 
@@ -158,7 +161,7 @@
           <input type="text" id="test-titulo" placeholder="Título del test">
         </div>
         <div class="editor-field">
-          <label for="test-tipo-informe">¿A qué informe, Entrevista de Salida o Clima Laboral alimenta? (opcional)</label>
+          <label for="test-tipo-informe" id="test-tipo-informe-label">¿A qué informe, Entrevista de Salida o Clima Laboral alimenta? (opcional)</label>
           <select id="test-tipo-informe"><option value="">— No calcular puntuación —</option></select>
         </div>
       </div>

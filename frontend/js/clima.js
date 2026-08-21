@@ -130,7 +130,7 @@ async function loadOleadas() {
     const otraEmpresa = EMPRESA === "saona" ? "kk" : "saona";
     if (!sessionStorage.getItem("kt-clima-oleada-redirect")) {
       sessionStorage.setItem("kt-clima-oleada-redirect", "1");
-      location.href = `/clima.html?empresa=${otraEmpresa}&oleada=${OLEADA_OBJETIVO}`;
+      location.href = `/clima-informes.html?empresa=${otraEmpresa}&oleada=${OLEADA_OBJETIVO}`;
       return;
     }
   }
@@ -437,7 +437,7 @@ function renderListaComentarios(container, textos) {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  const user = await checkAuth("/clima.html");
+  const user = await checkAuth("/clima-informes.html");
   if (!user) return;
   const moduloRequerido = EMPRESA === "saona" ? "saona_clima" : "clima";
   if (!(user.modulos || []).includes(moduloRequerido)) {
@@ -446,6 +446,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   wireUserBar(user);
   aplicarBrandingEmpresa();
+  const linkLanding = document.getElementById("link-clima-landing");
+  if (linkLanding && EMPRESA === "saona") linkLanding.href = "clima.html?empresa=saona";
 
   await cargarTokensDiseno();
   await loadOleadas();
@@ -461,7 +463,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!currentOleada) return;
     const select = document.getElementById("select-oleada");
     const actual = select.options[select.selectedIndex]?.textContent.split(" (")[0] || "";
-    const nombre = prompt("Nuevo nombre para esta oleada:", actual);
+    const nombre = await pedirTexto("Nuevo nombre para esta oleada:", actual);
     if (!nombre || !nombre.trim()) return;
     const res = await fetch(`${AUTH_API_BASE}/clima/${currentOleada}/etiqueta`, {
       method: "PUT",

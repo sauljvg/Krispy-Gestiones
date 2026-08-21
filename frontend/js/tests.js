@@ -24,25 +24,44 @@ function escapeHTML(str) {
   return div.innerHTML;
 }
 
+// clima-tests.html carga este mismo tests.js (mismo editor, misma API) pero
+// como "Clima Laboral > Test" -- solo se distingue por la URL, no hace
+// falta ningún parámetro ni marca especial en el HTML. Se usa para: (a)
+// enseñar solo los tests que ya alimentan una oleada de Clima Laboral en el
+// listado, y (b) que el desplegable de destino del editor no ofrezca
+// Informes/Entrevista de Salida ahí, que no pintan nada en esa pantalla.
+function esClimaTests() {
+  return window.location.pathname.endsWith("/clima-tests.html");
+}
+
 async function loadTiposInforme() {
+  const clima = esClimaTests();
   const [resInformes, resClima] = await Promise.all([
-    fetch(`${AUTH_API_BASE}/encuestas/tipos-informe-disponibles`),
+    clima ? Promise.resolve(null) : fetch(`${AUTH_API_BASE}/encuestas/tipos-informe-disponibles`),
     fetch(`${AUTH_API_BASE}/encuestas/clima-oleadas-disponibles`),
   ]);
-  const tipos = await resInformes.json();
+  const tipos = resInformes ? await resInformes.json() : [];
   const oleadas = await resClima.json();
   const select = document.getElementById("test-tipo-informe");
+  const label = document.getElementById("test-tipo-informe-label");
+  if (label && clima) label.textContent = "¿A qué oleada de Clima Laboral alimenta? (opcional)";
+  const grupoInformes = clima
+    ? ""
+    : `<optgroup label="Informes">` +
+      tipos.map((t) => `<option value="informe:${escapeHTML(t.clave)}">${escapeHTML(t.nombre)}</option>`).join("") +
+      `<option value="informe:nueva:kk">+ Nuevo tipo de Informe — Krispy Kreme</option>` +
+      `<option value="informe:nueva:saona">+ Nuevo tipo de Informe — SAONA</option>` +
+      `</optgroup>`;
+  const grupoEntrevista = clima
+    ? ""
+    : `<optgroup label="Entrevista de Salida">` +
+      `<option value="entrevista:kk">Entrevista de Salida — Krispy Kreme</option>` +
+      `<option value="entrevista:saona">Entrevista de Salida — SAONA</option>` +
+      `</optgroup>`;
   select.innerHTML =
     `<option value="">— No calcular puntuación —</option>` +
-    `<optgroup label="Informes">` +
-    tipos.map((t) => `<option value="informe:${escapeHTML(t.clave)}">${escapeHTML(t.nombre)}</option>`).join("") +
-    `<option value="informe:nueva:kk">+ Nuevo tipo de Informe — Krispy Kreme</option>` +
-    `<option value="informe:nueva:saona">+ Nuevo tipo de Informe — SAONA</option>` +
-    `</optgroup>` +
-    `<optgroup label="Entrevista de Salida">` +
-    `<option value="entrevista:kk">Entrevista de Salida — Krispy Kreme</option>` +
-    `<option value="entrevista:saona">Entrevista de Salida — SAONA</option>` +
-    `</optgroup>` +
+    grupoInformes +
+    grupoEntrevista +
     `<optgroup label="Clima Laboral">` +
     oleadas
       .map((o) => {
@@ -146,14 +165,15 @@ function enlaceRespuestasTest(t) {
     return `<a href="/entrevistas.html?${params.toString()}" target="_blank">${t.num_respuestas}</a>`;
   }
   if (t.clima_oleada_id) {
-    return `<a href="/clima.html?oleada=${t.clima_oleada_id}" target="_blank">${t.num_respuestas}</a>`;
+    return `<a href="/clima-informes.html?oleada=${t.clima_oleada_id}" target="_blank">${t.num_respuestas}</a>`;
   }
   return `${t.num_respuestas}`;
 }
 
 async function loadTests() {
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas`);
-  const tests = await res.json();
+  let tests = await res.json();
+  if (esClimaTests()) tests = tests.filter((t) => t.clima_oleada_id);
   const tbody = document.getElementById("tests-tbody");
   if (tests.length === 0) {
     tbody.innerHTML = `<tr><td colspan="4" class="staff-hint">Todavía no has creado ningún test.</td></tr>`;
@@ -1039,7 +1059,7 @@ async function borrarRespuesta(respuestaId) {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  const user = await checkAuth("/tests.html");
+  const user = await checkAuth(window.location.pathname);
   if (!user) return;
   if (!(user.modulos || []).includes("tests")) {
     window.location.href = "/";

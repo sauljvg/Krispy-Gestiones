@@ -14,82 +14,11 @@
   })();
 </script>
 <link rel="stylesheet" href="css/styles.css?v=20260820a">
-<script src="js/vendor/chart.umd.min.js?v=20260723g"></script>
 <style>
-  /* Valores por defecto — se sobreescriben en runtime con
-     assets/design-tokens.json (misma fuente que usa el PDF), así que si el
-     fetch fallara por lo que sea, esto sigue viéndose igual que hoy. */
-  :root {
-    --kk-verde: #006838;
-    --kk-gris-anterior: #8a8a86;
-    --chip-fortaleza: #006838;
-    --chip-oportunidad: #e07b00;
-    --radio-chip: 8px;
-    --radio-caja: 8px;
-  }
   .clima-wrap { max-width: 1100px; margin: 0 auto; padding: 0 0 40px; }
-  .clima-report-title { text-align: center; margin: 6px 0 20px; }
+  .clima-report-title { text-align: center; margin: 6px 0 28px; }
   .clima-report-title img { height: 130px; width: auto; }
-  .clima-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 16px 0; }
-  .clima-toolbar select { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 14px; }
-  .clima-import-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
-  .centro-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
-  .centro-card {
-    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
-    padding: 14px; text-align: center; cursor: pointer; font-size: 14px; font-weight: 600;
-  }
-  .centro-card:hover { border-color: var(--acento); }
-  .centro-card.active { border-color: var(--status-good); background: color-mix(in srgb, var(--status-good) 12%, var(--surface-1)); }
-
-  .clima-header-stats { display: flex; justify-content: center; gap: 32px; flex-wrap: wrap; margin: 14px 0 24px; color: var(--text-secondary); font-size: 17px; text-align: center; }
-  .clima-header-stats b { color: var(--text-primary); font-size: 19px; }
-
-  .centros-charts-toggle { text-align: center; margin: -10px 0 18px; }
-  .centros-charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
-  @media (max-width: 800px) { .centros-charts-row { grid-template-columns: 1fr; } }
-  .centros-chart-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
-  .centros-chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 8px; }
-  .centros-chart-head h2 { font-size: 15px; margin: 0; }
-  .btn-descargar-chart { font-size: 12px; padding: 5px 10px; }
-
-  .engagement-row { display: flex; gap: 32px; flex-wrap: wrap; margin-bottom: 28px; }
-  .engagement-col { flex: 1; min-width: 280px; }
-  .engagement-col h2 { margin: 0 0 12px; }
-
-  .score-boxes { display: flex; gap: 12px; }
-  .score-box { flex: 1; max-width: 220px; border-radius: var(--radio-caja); padding: 18px; color: #fff; text-align: center; }
-  .score-box .score-label { font-size: 15px; opacity: 0.9; }
-  .score-box .score-value { font-size: 32px; font-weight: 700; margin-top: 4px; }
-  .score-presente { background: var(--kk-verde); }
-  .score-anterior { background: var(--kk-gris-anterior); }
-
-  .clima-chart-wrap { position: relative; margin-bottom: 10px; }
-
-  .fo-titulo-centrado { text-align: center; font-size: 22px; margin: 24px 0 16px; }
-  .fo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; margin: 10px 0 28px; align-items: stretch; }
-  .fo-col-title { font-size: 16px; margin: 0 0 4px; text-align: center; }
-  /* El color de marca de "fortaleza" está pensado para chip de fondo sólido
-     con texto blanco encima — como texto suelto sobre el fondo de la
-     página, en modo oscuro se vuelve casi ilegible (navy de Saona, verde
-     oscuro de KK). --chip-fortaleza-titulo es una variante más clara SOLO
-     para este texto; el chip de fondo sigue igual. En modo claro no hace
-     falta aclarar nada, por eso solo se define dentro de los bloques de
-     modo oscuro (fuera de ahí cae al var(--chip-fortaleza) de siempre). */
-  .fo-title-fortaleza { color: var(--chip-fortaleza-titulo, var(--chip-fortaleza)); }
-  .fo-title-oportunidad { color: var(--chip-oportunidad); }
-  @media (prefers-color-scheme: dark) {
-    :root:where(:not([data-theme="light"])) { --chip-fortaleza-titulo: #4caf7d; }
-    :root[data-empresa="saona"]:where(:not([data-theme="light"])) { --chip-fortaleza-titulo: #7A99AC; }
-  }
-  :root[data-theme="dark"] { --chip-fortaleza-titulo: #4caf7d; }
-  :root[data-empresa="saona"][data-theme="dark"] { --chip-fortaleza-titulo: #7A99AC; }
-  .fo-chip { display: flex; align-items: center; padding: 14px 18px; border-radius: var(--radio-chip); font-size: 16px; font-weight: 600; color: #fff; line-height: 1.4; height: 100%; box-sizing: border-box; }
-  .fo-chip-fortaleza { background: var(--chip-fortaleza); }
-  .fo-chip-oportunidad { background: var(--chip-oportunidad); }
-
-  .comentarios-lista { margin-bottom: 28px; }
-  .comentarios-lista ul { margin: 0; padding-left: 22px; max-height: 340px; overflow-y: auto; }
-  .comentarios-lista li { font-size: 16px; margin-bottom: 10px; color: var(--text-primary); line-height: 1.45; }
+  .clima-landing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; max-width: 640px; margin: 0 auto; }
 </style>
 </head>
 <body>
@@ -120,100 +49,24 @@
     <div class="hero-banner">
       <span class="eyebrow">Portal interno</span>
       <h1>Clima Laboral</h1>
-      <p>Engagement por centro: resultados, impulsores, fortalezas y oportunidades.</p>
+      <p>Encuestas de engagement por centro: crea el test o revisa los informes ya recogidos.</p>
     </div>
 
     <div class="clima-report-title">
       <img id="clima-report-logo" src="assets/la-voz-logo.png" alt="La Voz Krispy Kreme">
     </div>
 
-    <div class="clima-toolbar">
-      <label for="select-oleada">Oleada</label>
-      <select id="select-oleada"></select>
-      <button id="btn-renombrar-oleada" class="btn btn-ghost" type="button" title="Renombrar esta oleada">✏️ Renombrar</button>
-      <button id="btn-eliminar-oleada" class="btn btn-ghost" type="button" title="Eliminar esta oleada por completo">🗑️ Eliminar</button>
-
-      <label class="btn btn-primary btn-upload">
-        ⬆ Importar Excel
-        <input type="file" id="input-clima-upload" accept=".xlsx,.xls" hidden>
-      </label>
-      <label class="clima-import-check">
-        <input type="checkbox" id="check-nueva-oleada">
-        Nuevo Registro
-      </label>
-
-      <button id="btn-exportar-pdf" class="btn btn-ghost" hidden>⬇ Exportar PDF</button>
-    </div>
-
-    <div class="centro-grid" id="centro-grid"></div>
-
-    <div id="reporte-wrap" hidden>
-      <div class="clima-header-stats" id="clima-header-stats"></div>
-
-      <div class="centros-charts-toggle" id="centros-charts-toggle-wrap" hidden>
-        <button type="button" id="btn-toggle-centros-charts" class="btn btn-ghost">📊 Ocultar gráficos por tienda</button>
-      </div>
-      <div class="centros-charts-row" id="centros-charts-row" hidden>
-        <div class="centros-chart-card">
-          <div class="centros-chart-head">
-            <h2>Engagement por tienda</h2>
-            <button type="button" class="btn btn-ghost btn-descargar-chart" data-target="chart-centros-engagement" data-nombre="engagement_por_tienda">⬇ PNG</button>
-          </div>
-          <div class="clima-chart-wrap"><canvas id="chart-centros-engagement"></canvas></div>
-        </div>
-        <div class="centros-chart-card">
-          <div class="centros-chart-head">
-            <h2>Participación por tienda</h2>
-            <button type="button" class="btn btn-ghost btn-descargar-chart" data-target="chart-centros-participacion" data-nombre="participacion_por_tienda">⬇ PNG</button>
-          </div>
-          <div class="clima-chart-wrap"><canvas id="chart-centros-participacion"></canvas></div>
-        </div>
-      </div>
-      <div class="centros-charts-row" id="fabricas-charts-row" hidden>
-        <div class="centros-chart-card">
-          <div class="centros-chart-head">
-            <h2>Engagement por fábrica</h2>
-            <button type="button" class="btn btn-ghost btn-descargar-chart" data-target="chart-fabricas-engagement" data-nombre="engagement_por_fabrica">⬇ PNG</button>
-          </div>
-          <div class="clima-chart-wrap"><canvas id="chart-fabricas-engagement"></canvas></div>
-        </div>
-        <div class="centros-chart-card">
-          <div class="centros-chart-head">
-            <h2>Participación por fábrica</h2>
-            <button type="button" class="btn btn-ghost btn-descargar-chart" data-target="chart-fabricas-participacion" data-nombre="participacion_por_fabrica">⬇ PNG</button>
-          </div>
-          <div class="clima-chart-wrap"><canvas id="chart-fabricas-participacion"></canvas></div>
-        </div>
-      </div>
-
-      <div class="engagement-row">
-        <div class="engagement-col">
-          <h2 style="font-size:18px;">Puntuación Global de Engagement</h2>
-          <div class="score-boxes" id="score-boxes"></div>
-        </div>
-        <div class="engagement-col" id="col-satisfaccion" hidden>
-          <h2 style="font-size:18px;">Satisfacción del cliente</h2>
-          <div class="score-boxes" id="score-boxes-satisfaccion"></div>
-        </div>
-      </div>
-
-      <h2 style="font-size:18px;">Resultados de Engagement</h2>
-      <div class="clima-chart-wrap"><canvas id="chart-resultados"></canvas></div>
-
-      <h2 style="font-size:18px;">Impulsores de Engagement</h2>
-      <div class="clima-chart-wrap"><canvas id="chart-impulsores"></canvas></div>
-
-      <h2 class="fo-titulo-centrado">
-        Fortalezas / Oportunidades
-        <span class="info-tip-wrap">
-          <button type="button" class="info-tip-btn" aria-label="Cómo se interpreta">ⓘ</button>
-          <div class="info-tip-box">Suma de "Totalmente de acuerdo" + "De acuerdo" para cada pregunta.</div>
-        </span>
-      </h2>
-      <div class="fo-grid" id="fo-grid"></div>
-
-      <h2 style="font-size:17px;">Preguntas abiertas</h2>
-      <div id="comentarios-wrap"></div>
+    <div class="clima-landing-grid">
+      <a class="home-card" href="clima-tests.html" id="link-clima-tests">
+        <span class="icon-badge"><span class="home-icon">📝</span></span>
+        <h2>Test</h2>
+        <p>Crea y edita las oleadas (Encuesta completa o Pulso), sus preguntas y la plantilla de empleados esperados por centro.</p>
+      </a>
+      <a class="home-card" href="clima-informes.html" id="link-clima-informes">
+        <span class="icon-badge"><span class="home-icon">📊</span></span>
+        <h2>Informes</h2>
+        <p>Resultados por centro: engagement, participación, fortalezas, oportunidades y satisfacción del cliente.</p>
+      </a>
     </div>
   </div>
 </div>
@@ -221,6 +74,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260723g"></script>
 <script src="js/topbar-menu.js?v=20260821a"></script>
-<script src="js/clima.js?v=20260821d"></script>
+<script src="js/clima-landing.js?v=20260821a"></script>
 </body>
 </html>
