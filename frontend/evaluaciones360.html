@@ -37,57 +37,77 @@
   .puesto-row .puesto-vacante { color: var(--text-muted); font-size: 13px; font-style: italic; }
   .puesto-row .puesto-acciones { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
 
-  /* Árbol visual de puestos, tipo Bizneo: lista indentada con chevron para
-     expandir/colapsar cada rama (en vez de un diagrama de cajas unidas por
-     líneas -- ese formato hacía que las cajas nuevas o los puestos raíz
-     adicionales pudieran acabar renderizados fuera del área visible). Cada
-     fila es su propio elemento de bloque, así que crece hacia abajo dentro
-     del contenedor con scroll, nunca "se sale" hacia un lado. */
+  /* Árbol visual de puestos, tipo Bizneo: nodos conectados por líneas, con
+     drag & drop para reasignar el puesto al que reporta cada uno. Patrón
+     CSS clásico de organigrama (ul/li anidados + bordes en ::before/::after
+     dibujando las líneas), en vez de una librería de diagramas aparte. */
   .orgchart-scroll {
-    overflow: auto; padding: 10px 12px 20px; margin: 12px -12px 0; max-height: 70vh;
+    overflow: auto; padding: 24px 12px 40px; margin: 12px -12px 0; cursor: grab; max-height: 70vh;
     border: 2px solid var(--status-good); border-radius: 12px;
   }
-  #puestos-arbol-inner { transform-origin: top left; }
-  .orgtree, .orgtree-children { list-style: none; margin: 0; padding: 0; }
-  .orgtree-children { padding-left: 18px; margin-left: 9px; border-left: 1px dashed var(--border); }
-  .orgtree-node { margin: 1px 0; }
-  .orgtree.orgtree-raiz-extra { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); }
-  .orgtree-row {
-    display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 6px;
-    cursor: grab; border: 1px solid transparent; flex-wrap: wrap;
+  .orgchart-scroll.panning { cursor: grabbing; user-select: none; }
+  #puestos-arbol-inner { width: max-content; margin: 0 auto; transform-origin: top center; }
+  .orgchart, .orgchart ul { list-style: none; margin: 0; padding: 0; display: flex; justify-content: center; width: max-content; }
+  .orgchart { padding-top: 0; margin: 0 auto; }
+  .orgchart li { position: relative; padding: 28px 10px 0; text-align: center; }
+  .orgchart li ul { padding-top: 28px; position: relative; margin: 0 auto; }
+  .orgchart-toggle {
+    position: absolute; bottom: -9px; left: 50%; transform: translateX(-50%); z-index: 2;
+    width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-secondary); font-size: 10px; line-height: 1;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0;
   }
-  .orgtree-row:hover { background: var(--surface-1); }
-  .orgtree-row:active { cursor: grabbing; }
-  .orgtree-row.arrastrando { opacity: 0.4; }
-  .orgtree-row.drop-valido { border-color: var(--status-good); background: color-mix(in srgb, var(--status-good) 12%, transparent); }
-  .orgtree-row.drop-invalido { border-color: var(--status-bad, #c62828); }
-  .orgtree-row.orgtree-row-huerfanos { background: color-mix(in srgb, var(--status-bad, #c62828) 8%, transparent); cursor: default; }
-  .orgtree-toggle, .orgtree-toggle-spacer {
-    width: 18px; height: 18px; flex-shrink: 0;
+  .orgchart-toggle:hover { background: var(--surface-2); color: var(--text-primary); }
+  .orgchart-box { position: relative; }
+  .orgchart li ul::before {
+    content: ""; position: absolute; top: 0; left: 50%; width: 0; height: 28px;
+    border-left: 2px solid var(--border);
   }
-  .orgtree-toggle {
+  .orgchart li::before, .orgchart li::after {
+    content: ""; position: absolute; top: 0; right: 50%; width: 50%; height: 28px;
+    border-top: 2px solid var(--border);
+  }
+  .orgchart li::after { right: auto; left: 50%; border-left: 2px solid var(--border); }
+  .orgchart li:only-child::before, .orgchart li:only-child::after { display: none; }
+  .orgchart li:first-child::before { border: 0 none; }
+  .orgchart li:last-child::after { border: 0 none; }
+  .orgchart li:last-child::before { border-radius: 0 8px 0 0; }
+  .orgchart li:first-child::after { border-radius: 8px 0 0 0; }
+  .orgchart-box {
+    display: inline-block; min-width: 130px; padding: 8px 12px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface-1); cursor: grab; text-align: left;
+  }
+  .orgchart-box:active { cursor: grabbing; }
+  .orgchart-box.arrastrando { opacity: 0.4; }
+  .orgchart-box.drop-valido { border-color: var(--status-good); box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-good) 40%, transparent); }
+  .orgchart-box.drop-invalido { border-color: var(--status-bad, #c62828); }
+  .orgchart-box .puesto-nombre { display: block; font-weight: 600; font-size: 13px; white-space: nowrap; }
+  .orgchart-box .puesto-personas { display: block; color: var(--text-secondary); font-size: 12px; margin-top: 2px; max-width: 200px; white-space: normal; }
+  .orgchart-box .puesto-vacante { display: block; color: var(--text-muted); font-size: 12px; font-style: italic; margin-top: 2px; }
+  .orgchart-box .puesto-acciones { display: flex; gap: 4px; margin-top: 6px; }
+  .orgchart-box .puesto-acciones button { font-size: 11px; padding: 2px 6px; }
+  .orgchart-raiz-extra { margin-top: 10px; }
+  .persona-chip {
+    display: inline-block; cursor: grab; border-radius: 4px; padding: 0 2px;
+  }
+  .persona-chip:not(:last-child)::after { content: ", "; color: var(--text-secondary); cursor: default; }
+  .persona-chip:hover { background: var(--surface-2); text-decoration: underline; }
+  .persona-chip.arrastrando { opacity: 0.4; }
+
+  /* "Por persona": lista indentada tipo Bizneo, con chevron para
+     expandir/colapsar la rama de cada persona (a diferencia de "Por puesto
+     de trabajo", aquí cada fila ya es una única persona, así que no hace
+     falta el concepto de "ver individualmente" -- solo mostrar/ocultar
+     hijos). */
+  .persona-tree-children { list-style: none; margin: 0; padding-left: 18px; margin-left: 9px; border-left: 1px dashed var(--border); }
+  .persona-tree-node { margin: 1px 0; }
+  .persona-toggle, .persona-toggle-spacer { width: 18px; height: 18px; flex-shrink: 0; }
+  .persona-toggle {
     border-radius: 4px; border: 1px solid var(--border); background: var(--surface-page);
     color: var(--text-secondary); font-size: 10px; cursor: pointer; display: flex;
     align-items: center; justify-content: center; padding: 0;
   }
-  .orgtree-toggle:hover { background: var(--surface-2); color: var(--text-primary); }
-  .orgtree-nombre { font-weight: 600; font-size: 13px; white-space: nowrap; }
-  .orgtree-separador { color: var(--text-secondary); font-size: 13px; }
-  .orgtree-persona {
-    font-size: 13px; cursor: grab; border-radius: 4px; padding: 0 3px; white-space: nowrap;
-  }
-  .orgtree-persona:hover { background: var(--surface-2); text-decoration: underline; }
-  .orgtree-persona.arrastrando { opacity: 0.4; }
-  .orgtree-vacante { color: var(--text-muted); font-size: 12px; font-style: italic; }
-  .orgtree-resumen-personas { color: var(--text-secondary); font-size: 12px; }
-  .orgtree-btn-detalle {
-    font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--border);
-    background: var(--surface-page); color: var(--text-secondary); cursor: pointer; flex-shrink: 0;
-  }
-  .orgtree-btn-detalle:hover { background: var(--surface-2); color: var(--text-primary); }
-  .orgtree-aviso { color: var(--status-bad, #c62828); cursor: help; }
-  .orgtree-acciones { display: flex; gap: 4px; margin-left: auto; flex-shrink: 0; }
-  .orgtree-acciones button { font-size: 11px; padding: 2px 6px; }
+  .persona-toggle:hover { background: var(--surface-2); color: var(--text-primary); }
 
   .organigrama-lista, .lista-simple { list-style: none; margin: 0; padding: 0; }
   .organigrama-lista li { padding: 4px 0; }
@@ -411,6 +431,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/auth-common.js?v=20260723f"></script>
 <script src="js/topbar-menu.js?v=20260821a"></script>
-<script src="js/evaluaciones360.js?v=20260821l"></script>
+<script src="js/evaluaciones360.js?v=20260821m"></script>
 </body>
 </html>
