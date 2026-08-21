@@ -1364,7 +1364,7 @@ function renderForm() {
     ? `<div class="archivos-lista">${candidatoEditando.archivos.map((a) => `
         <div class="archivo-item-fila">
           <a href="${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}/archivos/${a.id}" target="_blank" rel="noopener">📄 ${escapeHTML(a.nombre_original)}</a>
-          ${a.nombre_original.toLowerCase().endsWith(".pdf") ? `<button type="button" class="btn-mini btn-reextraer-cv" data-archivo-id="${a.id}">🔄 Re-extraer con IA</button>` : ""}
+          ${a.nombre_original.toLowerCase().endsWith(".pdf") ? `<button type="button" class="btn-mini btn-reextraer-cv" data-archivo-id="${a.id}">🔄 Re-extraer</button>` : ""}
         </div>`
       ).join("")}</div>
       <div id="extraccion-aviso-wrap-edicion"></div>`

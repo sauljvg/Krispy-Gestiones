@@ -21,7 +21,10 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import Flowable, SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import (
+    BaseDocTemplate, Flowable, Frame, FrameBreak, KeepInFrame, NextPageTemplate, PageTemplate,
+    Paragraph, Spacer, Table, TableStyle,
+)
 from reportlab.platypus.flowables import HRFlowable
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
@@ -228,11 +231,12 @@ def generar_cv_pdf(candidato: dict, empresa="kk", foto_ruta=None) -> bytes:
     estilos = _estilos(color_marca)
 
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
+    pagina_alto = A4[1]
+    margen_izq, margen_der, margen_abajo = 2 * cm, 2 * cm, 1.5 * cm
+    doc = BaseDocTemplate(
         buffer, pagesize=A4,
-        topMargin=0, bottomMargin=1.5 * cm, leftMargin=2 * cm, rightMargin=2 * cm,
+        topMargin=0, bottomMargin=margen_abajo, leftMargin=margen_izq, rightMargin=margen_der,
     )
-    story = []
 
     nombre = candidato.get("nombre_completo") or "(sin nombre)"
     puesto = candidato.get("puesto_solicitado") or ""
@@ -269,10 +273,68 @@ def generar_cv_pdf(candidato: dict, empresa="kk", foto_ruta=None) -> bytes:
         ("TOPPADDING", (0, 0), (-1, -1), 2 * cm),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5 * cm),
     ]))
-    story.append(banda)
-    story.append(Spacer(1, 16))
 
-    sidebar_flow = _sidebar(candidato, estilos)
+    # Antes, sidebar y cuerpo principal (Experiencia/Formación) iban juntos
+    # en la MISMA fila de una Table de una sola fila -- reportlab no puede
+    # partir esa fila entre páginas de forma sensata (como mucho, intenta
+    # partir sidebar y principal por el mismo punto vertical, sin relación
+    # con cuánto contenido tiene cada uno) y, con un historial largo (varios
+    # estudios/puestos), directamente no cabía en ninguna página y tiraba
+    # LayoutError -- servía el PDF original en su lugar (ver cv_pdf_route en
+    # reclutamiento_routes.py). Con cada columna en su propio Frame, cada
+    # una avanza de página cuando A ELLA le hace falta, sin arrastrar a la
+    # otra ni depender de que quepan juntas.
+    # Altura REAL que reportlab le va a dar a la banda (no una estimación a
+    # mano a partir de los leading de cada estilo, que se quedaba corta y
+    # dejaba manchada la capa siguiente) -- Table.wrap() hace el mismo
+    # cálculo que hará doc.build() al dibujarla de verdad, así que el frame
+    # de cabecera queda con la altura exacta que ocupa.
+    _, altura_cabecera = banda.wrap(ANCHO_PAGINA_UTIL, pagina_alto)
+    altura_cuerpo = pagina_alto - margen_abajo - altura_cabecera
+
+    def _fondo_sidebar(canvas, _doc):
+        canvas.saveState()
+        canvas.setFillColor(colors.HexColor("#f4f2ec"))
+        canvas.rect(margen_izq, margen_abajo, ANCHO_SIDEBAR, altura_cuerpo, fill=1, stroke=0)
+        canvas.restoreState()
+
+    frame_cabecera = Frame(
+        margen_izq, pagina_alto - altura_cabecera, ANCHO_PAGINA_UTIL, altura_cabecera,
+        leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0,
+    )
+    frame_sidebar = Frame(
+        margen_izq, margen_abajo, ANCHO_SIDEBAR, altura_cuerpo,
+        leftPadding=14, rightPadding=14, topPadding=10, bottomPadding=6,
+    )
+    frame_principal = Frame(
+        margen_izq + ANCHO_SIDEBAR, margen_abajo, ANCHO_PRINCIPAL, altura_cuerpo,
+        leftPadding=18, rightPadding=6, topPadding=4, bottomPadding=6,
+    )
+    margen_arriba_continuacion = 1.5 * cm
+    frame_continuacion = Frame(
+        margen_izq, margen_abajo, ANCHO_PAGINA_UTIL, pagina_alto - margen_abajo - margen_arriba_continuacion,
+        leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=6,
+    )
+    doc.addPageTemplates([
+        PageTemplate(id="primera", frames=[frame_cabecera, frame_sidebar, frame_principal], onPage=_fondo_sidebar),
+        # Sin cabecera de color ni columna lateral -- si el historial no cupo
+        # en la primera página, sigue como una sola columna a todo lo ancho
+        # en las siguientes (igual que cualquier CV/informe de varias
+        # páginas normal).
+        PageTemplate(id="continuacion", frames=[frame_continuacion]),
+    ])
+
+    # La barra lateral SÍ va envuelta en KeepInFrame(mode="shrink"): a
+    # diferencia de Experiencia/Formación (que interesa que paginen de
+    # verdad si hace falta, no que se encojan), un candidato con muchísimos
+    # extra_fields podría desbordar frame_sidebar -- y como frame_sidebar no
+    # es el último frame de la página, ese desborde se colaría dentro de
+    # frame_principal en vez de pasar a la página siguiente. Mejor encoger
+    # el texto en el caso extremo que corromper el orden del contenido
+    # principal.
+    sidebar_flow = [KeepInFrame(
+        ANCHO_SIDEBAR - 28, altura_cuerpo - 16, _sidebar(candidato, estilos), mode="shrink", vAlign="TOP",
+    )]
     principal_flow = [
         Paragraph("Experiencia", estilos["seccion_titulo"]),
         HRFlowable(width="100%", thickness=1.2, color=color_marca, spaceBefore=0, spaceAfter=8),
@@ -283,17 +345,14 @@ def generar_cv_pdf(candidato: dict, empresa="kk", foto_ruta=None) -> bytes:
         *_bloque_formacion(candidato.get("formacion_json") or [], estilos),
     ]
 
-    cuerpo = Table([[sidebar_flow, principal_flow]], colWidths=[ANCHO_SIDEBAR, ANCHO_PRINCIPAL])
-    cuerpo.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#f4f2ec")),
-        ("LEFTPADDING", (0, 0), (0, 0), 14),
-        ("RIGHTPADDING", (0, 0), (0, 0), 14),
-        ("TOPPADDING", (0, 0), (0, 0), 10),
-        ("LEFTPADDING", (1, 0), (1, 0), 18),
-        ("TOPPADDING", (1, 0), (1, 0), 4),
-    ]))
-    story.append(cuerpo)
+    story = [
+        NextPageTemplate("continuacion"),
+        banda,
+        FrameBreak(),
+        *sidebar_flow,
+        FrameBreak(),
+        *principal_flow,
+    ]
 
     doc.build(story)
     return buffer.getvalue()
