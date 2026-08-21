@@ -2526,8 +2526,21 @@ function reposicionarFormWrap() {
   // panel fijo al que ir (se apila en una columna, ver compartidos.html).
   const combinadaComoLista = candidatosVista === "combinada" && window.matchMedia(ANCHO_COMBINADA_UNA_COLUMNA).matches;
   if (candidatosVista === "combinada" && !combinadaComoLista) return;
-  if (!candidatoEditando) return; // alta nueva o nada abierto -- ya aparcado, nada más que hacer
   const formWrap = document.getElementById("form-wrap");
+  if (!candidatoEditando) {
+    // Alta nueva: si se deja aparcado (su sitio de siempre, al final de
+    // TODA la lista tras la paginación) con muchos candidatos habría que
+    // hacer scroll a través de todos ellos para llegar al formulario. Lo
+    // colocamos en vez de eso justo debajo de la barra de herramientas
+    // donde vive el botón "+ Nuevo candidato" (ese botón solo existe en
+    // Base de candidatos, así que #candidatos-contador-filtro siempre
+    // está disponible aquí).
+    const contador = document.getElementById("candidatos-contador-filtro");
+    if (formWrap && contador) {
+      contador.insertAdjacentElement("afterend", formWrap);
+    }
+    return;
+  }
   const cardAbierta = document.querySelector(`.candidato-mini-card[data-candidato-id="${candidatoEditando.id}"]`);
   if (formWrap && cardAbierta) {
     cardAbierta.insertAdjacentElement("afterend", formWrap);
