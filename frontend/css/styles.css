@@ -571,6 +571,14 @@ h3 {
 }
 .chart-card h2, .keywords-card h2, .reviews-card h2, .staff-card h2 { margin: 0 0 12px; font-size: 15px; }
 
+/* .staff-table nunca envuelve sus celdas (white-space: nowrap, para que
+   los números de la tabla no se lean en varias líneas) -- en una pantalla
+   estrecha eso la hace más ancha que la tarjeta que la contiene. Sin este
+   overflow, esa anchura se filtraba fuera de la tarjeta y empujaba la
+   página entera a scroll horizontal; con él, es la tarjeta la que gana su
+   propia barra de scroll, sin afectar al resto de la página. */
+.staff-card { overflow-x: auto; }
+
 .keywords-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .keyword-chip {
   background: var(--surface-page);
