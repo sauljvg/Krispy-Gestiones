@@ -254,7 +254,6 @@ function wirePersonaRows(ul) {
 // ---------------------------------------------------------------------------
 
 let editandoPuestoId = null;
-let puestoArrastradoId = null;
 // Claves de colapso (siempre string): el id del puesto para una caja normal
 // o resumen, "persona:<id>" para colapsar los hijos de una caja individual
 // dentro de un puesto compartido ya desplegado.
@@ -318,7 +317,7 @@ function nodoPuestoHTML(puesto, porPadre, personasPorPuesto, vistos, jefeFiltro)
     const persona = ocupantes[0] || null;
     const siguienteFiltro = persona ? persona.id : undefined;
     const personasHTML = persona
-      ? `<span class="puesto-personas"><span class="persona-chip" draggable="true" data-persona-id="${persona.id}" title="Arrastra para cambiar su jefe directo">${escapeHTML(persona.nombre_completo)}</span></span>`
+      ? `<span class="puesto-personas"><span class="persona-chip" data-persona-id="${persona.id}" title="Arrastra para cambiar su jefe directo">${escapeHTML(persona.nombre_completo)}</span></span>`
       : `<span class="puesto-vacante">Vacante</span>`;
     const clave = String(puesto.id);
     const colapsado = puestosColapsados.has(clave);
@@ -330,7 +329,7 @@ function nodoPuestoHTML(puesto, porPadre, personasPorPuesto, vistos, jefeFiltro)
       : "";
     return `
       <li>
-        <div class="orgchart-box" draggable="true" data-puesto-id="${puesto.id}" data-jefe-target-id="${persona ? persona.id : ""}">
+        <div class="orgchart-box" data-puesto-id="${puesto.id}" data-jefe-target-id="${persona ? persona.id : ""}">
           <span class="puesto-nombre">${escapeHTML(puesto.nombre)}</span>
           ${personasHTML}
           <div class="puesto-acciones">
@@ -353,10 +352,10 @@ function nodoPuestoHTML(puesto, porPadre, personasPorPuesto, vistos, jefeFiltro)
     const hijosHTML = hijos.length && !colapsado
       ? `<ul>${hijos.map((h) => nodoPuestoHTML(h, porPadre, personasPorPuesto, vistosHijo, undefined)).join("")}</ul>`
       : "";
-    const personasHTML = `<span class="puesto-personas">${ocupantes.map((p) => `<span class="persona-chip" draggable="true" data-persona-id="${p.id}" title="Arrastra para cambiar su jefe directo">${escapeHTML(p.nombre_completo)}</span>`).join("")}</span>`;
+    const personasHTML = `<span class="puesto-personas">${ocupantes.map((p) => `<span class="persona-chip" data-persona-id="${p.id}" title="Arrastra para cambiar su jefe directo">${escapeHTML(p.nombre_completo)}</span>`).join("")}</span>`;
     return `
       <li>
-        <div class="orgchart-box" draggable="true" data-puesto-id="${puesto.id}">
+        <div class="orgchart-box" data-puesto-id="${puesto.id}">
           <span class="puesto-nombre">${escapeHTML(puesto.nombre)}</span>
           ${personasHTML}
           <div class="puesto-acciones">
@@ -385,7 +384,7 @@ function nodoPuestoHTML(puesto, porPadre, personasPorPuesto, vistos, jefeFiltro)
       const hijosVisibles = hijosHTML && !colapsado ? `<ul>${hijosHTML}</ul>` : "";
       return `
         <li>
-          <div class="orgchart-box orgchart-box-individual" draggable="true" data-puesto-id="${puesto.id}" data-persona-id="${persona.id}" data-jefe-target-id="${persona.id}" title="Arrastra para cambiar su jefe directo">
+          <div class="orgchart-box orgchart-box-individual" data-puesto-id="${puesto.id}" data-persona-id="${persona.id}" data-jefe-target-id="${persona.id}" title="Arrastra para cambiar su jefe directo">
             <span class="puesto-nombre">${escapeHTML(puesto.nombre)}</span>
             <span class="puesto-personas">${escapeHTML(persona.nombre_completo)}</span>
             <div class="puesto-acciones">
@@ -458,6 +457,84 @@ async function reparentarPuesto(puestoId, nuevoPadreId, nuevoJefeIdOverride) {
   renderPuestosArbol();
 }
 
+// ---------------------------------------------------------------------------
+// Arrastre por Pointer Events -- sustituye a la API nativa de HTML5 Drag &
+// Drop en el organigrama por puesto. La nativa no sigue al cursor 1:1 (usa
+// una imagen fantasma de baja fidelidad, con su propio retraso); aquí es un
+// clon del propio elemento el que se mueve con position:fixed en cada
+// pointermove, pegado de verdad al cursor. Solo "arranca" tras superar un
+// pequeño umbral de movimiento, para no robarle el click a los botones
+// anidados en la caja (editar, colapsar, ⛶...) -- si sueltas sin moverte,
+// nunca se llega a crear el clon y el click del botón funciona normal.
+function wireArrastrePuntero(el, { obtenerDato, onMover, onSoltar, pararPropagacion }) {
+  const UMBRAL_PX = 5;
+  el.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return; // solo botón principal / toque primario
+    if (pararPropagacion) e.stopPropagation();
+    const dato = obtenerDato();
+    if (dato === null) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let arrancado = false;
+    let clon = null;
+    let grabX = 0;
+    let grabY = 0;
+
+    function elementoBajoCursor(x, y) {
+      if (!clon) return document.elementFromPoint(x, y);
+      clon.style.display = "none";
+      const destino = document.elementFromPoint(x, y);
+      clon.style.display = "";
+      return destino;
+    }
+
+    function arrancar() {
+      arrancado = true;
+      const rect = el.getBoundingClientRect();
+      grabX = startX - rect.left;
+      grabY = startY - rect.top;
+      clon = el.cloneNode(true);
+      clon.classList.add("orgtree-clon-arrastre");
+      // Se añade a document.body, nunca dentro de #puestos-arbol-inner: ese
+      // contenedor tiene su propio transform: scale() (zoom) que, si el
+      // clon quedara anidado dentro, convertiría su position:fixed en
+      // relativo a ese ancestro en vez de al viewport -- y dejaría de
+      // seguir al cursor con precisión.
+      Object.assign(clon.style, {
+        position: "fixed", left: `${rect.left}px`, top: `${rect.top}px`,
+        width: `${rect.width}px`, margin: "0", pointerEvents: "none", zIndex: "9999",
+      });
+      document.body.appendChild(clon);
+      el.classList.add("arrastrando");
+    }
+
+    function mover(e2) {
+      if (!arrancado) {
+        if (Math.hypot(e2.clientX - startX, e2.clientY - startY) < UMBRAL_PX) return;
+        arrancar();
+      }
+      clon.style.left = `${e2.clientX - grabX}px`;
+      clon.style.top = `${e2.clientY - grabY}px`;
+      if (onMover) onMover(dato, elementoBajoCursor(e2.clientX, e2.clientY));
+    }
+
+    function soltar(e2) {
+      window.removeEventListener("pointermove", mover);
+      window.removeEventListener("pointerup", soltar);
+      window.removeEventListener("pointercancel", soltar);
+      if (!arrancado) return;
+      const destino = elementoBajoCursor(e2.clientX, e2.clientY);
+      clon.remove();
+      el.classList.remove("arrastrando");
+      if (onSoltar) onSoltar(dato, destino);
+    }
+
+    window.addEventListener("pointermove", mover);
+    window.addEventListener("pointerup", soltar);
+    window.addEventListener("pointercancel", soltar);
+  });
+}
+
 function wirePuestoBoxes(cont) {
   cont.querySelectorAll("[data-editar-puesto]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
@@ -495,107 +572,72 @@ function wirePuestoBoxes(cont) {
     });
   });
 
-  const limpiarEstadosDrag = () => {
-    cont.querySelectorAll(".arrastrando, .drop-valido, .drop-invalido").forEach((b) => {
-      b.classList.remove("arrastrando", "drop-valido", "drop-invalido");
+  const limpiarEstadosDrop = () => {
+    cont.querySelectorAll(".drop-valido, .drop-invalido").forEach((b) => {
+      b.classList.remove("drop-valido", "drop-invalido");
     });
   };
+  function marcarDestino(destino, valido) {
+    limpiarEstadosDrop();
+    if (!destino) return;
+    destino.classList.toggle("drop-valido", valido);
+    destino.classList.toggle("drop-invalido", !valido);
+  }
 
-  cont.querySelectorAll(".persona-chip").forEach((chip) => {
-    chip.addEventListener("dragstart", (e) => {
-      e.stopPropagation(); // que no dispare también el drag de la caja del puesto
-      personaArrastradaId = Number(chip.dataset.personaId);
-      chip.classList.add("arrastrando");
-      e.dataTransfer.effectAllowed = "move";
-    });
-    chip.addEventListener("dragend", (e) => {
-      e.stopPropagation();
-      personaArrastradaId = null;
-      limpiarEstadosDrag();
-    });
-    chip.addEventListener("click", (e) => e.stopPropagation());
-  });
-
-  // Caja individual (una persona concreta dentro de un puesto ya desplegado
-  // "por persona"): arrastrarla reasigna solo su jefe directo, nunca el
-  // puesto compartido -- por eso NO se une al grupo de abajo que arrastra
-  // el puesto entero.
-  cont.querySelectorAll(".orgchart-box-individual").forEach((box) => {
-    box.addEventListener("dragstart", (e) => {
-      personaArrastradaId = Number(box.dataset.personaId);
-      box.classList.add("arrastrando");
-      e.dataTransfer.effectAllowed = "move";
-    });
-    box.addEventListener("dragend", () => {
-      personaArrastradaId = null;
-      limpiarEstadosDrag();
-    });
-  });
-
-  cont.querySelectorAll(".orgchart-box:not(.orgchart-box-individual)").forEach((box) => {
-    box.addEventListener("dragstart", (e) => {
-      puestoArrastradoId = Number(box.dataset.puestoId);
-      box.classList.add("arrastrando");
-      e.dataTransfer.effectAllowed = "move";
-    });
-    box.addEventListener("dragend", () => {
-      puestoArrastradoId = null;
-      limpiarEstadosDrag();
-    });
-  });
-
-  // Dragover/drop es común a toda caja (individual o no) -- puede recibir
-  // tanto una ficha de persona (reasignar jefe directo) como otro puesto
-  // arrastrado encima (reasignar su puesto padre).
-  cont.querySelectorAll(".orgchart-box").forEach((box) => {
-    box.addEventListener("dragover", (e) => {
-      if (puestoArrastradoId === null && personaArrastradaId === null) return;
-      e.preventDefault();
-    });
-    box.addEventListener("dragenter", (e) => {
-      if (personaArrastradaId !== null) {
-        e.preventDefault();
+  // Ficha de persona (chip anidado en una caja de ocupante único, o fila
+  // entera de un ocupante ya desplegado dentro de un puesto compartido):
+  // arrastrarla reasigna solo su jefe directo, nunca el puesto.
+  cont.querySelectorAll(".persona-chip, .orgchart-box-individual").forEach((el) => {
+    const esChipAnidado = el.classList.contains("persona-chip");
+    wireArrastrePuntero(el, {
+      pararPropagacion: esChipAnidado, // que no dispare también el drag de la caja que lo contiene
+      obtenerDato: () => (el.dataset.personaId ? Number(el.dataset.personaId) : null),
+      onMover: (personaId, elBajoCursor) => {
+        const box = elBajoCursor ? elBajoCursor.closest(".orgchart-box") : null;
+        if (!box) { limpiarEstadosDrop(); return; }
         const jefeId = box.dataset.jefeTargetId ? Number(box.dataset.jefeTargetId) : null;
-        const valido = jefeId !== null && jefeId !== personaArrastradaId;
-        box.classList.toggle("drop-valido", valido);
-        box.classList.toggle("drop-invalido", !valido);
-        return;
-      }
-      if (puestoArrastradoId === null || !box.dataset.puestoId) return;
-      e.preventDefault();
-      const destinoId = Number(box.dataset.puestoId);
-      const valido = esReparentadoValido(puestoArrastradoId, destinoId);
-      box.classList.toggle("drop-valido", valido);
-      box.classList.toggle("drop-invalido", !valido);
-    });
-    box.addEventListener("dragleave", () => {
-      box.classList.remove("drop-valido", "drop-invalido");
-    });
-    box.addEventListener("drop", async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      box.classList.remove("drop-valido", "drop-invalido");
-
-      if (personaArrastradaId !== null) {
-        const arrastradaId = personaArrastradaId;
-        personaArrastradaId = null;
+        marcarDestino(box, jefeId !== null && jefeId !== personaId);
+      },
+      onSoltar: async (personaId, elBajoCursor) => {
+        limpiarEstadosDrop();
+        const box = elBajoCursor ? elBajoCursor.closest(".orgchart-box") : null;
+        if (!box) {
+          await asignarJefeDirectoSolo(personaId, null);
+          return;
+        }
         const jefeId = box.dataset.jefeTargetId ? Number(box.dataset.jefeTargetId) : null;
         if (jefeId === null) {
           await mostrarAviso('Ese puesto no tiene un único responsable claro (está vacante o lo comparte más de una persona). Pulsa "⛶" en esa caja y suelta sobre la persona concreta.');
           return;
         }
-        if (jefeId === arrastradaId) return;
-        await asignarJefeDirectoSolo(arrastradaId, jefeId);
-        return;
-      }
+        if (jefeId === personaId) return;
+        await asignarJefeDirectoSolo(personaId, jefeId);
+      },
+    });
+  });
 
-      if (puestoArrastradoId === null || !box.dataset.puestoId) return;
-      const arrastradoId = puestoArrastradoId;
-      puestoArrastradoId = null;
-      const destinoId = Number(box.dataset.puestoId);
-      if (!esReparentadoValido(arrastradoId, destinoId)) return;
-      const jefeOverride = box.dataset.jefeTargetId ? Number(box.dataset.jefeTargetId) : undefined;
-      await reparentarPuesto(arrastradoId, destinoId, jefeOverride);
+  // Caja de puesto completo (ocupante único, vacante, o resumen de uno
+  // compartido): arrastrarla reasigna el puesto entero a un nuevo padre.
+  cont.querySelectorAll(".orgchart-box:not(.orgchart-box-individual)").forEach((box) => {
+    wireArrastrePuntero(box, {
+      obtenerDato: () => (box.dataset.puestoId ? Number(box.dataset.puestoId) : null),
+      onMover: (puestoId, elBajoCursor) => {
+        const destino = elBajoCursor ? elBajoCursor.closest(".orgchart-box[data-puesto-id]") : null;
+        if (!destino) { limpiarEstadosDrop(); return; }
+        marcarDestino(destino, esReparentadoValido(puestoId, Number(destino.dataset.puestoId)));
+      },
+      onSoltar: async (puestoId, elBajoCursor) => {
+        limpiarEstadosDrop();
+        const destino = elBajoCursor ? elBajoCursor.closest(".orgchart-box[data-puesto-id]") : null;
+        if (!destino) {
+          await reparentarPuesto(puestoId, null);
+          return;
+        }
+        const destinoId = Number(destino.dataset.puestoId);
+        if (!esReparentadoValido(puestoId, destinoId)) return;
+        const jefeOverride = destino.dataset.jefeTargetId ? Number(destino.dataset.jefeTargetId) : undefined;
+        await reparentarPuesto(puestoId, destinoId, jefeOverride);
+      },
     });
   });
 }
@@ -1570,23 +1612,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   activarSubvistaOrganigrama("personas");
   document.getElementById("btn-nuevo-puesto-raiz").addEventListener("click", () => abrirEditorPuesto(null));
   const arbolCont = document.getElementById("puestos-arbol");
-  arbolCont.addEventListener("dragover", (e) => {
-    if (puestoArrastradoId !== null || personaArrastradaId !== null) e.preventDefault();
-  });
-  arbolCont.addEventListener("drop", async (e) => {
-    if (e.target.closest(".orgchart-box")) return; // ya lo gestiona la caja concreta
-    e.preventDefault();
-    if (personaArrastradaId !== null) {
-      const arrastradaId = personaArrastradaId;
-      personaArrastradaId = null;
-      await asignarJefeDirectoSolo(arrastradaId, null);
-      return;
-    }
-    const arrastradoId = puestoArrastradoId;
-    puestoArrastradoId = null;
-    if (arrastradoId === null) return;
-    await reparentarPuesto(arrastradoId, null);
-  });
+  // (Soltar sobre el fondo, sin caja debajo, ya lo gestiona el propio
+  // onSoltar de wireArrastrePuntero en wirePuestoBoxes -- destino null.)
   // Arrastrar el fondo (no una caja) para desplazar el árbol -- como el
   // organigrama es más ancho/alto que el hueco disponible, la barra de
   // scroll sola no era suficiente, esto imita el "click y arrastra para

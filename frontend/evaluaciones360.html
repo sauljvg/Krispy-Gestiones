@@ -79,6 +79,13 @@
   }
   .orgchart-box:active { cursor: grabbing; }
   .orgchart-box.arrastrando { opacity: 0.4; }
+  /* Clon flotante que sigue al cursor mientras se arrastra (Pointer Events,
+     ver wireArrastrePuntero) -- no es un elemento real de la caja, es una
+     copia visual con pointer-events:none, así que nunca intercepta clics. */
+  .orgtree-clon-arrastre {
+    opacity: 0.92; box-shadow: 0 10px 28px rgba(0,0,0,0.35); cursor: grabbing;
+    transform: rotate(-1deg);
+  }
   .orgchart-box.drop-valido { border-color: var(--status-good); box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-good) 40%, transparent); }
   .orgchart-box.drop-invalido { border-color: var(--status-bad, #c62828); }
   .orgchart-box .puesto-nombre { display: block; font-weight: 600; font-size: 13px; white-space: nowrap; }
@@ -451,6 +458,6 @@
 <script src="js/auth-common.js?v=20260723f"></script>
 <script src="js/topbar-menu.js?v=20260821a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/evaluaciones360.js?v=20260823a"></script>
+<script src="js/evaluaciones360.js?v=20260823d"></script>
 </body>
 </html>
