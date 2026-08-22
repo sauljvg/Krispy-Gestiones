@@ -164,7 +164,12 @@ h3 {
 .brand h1 { margin: 0; font-size: 20px; }
 .subtitle { margin: 2px 0 0; color: var(--text-secondary); font-size: 13px; }
 
-.topbar-actions { display: flex; align-items: center; gap: 8px; }
+/* flex-wrap: sin esto, una página con botones propios en la topbar (ej.
+   "Exportar Excel" en Reseñas) obligaba a toda la fila (grupo de botones +
+   volver/inicio/menú) a caber en una sola línea sin encoger -- en móvil
+   eso empujaba la página entera a scroll horizontal. Con wrap, el grupo de
+   botones de la página cae a su propia línea cuando no cabe. */
+.topbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* Grupos de botones de acción dentro del topbar (Actualizar / Importar+Exportar
    / etc.) — cada .topbar-group junta botones relacionados, con un separador

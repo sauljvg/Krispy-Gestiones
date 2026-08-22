@@ -2310,6 +2310,13 @@ async function agrActualizarPoligonoLimite() {
   let totalVertices = 0;
   const anillosPorAgregador = {}; // nombre -> [anillo, anillo, ...] (uno por tienda con polígono cerrado) -- para la unión
   const agregarAnillo = (resultado) => {
+    // agrDibujarPoligonoLimite() devuelve null cuando esa tienda todavía no
+    // tiene ningún límite dibujado para ese agregador concreto (algo normal
+    // en una tienda recién dada de alta, o si solo se ha dibujado el radar
+    // de un agregador y no de los demás) -- sin este guard, cargar el mapa
+    // entero fallaba en cuanto CUALQUIER combinación tienda/agregador no
+    // tuviera datos todavía.
+    if (!resultado) return;
     totalVertices += resultado.n;
     if (resultado.anillo) {
       (anillosPorAgregador[resultado.agregador] ||= []).push(resultado.anillo);
