@@ -99,6 +99,22 @@ def _ensure_reviews_columns():
     conn.close()
 
 
+def _ensure_reviews_indexes():
+    """reviews se filtra constantemente por tienda/fecha_datetime/sentiment
+    (ver routes.build_filters) pero no tenía ningún índice más allá del
+    rowid -- cada consulta filtrada era un full table scan. IF NOT EXISTS +
+    el mismo guard "if cols" que _ensure_reviews_columns, para no fallar si
+    el scraper todavía no ha creado la tabla en un despliegue nuevo."""
+    conn = get_connection()
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(reviews)")}
+    if cols:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_reviews_tienda_fecha ON reviews(tienda, fecha_datetime)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_reviews_fecha ON reviews(fecha_datetime)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_reviews_sentiment ON reviews(sentiment)")
+        conn.commit()
+    conn.close()
+
+
 def _ensure_import_meta_table():
     """Fila única con la fecha/hora de la última importación de Takeout —
     visible para cualquiera con acceso a Reseñas, no solo quien la lanzó
@@ -137,4 +153,5 @@ def set_ultima_importacion_takeout():
 _ensure_transactions_table()
 _ensure_store_meta_table()
 _ensure_reviews_columns()
+_ensure_reviews_indexes()
 _ensure_import_meta_table()

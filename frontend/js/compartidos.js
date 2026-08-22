@@ -1,8 +1,5 @@
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script en
+// compartidos.html) -- ver ese archivo.
 
 // Iconos de marca en vez de emoji (💬/✉) -- se ven más cuidados y más
 // compactos, para que la barra de selección quepa en una sola línea.

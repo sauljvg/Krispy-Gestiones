@@ -89,11 +89,7 @@ function colorTextoActual() {
   return getComputedStyle(document.documentElement).getPropertyValue("--text-primary").trim() || "#000";
 }
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script).
 
 // o.oportunidad ya viene calculado desde el backend: la suma de las DOS
 // categorías que más pesen entre Neutral/En desacuerdo/Totalmente en

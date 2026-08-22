@@ -18,11 +18,7 @@ function claveDesdeNombre(nombre) {
     .replace(/^_+|_+$/g, "");
 }
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script).
 
 // clima-tests.html carga este mismo tests.js (mismo editor, misma API) pero
 // como "Clima Laboral > Test" -- solo se distingue por la URL, no hace

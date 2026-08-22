@@ -36,9 +36,9 @@ function aplicarBrandingEmpresa() {
   if (title) title.textContent = "SAONA Gestiones";
 }
 
-function escapeHTML(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script) --
+// antes este archivo tenía su propia copia con una implementación distinta
+// (regex en vez de textContent/innerHTML) a la de los otros 13 archivos.
 
 // ---------------------------------------------------------------------------
 // Pestañas

@@ -46,11 +46,7 @@ function indicesVisibles() {
   return encuesta.paginas.map((_, i) => i).filter((i) => paginaVisible(encuesta.paginas[i]));
 }
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script).
 
 function mostrarError(mensaje) {
   document.getElementById("encuesta-card").innerHTML = `<div class="encuesta-error"><p>${escapeHTML(mensaje)}</p></div>`;

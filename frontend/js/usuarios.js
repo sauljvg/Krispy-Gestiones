@@ -3,11 +3,7 @@ let MODULOS_CACHE = [];
 let TIPOS_INFORME_CACHE = null; // null = todavía no se ha pedido (se carga la primera vez que hace falta)
 let CLIMA_CENTROS_CACHE = null; // idem, para el checklist de restricción por centro de Clima Laboral
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script).
 
 // Mismas tiendas del selector de Reseñas (KK + SAONA) — ParqueSur es una
 // sola ficha de Google (fábrica y tienda comparten la misma reseña pública),

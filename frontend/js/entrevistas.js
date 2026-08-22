@@ -23,11 +23,7 @@ function conEmpresa(params) {
   return params;
 }
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script).
 
 function colorTextoActual() {
   return getComputedStyle(document.documentElement).getPropertyValue("--text-primary").trim() || "#000";

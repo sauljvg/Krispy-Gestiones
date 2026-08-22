@@ -8,11 +8,7 @@ let respondidasPub = new Set();
 let paginaActualPub = 0;
 let totalPaginasPub = 1;
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script).
 
 function shuffle(arr) {
   const a = arr.slice();

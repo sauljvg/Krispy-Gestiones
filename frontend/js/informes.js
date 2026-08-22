@@ -149,11 +149,7 @@ function renderColumnasPanel() {
   });
 }
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script).
 
 // Las fechas se guardan en datos_json como ISO ("2026-08-16" o
 // "2026-08-16T10:30:00") — aquí solo se cambia cómo se MUESTRAN en la

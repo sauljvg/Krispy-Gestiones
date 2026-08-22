@@ -914,7 +914,7 @@ function agrRenderMapa(data) {
   agrDireccionesPorTienda = { [tienda.tienda]: direcciones };
   agrInitMap(tienda.lat, tienda.lng);
 
-  L.marker([tienda.lat, tienda.lng], { icon: agrIconoTienda(tienda.tienda) }).addTo(agrMap).bindPopup(`<b>${tienda.nombre}</b>`);
+  L.marker([tienda.lat, tienda.lng], { icon: agrIconoTienda(tienda.tienda) }).addTo(agrMap).bindPopup(`<b>${escapeHTML(tienda.nombre)}</b>`);
 
   agrLimpiarMapa();
   direcciones.forEach((dir) => agrAgregarMarcador(dir, { editable: true }));
@@ -946,7 +946,7 @@ function agrRenderMapaTodas(data, ajustarVista = true) {
   // destruía y recreaba cada vez, ver agrInitMap).
   agrTiendaMarkers.forEach((m) => agrMap.removeLayer(m));
   agrTiendaMarkers = tiendas.map((t) =>
-    L.marker([t.lat, t.lng], { icon: agrIconoTienda(t.tienda) }).addTo(agrMap).bindPopup(`<b>${t.nombre}</b>`)
+    L.marker([t.lat, t.lng], { icon: agrIconoTienda(t.tienda) }).addTo(agrMap).bindPopup(`<b>${escapeHTML(t.nombre)}</b>`)
   );
 
   agrLimpiarMapa();
@@ -995,7 +995,7 @@ function agrRenderChipsTiendasMapa(tiendas) {
   const cont = document.getElementById("agr-tiendas-mapa-chips");
   if (!cont) return;
   const chips = [`<button type="button" class="agr-tienda-chip agr-tienda-chip-todas" data-todas="1">Todas</button>`].concat(
-    tiendas.map((t) => `<button type="button" class="agr-tienda-chip" data-tienda="${t.tienda}">${t.nombre}</button>`)
+    tiendas.map((t) => `<button type="button" class="agr-tienda-chip" data-tienda="${escapeHTML(t.tienda)}">${escapeHTML(t.nombre)}</button>`)
   );
   cont.innerHTML = chips.join("");
   agrActualizarChipsTiendasMapa();
@@ -1431,7 +1431,7 @@ async function agrCargarAlertas() {
       const hora = new Date(a.timestamp).toLocaleString("es-ES", { timeZone: "Europe/Madrid" });
       const claseTipo = a.tipo === "scraper_error" ? "tipo nuestro" : "tipo";
       const etiquetaTipo = a.tipo === "scraper_error" ? "Nuestro" : a.tipo;
-      return `<li><span class="hora">${hora}</span><span class="${claseTipo}">${etiquetaTipo}</span>${a.mensaje}</li>`;
+      return `<li><span class="hora">${hora}</span><span class="${claseTipo}">${escapeHTML(etiquetaTipo)}</span>${escapeHTML(a.mensaje)}</li>`;
     })
     .join("");
 }
@@ -2198,7 +2198,7 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
           `<b>${AGR_NOMBRE_AGREGADOR[limite.agregador] || limite.agregador}</b><br>Ángulo: ${limite.angulo_grados}°<br>Límite: ${etiqueta}<br>Dirección: <span class="agr-poligono-dir">${direccionMostrar || "cargando..."}</span><br>` +
             `<i style="color:var(--text-muted);font-size:11px;">Arrastra para ajustar el borde</i><br>` +
             unirVerticeHtml +
-            `<button type="button" class="btn btn-ghost" style="margin-top:6px;font-size:12px;padding:3px 8px;" onclick="agrEliminarLimite('${limite.tienda}', '${limite.agregador}', ${limite.angulo_grados})">🗑️ Quitar este vértice del borde</button>`
+            `<button type="button" class="btn btn-ghost" style="margin-top:6px;font-size:12px;padding:3px 8px;" onclick="agrEliminarLimite('${limite.tienda.replace(/'/g, "\\'")}', '${limite.agregador.replace(/'/g, "\\'")}', ${limite.angulo_grados})">🗑️ Quitar este vértice del borde</button>`
         )
         .addTo(agrMap);
       marker.on("dragend", (e) => {

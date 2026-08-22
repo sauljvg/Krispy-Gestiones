@@ -16,11 +16,7 @@ async function fetchJSON(url) {
 }
 
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script).
 
 // Cuando el usuario (gerente) está restringido a una sola tienda, no tiene
 // sentido ofrecerle "Todas" ni un desplegable — /api/stores ya viene filtrado
