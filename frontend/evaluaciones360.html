@@ -16,8 +16,14 @@
 <link rel="stylesheet" href="css/styles.css?v=20260823c">
 <style>
   .eval360-wrap { max-width: 1000px; margin: 0 auto; padding: 0 0 60px; }
-  .eval360-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 16px 0; }
-  .eval360-toolbar p { flex: 1; min-width: 0; }
+  /* flex-wrap: sin esto, un grupo de botones que no encoge (flex-shrink:0,
+     como el de zoom + "Nuevo puesto") exprimía el texto de ayuda de al lado
+     hasta una columna carísimamente estrecha en móvil -- con min-width:0
+     el párrafo SÍ podía encoger tanto, y una palabra por línea es lo que
+     queda cuando el hueco es más angosto que la palabra más larga. Con
+     wrap, el grupo de botones cae a su propia línea cuando no cabe. */
+  .eval360-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin: 16px 0; }
+  .eval360-toolbar p { flex: 1; min-width: 200px; }
   .eval360-toolbar .btn { flex-shrink: 0; white-space: nowrap; }
 
   .eval360-tabs { display: flex; gap: 6px; margin: 20px 0 4px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
