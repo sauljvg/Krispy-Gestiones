@@ -18,7 +18,7 @@ import cv_pdf
 import notificaciones as notificaciones_module
 import reclutamiento as reclutamiento_module
 from auth_routes import get_current_user
-from informes_routes import require_informes
+from informes_routes import require_informes_o_reclutamiento
 from utils import rows_to_xlsx
 
 router = APIRouter()
@@ -43,13 +43,14 @@ def _nombre_archivo_cv(candidato: dict) -> str:
 
 
 def require_acceso_candidato(candidato_id: int, user: dict = Depends(get_current_user)) -> dict:
-    """A diferencia de require_informes (para la sección propia de
-    Reclutamiento), esto también deja pasar a quien no tiene el módulo
-    Informes pero SÍ recibió justo este candidato compartido — mismo
-    espíritu que /informes/compartidos (get_current_user a secas) para que
-    un gerente o area manager pueda abrir la ficha completa que le
+    """A diferencia de require_informes_o_reclutamiento (para la sección
+    propia de Reclutamiento), esto también deja pasar a quien no tiene
+    ninguno de esos módulos pero SÍ recibió justo este candidato compartido
+    — mismo espíritu que /informes/compartidos (get_current_user a secas)
+    para que un gerente o area manager pueda abrir la ficha completa que le
     compartieron, no solo la tarjeta resumen."""
-    if auth_module.tiene_modulo(user, "informes") or auth_module.tiene_modulo(user, "saona_informes"):
+    modulos = ("informes", "saona_informes", "reclutamiento", "saona_reclutamiento")
+    if any(auth_module.tiene_modulo(user, m) for m in modulos):
         return user
     if reclutamiento_module.usuario_tiene_acceso_candidato(user["id"], candidato_id):
         return user
@@ -135,13 +136,13 @@ class CandidatoUpdateIn(BaseModel):
 @router.get("/vacantes")
 def list_vacantes_route(
     empresa: str | None = None, estado: str | None = None, archivadas: bool = False,
-    _user: dict = Depends(require_informes),
+    _user: dict = Depends(require_informes_o_reclutamiento),
 ):
     return reclutamiento_module.list_vacantes(empresa=empresa, estado=estado, archivadas=archivadas)
 
 
 @router.get("/vacantes/{vacante_id}")
-def get_vacante_route(vacante_id: int, _user: dict = Depends(require_informes)):
+def get_vacante_route(vacante_id: int, _user: dict = Depends(require_informes_o_reclutamiento)):
     vacante = reclutamiento_module.get_vacante(vacante_id)
     if vacante is None:
         raise HTTPException(status_code=404, detail="Vacante no encontrada")
@@ -149,7 +150,7 @@ def get_vacante_route(vacante_id: int, _user: dict = Depends(require_informes)):
 
 
 @router.post("/vacantes")
-def crear_vacante_route(body: VacanteIn, user: dict = Depends(require_informes)):
+def crear_vacante_route(body: VacanteIn, user: dict = Depends(require_informes_o_reclutamiento)):
     vacante_id = reclutamiento_module.crear_vacante(
         body.empresa, body.puesto, centro=body.centro, notas=body.notas, creado_por=user["username"]
     )
@@ -157,7 +158,7 @@ def crear_vacante_route(body: VacanteIn, user: dict = Depends(require_informes))
 
 
 @router.put("/vacantes/{vacante_id}")
-def actualizar_vacante_route(vacante_id: int, body: VacanteUpdateIn, _user: dict = Depends(require_informes)):
+def actualizar_vacante_route(vacante_id: int, body: VacanteUpdateIn, _user: dict = Depends(require_informes_o_reclutamiento)):
     if reclutamiento_module.get_vacante(vacante_id) is None:
         raise HTTPException(status_code=404, detail="Vacante no encontrada")
     if body.estado is not None and body.estado not in reclutamiento_module.VACANTE_ESTADOS:
@@ -168,7 +169,7 @@ def actualizar_vacante_route(vacante_id: int, body: VacanteUpdateIn, _user: dict
 
 
 @router.delete("/vacantes/{vacante_id}")
-def eliminar_vacante_route(vacante_id: int, _user: dict = Depends(require_informes)):
+def eliminar_vacante_route(vacante_id: int, _user: dict = Depends(require_informes_o_reclutamiento)):
     if reclutamiento_module.get_vacante(vacante_id) is None:
         raise HTTPException(status_code=404, detail="Vacante no encontrada")
     reclutamiento_module.eliminar_vacante(vacante_id)
@@ -180,7 +181,7 @@ class FusionarVacanteIn(BaseModel):
 
 
 @router.post("/vacantes/{vacante_id}/fusionar")
-def fusionar_vacantes_route(vacante_id: int, body: FusionarVacanteIn, _user: dict = Depends(require_informes)):
+def fusionar_vacantes_route(vacante_id: int, body: FusionarVacanteIn, _user: dict = Depends(require_informes_o_reclutamiento)):
     if reclutamiento_module.get_vacante(vacante_id) is None or reclutamiento_module.get_vacante(body.destino_id) is None:
         raise HTTPException(status_code=404, detail="Vacante no encontrada")
     if vacante_id == body.destino_id:
@@ -194,7 +195,7 @@ class CompartirVacanteIn(BaseModel):
 
 
 @router.post("/vacantes/{vacante_id}/compartir")
-def compartir_vacante_route(vacante_id: int, body: CompartirVacanteIn, user: dict = Depends(require_informes)):
+def compartir_vacante_route(vacante_id: int, body: CompartirVacanteIn, user: dict = Depends(require_informes_o_reclutamiento)):
     """Asigna uno o más gerentes/responsables a TODA la solicitud -- a
     diferencia de /candidatos/compartir (candidato a candidato), esto da
     acceso a todos sus candidatos de una vez, presentes y futuros."""
@@ -205,7 +206,7 @@ def compartir_vacante_route(vacante_id: int, body: CompartirVacanteIn, user: dic
 
 
 @router.delete("/vacantes/{vacante_id}/compartir/{usuario_id}")
-def dejar_de_compartir_vacante_route(vacante_id: int, usuario_id: int, _user: dict = Depends(require_informes)):
+def dejar_de_compartir_vacante_route(vacante_id: int, usuario_id: int, _user: dict = Depends(require_informes_o_reclutamiento)):
     reclutamiento_module.dejar_de_compartir_vacante(vacante_id, usuario_id)
     return {"ok": True}
 
@@ -230,24 +231,24 @@ def list_candidatos_route(
     q: str | None = None,
     vacante_id: int | None = None,
     sin_vacante: bool = False,
-    _user: dict = Depends(require_informes),
+    _user: dict = Depends(require_informes_o_reclutamiento),
 ):
     return reclutamiento_module.list_candidatos(empresa=empresa, estado=estado, q=q, vacante_id=vacante_id, sin_vacante=sin_vacante)
 
 
 @router.get("/candidatos/descartados-antiguos")
-def descartados_antiguos_route(meses: int = 12, _user: dict = Depends(require_informes)):
+def descartados_antiguos_route(meses: int = 12, _user: dict = Depends(require_informes_o_reclutamiento)):
     return reclutamiento_module.candidatos_descartados_antiguos(meses)
 
 
 @router.post("/candidatos/purgar-descartados")
-def purgar_descartados_route(meses: int = 12, user: dict = Depends(require_informes)):
+def purgar_descartados_route(meses: int = 12, user: dict = Depends(require_informes_o_reclutamiento)):
     borrados = reclutamiento_module.purgar_descartados(meses)
     return {"ok": True, "borrados": borrados}
 
 
 @router.post("/candidatos/revincular-tests")
-def revincular_candidatos_route(user: dict = Depends(require_informes)):
+def revincular_candidatos_route(user: dict = Depends(require_informes_o_reclutamiento)):
     enlazados = reclutamiento_module.revincular_candidatos_existentes()
     return {"ok": True, "enlazados": enlazados}
 
@@ -258,13 +259,13 @@ def conteo_por_estado_route(
     q: str | None = None,
     vacante_id: int | None = None,
     sin_vacante: bool = False,
-    _user: dict = Depends(require_informes),
+    _user: dict = Depends(require_informes_o_reclutamiento),
 ):
     return reclutamiento_module.contar_por_estado(empresa=empresa, q=q, vacante_id=vacante_id, sin_vacante=sin_vacante)
 
 
 @router.put("/candidatos/estado-multiple")
-def actualizar_estado_multiple_route(body: EstadoMultipleIn, _user: dict = Depends(require_informes)):
+def actualizar_estado_multiple_route(body: EstadoMultipleIn, _user: dict = Depends(require_informes_o_reclutamiento)):
     if body.estado not in reclutamiento_module.ESTADOS:
         raise HTTPException(status_code=400, detail=f"Estado inválido: {body.estado}")
     reclutamiento_module.actualizar_estado_multiple(body.candidato_ids, body.estado)
@@ -272,7 +273,7 @@ def actualizar_estado_multiple_route(body: EstadoMultipleIn, _user: dict = Depen
 
 
 @router.put("/candidatos/vacante-multiple")
-def actualizar_vacante_multiple_route(body: VacanteMultipleIn, _user: dict = Depends(require_informes)):
+def actualizar_vacante_multiple_route(body: VacanteMultipleIn, _user: dict = Depends(require_informes_o_reclutamiento)):
     if body.vacante_id is not None and reclutamiento_module.get_vacante(body.vacante_id) is None:
         raise HTTPException(status_code=404, detail="Vacante no encontrada")
     reclutamiento_module.actualizar_vacante_multiple(body.candidato_ids, body.vacante_id)
@@ -314,19 +315,19 @@ class MarcarInvitadosTestIn(BaseModel):
 
 
 @router.post("/candidatos/marcar-invitados-test")
-def marcar_invitados_test_route(body: MarcarInvitadosTestIn, _user: dict = Depends(require_informes)):
+def marcar_invitados_test_route(body: MarcarInvitadosTestIn, _user: dict = Depends(require_informes_o_reclutamiento)):
     reclutamiento_module.marcar_invitados_test(body.candidato_ids, body.encuesta_id)
     return {"ok": True}
 
 
 @router.post("/candidatos/compartir")
-def compartir_candidatos_route(body: CompartirCandidatosIn, user: dict = Depends(require_informes)):
+def compartir_candidatos_route(body: CompartirCandidatosIn, user: dict = Depends(require_informes_o_reclutamiento)):
     reclutamiento_module.compartir_candidatos_directo(body.candidato_ids, body.usuario_id, user["username"])
     return {"ok": True}
 
 
 @router.delete("/candidatos/{candidato_id}/compartir/{usuario_id}")
-def dejar_de_compartir_candidato_route(candidato_id: int, usuario_id: int, _user: dict = Depends(require_informes)):
+def dejar_de_compartir_candidato_route(candidato_id: int, usuario_id: int, _user: dict = Depends(require_informes_o_reclutamiento)):
     reclutamiento_module.dejar_de_compartir_candidato(candidato_id, usuario_id)
     return {"ok": True}
 
@@ -348,7 +349,7 @@ def lotes_en_progreso_route(user: dict = Depends(get_current_user)):
 
 
 @router.get("/candidatos/fotos-duplicadas")
-def fotos_duplicadas_route(empresa: str = "kk", _user: dict = Depends(require_informes)):
+def fotos_duplicadas_route(empresa: str = "kk", _user: dict = Depends(require_informes_o_reclutamiento)):
     """Diagnóstico de solo lectura: agrupa a todos los candidatos con foto
     por el CONTENIDO real del archivo (hash), no por si su PDF vuelve a
     analizarse como una o varias personas -- esa segunda vía es la que usa
@@ -394,7 +395,7 @@ def get_candidato_route(candidato_id: int, _user: dict = Depends(require_acceso_
 
 
 @router.post("/candidatos")
-def crear_candidato_route(body: CandidatoIn, user: dict = Depends(require_informes)):
+def crear_candidato_route(body: CandidatoIn, user: dict = Depends(require_informes_o_reclutamiento)):
     campos = body.model_dump(exclude={"empresa", "vacante_id"})
     candidato_id = reclutamiento_module.crear_candidato(
         campos, empresa=body.empresa, origen="manual", creado_por=user["username"], vacante_id=body.vacante_id
@@ -421,7 +422,7 @@ def actualizar_candidato_route(candidato_id: int, body: CandidatoUpdateIn, _user
 
 
 @router.delete("/candidatos/{candidato_id}")
-def eliminar_candidato_route(candidato_id: int, _user: dict = Depends(require_informes)):
+def eliminar_candidato_route(candidato_id: int, _user: dict = Depends(require_informes_o_reclutamiento)):
     if reclutamiento_module.get_candidato(candidato_id) is None:
         raise HTTPException(status_code=404, detail="Candidato no encontrado")
     reclutamiento_module.eliminar_candidato(candidato_id)
@@ -429,7 +430,7 @@ def eliminar_candidato_route(candidato_id: int, _user: dict = Depends(require_in
 
 
 @router.post("/candidatos/extraer-cv")
-async def extraer_cv_route(file: UploadFile = File(...), _user: dict = Depends(require_informes)):
+async def extraer_cv_route(file: UploadFile = File(...), _user: dict = Depends(require_informes_o_reclutamiento)):
     """Lee un CV nuevo (sin guardarlo todavía) con el método local -- el
     frontend rellena el formulario con el resultado para que el reclutador
     lo revise antes de guardar. Si trae varios candidatos concatenados (PDF
@@ -458,7 +459,7 @@ async def extraer_cv_route(file: UploadFile = File(...), _user: dict = Depends(r
 
 
 @router.post("/candidatos/adjuntar-pdf-lote")
-async def adjuntar_pdf_lote_route(empresa: str = "kk", file: UploadFile = File(...), _user: dict = Depends(require_informes)):
+async def adjuntar_pdf_lote_route(empresa: str = "kk", file: UploadFile = File(...), _user: dict = Depends(require_informes_o_reclutamiento)):
     """Vista previa para el caso de "subí un PDF con 50 CVs, se crearon las
     50 fichas, pero el PDF en sí nunca se guardó en ninguna" -- lee el mismo
     PDF, extrae los nombres, y por cada uno busca si YA existe una ficha con
@@ -638,7 +639,7 @@ def reanudar_lotes_ia_pendientes():
 
 
 @router.post("/candidatos/reextraer-todos")
-def reextraer_todos_route(empresa: str = "kk", user: dict = Depends(require_informes)):
+def reextraer_todos_route(empresa: str = "kk", user: dict = Depends(require_informes_o_reclutamiento)):
     """Vuelve a extraer con el método local el PDF YA guardado de cada
     candidato que tenga uno -- para cuando una mejora del extractor local
     (ver cv_extraction.py) deja desactualizadas fichas que se procesaron
@@ -709,7 +710,7 @@ def _limpiar_fotos_en_segundo_plano(limpieza_id: str, items: list[tuple[int, int
 
 
 @router.post("/candidatos/limpiar-fotos-de-lote-compartido")
-def limpiar_fotos_de_lote_compartido_route(empresa: str = "kk", user: dict = Depends(require_informes)):
+def limpiar_fotos_de_lote_compartido_route(empresa: str = "kk", user: dict = Depends(require_informes_o_reclutamiento)):
     """Corrige el daño de un bug real: "Reextraer todos los CV" sacaba la
     foto de "la página 1" del PDF más reciente adjunto a cada candidato sin
     comprobar antes si ese PDF era de verdad SOLO suyo -- para fichas
@@ -736,7 +737,7 @@ def limpiar_fotos_de_lote_compartido_route(empresa: str = "kk", user: dict = Dep
 
 
 @router.get("/candidatos/limpiar-fotos-de-lote-compartido/progreso/{limpieza_id}")
-def limpiar_fotos_progreso_route(limpieza_id: str, _user: dict = Depends(require_informes)):
+def limpiar_fotos_progreso_route(limpieza_id: str, _user: dict = Depends(require_informes_o_reclutamiento)):
     estado = _limpiezas_fotos.get(limpieza_id)
     if estado is None:
         raise HTTPException(status_code=404, detail="No hay ninguna limpieza en marcha con ese id")
@@ -748,7 +749,7 @@ async def adjuntar_pdf_lote_confirmar_route(
     file: UploadFile = File(...),
     mapeo: str = Form(...),
     titulo: str | None = Form(None),
-    user: dict = Depends(require_informes),
+    user: dict = Depends(require_informes_o_reclutamiento),
 ):
     """Recorta y adjunta -- recibe el PDF de lote UNA sola vez (en vez de
     subirlo N veces, una por candidato, como hacía antes el frontend) más la
@@ -810,7 +811,7 @@ async def adjuntar_pdf_lote_confirmar_route(
 
 
 @router.get("/candidatos/adjuntar-pdf-lote/progreso/{lote_id}")
-def progreso_relleno_lote_route(lote_id: str, _user: dict = Depends(require_informes)):
+def progreso_relleno_lote_route(lote_id: str, _user: dict = Depends(require_informes_o_reclutamiento)):
     """Para que el frontend pueda sondear 'cuántos van' del relleno con IA en
     segundo plano (ver _rellenar_huecos_en_segundo_plano) -- 404 si el
     servidor se reinició desde entonces o el id no existe."""
@@ -821,7 +822,7 @@ def progreso_relleno_lote_route(lote_id: str, _user: dict = Depends(require_info
 
 
 @router.post("/candidatos/{candidato_id}/archivos")
-async def agregar_archivo_route(candidato_id: int, file: UploadFile = File(...), _user: dict = Depends(require_informes)):
+async def agregar_archivo_route(candidato_id: int, file: UploadFile = File(...), _user: dict = Depends(require_informes_o_reclutamiento)):
     if reclutamiento_module.get_candidato(candidato_id) is None:
         raise HTTPException(status_code=404, detail="Candidato no encontrado")
     contenido = await file.read()
@@ -981,7 +982,7 @@ class DescargarPdfsLoteBody(BaseModel):
 
 
 @router.post("/candidatos/descargar-pdfs-lote")
-def descargar_pdfs_lote_route(body: DescargarPdfsLoteBody, _user: dict = Depends(require_informes)):
+def descargar_pdfs_lote_route(body: DescargarPdfsLoteBody, _user: dict = Depends(require_informes_o_reclutamiento)):
     """Un único PDF con el CV de cada candidato seleccionado (el mismo que
     saldría en /cv.pdf para cada uno -- diseño propio o recorte original,
     lo que toque) fusionado en el orden EXACTO en que se pasan los ids, que

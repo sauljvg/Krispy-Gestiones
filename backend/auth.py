@@ -33,10 +33,12 @@ MODULOS = {
     "disc": "Perfil DISC",
     "agregadores": "Agregadores",
     "evaluaciones360": "Evaluaciones 360°",
+    "reclutamiento": "Reclutamiento",
     "saona_resenas": "SAONA · Reseñas",
     "saona_informes": "SAONA · Informes",
     "saona_clima": "SAONA · Clima Laboral",
     "saona_evaluaciones360": "SAONA · Evaluaciones 360°",
+    "saona_reclutamiento": "SAONA · Reclutamiento",
 }
 
 # Módulos que pertenecen al "hub" SAONA en Home — un usuario ve la tarjeta

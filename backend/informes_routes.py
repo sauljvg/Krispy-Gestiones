@@ -24,6 +24,17 @@ def require_informes(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
+def require_informes_o_reclutamiento(user: dict = Depends(get_current_user)) -> dict:
+    """Como require_informes, pero deja pasar también a quien solo tiene el
+    módulo Reclutamiento (sin el resto de Informes) -- para las rutas que
+    usa la propia página de Reclutamiento (compartidos.js), que vive en
+    reclutamiento_routes.py pero reutiliza estos dos endpoints."""
+    modulos = ("informes", "saona_informes", "reclutamiento", "saona_reclutamiento")
+    if not any(auth_module.tiene_modulo(user, m) for m in modulos):
+        raise HTTPException(status_code=403, detail="No tienes acceso a Informes o Reclutamiento")
+    return user
+
+
 def require_tipo_acceso(tipo_clave: str, user: dict = Depends(get_current_user)) -> dict:
     """La empresa se resuelve del propio tipo (no hace falta que el
     frontend la repita en la URL): un tipo 'kk' exige el módulo "informes",
@@ -128,7 +139,7 @@ def eliminar_tipo_route(tipo_clave: str, _user: dict = Depends(require_tipo_acce
 
 
 @router.get("/usuarios-para-compartir")
-def usuarios_para_compartir_route(_user: dict = Depends(require_informes)):
+def usuarios_para_compartir_route(_user: dict = Depends(require_informes_o_reclutamiento)):
     conn = get_connection()
     rows = conn.execute("SELECT id, username, nombre, rol FROM usuarios ORDER BY nombre").fetchall()
     conn.close()
@@ -264,7 +275,7 @@ def dejar_de_compartir_route(respuesta_id: int, usuario_id: int, _user: dict = D
 
 
 @router.put("/compartidos-por-mi/destinatario")
-def cambiar_destinatario_route(body: CambiarDestinatarioBody, _user: dict = Depends(require_informes)):
+def cambiar_destinatario_route(body: CambiarDestinatarioBody, _user: dict = Depends(require_informes_o_reclutamiento)):
     items = [it.model_dump() for it in body.items]
     informes_module.cambiar_destinatario_compartidos(items, body.nuevo_usuario_id)
     return {"ok": True}
