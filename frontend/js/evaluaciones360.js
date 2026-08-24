@@ -166,16 +166,20 @@ function esReparentadoValidoPersona(arrastradaId, destinoId) {
   return true;
 }
 
-async function reparentarPersona(personaId, nuevoJefeId) {
-  // A petición expresa: mover a alguien de jefe directo también mueve su
-  // PUESTO para que dependa del puesto de su nuevo jefe -- así "Por
-  // persona" y "Por puesto de trabajo" no se desincronizan. Como una
-  // persona puede tener más de un puesto (ej. alguien con dos direcciones
-  // a la vez) o el nuevo jefe también, solo se reasigna el puesto cuando
-  // no hay ambigüedad posible: exactamente un puesto a cada lado.
+// "Por persona" y "Por puesto de trabajo" son el mismo organigrama visto de
+// dos formas -- no dos datos que se puedan desincronizar. Compartida entre
+// arrastrar una fila (reparentarPersona) y guardar el editor de personas
+// (guardarPersona): antes solo el arrastre movía el puesto junto con el
+// jefe directo, así que editar el jefe desde el formulario dejaba la vista
+// "Por puesto" sin actualizar (bug real reportado). `puestoIdsPersona`
+// permite pasar los puestos que se están guardando en el mismo formulario
+// (pueden cambiar en el mismo guardado que el jefe) en vez de los que ya
+// tenía en caché.
+async function sincronizarPuestoConJefe(personaId, nuevoJefeId, puestoIdsPersona) {
   const persona = PERSONAS.find((p) => p.id === personaId);
+  const puestosPersona = puestoIdsPersona ?? (persona?.puestos || []).map((p) => p.id);
   const nuevoJefe = nuevoJefeId ? PERSONAS.find((p) => p.id === nuevoJefeId) : null;
-  const puestoUnicoPersona = persona?.puestos?.length === 1 ? persona.puestos[0].id : null;
+  const puestoUnicoPersona = puestosPersona.length === 1 ? puestosPersona[0] : null;
   const puestoUnicoJefe = nuevoJefeId === null ? null : (nuevoJefe?.puestos?.length === 1 ? nuevoJefe.puestos[0].id : undefined);
   const puedeReasignarPuesto = puestoUnicoPersona && puestoUnicoJefe !== undefined;
 
@@ -197,31 +201,31 @@ async function reparentarPersona(personaId, nuevoJefeId) {
     );
   }
 
-  if (puedeReasignarPuesto) {
-    const nuevoPuestoPadreId = puestoUnicoJefe;
-    const puestoActual = PUESTOS.find((p) => p.id === puestoUnicoPersona);
-    const yaEsPadre = puestoActual && puestoActual.puesto_padre_id === nuevoPuestoPadreId;
-    const esValido = nuevoPuestoPadreId === null || esReparentadoValido(puestoUnicoPersona, nuevoPuestoPadreId);
-    if (puestoActual && !yaEsPadre && esValido) {
-      const companeros = PERSONAS.filter(
-        (p) => p.id !== personaId && (p.puestos || []).some((pu) => pu.id === puestoUnicoPersona)
-      );
-      let continuar = true;
-      if (companeros.length) {
-        continuar = await pedirConfirmacion(
-          `El puesto "${puestoActual.nombre}" también lo ocupan ${companeros.map((c) => c.nombre_completo).join(", ")}. ` +
-          `Moverlo hará que a ellos también les cambie el puesto padre. ¿Continuar?`
-        );
-      }
-      if (continuar) {
-        await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos/${puestoUnicoPersona}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ puesto_padre_id: nuevoPuestoPadreId }),
-        });
-      }
-    }
+  if (!puedeReasignarPuesto) return;
+  const nuevoPuestoPadreId = puestoUnicoJefe;
+  const puestoActual = PUESTOS.find((p) => p.id === puestoUnicoPersona);
+  const yaEsPadre = puestoActual && puestoActual.puesto_padre_id === nuevoPuestoPadreId;
+  const esValido = nuevoPuestoPadreId === null || esReparentadoValido(puestoUnicoPersona, nuevoPuestoPadreId);
+  if (!puestoActual || yaEsPadre || !esValido) return;
+  const companeros = PERSONAS.filter(
+    (p) => p.id !== personaId && (p.puestos || []).some((pu) => pu.id === puestoUnicoPersona)
+  );
+  if (companeros.length) {
+    const continuar = await pedirConfirmacion(
+      `El puesto "${puestoActual.nombre}" también lo ocupan ${companeros.map((c) => c.nombre_completo).join(", ")}. ` +
+      `Moverlo hará que a ellos también les cambie el puesto padre. ¿Continuar?`
+    );
+    if (!continuar) return;
   }
+  await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos/${puestoUnicoPersona}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ puesto_padre_id: nuevoPuestoPadreId }),
+  });
+}
+
+async function reparentarPersona(personaId, nuevoJefeId) {
+  await sincronizarPuestoConJefe(personaId, nuevoJefeId);
   await fetch(`${AUTH_API_BASE}/evaluaciones360/personas/${personaId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -880,13 +884,22 @@ async function guardarPersona() {
     return;
   }
   const puestoIds = [...document.querySelectorAll("#persona-puestos-lista input:checked")].map((i) => Number(i.value));
+  const nuevoJefeId = document.getElementById("persona-jefe").value ? Number(document.getElementById("persona-jefe").value) : null;
   const body = {
     nombre_completo: nombre,
     puesto_ids: puestoIds,
-    jefe_directo_id: document.getElementById("persona-jefe").value ? Number(document.getElementById("persona-jefe").value) : null,
+    jefe_directo_id: nuevoJefeId,
     usuario_id: document.getElementById("persona-usuario").value ? Number(document.getElementById("persona-usuario").value) : null,
     email: document.getElementById("persona-email").value.trim() || null,
   };
+  if (editandoPersonaId) {
+    const personaActual = PERSONAS.find((p) => p.id === editandoPersonaId);
+    // Solo si el jefe directo realmente cambió en este guardado -- si no,
+    // no hace falta tocar (ni preguntar por) el puesto.
+    if (personaActual && (personaActual.jefe_directo_id || null) !== nuevoJefeId) {
+      await sincronizarPuestoConJefe(editandoPersonaId, nuevoJefeId, puestoIds);
+    }
+  }
   const url = editandoPersonaId
     ? `${AUTH_API_BASE}/evaluaciones360/personas/${editandoPersonaId}`
     : `${AUTH_API_BASE}/evaluaciones360/personas`;
