@@ -1624,11 +1624,14 @@ function renderAccesos() {
   ul.innerHTML = ACCESOS.map((p) => `
     <li>
       <div class="fila-simple" data-fila-acceso="${p.id}">
-        <span class="fila-titulo">${escapeHTML(p.nombre_completo)}</span>
+        <input type="text" class="acceso-nombre-input" data-id="${p.id}" value="${escapeHTML(p.nombre_completo)}" style="width:150px;">
+        ${p.tiene_acceso
+          ? `<input type="text" class="acceso-username-input" data-usuario-id="${p.usuario_id}" value="${escapeHTML(p.username || "")}" style="width:110px;">`
+          : `<span class="staff-hint" style="width:110px;">sin cuenta todavía</span>`}
         <span class="staff-hint">${p.email ? escapeHTML(p.email) : "sin email registrado"}</span>
         <div class="fila-acciones">
           ${p.tiene_acceso
-            ? `<span class="badge-estado badge-abierta">✓ acceso creado${p.username ? ` (usuario: ${escapeHTML(p.username)})` : ""}</span>
+            ? `<span class="badge-estado badge-abierta">✓ acceso creado</span>
                <button type="button" class="btn btn-ghost btn-mini" data-reset-pin="${p.usuario_id}">Resetear PIN</button>`
             : `<button type="button" class="btn btn-ghost btn-mini" data-crear-acceso="${p.id}">Crear acceso</button>`}
           ${p.email ? `<a class="btn btn-ghost btn-mini" href="${enlaceMailtoAcceso(p)}">✉️ Enviar mail</a>` : ""}
@@ -1640,6 +1643,53 @@ function renderAccesos() {
   });
   ul.querySelectorAll("[data-reset-pin]").forEach((btn) => {
     btn.addEventListener("click", () => resetearPinAcceso(Number(btn.dataset.resetPin)));
+  });
+  // Nombre y usuario se guardan solos al salir del campo -- para gestionar
+  // el acceso de alguien sin salir de 360. El nombre ya se sincroniza solo
+  // con Ajustes (editar_persona_route); el username va directo contra la
+  // cuenta (mismo endpoint que usa Ajustes → Usuarios).
+  ul.querySelectorAll(".acceso-nombre-input").forEach((input) => {
+    input.addEventListener("blur", async () => {
+      const personaId = Number(input.dataset.id);
+      const valor = input.value.trim();
+      const persona = ACCESOS.find((p) => p.id === personaId);
+      if (!valor || !persona || persona.nombre_completo === valor) {
+        input.value = persona ? persona.nombre_completo : valor;
+        return;
+      }
+      const res = await fetch(`${AUTH_API_BASE}/evaluaciones360/personas/${personaId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nombre_completo: valor }),
+      });
+      if (!res.ok) {
+        await mostrarAviso("No se pudo guardar el nombre.");
+      }
+      persona.nombre_completo = valor;
+    });
+  });
+  ul.querySelectorAll(".acceso-username-input").forEach((input) => {
+    input.addEventListener("blur", async () => {
+      const usuarioId = Number(input.dataset.usuarioId);
+      const valor = input.value.trim();
+      const persona = ACCESOS.find((p) => p.usuario_id === usuarioId);
+      if (!valor || !persona || persona.username === valor) {
+        input.value = persona ? persona.username : valor;
+        return;
+      }
+      const res = await fetch(`${AUTH_API_BASE}/auth/users/${usuarioId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: valor }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        await mostrarAviso(err.detail || "No se pudo guardar el usuario.");
+        input.value = persona.username;
+        return;
+      }
+      persona.username = valor;
+    });
   });
 }
 
