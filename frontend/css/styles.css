@@ -803,10 +803,25 @@ h3 {
   height: 48px;
   border-radius: 50%;
   background: color-mix(in srgb, var(--acento) 12%, var(--surface-1));
+  color: var(--acento);
   font-size: 22px;
   flex-shrink: 0;
 }
 .icon-badge img { height: 24px; width: auto; }
+
+/* Paleta de las tarjetas de la home -- cada módulo con su propio color en
+   vez de que todo salga verde/gris; los tonos se eligen para que lean bien
+   tanto en tema claro como oscuro (saturación media, ni pastel ni neón). */
+.icon-badge[data-c="gold"]   { background: color-mix(in srgb, #c9960c 16%, var(--surface-1)); color: #c9960c; }
+.icon-badge[data-c="teal"]   { background: color-mix(in srgb, #0e8a86 16%, var(--surface-1)); color: #0e8a86; }
+.icon-badge[data-c="blue"]   { background: color-mix(in srgb, #1d6fb8 16%, var(--surface-1)); color: #1d6fb8; }
+.icon-badge[data-c="violet"] { background: color-mix(in srgb, #7b4fb0 16%, var(--surface-1)); color: #7b4fb0; }
+.icon-badge[data-c="indigo"] { background: color-mix(in srgb, #4a5fc1 16%, var(--surface-1)); color: #4a5fc1; }
+.icon-badge[data-c="orange"] { background: color-mix(in srgb, #e0641e 16%, var(--surface-1)); color: #e0641e; }
+.icon-badge[data-c="rose"]   { background: color-mix(in srgb, #c23a72 16%, var(--surface-1)); color: #c23a72; }
+.icon-badge[data-c="slate"]  { background: color-mix(in srgb, #3d5a80 16%, var(--surface-1)); color: #3d5a80; }
+.icon-badge[data-c="cyan"]   { background: color-mix(in srgb, #0aa3a3 16%, var(--surface-1)); color: #0aa3a3; }
+.icon-badge[data-c="green"]  { background: color-mix(in srgb, var(--status-good) 16%, var(--surface-1)); color: var(--status-good); }
 
 /* Iconos SVG que sustituyen a los emojis sueltos del texto (ver
    js/icons.js) -- inline-flex + vertical-align para que se alineen con la
