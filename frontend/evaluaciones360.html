@@ -194,6 +194,20 @@
   .escala-likert label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
   .form-pregunta-abierta { padding: 10px 0; }
   .form-pregunta-abierta p { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+  .form-pregunta-abierta textarea {
+    width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary);
+    font-size: 14px; font-family: inherit; resize: vertical;
+  }
+  .form-pregunta-abierta [data-contador] { margin: 4px 0 0; font-size: 12px; }
+
+  /* Sticky mientras se contesta un formulario largo -- se ve siempre a
+     quién se está evaluando, sin tener que volver a subir para
+     recordarlo. */
+  #responder-titulo {
+    position: sticky; top: 0; z-index: 5; background: var(--surface-1);
+    padding: 4px 0; margin-top: 0;
+  }
 
   #buscar-nuevo-evaluador {
     width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border);
@@ -462,6 +476,7 @@
 </div>
 <script src="js/theme.js?v=20260723f"></script>
 <script src="js/dialogs.js?v=20260818a"></script>
+<script src="js/icons.js?v=20260824a"></script>
 <script src="js/auth-common.js?v=20260723f"></script>
 <script src="js/topbar-menu.js?v=20260821a"></script>
 <script src="js/common.js?v=20260823a"></script>

@@ -808,6 +808,13 @@ h3 {
 }
 .icon-badge img { height: 24px; width: auto; }
 
+/* Iconos SVG que sustituyen a los emojis sueltos del texto (ver
+   js/icons.js) -- inline-flex + vertical-align para que se alineen con la
+   línea de texto igual que hacía el emoji, en vez de colgar más abajo como
+   suelen hacer los SVG inline por defecto. */
+.icono-svg { display: inline-flex; vertical-align: -0.125em; line-height: 1; }
+.icono-svg svg { display: block; }
+
 /* Control segmentado tipo "pill" (rangos de fecha, alternar vistas) —
    pieza nueva reutilizable, mismo lenguaje visual que .pagination pero
    para grupos de opciones mutuamente excluyentes que no son páginas. */

@@ -13,6 +13,8 @@ uploads/
 *.pid
 
 *.db
+*.db-shm
+*.db-wal
 backups/
 scraper/reconciliacion_*.csv
 

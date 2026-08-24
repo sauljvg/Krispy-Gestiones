@@ -383,11 +383,29 @@ def finalizar_asignacion_route(asignacion_id: int, user: dict = Depends(get_curr
     if asignacion["estado"] == "completada":
         return {"ok": True}
     formulario = eval360_module.get_formulario_asignacion(asignacion_id)
-    obligatorias = [p["id"] for p in formulario["preguntas"] if p["tipo"] == "likert"]
-    respondidas = set(formulario["respuestas"].keys())
-    faltantes = [p for p in obligatorias if p not in respondidas]
-    if faltantes:
-        raise HTTPException(status_code=400, detail=f"Faltan {len(faltantes)} preguntas por responder")
+    # Todas las preguntas son obligatorias: las likert necesitan una
+    # respuesta guardada (el propio "N/A" cuenta, es una respuesta explícita
+    # -- solo falta si no se tocó en absoluto); las abiertas necesitan texto
+    # real, con un mínimo de 20 caracteres para evitar comentarios vacíos de
+    # relleno tipo "-" o "ok".
+    sin_responder = 0
+    comentarios_cortos = 0
+    for p in formulario["preguntas"]:
+        respuesta = formulario["respuestas"].get(p["id"])
+        if p["tipo"] == "likert":
+            if respuesta is None:
+                sin_responder += 1
+        else:
+            texto = (respuesta["comentario"] if respuesta else None) or ""
+            if len(texto.strip()) < 20:
+                comentarios_cortos += 1
+    if sin_responder or comentarios_cortos:
+        partes = []
+        if sin_responder:
+            partes.append(f"{sin_responder} pregunta(s) sin responder")
+        if comentarios_cortos:
+            partes.append(f"{comentarios_cortos} comentario(s) con menos de 20 caracteres")
+        raise HTTPException(status_code=400, detail="Faltan: " + ", ".join(partes))
     eval360_module.finalizar_asignacion(asignacion_id)
     return {"ok": True}
 

@@ -1497,7 +1497,12 @@ function renderFormularioResponder() {
     radio.addEventListener("change", () => guardarRespuestaLikert(Number(radio.name.replace("p", ""))));
   });
   document.querySelectorAll("[data-abierta]").forEach((textarea) => {
-    textarea.addEventListener("blur", () => guardarRespuestaAbierta(Number(textarea.dataset.abierta)));
+    const preguntaId = Number(textarea.dataset.abierta);
+    textarea.addEventListener("blur", () => guardarRespuestaAbierta(preguntaId));
+    textarea.addEventListener("input", () => {
+      const contador = document.querySelector(`[data-contador="${preguntaId}"]`);
+      if (contador) contador.textContent = contadorCaracteresTexto(textarea.value);
+    });
   });
 }
 
@@ -1520,12 +1525,23 @@ function filaLikert(pregunta, respuesta) {
     </div>`;
 }
 
+const MIN_CARACTERES_ABIERTA = 20;
+
 function filaAbierta(pregunta, respuesta) {
+  const texto = respuesta?.comentario || "";
   return `
     <div class="form-pregunta-abierta">
       <p>${escapeHTML(pregunta.texto)}</p>
-      <textarea rows="3" data-abierta="${pregunta.id}">${escapeHTML(respuesta?.comentario || "")}</textarea>
+      <textarea rows="6" data-abierta="${pregunta.id}">${escapeHTML(texto)}</textarea>
+      <p class="staff-hint" data-contador="${pregunta.id}">${contadorCaracteresTexto(texto)}</p>
     </div>`;
+}
+
+function contadorCaracteresTexto(texto) {
+  const n = (texto || "").trim().length;
+  return n >= MIN_CARACTERES_ABIERTA
+    ? `${n} caracteres`
+    : `${n}/${MIN_CARACTERES_ABIERTA} caracteres mínimo`;
 }
 
 async function guardarRespuestaLikert(preguntaId) {

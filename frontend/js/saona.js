@@ -14,5 +14,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("card-saona-informes").hidden = !modulos.includes("saona_informes");
   document.getElementById("card-saona-clima").hidden = !modulos.includes("saona_clima");
   document.getElementById("card-saona-entrevistas").hidden = !modulos.includes("saona_informes");
+  document.getElementById("card-saona-compartidos").hidden = !modulos.includes("saona_informes");
   document.getElementById("card-saona-evaluaciones360").hidden = !modulos.includes("saona_evaluaciones360");
 });

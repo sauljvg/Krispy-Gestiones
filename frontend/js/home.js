@@ -1,13 +1,38 @@
+// Apodos para el saludo de la home -- excepciones pedidas explícitamente,
+// por nombre completo. Se compara normalizado (sin tildes, minúsculas) para
+// no depender de que esté escrito con los acentos exactos en la ficha.
+const APODOS_HOME = {
+  "maria hovsepian": "Maru",
+  "rafaela morales": "Rafa",
+  "matias prada": "Mati",
+  "ildara lorenzo": "Ildi",
+  "elisabeth cachimaille": "Eli",
+};
+
+function saludoHome(nombreCompleto) {
+  const normalizado = (nombreCompleto || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .trim();
+  const apodo = APODOS_HOME[normalizado];
+  if (apodo) return `Hola, ${apodo}`;
+  const primerNombre = (nombreCompleto || "").trim().split(/\s+/)[0] || "";
+  return primerNombre ? `Hola, ${primerNombre}` : "¿A dónde quieres ir?";
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   const user = await checkAuth("/");
   if (!user) return;
   wireUserBar(user);
+  document.getElementById("home-titulo").textContent = saludoHome(user.nombre);
 
   const modulos = user.modulos || [];
   document.getElementById("card-resenas").hidden = !modulos.includes("resenas");
   document.getElementById("card-informes").hidden = !modulos.includes("informes");
   document.getElementById("card-clima").hidden = !modulos.includes("clima");
   document.getElementById("card-entrevistas").hidden = !modulos.includes("informes");
+  document.getElementById("card-compartidos").hidden = !modulos.includes("informes");
   // Boletines oculto de la home por ahora (no se va a usar) -- la página y
   // la API siguen intactas, solo se quita el acceso desde el menú principal.
   document.getElementById("card-tests").hidden = !modulos.includes("tests");
