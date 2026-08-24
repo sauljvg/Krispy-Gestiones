@@ -175,6 +175,24 @@ async function reparentarPersona(personaId, nuevoJefeId) {
   const puestoUnicoJefe = nuevoJefeId === null ? null : (nuevoJefe?.puestos?.length === 1 ? nuevoJefe.puestos[0].id : undefined);
   const puedeReasignarPuesto = puestoUnicoPersona && puestoUnicoJefe !== undefined;
 
+  // Antes esto se saltaba en silencio cuando había ambigüedad (persona o
+  // jefe con 0 o 2+ puestos) -- con puestos compartidos por varias personas
+  // (habitual en este organigrama: Gerente de Retail, Gerente de
+  // producción...) eso pasaba la mayoría de las veces, y la vista "Por
+  // puesto" se quedaba desincronizada sin que quedara ningún rastro de por
+  // qué. Ahora se avisa siempre que el puesto no se pudo mover con la
+  // persona, para que quede claro que hace falta moverlo a mano en la otra
+  // vista.
+  if (!puestoUnicoPersona) {
+    await mostrarAviso(
+      `${persona?.nombre_completo || "Esta persona"} no tiene exactamente un puesto asignado, así que su puesto no se movió junto con el jefe directo. Si hace falta, muévelo a mano en "Por puesto de trabajo".`
+    );
+  } else if (puestoUnicoJefe === undefined) {
+    await mostrarAviso(
+      `${nuevoJefe?.nombre_completo || "El nuevo jefe"} no tiene exactamente un puesto asignado, así que no se pudo mover el puesto de ${persona?.nombre_completo || "esta persona"} junto con él. Si hace falta, muévelo a mano en "Por puesto de trabajo".`
+    );
+  }
+
   if (puedeReasignarPuesto) {
     const nuevoPuestoPadreId = puestoUnicoJefe;
     const puestoActual = PUESTOS.find((p) => p.id === puestoUnicoPersona);
@@ -436,9 +454,22 @@ async function reparentarPuesto(puestoId, nuevoPadreId, nuevoJefeIdOverride) {
   // una caja individual (ocupante único, o una persona concreta desplegada
   // dentro de un puesto compartido), se usa ese id exacto en vez de
   // adivinar "el primero que ocupe el puesto".
-  const nuevoJefeId = nuevoPadreId
-    ? (nuevoJefeIdOverride !== undefined ? nuevoJefeIdOverride : (PERSONAS.find((p) => (p.puestos || []).some((pu) => pu.id === nuevoPadreId))?.id ?? null))
-    : null;
+  let nuevoJefeId = null;
+  if (nuevoPadreId) {
+    if (nuevoJefeIdOverride !== undefined) {
+      nuevoJefeId = nuevoJefeIdOverride;
+    } else {
+      const ocupantesDestino = PERSONAS.filter((p) => (p.puestos || []).some((pu) => pu.id === nuevoPadreId));
+      nuevoJefeId = ocupantesDestino[0]?.id ?? null;
+      if (ocupantesDestino.length > 1) {
+        await mostrarAviso(
+          `El puesto destino lo ocupan varias personas (${ocupantesDestino.map((o) => o.nombre_completo).join(", ")}). ` +
+          `Se ha puesto a ${ocupantesDestino[0].nombre_completo} como jefe directo de quien ocupa el puesto movido -- ` +
+          `cámbialo a mano en "Por persona" si no es quien corresponde.`
+        );
+      }
+    }
+  }
   const ocupantes = PERSONAS.filter((p) => (p.puestos || []).some((pu) => pu.id === puestoId));
   for (const persona of ocupantes) {
     await fetch(`${AUTH_API_BASE}/evaluaciones360/personas/${persona.id}`, {
@@ -781,19 +812,34 @@ function poblarSelectsPersona(puestosMarcados) {
 
 // De "Saul Vasquez Garcia" saca "saul.v@krispykreme.es" -- primer nombre +
 // inicial del primer apellido, sin tildes ni espacios, patrón de email que
-// ya usa la empresa. Solo una sugerencia de partida: el campo sigue siendo
-// libre de editar.
-function sugerirEmailDesdeNombre(nombreCompleto) {
+// usa el resto de la empresa. El departamento "JV" (Alessandro Moneta, Arnaud
+// Van Coppenolle, Joe Wendling, Maria Ibañez-Fischer, Raphael Duvivier...) usa
+// un patrón distinto: inicial del NOMBRE + apellido completo, sin punto,
+// @krispykreme.com -- ej. "Joe Wendling" -> "jwendling@krispykreme.com". Solo
+// una sugerencia de partida: el campo sigue siendo libre de editar.
+function sugerirEmailDesdeNombre(nombreCompleto, esJV) {
   const partes = (nombreCompleto || "").trim().split(/\s+/).filter(Boolean);
   if (!partes.length) return "";
   // NFD separa cada letra con tilde en (letra + marca de acento aparte);
   // el filtro [^a-z0-9] de abajo descarta esa marca junto con cualquier
   // otro carácter no alfanumérico, así que el resultado ya queda sin tildes.
   const limpiar = (s) => s.normalize("NFD").toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (esJV) {
+    const inicial = limpiar(partes[0]).slice(0, 1);
+    const apellido = limpiar(partes.slice(1).join(""));
+    const local = apellido ? `${inicial}${apellido}` : inicial;
+    return local ? `${local}@krispykreme.com` : "";
+  }
   const nombre = limpiar(partes[0]);
   const inicial = partes.length > 1 ? limpiar(partes[1]).slice(0, 1) : "";
   const local = inicial ? `${nombre}.${inicial}` : nombre;
   return local ? `${local}@krispykreme.es` : "";
+}
+
+function personaEnEdicionEsJV() {
+  const puestoJV = PUESTOS.find((p) => p.nombre === "JV");
+  if (!puestoJV) return false;
+  return !!document.querySelector(`#persona-puestos-lista input[value="${puestoJV.id}"]:checked`);
 }
 
 function abrirEditorPersona(personaId) {
@@ -1214,14 +1260,22 @@ async function confirmarAnadirEvaluados() {
 }
 
 async function lanzarCampana() {
-  if (!(await pedirConfirmacion(`¿Lanzar "${currentCampana.nombre}"? Los evaluadores empezarán a ver sus evaluaciones pendientes.`))) return;
+  if (!(await pedirConfirmacion(`¿Lanzar "${currentCampana.nombre}"? Los evaluadores empezarán a ver sus evaluaciones pendientes y se les avisará por email.`))) return;
   const res = await fetch(`${AUTH_API_BASE}/evaluaciones360/campanas/${currentCampana.id}/lanzar`, { method: "POST" });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     await mostrarAviso(err.detail || "No se pudo lanzar la campaña.");
     return;
   }
+  const { avisos } = await res.json();
   await abrirCampana(currentCampana.id);
+  if (avisos) {
+    await mostrarAviso(
+      avisos.omitidos > 0
+        ? `Campaña lanzada. Aviso enviado a ${avisos.enviados} evaluador(es); ${avisos.omitidos} no se pudieron avisar (sin email registrado o fallo al enviar).`
+        : `Campaña lanzada. Aviso enviado por email a ${avisos.enviados} evaluador(es).`
+    );
+  }
 }
 
 async function cerrarCampanaFormal() {
@@ -1516,19 +1570,21 @@ async function cargarAccesos() {
 function renderAccesos() {
   const ul = document.getElementById("accesos-lista");
   const btnTodos = document.getElementById("btn-crear-todos-accesos");
+  const pendientes = ACCESOS.filter((p) => !p.tiene_acceso);
+  btnTodos.hidden = pendientes.length === 0;
   if (ACCESOS.length === 0) {
-    ul.innerHTML = `<p class="staff-hint">Todo el mundo en el organigrama ya tiene una cuenta de portal vinculada.</p>`;
-    btnTodos.hidden = true;
+    ul.innerHTML = `<p class="staff-hint">Todavía no hay nadie en el organigrama.</p>`;
     return;
   }
-  btnTodos.hidden = false;
   ul.innerHTML = ACCESOS.map((p) => `
     <li>
       <div class="fila-simple" data-fila-acceso="${p.id}">
         <span class="fila-titulo">${escapeHTML(p.nombre_completo)}</span>
         <span class="staff-hint">${p.email ? escapeHTML(p.email) : "sin email registrado"}</span>
         <div class="fila-acciones">
-          <button type="button" class="btn btn-ghost btn-mini" data-crear-acceso="${p.id}">Crear acceso</button>
+          ${p.tiene_acceso
+            ? `<span class="badge-estado badge-abierta">✓ acceso creado${p.username ? ` (usuario: ${escapeHTML(p.username)})` : ""}</span>`
+            : `<button type="button" class="btn btn-ghost btn-mini" data-crear-acceso="${p.id}">Crear acceso</button>`}
         </div>
       </div>
     </li>`).join("");
@@ -1545,17 +1601,23 @@ async function crearAcceso(personaId) {
     return false;
   }
   const { username } = await res.json();
+  const persona = ACCESOS.find((p) => p.id === personaId);
+  if (persona) {
+    persona.tiene_acceso = true;
+    persona.username = username;
+  }
   const fila = document.querySelector(`[data-fila-acceso="${personaId}"] .fila-acciones`);
-  if (fila) fila.innerHTML = `<span class="badge-estado badge-abierta">usuario: ${escapeHTML(username)}</span>`;
+  if (fila) fila.innerHTML = `<span class="badge-estado badge-abierta">✓ acceso creado (usuario: ${escapeHTML(username)})</span>`;
   return true;
 }
 
 async function crearTodosAccesos() {
-  if (!(await pedirConfirmacion(`¿Crear una cuenta de portal para las ${ACCESOS.length} personas de esta lista? Cada una entrará por primera vez con su usuario y creará su propio PIN.`))) return;
-  for (const p of ACCESOS) {
+  const pendientes = ACCESOS.filter((p) => !p.tiene_acceso);
+  if (!(await pedirConfirmacion(`¿Crear una cuenta de portal para las ${pendientes.length} personas que aún no tienen? Cada una entrará por primera vez con su usuario y creará su propio PIN.`))) return;
+  for (const p of pendientes) {
     await crearAcceso(p.id);
   }
-  await cargarAccesos();
+  renderAccesos();
 }
 
 // ---------------------------------------------------------------------------
@@ -1572,6 +1634,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   wireUserBar(user);
   aplicarBrandingEmpresa();
 
+  // Solo un admin gestiona campañas/organigrama/preguntas/accesos -- el resto
+  // de gente con el módulo concedido únicamente responde sus evaluaciones
+  // asignadas (pestaña "Mis evaluaciones"), el backend ya rechaza con 403
+  // cualquier intento de llamar a esos endpoints de gestión igualmente.
+  if (user.rol !== "admin") {
+    ["campanas", "organigrama", "preguntas", "accesos"].forEach((nombre) => {
+      const btn = document.querySelector(`.eval360-tab-btn[data-tab="${nombre}"]`);
+      if (btn) btn.hidden = true;
+    });
+  }
+
   document.querySelectorAll(".eval360-tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => activarTab(btn.dataset.tab));
   });
@@ -1586,11 +1659,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("persona-nombre").addEventListener("input", (e) => {
     const emailInput = document.getElementById("persona-email");
     if (emailInput.dataset.auto === "0") return; // ya lo editaron a mano, no se lo pisamos
-    emailInput.value = sugerirEmailDesdeNombre(e.target.value);
+    emailInput.value = sugerirEmailDesdeNombre(e.target.value, personaEnEdicionEsJV());
     emailInput.dataset.auto = "1";
   });
   document.getElementById("persona-email").addEventListener("input", (e) => {
     e.target.dataset.auto = "0";
+  });
+  // Si marcan/desmarcan el puesto "JV" después de escribir el nombre, la
+  // sugerencia de email (si sigue siendo automática) se recalcula con el
+  // patrón correcto en vez de quedarse con el de antes.
+  document.getElementById("persona-puestos-lista").addEventListener("change", () => {
+    const emailInput = document.getElementById("persona-email");
+    if (emailInput.dataset.auto === "0") return;
+    emailInput.value = sugerirEmailDesdeNombre(document.getElementById("persona-nombre").value, personaEnEdicionEsJV());
   });
   document.getElementById("btn-nuevo-puesto").addEventListener("click", nuevoPuesto);
   const personasCont = document.getElementById("organigrama-lista");

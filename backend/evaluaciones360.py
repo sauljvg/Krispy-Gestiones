@@ -808,15 +808,31 @@ def sugerir_local_part(nombre_completo: str) -> str:
     return base or "persona"
 
 
-def list_personas_sin_acceso(empresa="kk"):
+def list_personas_con_estado_acceso(empresa="kk"):
+    """Todas las personas activas del organigrama (no solo las que aún no
+    tienen cuenta) -- a diferencia de la extinta list_personas_sin_acceso,
+    esto hace que una persona a la que se le acaba de crear el acceso siga
+    apareciendo en la pestaña "Accesos" (ahora con tiene_acceso=True), en vez
+    de desaparecer de la lista en el siguiente refresco."""
     conn = get_connection()
     rows = conn.execute("""
-        SELECT id, nombre_completo, email FROM eval360_personas
-        WHERE empresa = ? AND activo = 1 AND usuario_id IS NULL
-        ORDER BY nombre_completo
+        SELECT p.id, p.nombre_completo, p.email, p.usuario_id, u.username
+        FROM eval360_personas p
+        LEFT JOIN usuarios u ON u.id = p.usuario_id
+        WHERE p.empresa = ? AND p.activo = 1
+        ORDER BY p.nombre_completo
     """, (empresa,)).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [
+        {
+            "id": r["id"],
+            "nombre_completo": r["nombre_completo"],
+            "email": r["email"],
+            "tiene_acceso": r["usuario_id"] is not None,
+            "username": r["username"],
+        }
+        for r in rows
+    ]
 
 
 def crear_acceso_para_persona(persona_id):
@@ -840,6 +856,88 @@ def crear_acceso_para_persona(persona_id):
     auth.set_modulos_permitidos(usuario_id, [modulo])
     actualizar_persona(persona_id, {"usuario_id": usuario_id})
     return {"usuario_id": usuario_id, "username": username}
+
+
+# ---------------------------------------------------------------------------
+# Email de aviso al lanzar una campaña
+# ---------------------------------------------------------------------------
+
+def _es_jv(persona_id) -> bool:
+    """El departamento "JV" del organigrama (Alessandro Moneta, Arnaud Van
+    Coppenolle, Joe Wendling, Maria Ibañez-Fischer, Raphael Duvivier, a fecha
+    de esto) usa un dominio y patrón de email distintos al resto del grupo
+    -- ver email_de_persona()."""
+    conn = get_connection()
+    row = conn.execute("""
+        SELECT 1 FROM eval360_persona_puestos pp
+        JOIN eval360_puestos pu ON pu.id = pp.puesto_id
+        WHERE pp.persona_id = ? AND pu.nombre = 'JV'
+        LIMIT 1
+    """, (persona_id,)).fetchone()
+    conn.close()
+    return row is not None
+
+
+def email_de_persona(persona: dict) -> str | None:
+    """Email a usar para avisar a esta persona: el guardado a mano en su
+    ficha si existe; si no, se deriva del nombre. Todo el grupo usa
+    nombre.inicialdeapellido@krispykreme.es (ver sugerir_local_part), EXCEPTO
+    el departamento "JV", que usa inicialdenombre+apellido (sin punto, sin
+    espacios) @krispykreme.com -- ej. Alessandro Moneta -> amoneta@krispykreme.com,
+    Arnaud Van Coppenolle -> avancoppenolle@krispykreme.com."""
+    if persona.get("email"):
+        return persona["email"]
+    partes = (persona.get("nombre_completo") or "").strip().split()
+    if not partes:
+        return None
+    if _es_jv(persona["id"]):
+        inicial = re.sub(r"[^a-z0-9]", "", _sin_tildes(partes[0]).lower())[:1]
+        apellido = re.sub(r"[^a-z0-9]", "", _sin_tildes("".join(partes[1:])).lower())
+        local = f"{inicial}{apellido}" if apellido else inicial
+        return f"{local}@krispykreme.com" if local else None
+    local = sugerir_local_part(persona["nombre_completo"])
+    return f"{local}@krispykreme.es" if local != "persona" else None
+
+
+def notificar_campana_lanzada(campana_id) -> dict:
+    """Al lanzar una campaña, avisa por email a cada evaluador con al menos
+    una asignación pendiente ahí (un email por persona, aunque tenga varias
+    evaluaciones que hacer). Best-effort: una persona sin email resoluble o
+    un fallo de Resend no interrumpe a las demás, se cuenta como omitida."""
+    import boletines as boletines_module
+
+    campana = get_campana(campana_id)
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT DISTINCT ev.id, ev.nombre_completo, ev.email
+        FROM eval360_asignaciones a
+        JOIN eval360_personas ev ON ev.id = a.evaluador_persona_id
+        WHERE a.campana_id = ? AND a.estado = 'pendiente'
+    """, (campana_id,)).fetchall()
+    conn.close()
+
+    enviados, omitidos = 0, 0
+    for r in rows:
+        evaluador = dict(r)
+        destino = email_de_persona(evaluador)
+        if not destino:
+            omitidos += 1
+            continue
+        html = (
+            f"<p>Hola {evaluador['nombre_completo']},</p>"
+            f"<p>Se ha lanzado la campaña de evaluación 360° <b>{campana['nombre']}</b> "
+            f"y tienes evaluaciones pendientes por completar.</p>"
+            f"<p>Entra en Krispy Gestiones, sección Evaluaciones 360°, pestaña "
+            f"\"Mis evaluaciones\", para responderlas.</p>"
+        )
+        ok, _error = boletines_module._enviar_email_resend(
+            destino, evaluador["nombre_completo"], f"Evaluación 360° pendiente: {campana['nombre']}", html
+        )
+        if ok:
+            enviados += 1
+        else:
+            omitidos += 1
+    return {"enviados": enviados, "omitidos": omitidos}
 
 
 ensure_eval360_tables()

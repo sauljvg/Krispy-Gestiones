@@ -3,19 +3,13 @@ from pydantic import BaseModel
 
 import auth as auth_module
 import evaluaciones360 as eval360_module
-from auth_routes import get_current_user
+from auth_routes import get_current_user, require_admin
 
 router = APIRouter()
 
 
 def _modulo_para_empresa(empresa: str) -> str:
     return "saona_evaluaciones360" if empresa == "saona" else "evaluaciones360"
-
-
-def require_eval360(empresa: str = "kk", user: dict = Depends(get_current_user)) -> dict:
-    if not auth_module.tiene_modulo(user, _modulo_para_empresa(empresa)):
-        raise HTTPException(status_code=403, detail="No tienes acceso a Evaluaciones 360°")
-    return user
 
 
 def _require_acceso_empresa(user: dict, empresa: str):
@@ -75,7 +69,7 @@ class PreguntaEditBody(BaseModel):
 
 
 @router.get("/usuarios-seleccionables")
-def list_usuarios_seleccionables_route(_user: dict = Depends(require_eval360)):
+def list_usuarios_seleccionables_route(_user: dict = Depends(require_admin)):
     return eval360_module.list_usuarios_seleccionables()
 
 
@@ -84,12 +78,12 @@ def list_usuarios_seleccionables_route(_user: dict = Depends(require_eval360)):
 # ---------------------------------------------------------------------------
 
 @router.get("/preguntas")
-def list_preguntas_route(empresa: str = "kk", _user: dict = Depends(require_eval360)):
+def list_preguntas_route(empresa: str = "kk", _user: dict = Depends(require_admin)):
     return eval360_module.list_preguntas(empresa)
 
 
 @router.post("/preguntas")
-def crear_pregunta_route(body: PreguntaBody, user: dict = Depends(get_current_user)):
+def crear_pregunta_route(body: PreguntaBody, user: dict = Depends(require_admin)):
     _require_acceso_empresa(user, body.empresa)
     if body.tipo not in ("likert", "abierta"):
         raise HTTPException(status_code=400, detail="tipo debe ser 'likert' o 'abierta'")
@@ -98,7 +92,7 @@ def crear_pregunta_route(body: PreguntaBody, user: dict = Depends(get_current_us
 
 
 @router.patch("/preguntas/{pregunta_id}")
-def editar_pregunta_route(pregunta_id: int, body: PreguntaEditBody, user: dict = Depends(get_current_user)):
+def editar_pregunta_route(pregunta_id: int, body: PreguntaEditBody, user: dict = Depends(require_admin)):
     pregunta = eval360_module.get_pregunta(pregunta_id)
     if not pregunta:
         raise HTTPException(status_code=404, detail="Pregunta no encontrada")
@@ -113,19 +107,19 @@ def editar_pregunta_route(pregunta_id: int, body: PreguntaEditBody, user: dict =
 # ---------------------------------------------------------------------------
 
 @router.get("/puestos")
-def list_puestos_route(empresa: str = "kk", _user: dict = Depends(require_eval360)):
+def list_puestos_route(empresa: str = "kk", _user: dict = Depends(require_admin)):
     return eval360_module.list_puestos(empresa)
 
 
 @router.post("/puestos")
-def crear_puesto_route(body: PuestoBody, user: dict = Depends(get_current_user)):
+def crear_puesto_route(body: PuestoBody, user: dict = Depends(require_admin)):
     _require_acceso_empresa(user, body.empresa)
     puesto_id = eval360_module.crear_puesto(body.empresa, body.nombre.strip(), body.puesto_padre_id)
     return {"ok": True, "id": puesto_id}
 
 
 @router.patch("/puestos/{puesto_id}")
-def editar_puesto_route(puesto_id: int, body: PuestoEditBody, user: dict = Depends(get_current_user)):
+def editar_puesto_route(puesto_id: int, body: PuestoEditBody, user: dict = Depends(require_admin)):
     puesto = eval360_module.get_puesto(puesto_id)
     if not puesto:
         raise HTTPException(status_code=404, detail="Puesto no encontrado")
@@ -137,7 +131,7 @@ def editar_puesto_route(puesto_id: int, body: PuestoEditBody, user: dict = Depen
 
 
 @router.get("/puestos/{puesto_id}/personas")
-def list_personas_de_puesto_route(puesto_id: int, user: dict = Depends(get_current_user)):
+def list_personas_de_puesto_route(puesto_id: int, user: dict = Depends(require_admin)):
     puesto = eval360_module.get_puesto(puesto_id)
     if not puesto:
         raise HTTPException(status_code=404, detail="Puesto no encontrado")
@@ -150,17 +144,17 @@ def list_personas_de_puesto_route(puesto_id: int, user: dict = Depends(get_curre
 # ---------------------------------------------------------------------------
 
 @router.get("/personas")
-def list_personas_route(empresa: str = "kk", _user: dict = Depends(require_eval360)):
+def list_personas_route(empresa: str = "kk", _user: dict = Depends(require_admin)):
     return eval360_module.list_personas(empresa)
 
 
 @router.get("/personas/{persona_id}")
-def get_persona_route(persona_id: int, user: dict = Depends(get_current_user)):
+def get_persona_route(persona_id: int, user: dict = Depends(require_admin)):
     return _require_acceso_persona(persona_id, user)
 
 
 @router.get("/personas/{persona_id}/relaciones")
-def get_relaciones_route(persona_id: int, user: dict = Depends(get_current_user)):
+def get_relaciones_route(persona_id: int, user: dict = Depends(require_admin)):
     """Superior/pares/reportes calculados desde el organigrama -- usado para
     previsualizar y para la autopropuesta de evaluadores al lanzar una
     campaña (fase 3)."""
@@ -173,7 +167,7 @@ def get_relaciones_route(persona_id: int, user: dict = Depends(get_current_user)
 
 
 @router.post("/personas")
-def crear_persona_route(body: PersonaBody, user: dict = Depends(get_current_user)):
+def crear_persona_route(body: PersonaBody, user: dict = Depends(require_admin)):
     _require_acceso_empresa(user, body.empresa)
     email = body.email.strip() or None if body.email else None
     persona_id = eval360_module.crear_persona(
@@ -183,7 +177,7 @@ def crear_persona_route(body: PersonaBody, user: dict = Depends(get_current_user
 
 
 @router.patch("/personas/{persona_id}")
-def editar_persona_route(persona_id: int, body: PersonaEditBody, user: dict = Depends(get_current_user)):
+def editar_persona_route(persona_id: int, body: PersonaEditBody, user: dict = Depends(require_admin)):
     _require_acceso_persona(persona_id, user)
     campos = body.model_dump(exclude_unset=True)
     if "nombre_completo" in campos and campos["nombre_completo"]:
@@ -195,7 +189,7 @@ def editar_persona_route(persona_id: int, body: PersonaEditBody, user: dict = De
 
 
 @router.delete("/personas/{persona_id}")
-def eliminar_persona_route(persona_id: int, user: dict = Depends(get_current_user)):
+def eliminar_persona_route(persona_id: int, user: dict = Depends(require_admin)):
     _require_acceso_persona(persona_id, user)
     eval360_module.eliminar_persona(persona_id)
     return {"ok": True}
@@ -235,12 +229,12 @@ def _require_acceso_campana(campana_id: int, user: dict) -> dict:
 
 
 @router.get("/campanas")
-def list_campanas_route(empresa: str = "kk", _user: dict = Depends(require_eval360)):
+def list_campanas_route(empresa: str = "kk", _user: dict = Depends(require_admin)):
     return eval360_module.list_campanas(empresa)
 
 
 @router.post("/campanas")
-def crear_campana_route(body: CampanaBody, user: dict = Depends(get_current_user)):
+def crear_campana_route(body: CampanaBody, user: dict = Depends(require_admin)):
     _require_acceso_empresa(user, body.empresa)
     if not body.nombre.strip():
         raise HTTPException(status_code=400, detail="Ponle un nombre a la campaña")
@@ -251,13 +245,13 @@ def crear_campana_route(body: CampanaBody, user: dict = Depends(get_current_user
 
 
 @router.get("/campanas/{campana_id}")
-def get_campana_route(campana_id: int, user: dict = Depends(get_current_user)):
+def get_campana_route(campana_id: int, user: dict = Depends(require_admin)):
     campana = _require_acceso_campana(campana_id, user)
     return {**campana, "evaluados": eval360_module.list_evaluados_de_campana(campana_id)}
 
 
 @router.patch("/campanas/{campana_id}")
-def editar_campana_route(campana_id: int, body: CampanaEditBody, user: dict = Depends(get_current_user)):
+def editar_campana_route(campana_id: int, body: CampanaEditBody, user: dict = Depends(require_admin)):
     _require_acceso_campana(campana_id, user)
     campos = body.model_dump(exclude_unset=True)
     if "nombre" in campos and campos["nombre"]:
@@ -267,25 +261,26 @@ def editar_campana_route(campana_id: int, body: CampanaEditBody, user: dict = De
 
 
 @router.post("/campanas/{campana_id}/lanzar")
-def lanzar_campana_route(campana_id: int, user: dict = Depends(get_current_user)):
+def lanzar_campana_route(campana_id: int, user: dict = Depends(require_admin)):
     campana = _require_acceso_campana(campana_id, user)
     if campana["estado"] != "borrador":
         raise HTTPException(status_code=400, detail="Esta campaña ya se lanzó")
     if eval360_module.contar_asignaciones(campana_id) == 0:
         raise HTTPException(status_code=400, detail="Añade al menos un evaluado con evaluadores antes de lanzar")
     eval360_module.lanzar_campana(campana_id)
-    return {"ok": True}
+    aviso = eval360_module.notificar_campana_lanzada(campana_id)
+    return {"ok": True, "avisos": aviso}
 
 
 @router.post("/campanas/{campana_id}/cerrar")
-def cerrar_campana_route(campana_id: int, user: dict = Depends(get_current_user)):
+def cerrar_campana_route(campana_id: int, user: dict = Depends(require_admin)):
     _require_acceso_campana(campana_id, user)
     eval360_module.cerrar_campana(campana_id)
     return {"ok": True}
 
 
 @router.post("/campanas/{campana_id}/evaluados")
-def agregar_evaluado_route(campana_id: int, body: EvaluadoBody, user: dict = Depends(get_current_user)):
+def agregar_evaluado_route(campana_id: int, body: EvaluadoBody, user: dict = Depends(require_admin)):
     campana = _require_acceso_campana(campana_id, user)
     if campana["estado"] != "borrador":
         raise HTTPException(status_code=400, detail="Esta campaña ya está lanzada, no se pueden añadir más evaluados")
@@ -295,21 +290,21 @@ def agregar_evaluado_route(campana_id: int, body: EvaluadoBody, user: dict = Dep
 
 
 @router.delete("/campanas/{campana_id}/evaluados/{persona_id}")
-def quitar_evaluado_route(campana_id: int, persona_id: int, user: dict = Depends(get_current_user)):
+def quitar_evaluado_route(campana_id: int, persona_id: int, user: dict = Depends(require_admin)):
     _require_acceso_campana(campana_id, user)
     eval360_module.quitar_evaluado_de_campana(campana_id, persona_id)
     return {"ok": True}
 
 
 @router.get("/campanas/{campana_id}/evaluados/{persona_id}/evaluadores")
-def list_evaluadores_route(campana_id: int, persona_id: int, user: dict = Depends(get_current_user)):
+def list_evaluadores_route(campana_id: int, persona_id: int, user: dict = Depends(require_admin)):
     _require_acceso_campana(campana_id, user)
     return eval360_module.list_evaluadores_de_evaluado(campana_id, persona_id)
 
 
 @router.post("/campanas/{campana_id}/evaluados/{persona_id}/evaluadores")
 def agregar_evaluador_manual_route(
-    campana_id: int, persona_id: int, body: EvaluadorManualBody, user: dict = Depends(get_current_user)
+    campana_id: int, persona_id: int, body: EvaluadorManualBody, user: dict = Depends(require_admin)
 ):
     _require_acceso_campana(campana_id, user)
     _require_acceso_persona(body.evaluador_persona_id, user)
@@ -318,7 +313,7 @@ def agregar_evaluador_manual_route(
 
 
 @router.delete("/asignaciones/{asignacion_id}")
-def quitar_asignacion_route(asignacion_id: int, user: dict = Depends(get_current_user)):
+def quitar_asignacion_route(asignacion_id: int, user: dict = Depends(require_admin)):
     asignacion = eval360_module.get_asignacion(asignacion_id)
     if not asignacion:
         raise HTTPException(status_code=404, detail="Asignación no encontrada")
@@ -328,10 +323,8 @@ def quitar_asignacion_route(asignacion_id: int, user: dict = Depends(get_current
 
 
 @router.get("/campanas/{campana_id}/evaluados/{persona_id}/resultados")
-def resultados_evaluado_route(campana_id: int, persona_id: int, user: dict = Depends(get_current_user)):
+def resultados_evaluado_route(campana_id: int, persona_id: int, user: dict = Depends(require_admin)):
     _require_acceso_campana(campana_id, user)
-    if user["rol"] != "admin":
-        raise HTTPException(status_code=403, detail="Solo un administrador puede ver los resultados detallados")
     return eval360_module.resultados_evaluado(campana_id, persona_id)
 
 
@@ -397,14 +390,12 @@ def finalizar_asignacion_route(asignacion_id: int, user: dict = Depends(get_curr
 # ---------------------------------------------------------------------------
 
 @router.get("/accesos")
-def list_accesos_route(empresa: str = "kk", _user: dict = Depends(require_eval360)):
-    return eval360_module.list_personas_sin_acceso(empresa)
+def list_accesos_route(empresa: str = "kk", _user: dict = Depends(require_admin)):
+    return eval360_module.list_personas_con_estado_acceso(empresa)
 
 
 @router.post("/accesos/{persona_id}/crear")
-def crear_acceso_route(persona_id: int, user: dict = Depends(get_current_user)):
-    if user["rol"] != "admin":
-        raise HTTPException(status_code=403, detail="Solo un administrador puede crear accesos")
+def crear_acceso_route(persona_id: int, user: dict = Depends(require_admin)):
     _require_acceso_persona(persona_id, user)
     resultado = eval360_module.crear_acceso_para_persona(persona_id)
     if not resultado or resultado.get("error"):
