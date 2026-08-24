@@ -52,7 +52,10 @@ async function activarTab(nombre) {
   if (nombre === "preguntas" && PREGUNTAS.length === 0) await cargarPreguntas();
   if (nombre === "campanas" && CAMPANAS.length === 0) await cargarCampanas();
   if (nombre === "mis") await cargarMisPendientes();
-  if (nombre === "accesos") await cargarAccesos();
+  if (nombre === "accesos") {
+    await cargarCampanasParaFiltroAccesos();
+    await cargarAccesos();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1666,8 +1669,25 @@ function cerrarResponder() {
 // nuevas, así que solo toca a quien no tiene ninguna todavía).
 // ---------------------------------------------------------------------------
 
+// El desplegable de campaña filtra qué personas se ven -- así con 15
+// personas en una campaña y 30 en otra, Accesos muestra las que
+// corresponden a la que se elija en vez de todo el organigrama junto.
+// Se recarga solo al entrar a la pestaña (no en cada refresco de datos)
+// para no perder la selección del admin a media gestión.
+async function cargarCampanasParaFiltroAccesos() {
+  const select = document.getElementById("accesos-campana-filtro");
+  const seleccionActual = select.value;
+  const campanas = await fetch(`${AUTH_API_BASE}/evaluaciones360/campanas?empresa=${EMPRESA}`).then((r) => (r.ok ? r.json() : []));
+  select.innerHTML = `<option value="">Todas las personas</option>` + campanas.map(
+    (c) => `<option value="${c.id}">${escapeHTML(c.nombre)} (${c.estado})</option>`
+  ).join("");
+  if (campanas.some((c) => String(c.id) === seleccionActual)) select.value = seleccionActual;
+}
+
 async function cargarAccesos() {
-  ACCESOS = await fetch(`${AUTH_API_BASE}/evaluaciones360/accesos?empresa=${EMPRESA}`).then((r) => r.json());
+  const campanaId = document.getElementById("accesos-campana-filtro").value;
+  const url = `${AUTH_API_BASE}/evaluaciones360/accesos?empresa=${EMPRESA}` + (campanaId ? `&campana_id=${campanaId}` : "");
+  ACCESOS = await fetch(url).then((r) => r.json());
   renderAccesos();
 }
 
@@ -1860,6 +1880,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("btn-crear-todos-accesos").addEventListener("click", crearTodosAccesos);
   document.getElementById("btn-rellenar-emails").addEventListener("click", rellenarEmailsFaltantes);
+  document.getElementById("accesos-campana-filtro").addEventListener("change", cargarAccesos);
   document.getElementById("btn-nueva-persona").addEventListener("click", () => abrirEditorPersona(null));
   document.getElementById("btn-cerrar-editor").addEventListener("click", cerrarEditorPersona);
   document.getElementById("btn-cerrar-editor-x").addEventListener("click", cerrarEditorPersona);

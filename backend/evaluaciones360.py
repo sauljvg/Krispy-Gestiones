@@ -973,20 +973,39 @@ def sugerir_local_part(nombre_completo: str) -> str:
     return base or "persona"
 
 
-def list_personas_con_estado_acceso(empresa="kk"):
+def list_personas_con_estado_acceso(empresa="kk", campana_id=None):
     """Todas las personas activas del organigrama (no solo las que aún no
     tienen cuenta) -- a diferencia de la extinta list_personas_sin_acceso,
     esto hace que una persona a la que se le acaba de crear el acceso siga
     apareciendo en la pestaña "Accesos" (ahora con tiene_acceso=True), en vez
-    de desaparecer de la lista en el siguiente refresco."""
+    de desaparecer de la lista en el siguiente refresco.
+
+    Con campana_id, se filtra a solo quienes participan en esa campaña
+    concreta (evaluados + evaluadores, hayan respondido o no) -- así con 15
+    personas en una campaña y 30 en otra, Accesos muestra las que
+    corresponden a la que se elija, en vez de todo el organigrama junto."""
     conn = get_connection()
-    rows = conn.execute("""
-        SELECT p.id, p.nombre_completo, p.email, p.usuario_id, u.username, u.pin
-        FROM eval360_personas p
-        LEFT JOIN usuarios u ON u.id = p.usuario_id
-        WHERE p.empresa = ? AND p.activo = 1
-        ORDER BY p.nombre_completo
-    """, (empresa,)).fetchall()
+    if campana_id:
+        rows = conn.execute("""
+            SELECT p.id, p.nombre_completo, p.email, p.usuario_id, u.username, u.pin
+            FROM eval360_personas p
+            LEFT JOIN usuarios u ON u.id = p.usuario_id
+            WHERE p.empresa = ? AND p.activo = 1
+              AND p.id IN (
+                  SELECT evaluado_persona_id FROM eval360_asignaciones WHERE campana_id = ?
+                  UNION
+                  SELECT evaluador_persona_id FROM eval360_asignaciones WHERE campana_id = ?
+              )
+            ORDER BY p.nombre_completo
+        """, (empresa, campana_id, campana_id)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT p.id, p.nombre_completo, p.email, p.usuario_id, u.username, u.pin
+            FROM eval360_personas p
+            LEFT JOIN usuarios u ON u.id = p.usuario_id
+            WHERE p.empresa = ? AND p.activo = 1
+            ORDER BY p.nombre_completo
+        """, (empresa,)).fetchall()
     conn.close()
     return [
         {

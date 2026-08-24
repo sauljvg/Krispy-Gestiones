@@ -459,9 +459,9 @@ def finalizar_asignacion_route(asignacion_id: int, user: dict = Depends(get_curr
 # ---------------------------------------------------------------------------
 
 @router.get("/accesos")
-def list_accesos_route(empresa: str = "kk", _user: dict = Depends(require_admin)):
+def list_accesos_route(empresa: str = "kk", campana_id: int | None = None, _user: dict = Depends(require_admin)):
     eval360_module.sincronizar_personas_privilegiadas()
-    return eval360_module.list_personas_con_estado_acceso(empresa)
+    return eval360_module.list_personas_con_estado_acceso(empresa, campana_id)
 
 
 @router.post("/accesos/{persona_id}/crear")
