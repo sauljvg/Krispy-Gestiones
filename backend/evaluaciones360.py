@@ -424,16 +424,21 @@ ROLES_ESPEJO = ("admin", "gerente", "area_manager")
 
 
 def _empresas_de_usuario(usuario_id, rol) -> list[str]:
-    """A qué organigrama(s) de 360 pertenece este usuario. admin ve las dos
-    marcas; el resto se infiere de sus tiendas permitidas (las de SAONA
-    llevan el prefijo "saona_", ver scraper/stores.py) -- sin tiendas
-    asignadas (gerente/AM sin restringir) se asume KK, el caso de siempre."""
+    """A qué organigrama(s) de 360 pertenece este usuario -- solo cuando hay
+    una señal fiable, si no, lista vacía (no se adivina, ver
+    sincronizar_personas_privilegiadas). admin ve las dos marcas. El resto:
+    cualquier módulo "saona_*" concedido cuenta como SAONA; cualquier tienda
+    sin prefijo "saona_" (ver scraper/stores.py) cuenta como KK. Sin tiendas
+    Y sin módulos saona -- como pasó con gerentes de SAONA dados de alta sin
+    tienda asignada -- no hay ninguna señal, así que no se devuelve nada."""
     if rol == "admin":
         return ["kk", "saona"]
+    empresas = set()
     tiendas = auth.get_tiendas_permitidas(usuario_id)
-    if not tiendas:
-        return ["kk"]
-    empresas = {"saona" if t.startswith("saona_") else "kk" for t in tiendas}
+    for t in tiendas:
+        empresas.add("saona" if t.startswith("saona_") else "kk")
+    if any(m.startswith("saona_") for m in auth.get_modulos_permitidos(usuario_id)):
+        empresas.add("saona")
     return sorted(empresas)
 
 
@@ -449,12 +454,37 @@ def _get_persona_por_usuario_y_empresa(usuario_id, empresa):
     return dict(row) if row else None
 
 
+def _hay_persona_sin_vincular_con_nombre_parecido(empresa, nombre) -> bool:
+    """Antes de crear una persona espejo nueva, si ya hay alguien sin
+    vincular en esa empresa cuyo primer nombre coincide (ej. el organigrama
+    ya tenía "Berta Garcia" a mano y la cuenta se llama "Berta"), no se crea
+    un duplicado -- se deja sin tocar para que se vincule a mano desde el
+    desplegable de "Cuenta vinculada" del editor de personas."""
+    partes_nombre = (nombre or "").strip().split()
+    if not partes_nombre:
+        return False
+    primer_nombre = partes_nombre[0].lower()
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT nombre_completo FROM eval360_personas WHERE empresa = ? AND usuario_id IS NULL AND activo = 1", (empresa,)
+    ).fetchall()
+    conn.close()
+    for r in rows:
+        otras_partes = (r["nombre_completo"] or "").strip().split()
+        if otras_partes and otras_partes[0].lower() == primer_nombre:
+            return True
+    return False
+
+
 def sincronizar_personas_privilegiadas():
     """Reconciliación idempotente: cada admin/gerente/area_manager con
-    cuenta en el portal tiene una persona espejo en el organigrama de 360 de
-    su(s) empresa(s), con el nombre al día. Se llama cada vez que se abre
-    Organigrama/Accesos en 360 -- barato (unas pocas filas) y así nunca hace
-    falta un cron aparte para mantenerlo fresco."""
+    cuenta en el portal Y una empresa identificable (ver _empresas_de_usuario)
+    tiene una persona espejo en el organigrama de 360, con el nombre al día.
+    Se llama cada vez que se abre Organigrama/Accesos en 360 -- barato (unas
+    pocas filas) y así nunca hace falta un cron aparte para mantenerlo
+    fresco. Si ya hay alguien sin vincular con el mismo nombre de pila, no
+    crea nada (evita duplicar a alguien que ya estaba en el organigrama a
+    mano, como pasó con "Berta"/"Berta Garcia")."""
     conn = get_connection()
     usuarios = conn.execute(
         f"SELECT id, nombre, rol FROM usuarios WHERE rol IN ({','.join('?' * len(ROLES_ESPEJO))})", ROLES_ESPEJO
@@ -465,6 +495,8 @@ def sincronizar_personas_privilegiadas():
         for empresa in _empresas_de_usuario(usuario_id, rol):
             persona = _get_persona_por_usuario_y_empresa(usuario_id, empresa)
             if persona is None:
+                if _hay_persona_sin_vincular_con_nombre_parecido(empresa, nombre):
+                    continue
                 crear_persona(empresa, nombre, usuario_id=usuario_id)
             elif persona["nombre_completo"] != nombre:
                 actualizar_persona(persona["id"], {"nombre_completo": nombre})
@@ -923,6 +955,7 @@ def list_personas_con_estado_acceso(empresa="kk"):
             "nombre_completo": r["nombre_completo"],
             "email": r["email"],
             "tiene_acceso": r["usuario_id"] is not None,
+            "usuario_id": r["usuario_id"],
             "username": r["username"],
         }
         for r in rows

@@ -1628,14 +1628,43 @@ function renderAccesos() {
         <span class="staff-hint">${p.email ? escapeHTML(p.email) : "sin email registrado"}</span>
         <div class="fila-acciones">
           ${p.tiene_acceso
-            ? `<span class="badge-estado badge-abierta">✓ acceso creado${p.username ? ` (usuario: ${escapeHTML(p.username)})` : ""}</span>`
+            ? `<span class="badge-estado badge-abierta">✓ acceso creado${p.username ? ` (usuario: ${escapeHTML(p.username)})` : ""}</span>
+               <button type="button" class="btn btn-ghost btn-mini" data-reset-pin="${p.usuario_id}">Resetear PIN</button>`
             : `<button type="button" class="btn btn-ghost btn-mini" data-crear-acceso="${p.id}">Crear acceso</button>`}
+          ${p.email ? `<a class="btn btn-ghost btn-mini" href="${enlaceMailtoAcceso(p)}">✉️ Enviar mail</a>` : ""}
         </div>
       </div>
     </li>`).join("");
   ul.querySelectorAll("[data-crear-acceso]").forEach((btn) => {
     btn.addEventListener("click", () => crearAcceso(Number(btn.dataset.crearAcceso)));
   });
+  ul.querySelectorAll("[data-reset-pin]").forEach((btn) => {
+    btn.addEventListener("click", () => resetearPinAcceso(Number(btn.dataset.resetPin)));
+  });
+}
+
+// mailto: directo, igual que en Reclutamiento -- nunca se manda nada desde
+// el servidor, se abre el cliente de correo del propio usuario con el
+// asunto/cuerpo ya rellenos (con el usuario si ya tiene acceso creado, o
+// invitándole a que se lo creen si todavía no).
+function enlaceMailtoAcceso(persona) {
+  const marca = EMPRESA === "saona" ? "SAONA" : "Krispy Kreme";
+  const asunto = `Tu acceso a Krispy Gestiones`;
+  const cuerpo = persona.tiene_acceso
+    ? `Hola ${persona.nombre_completo},\n\nYa tienes acceso al portal de ${marca} (Krispy Gestiones) para tus evaluaciones 360°.\n\nTu usuario es: ${persona.username}\nEntra en ${location.origin}/login.html y crea tu PIN de 4 dígitos la primera vez.\n\nUn saludo.`
+    : `Hola ${persona.nombre_completo},\n\nTe vamos a crear tu acceso al portal de ${marca} (Krispy Gestiones) para tus evaluaciones 360°. En cuanto esté listo te aviso con tu usuario.\n\nUn saludo.`;
+  return `mailto:${encodeURIComponent(persona.email)}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+}
+
+async function resetearPinAcceso(usuarioId) {
+  if (!usuarioId) return;
+  if (!(await pedirConfirmacion("¿Borrar el PIN de esta persona? La próxima vez que entre con su usuario, tendrá que crear uno nuevo."))) return;
+  const res = await fetch(`${AUTH_API_BASE}/auth/users/${usuarioId}/reset-pin`, { method: "POST" });
+  if (!res.ok) {
+    await mostrarAviso("No se pudo resetear el PIN.");
+    return;
+  }
+  await mostrarAviso("PIN reseteado.");
 }
 
 async function crearAcceso(personaId) {
@@ -1645,14 +1674,14 @@ async function crearAcceso(personaId) {
     await mostrarAviso(err.detail || "No se pudo crear el acceso.");
     return false;
   }
-  const { username } = await res.json();
+  const { username, usuario_id } = await res.json();
   const persona = ACCESOS.find((p) => p.id === personaId);
   if (persona) {
     persona.tiene_acceso = true;
     persona.username = username;
+    persona.usuario_id = usuario_id;
   }
-  const fila = document.querySelector(`[data-fila-acceso="${personaId}"] .fila-acciones`);
-  if (fila) fila.innerHTML = `<span class="badge-estado badge-abierta">✓ acceso creado (usuario: ${escapeHTML(username)})</span>`;
+  renderAccesos();
   return true;
 }
 
