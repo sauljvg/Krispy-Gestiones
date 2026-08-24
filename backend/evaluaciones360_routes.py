@@ -279,6 +279,15 @@ def cerrar_campana_route(campana_id: int, user: dict = Depends(require_admin)):
     return {"ok": True}
 
 
+@router.post("/campanas/{campana_id}/reabrir")
+def reabrir_campana_route(campana_id: int, user: dict = Depends(require_admin)):
+    campana = _require_acceso_campana(campana_id, user)
+    if campana["estado"] != "cerrada":
+        raise HTTPException(status_code=400, detail="Esta campaña no está cerrada")
+    eval360_module.reabrir_campana(campana_id)
+    return {"ok": True}
+
+
 @router.post("/campanas/{campana_id}/evaluados")
 def agregar_evaluado_route(campana_id: int, body: EvaluadoBody, user: dict = Depends(require_admin)):
     campana = _require_acceso_campana(campana_id, user)

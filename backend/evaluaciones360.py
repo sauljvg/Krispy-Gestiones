@@ -561,6 +561,17 @@ def cerrar_campana(campana_id):
     conn.close()
 
 
+def reabrir_campana(campana_id):
+    """Vuelve una campaña cerrada a 'abierta' -- no había forma de deshacer
+    un cierre (accidental o prematuro) hasta ahora. Los evaluadores
+    recuperan sus pendientes ahí mismo (mis_pendientes ya filtra por
+    c.estado = 'abierta')."""
+    conn = get_connection()
+    conn.execute("UPDATE eval360_campanas SET estado = 'abierta' WHERE id = ? AND estado = 'cerrada'", (campana_id,))
+    conn.commit()
+    conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Asignaciones (quién evalúa a quién) y autopropuesta
 # ---------------------------------------------------------------------------

@@ -1198,6 +1198,7 @@ function renderCampanaDetalle() {
   document.getElementById("btn-anadir-evaluados").hidden = !esBorrador;
   document.getElementById("btn-lanzar-campana").hidden = !esBorrador;
   document.getElementById("btn-cerrar-campana-formal").hidden = c.estado !== "abierta";
+  document.getElementById("btn-reabrir-campana").hidden = c.estado !== "cerrada";
   document.getElementById("picker-evaluados-wrap").hidden = true;
   document.getElementById("campana-detalle-hint").textContent = esBorrador
     ? "Añade evaluados, revisa quién evalúa a quién y lanza cuando esté listo."
@@ -1281,6 +1282,17 @@ async function lanzarCampana() {
 async function cerrarCampanaFormal() {
   if (!(await pedirConfirmacion("¿Cerrar esta campaña? Dejará de aparecer en las pendientes de los evaluadores."))) return;
   await fetch(`${AUTH_API_BASE}/evaluaciones360/campanas/${currentCampana.id}/cerrar`, { method: "POST" });
+  await abrirCampana(currentCampana.id);
+}
+
+async function reabrirCampana() {
+  if (!(await pedirConfirmacion("¿Reabrir esta campaña? Los evaluadores con pendientes sin completar volverán a verla en \"Mis evaluaciones\"."))) return;
+  const res = await fetch(`${AUTH_API_BASE}/evaluaciones360/campanas/${currentCampana.id}/reabrir`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    await mostrarAviso(err.detail || "No se pudo reabrir la campaña.");
+    return;
+  }
   await abrirCampana(currentCampana.id);
 }
 
@@ -1771,6 +1783,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   document.getElementById("btn-lanzar-campana").addEventListener("click", lanzarCampana);
   document.getElementById("btn-cerrar-campana-formal").addEventListener("click", cerrarCampanaFormal);
+  document.getElementById("btn-reabrir-campana").addEventListener("click", reabrirCampana);
   document.getElementById("btn-volver-evaluados").addEventListener("click", volverAEvaluados);
   document.getElementById("btn-anadir-evaluador-manual").addEventListener("click", anadirEvaluadorManual);
   document.getElementById("buscar-nuevo-evaluador").addEventListener("input", (e) => {
