@@ -1624,7 +1624,7 @@ function renderAccesos() {
   ul.innerHTML = ACCESOS.map((p) => `
     <li>
       <div class="fila-simple" data-fila-acceso="${p.id}">
-        <input type="text" class="acceso-nombre-input" data-id="${p.id}" value="${escapeHTML(p.nombre_completo)}" style="width:150px;">
+        <span class="acceso-nombre" style="width:150px;">${escapeHTML(p.nombre_completo)}</span>
         ${p.tiene_acceso
           ? `<input type="text" class="acceso-username-input" data-usuario-id="${p.usuario_id}" value="${escapeHTML(p.username || "")}" style="width:110px;">`
           : `<span class="staff-hint" style="width:110px;">sin cuenta todavía</span>`}
@@ -1651,30 +1651,9 @@ function renderAccesos() {
   ul.querySelectorAll("[data-guardar-pin]").forEach((btn) => {
     btn.addEventListener("click", () => guardarPinAcceso(Number(btn.dataset.guardarPin)));
   });
-  // Nombre y usuario se guardan solos al salir del campo -- para gestionar
-  // el acceso de alguien sin salir de 360. El nombre ya se sincroniza solo
-  // con Ajustes (editar_persona_route); el username va directo contra la
-  // cuenta (mismo endpoint que usa Ajustes → Usuarios).
-  ul.querySelectorAll(".acceso-nombre-input").forEach((input) => {
-    input.addEventListener("blur", async () => {
-      const personaId = Number(input.dataset.id);
-      const valor = input.value.trim();
-      const persona = ACCESOS.find((p) => p.id === personaId);
-      if (!valor || !persona || persona.nombre_completo === valor) {
-        input.value = persona ? persona.nombre_completo : valor;
-        return;
-      }
-      const res = await fetch(`${AUTH_API_BASE}/evaluaciones360/personas/${personaId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nombre_completo: valor }),
-      });
-      if (!res.ok) {
-        await mostrarAviso("No se pudo guardar el nombre.");
-      }
-      persona.nombre_completo = valor;
-    });
-  });
+  // El usuario se guarda solo al salir del campo -- para gestionar el acceso
+  // de alguien sin salir de 360. El nombre es texto plano a propósito: se
+  // edita desde la ficha de la persona en Organigrama, no desde aquí.
   ul.querySelectorAll(".acceso-username-input").forEach((input) => {
     input.addEventListener("blur", async () => {
       const usuarioId = Number(input.dataset.usuarioId);

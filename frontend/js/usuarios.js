@@ -199,7 +199,7 @@ async function loadUsers(currentUserId) {
       (u) => `
       <tr data-id="${u.id}">
         <td><input type="text" class="username-input" data-id="${u.id}" value="${escapeHTML(u.username)}" style="width:110px;"></td>
-        <td><input type="text" class="nombre-input" data-id="${u.id}" value="${escapeHTML(u.nombre)}" style="width:130px;"></td>
+        <td>${escapeHTML(u.nombre)}</td>
         <td><select class="rol-select" data-id="${u.id}" ${u.id === currentUserId ? "disabled" : ""}>${rolSelectHTML(u.rol)}</select></td>
         <td>
           ${
@@ -467,24 +467,22 @@ async function loadUsers(currentUserId) {
     });
   });
 
-  // Nombre y usuario se guardan solos al salir del campo (blur), como el
-  // email en el editor de personas de 360 -- si no cambiaron, no llama a
-  // la API. Antes no eran editables, había que borrar la cuenta y crearla
-  // de nuevo para corregir un nombre mal escrito.
-  tbody.querySelectorAll(".username-input, .nombre-input").forEach((input) => {
+  // El usuario se guarda solo al salir del campo (blur) -- si no cambió, no
+  // llama a la API. El nombre de la persona es texto plano a propósito: se
+  // edita desde la ficha de la persona en Evaluaciones 360, no desde aquí.
+  tbody.querySelectorAll(".username-input").forEach((input) => {
     input.addEventListener("blur", async () => {
       const id = input.dataset.id;
       const valor = input.value.trim();
       const original = users.find((u) => String(u.id) === String(id));
-      const campo = input.classList.contains("username-input") ? "username" : "nombre";
-      if (!valor || (original && original[campo] === valor)) {
-        input.value = original ? original[campo] : valor;
+      if (!valor || (original && original.username === valor)) {
+        input.value = original ? original.username : valor;
         return;
       }
       const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [campo]: valor }),
+        body: JSON.stringify({ username: valor }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
