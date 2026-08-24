@@ -688,6 +688,44 @@ def reabrir_campana(campana_id):
     conn.close()
 
 
+def eliminar_campana(campana_id):
+    """Borrado real (no como eliminar_persona, que solo desactiva): la
+    campaña entera desaparece junto con sus asignaciones y las respuestas ya
+    dadas -- a diferencia de "Quitar del organigrama" a una persona, esto sí
+    es irreversible y se avisa así en el frontend (hay que escribir el
+    nombre de la campaña para confirmar)."""
+    conn = get_connection()
+    conn.execute("""
+        DELETE FROM eval360_respuestas WHERE asignacion_id IN (
+            SELECT id FROM eval360_asignaciones WHERE campana_id = ?
+        )
+    """, (campana_id,))
+    conn.execute("DELETE FROM eval360_asignaciones WHERE campana_id = ?", (campana_id,))
+    conn.execute("DELETE FROM eval360_campanas WHERE id = ?", (campana_id,))
+    conn.commit()
+    conn.close()
+
+
+def list_evaluadores_pendientes_campana(campana_id):
+    """Personas de esta campaña que todavía tienen alguna evaluación sin
+    responder -- para el recordatorio manual (mailto) desde la propia
+    campaña, ya que a diferencia del aviso de lanzamiento, este no depende
+    de Resend."""
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT DISTINCT ev.id, ev.nombre_completo, ev.email
+        FROM eval360_asignaciones a
+        JOIN eval360_personas ev ON ev.id = a.evaluador_persona_id
+        WHERE a.campana_id = ? AND a.estado = 'pendiente'
+        ORDER BY ev.nombre_completo
+    """, (campana_id,)).fetchall()
+    conn.close()
+    return [
+        {"id": r["id"], "nombre_completo": r["nombre_completo"], "email": email_de_persona(dict(r))}
+        for r in rows
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Asignaciones (quién evalúa a quién) y autopropuesta
 # ---------------------------------------------------------------------------

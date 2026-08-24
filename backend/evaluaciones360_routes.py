@@ -234,6 +234,10 @@ class CampanaEditBody(BaseModel):
     periodo_hasta: str | None = None
 
 
+class EliminarCampanaBody(BaseModel):
+    confirmar_nombre: str
+
+
 class EvaluadoBody(BaseModel):
     persona_id: int
 
@@ -308,6 +312,21 @@ def reabrir_campana_route(campana_id: int, user: dict = Depends(require_admin)):
     if campana["estado"] != "cerrada":
         raise HTTPException(status_code=400, detail="Esta campaña no está cerrada")
     eval360_module.reabrir_campana(campana_id)
+    return {"ok": True}
+
+
+@router.get("/campanas/{campana_id}/pendientes")
+def list_pendientes_campana_route(campana_id: int, user: dict = Depends(require_admin)):
+    _require_acceso_campana(campana_id, user)
+    return eval360_module.list_evaluadores_pendientes_campana(campana_id)
+
+
+@router.delete("/campanas/{campana_id}")
+def eliminar_campana_route(campana_id: int, body: EliminarCampanaBody, user: dict = Depends(require_admin)):
+    campana = _require_acceso_campana(campana_id, user)
+    if body.confirmar_nombre.strip() != campana["nombre"]:
+        raise HTTPException(status_code=400, detail="El nombre no coincide con el de la campaña")
+    eval360_module.eliminar_campana(campana_id)
     return {"ok": True}
 
 

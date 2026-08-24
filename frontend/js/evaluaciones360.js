@@ -11,6 +11,7 @@ let ACCESOS = [];
 
 let CAMPANAS = [];
 let currentCampana = null;
+let PENDIENTES_CAMPANA = [];
 let currentEvaluadoId = null;
 
 let MIS_PENDIENTES = [];
@@ -1198,6 +1199,64 @@ async function abrirCampana(campanaId) {
   document.getElementById("campana-detalle").hidden = false;
   document.getElementById("evaluadores-detalle").hidden = true;
   renderCampanaDetalle();
+  await cargarPendientesCampana();
+}
+
+// Solo tiene sentido una vez lanzada (antes de eso nadie tiene todavía
+// nada "pendiente" que recordar) -- lista quién falta por responder en
+// ESTA campaña concreta, para el recordatorio manual por mailto (sin
+// depender de Resend, que hoy no se usa para esto).
+async function cargarPendientesCampana() {
+  const wrap = document.getElementById("pendientes-campana-wrap");
+  const btnRecordatorio = document.getElementById("btn-recordatorio-campana");
+  if (!currentCampana || currentCampana.estado === "borrador") {
+    wrap.hidden = true;
+    btnRecordatorio.hidden = true;
+    return;
+  }
+  PENDIENTES_CAMPANA = await fetch(`${AUTH_API_BASE}/evaluaciones360/campanas/${currentCampana.id}/pendientes`).then((r) => (r.ok ? r.json() : []));
+  wrap.hidden = PENDIENTES_CAMPANA.length === 0;
+  btnRecordatorio.hidden = PENDIENTES_CAMPANA.length === 0;
+  document.getElementById("pendientes-campana-resumen").textContent = `Evaluadores pendientes (${PENDIENTES_CAMPANA.length})`;
+  document.getElementById("pendientes-campana-lista").innerHTML = PENDIENTES_CAMPANA.map(
+    (p) => `<li>${escapeHTML(p.nombre_completo)}${p.email ? "" : ` <span class="staff-hint">(sin email)</span>`}</li>`
+  ).join("");
+}
+
+function enviarRecordatorioCampana() {
+  const destinatarios = PENDIENTES_CAMPANA.filter((p) => p.email).map((p) => p.email);
+  if (destinatarios.length === 0) {
+    mostrarAviso("Nadie de los pendientes tiene un email registrado todavía.");
+    return;
+  }
+  const fecha = currentCampana.periodo_hasta ? currentCampana.periodo_hasta.split("-").reverse().join("/") : null;
+  const asunto = `Recordatorio: evaluación 360° pendiente — ${currentCampana.nombre}`;
+  const cuerpo = `Hola,\n\nOs recordamos que tenéis pendiente vuestra evaluación 360° de este año. Es necesario que accedáis a esta web (${location.origin}/login.html) y la respondáis con vuestro usuario habitual.\n\nRecordad que la encuesta es totalmente anónima.${fecha ? ` Tenéis hasta el ${fecha} para poder rellenarla.` : ""}\n\nMuchas gracias.`;
+  window.location.href = `mailto:?bcc=${encodeURIComponent(destinatarios.join(","))}&subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+}
+
+async function eliminarCampanaCompleta() {
+  const c = currentCampana;
+  if (!c) return;
+  const escrito = await pedirTexto(
+    `Esto borra la campaña "${c.nombre}" para siempre: sus evaluadores/evaluados asignados y TODAS las respuestas ya dadas. No se puede deshacer.\n\nPara confirmar, escribe el nombre exacto de la campaña:`
+  );
+  if (escrito === null) return;
+  if (escrito.trim() !== c.nombre) {
+    await mostrarAviso("El nombre no coincide -- no se ha borrado nada.");
+    return;
+  }
+  const res = await fetch(`${AUTH_API_BASE}/evaluaciones360/campanas/${c.id}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmar_nombre: escrito.trim() }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    await mostrarAviso(err.detail || "No se pudo borrar la campaña.");
+    return;
+  }
+  volverACampanas();
 }
 
 function volverACampanas() {
@@ -1923,6 +1982,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btn-lanzar-campana").addEventListener("click", lanzarCampana);
   document.getElementById("btn-cerrar-campana-formal").addEventListener("click", cerrarCampanaFormal);
   document.getElementById("btn-reabrir-campana").addEventListener("click", reabrirCampana);
+  document.getElementById("btn-recordatorio-campana").addEventListener("click", enviarRecordatorioCampana);
+  document.getElementById("btn-eliminar-campana").addEventListener("click", eliminarCampanaCompleta);
   document.getElementById("btn-volver-evaluados").addEventListener("click", volverAEvaluados);
   document.getElementById("btn-anadir-evaluador-manual").addEventListener("click", anadirEvaluadorManual);
   document.getElementById("buscar-nuevo-evaluador").addEventListener("input", (e) => {

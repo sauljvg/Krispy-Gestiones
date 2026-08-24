@@ -322,13 +322,20 @@
         <p class="staff-hint" id="campana-detalle-periodo"></p>
         <div class="eval360-toolbar">
           <p class="staff-hint" id="campana-detalle-hint"></p>
-          <div style="display:flex; gap:8px;">
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <button id="btn-anadir-evaluados" class="btn btn-ghost" type="button">＋ Añadir evaluados</button>
             <button id="btn-lanzar-campana" class="btn btn-primary" type="button">🚀 Lanzar campaña</button>
             <button id="btn-cerrar-campana-formal" class="btn btn-ghost" type="button" hidden>Cerrar campaña</button>
             <button id="btn-reabrir-campana" class="btn btn-ghost" type="button" hidden>Reabrir campaña</button>
+            <button id="btn-recordatorio-campana" class="btn btn-ghost" type="button" hidden>✉️ Recordatorio</button>
+            <button id="btn-eliminar-campana" class="btn btn-ghost" type="button" style="color: var(--status-critical, #d03b3b);">🗑️ Eliminar campaña</button>
           </div>
         </div>
+
+        <details id="pendientes-campana-wrap" hidden style="margin-bottom:14px;">
+          <summary class="staff-hint" style="cursor:pointer;" id="pendientes-campana-resumen">Evaluadores pendientes</summary>
+          <ul class="lista-simple" id="pendientes-campana-lista" style="margin-top:8px;"></ul>
+        </details>
 
         <div id="picker-evaluados-wrap" hidden>
           <div class="editor-actions" style="margin-top:0; margin-bottom:8px;">
@@ -482,6 +489,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260821a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/evaluaciones360.js?v=20260824c"></script>
+<script src="js/evaluaciones360.js?v=20260824d"></script>
 </body>
 </html>
