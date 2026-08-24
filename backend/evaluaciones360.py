@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from datetime import datetime
 
 import auth
 from db import get_connection
@@ -1047,19 +1048,34 @@ def rellenar_emails_automaticos(empresa="kk") -> int:
     return actualizados
 
 
-def notificar_campana_lanzada(campana_id) -> dict:
+def _fecha_es(iso: str | None) -> str | None:
+    """'2026-09-22' -> '22/09/2026' (formato español) -- None si no hay
+    fecha o no se puede parsear."""
+    if not iso:
+        return None
+    try:
+        return datetime.strptime(iso, "%Y-%m-%d").strftime("%d/%m/%Y")
+    except ValueError:
+        return None
+
+
+def notificar_campana_lanzada(campana_id, base_url: str) -> dict:
     """Al lanzar una campaña, avisa por email a cada evaluador con al menos
     una asignación pendiente ahí (un email por persona, aunque tenga varias
-    evaluaciones que hacer). Best-effort: una persona sin email resoluble o
-    un fallo de Resend no interrumpe a las demás, se cuenta como omitida."""
+    evaluaciones que hacer). A quien todavía no tiene cuenta de portal se le
+    crea aquí mismo -- el email siempre incluye un usuario real para entrar.
+    Best-effort: una persona sin email resoluble o un fallo de Resend no
+    interrumpe a las demás, se cuenta como omitida."""
     import boletines as boletines_module
 
     campana = get_campana(campana_id)
+    fecha_limite = _fecha_es(campana["periodo_hasta"])
     conn = get_connection()
     rows = conn.execute("""
-        SELECT DISTINCT ev.id, ev.nombre_completo, ev.email
+        SELECT DISTINCT ev.id, ev.nombre_completo, ev.email, ev.usuario_id, u.username
         FROM eval360_asignaciones a
         JOIN eval360_personas ev ON ev.id = a.evaluador_persona_id
+        LEFT JOIN usuarios u ON u.id = ev.usuario_id
         WHERE a.campana_id = ? AND a.estado = 'pendiente'
     """, (campana_id,)).fetchall()
     conn.close()
@@ -1068,15 +1084,23 @@ def notificar_campana_lanzada(campana_id) -> dict:
     for r in rows:
         evaluador = dict(r)
         destino = email_de_persona(evaluador)
-        if not destino:
+        username = evaluador["username"]
+        if not username:
+            creado = crear_acceso_para_persona(evaluador["id"])
+            username = creado.get("username") if creado else None
+        if not destino or not username:
             omitidos += 1
             continue
+        deadline_html = f"<p>Tienes hasta el {fecha_limite} para poder rellenarla.</p>" if fecha_limite else ""
         html = (
             f"<p>Hola {evaluador['nombre_completo']},</p>"
-            f"<p>Se ha lanzado la campaña de evaluación 360° <b>{campana['nombre']}</b> "
-            f"y tienes evaluaciones pendientes por completar.</p>"
-            f"<p>Entra en Krispy Gestiones, sección Evaluaciones 360°, pestaña "
-            f"\"Mis evaluaciones\", para responderlas.</p>"
+            f"<p>Tenemos pendiente nuestras evaluaciones 360° de este año. Es necesario que puedas "
+            f"acceder a esta web (<a href=\"{base_url}/login.html\">{base_url}/login.html</a>) y que "
+            f"puedas responderlas.</p>"
+            f"<p>Para entrar, este es tu usuario: <b>{username}</b> -- debes crear tu contraseña en el momento.</p>"
+            f"<p>Recuerda que la encuesta es totalmente anónima.</p>"
+            f"{deadline_html}"
+            f"<p>Muchas gracias.</p>"
         )
         ok, _error = boletines_module._enviar_email_resend(
             destino, evaluador["nombre_completo"], f"Evaluación 360° pendiente: {campana['nombre']}", html

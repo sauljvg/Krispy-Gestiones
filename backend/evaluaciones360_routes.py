@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 import auth as auth_module
@@ -283,14 +283,15 @@ def editar_campana_route(campana_id: int, body: CampanaEditBody, user: dict = De
 
 
 @router.post("/campanas/{campana_id}/lanzar")
-def lanzar_campana_route(campana_id: int, user: dict = Depends(require_admin)):
+def lanzar_campana_route(campana_id: int, request: Request, user: dict = Depends(require_admin)):
     campana = _require_acceso_campana(campana_id, user)
     if campana["estado"] != "borrador":
         raise HTTPException(status_code=400, detail="Esta campaña ya se lanzó")
     if eval360_module.contar_asignaciones(campana_id) == 0:
         raise HTTPException(status_code=400, detail="Añade al menos un evaluado con evaluadores antes de lanzar")
     eval360_module.lanzar_campana(campana_id)
-    aviso = eval360_module.notificar_campana_lanzada(campana_id)
+    base_url = str(request.base_url).rstrip("/")
+    aviso = eval360_module.notificar_campana_lanzada(campana_id, base_url)
     return {"ok": True, "avisos": aviso}
 
 
