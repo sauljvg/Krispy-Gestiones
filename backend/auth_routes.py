@@ -165,21 +165,33 @@ def list_modulos(_admin: dict = Depends(require_admin)):
     return [{"value": k, "label": v} for k, v in auth_module.MODULOS.items()]
 
 
+MODULOS_360 = {"evaluaciones360", "saona_evaluaciones360"}
+
+
 @router.get("/users")
 def list_users(_admin: dict = Depends(require_admin)):
+    """Ajustes -> Usuarios es la lista de quienes usan el portal en general.
+    Las cuentas creadas desde Evaluaciones 360 exclusivamente para responder
+    ahí (rol colaborador, único módulo evaluaciones360/saona_evaluaciones360)
+    se gestionan desde la pestaña Accesos de 360 y no aparecen aquí -- si a
+    esa cuenta se le da algún otro módulo, deja de ser "exclusiva" y pasa a
+    verse también en Ajustes."""
     conn = get_connection()
     rows = conn.execute("SELECT id, username, pin, nombre, rol, creado FROM usuarios ORDER BY id").fetchall()
     conn.close()
-    return [
-        {
+    resultado = []
+    for r in rows:
+        modulos = list(auth_module.MODULOS) if r["rol"] == "admin" else auth_module.get_modulos_permitidos(r["id"])
+        if r["rol"] != "admin" and modulos and set(modulos) <= MODULOS_360:
+            continue
+        resultado.append({
             **dict(r),
             "tiendas": auth_module.get_tiendas_permitidas(r["id"]),
-            "modulos": list(auth_module.MODULOS) if r["rol"] == "admin" else auth_module.get_modulos_permitidos(r["id"]),
+            "modulos": modulos,
             "tipos_informes": informes_module.get_tipos_permitidos(r["id"]),
             "clima_centros": clima_module.get_centros_permitidos(r["id"]),
-        }
-        for r in rows
-    ]
+        })
+    return resultado
 
 
 @router.post("/users")
