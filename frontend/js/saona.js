@@ -15,5 +15,5 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("card-saona-clima").hidden = !modulos.includes("saona_clima");
   document.getElementById("card-saona-entrevistas").hidden = !modulos.includes("saona_informes");
   document.getElementById("card-saona-compartidos").hidden = !(modulos.includes("saona_informes") || modulos.includes("saona_reclutamiento"));
-  document.getElementById("card-saona-evaluaciones360").hidden = !modulos.includes("saona_evaluaciones360");
+  aplicarVisibilidadEval360(document.getElementById("card-saona-evaluaciones360"), user, modulos.includes("saona_evaluaciones360"));
 });

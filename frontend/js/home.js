@@ -38,7 +38,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("card-tests").hidden = !modulos.includes("tests");
   document.getElementById("card-disc").hidden = !modulos.includes("disc");
   document.getElementById("card-agregadores").hidden = !modulos.includes("agregadores");
-  document.getElementById("card-evaluaciones360").hidden = !modulos.includes("evaluaciones360");
+  aplicarVisibilidadEval360(document.getElementById("card-evaluaciones360"), user, modulos.includes("evaluaciones360"));
   const tieneModuloSaona = ["saona_resenas", "saona_informes", "saona_clima", "saona_evaluaciones360", "saona_reclutamiento"].some((m) => modulos.includes(m));
   document.getElementById("card-saona").hidden = !tieneModuloSaona;
   if (user.rol === "admin") {

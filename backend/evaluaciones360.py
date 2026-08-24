@@ -942,7 +942,7 @@ def list_personas_con_estado_acceso(empresa="kk"):
     de desaparecer de la lista en el siguiente refresco."""
     conn = get_connection()
     rows = conn.execute("""
-        SELECT p.id, p.nombre_completo, p.email, p.usuario_id, u.username
+        SELECT p.id, p.nombre_completo, p.email, p.usuario_id, u.username, u.pin
         FROM eval360_personas p
         LEFT JOIN usuarios u ON u.id = p.usuario_id
         WHERE p.empresa = ? AND p.activo = 1
@@ -957,6 +957,7 @@ def list_personas_con_estado_acceso(empresa="kk"):
             "tiene_acceso": r["usuario_id"] is not None,
             "usuario_id": r["usuario_id"],
             "username": r["username"],
+            "pin": r["pin"],
         }
         for r in rows
     ]

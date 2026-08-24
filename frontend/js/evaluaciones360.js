@@ -1628,10 +1628,14 @@ function renderAccesos() {
         ${p.tiene_acceso
           ? `<input type="text" class="acceso-username-input" data-usuario-id="${p.usuario_id}" value="${escapeHTML(p.username || "")}" style="width:110px;">`
           : `<span class="staff-hint" style="width:110px;">sin cuenta todavía</span>`}
+        ${p.tiene_acceso
+          ? `<input type="text" class="acceso-pin-input" data-usuario-id="${p.usuario_id}" value="${escapeHTML(p.pin || "")}" placeholder="sin PIN" maxlength="4" style="width:60px; text-align:center;">`
+          : ""}
         <span class="staff-hint">${p.email ? escapeHTML(p.email) : "sin email registrado"}</span>
         <div class="fila-acciones">
           ${p.tiene_acceso
             ? `<span class="badge-estado badge-abierta">✓ acceso creado</span>
+               <button type="button" class="btn btn-ghost btn-mini" data-guardar-pin="${p.usuario_id}">Guardar PIN</button>
                <button type="button" class="btn btn-ghost btn-mini" data-reset-pin="${p.usuario_id}">Resetear PIN</button>`
             : `<button type="button" class="btn btn-ghost btn-mini" data-crear-acceso="${p.id}">Crear acceso</button>`}
           ${p.email ? `<a class="btn btn-ghost btn-mini" href="${enlaceMailtoAcceso(p)}">✉️ Enviar mail</a>` : ""}
@@ -1643,6 +1647,9 @@ function renderAccesos() {
   });
   ul.querySelectorAll("[data-reset-pin]").forEach((btn) => {
     btn.addEventListener("click", () => resetearPinAcceso(Number(btn.dataset.resetPin)));
+  });
+  ul.querySelectorAll("[data-guardar-pin]").forEach((btn) => {
+    btn.addEventListener("click", () => guardarPinAcceso(Number(btn.dataset.guardarPin)));
   });
   // Nombre y usuario se guardan solos al salir del campo -- para gestionar
   // el acceso de alguien sin salir de 360. El nombre ya se sincroniza solo
@@ -1706,6 +1713,28 @@ function enlaceMailtoAcceso(persona) {
   return `mailto:${encodeURIComponent(persona.email)}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
 }
 
+async function guardarPinAcceso(usuarioId) {
+  if (!usuarioId) return;
+  const input = document.querySelector(`.acceso-pin-input[data-usuario-id="${usuarioId}"]`);
+  const pin = input.value.trim();
+  if (!/^\d{4}$/.test(pin)) {
+    await mostrarAviso("El PIN debe ser de 4 dígitos.");
+    return;
+  }
+  const res = await fetch(`${AUTH_API_BASE}/auth/users/${usuarioId}/pin`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pin }),
+  });
+  if (!res.ok) {
+    await mostrarAviso("No se pudo guardar el PIN.");
+    return;
+  }
+  const persona = ACCESOS.find((p) => p.usuario_id === usuarioId);
+  if (persona) persona.pin = pin;
+  await mostrarAviso("PIN actualizado.");
+}
+
 async function resetearPinAcceso(usuarioId) {
   if (!usuarioId) return;
   if (!(await pedirConfirmacion("¿Borrar el PIN de esta persona? La próxima vez que entre con su usuario, tendrá que crear uno nuevo."))) return;
@@ -1714,6 +1743,9 @@ async function resetearPinAcceso(usuarioId) {
     await mostrarAviso("No se pudo resetear el PIN.");
     return;
   }
+  const persona = ACCESOS.find((p) => p.usuario_id === usuarioId);
+  if (persona) persona.pin = null;
+  renderAccesos();
   await mostrarAviso("PIN reseteado.");
 }
 
