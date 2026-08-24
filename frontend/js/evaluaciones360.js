@@ -893,12 +893,14 @@ async function guardarPersona() {
     email: document.getElementById("persona-email").value.trim() || null,
   };
   if (editandoPersonaId) {
-    const personaActual = PERSONAS.find((p) => p.id === editandoPersonaId);
-    // Solo si el jefe directo realmente cambió en este guardado -- si no,
-    // no hace falta tocar (ni preguntar por) el puesto.
-    if (personaActual && (personaActual.jefe_directo_id || null) !== nuevoJefeId) {
-      await sincronizarPuestoConJefe(editandoPersonaId, nuevoJefeId, puestoIds);
-    }
+    // Siempre se intenta sincronizar al guardar, no solo cuando el jefe
+    // directo cambia en este guardado -- si ya estaba bien no pasa nada
+    // (sincronizarPuestoConJefe no toca ni pregunta nada cuando el puesto ya
+    // tiene el padre correcto), pero así cualquier persona que se hubiera
+    // quedado desincronizada de antes se corrige en cuanto se vuelve a abrir
+    // y guardar su ficha, sin tener que cambiar el jefe a mano para que
+    // "cuente" como cambio.
+    await sincronizarPuestoConJefe(editandoPersonaId, nuevoJefeId, puestoIds);
   }
   const url = editandoPersonaId
     ? `${AUTH_API_BASE}/evaluaciones360/personas/${editandoPersonaId}`
@@ -1936,6 +1938,25 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   activarSubvistaOrganigrama("personas");
   document.getElementById("btn-nuevo-puesto-raiz").addEventListener("click", () => abrirEditorPuesto(null));
+  document.getElementById("btn-reparar-organigrama").addEventListener("click", async () => {
+    const continuar = await pedirConfirmacion(
+      "Esto revisa a todo el mundo con jefe directo en \"Por persona\" y corrige el puesto padre de quien no coincida en \"Por puesto de trabajo\" (solo cuando no hay ambigüedad: la persona y su jefe ocupan cada uno un único puesto). ¿Continuar?"
+    );
+    if (!continuar) return;
+    const res = await fetch(`${AUTH_API_BASE}/evaluaciones360/organigrama/resincronizar?empresa=${EMPRESA}`, { method: "POST" });
+    if (!res.ok) {
+      await mostrarAviso("No se pudo reparar el organigrama. Inténtalo de nuevo.");
+      return;
+    }
+    const { corregidos, sin_tocar } = await res.json();
+    await mostrarAviso(
+      corregidos
+        ? `Se corrigieron ${corregidos} puesto(s).${sin_tocar ? ` ${sin_tocar} persona(s) se dejaron igual por ambigüedad (puestos compartidos o sin puesto único) -- revísalas a mano si hace falta.` : ""}`
+        : `No hacía falta corregir nada.${sin_tocar ? ` ${sin_tocar} persona(s) tienen ambigüedad (puestos compartidos o sin puesto único) y no se pudieron revisar automáticamente.` : ""}`
+    );
+    PUESTOS = await fetch(`${AUTH_API_BASE}/evaluaciones360/puestos?empresa=${EMPRESA}`).then((r) => r.json());
+    renderPuestosArbol();
+  });
   const arbolCont = document.getElementById("puestos-arbol");
   // (Soltar sobre el fondo, sin caja debajo, ya lo gestiona el propio
   // onSoltar de wireArrastrePuntero en wirePuestoBoxes -- destino null.)

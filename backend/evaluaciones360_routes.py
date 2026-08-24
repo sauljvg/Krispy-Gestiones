@@ -139,6 +139,16 @@ def list_personas_de_puesto_route(puesto_id: int, user: dict = Depends(require_a
     return eval360_module.list_personas_de_puesto(puesto_id)
 
 
+@router.post("/organigrama/resincronizar")
+def resincronizar_organigrama_route(empresa: str = "kk", user: dict = Depends(require_admin)):
+    """Corrige de golpe todos los puestos que se quedaron sin actualizar
+    respecto a quién reporta a quién de verdad en "Por persona" -- para
+    cuando ese desajuste viene de antes de que guardar el editor de personas
+    empezara a sincronizar también (ver sincronizarPuestoConJefe)."""
+    _require_acceso_empresa(user, empresa)
+    return eval360_module.resincronizar_puestos_desde_jefes(empresa)
+
+
 # ---------------------------------------------------------------------------
 # Personas (organigrama)
 # ---------------------------------------------------------------------------

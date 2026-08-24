@@ -350,6 +350,70 @@ def set_puestos_de_persona(persona_id, puesto_ids: list):
     conn.close()
 
 
+def _crearia_ciclo_puesto(conn, puesto_id, nuevo_padre_id):
+    cursor_id = nuevo_padre_id
+    visitados = set()
+    while cursor_id is not None:
+        if cursor_id == puesto_id:
+            return True
+        if cursor_id in visitados:
+            break
+        visitados.add(cursor_id)
+        fila = conn.execute("SELECT puesto_padre_id FROM eval360_puestos WHERE id = ?", (cursor_id,)).fetchone()
+        cursor_id = fila["puesto_padre_id"] if fila else None
+    return False
+
+
+def resincronizar_puestos_desde_jefes(empresa="kk"):
+    """"Por persona" y "Por puesto de trabajo" son el mismo organigrama --
+    esto corrige de una vez todos los puestos que se quedaron desincronizados
+    de quién reporta a quién de verdad (jefe_directo_id), en vez de obligar a
+    reabrir y regrabar a cada persona una por una para que se dispare la
+    sincronización del guardado normal (ver sincronizarPuestoConJefe en el
+    frontend). Solo se corrige sin ambigüedad: la persona ocupa exactamente
+    un puesto, su jefe directo también ocupa exactamente un puesto, y mover
+    el puesto no crearía un ciclo. Devuelve cuántos puestos se corrigieron y
+    cuántas personas se dejaron igual por ambigüedad."""
+    conn = get_connection()
+    personas = conn.execute(
+        """SELECT id, jefe_directo_id FROM eval360_personas
+           WHERE empresa = ? AND activo = 1 AND jefe_directo_id IS NOT NULL""",
+        (empresa,),
+    ).fetchall()
+    corregidos = 0
+    sin_tocar = 0
+    for persona in personas:
+        puestos_persona = conn.execute(
+            "SELECT puesto_id FROM eval360_persona_puestos WHERE persona_id = ?", (persona["id"],)
+        ).fetchall()
+        puestos_jefe = conn.execute(
+            "SELECT puesto_id FROM eval360_persona_puestos WHERE persona_id = ?", (persona["jefe_directo_id"],)
+        ).fetchall()
+        if len(puestos_persona) != 1 or len(puestos_jefe) != 1:
+            sin_tocar += 1
+            continue
+        puesto_persona_id = puestos_persona[0]["puesto_id"]
+        puesto_jefe_id = puestos_jefe[0]["puesto_id"]
+        if puesto_persona_id == puesto_jefe_id:
+            continue
+        actual = conn.execute(
+            "SELECT puesto_padre_id FROM eval360_puestos WHERE id = ?", (puesto_persona_id,)
+        ).fetchone()
+        if not actual or actual["puesto_padre_id"] == puesto_jefe_id:
+            continue
+        if _crearia_ciclo_puesto(conn, puesto_persona_id, puesto_jefe_id):
+            sin_tocar += 1
+            continue
+        conn.execute(
+            "UPDATE eval360_puestos SET puesto_padre_id = ? WHERE id = ?",
+            (puesto_jefe_id, puesto_persona_id),
+        )
+        corregidos += 1
+    conn.commit()
+    conn.close()
+    return {"corregidos": corregidos, "sin_tocar": sin_tocar}
+
+
 # ---------------------------------------------------------------------------
 # Personas (organigrama)
 # ---------------------------------------------------------------------------
