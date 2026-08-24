@@ -127,7 +127,6 @@
         <span class="stat-label">Total de reseñas</span>
         <span class="stat-value-row">
           <span class="stat-value" id="stat-total">—</span>
-          <span class="stat-check" id="stat-total-check" hidden>✓</span>
         </span>
       </div>
       <div class="stat-tile">
@@ -212,12 +211,6 @@
            basta con quitar este `hidden` para volver a mostrarlo. El
            checkbox y todo su cableado en dashboard.js/backend se dejan
            intactos para no tener que reconstruirlo luego. -->
-      <div class="filter-group" hidden>
-        <label>&nbsp;</label>
-        <label class="filter-toggle-google" title="Excluye del todo (totales, promedio, % positivas, ranking) las reseñas que la reconciliación manual (scraper --reconciliar) marcó como ya no visibles en Google — para ver exactamente lo mismo que muestra la ficha pública.">
-          <input type="checkbox" id="filter-solo-google"> Solo Google
-        </label>
-      </div>
       <div class="filter-group">
         <label>&nbsp;</label>
         <button id="btn-clear-filters" class="btn btn-ghost">✕ Limpiar filtros</button>

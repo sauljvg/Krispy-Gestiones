@@ -15,3 +15,8 @@ uploads/
 *.db
 backups/
 scraper/reconciliacion_*.csv
+
+# Documentos/recursos sueltos (PDFs, Excel, logos, datos de Takeout) — no
+# son código, no van al repo. Ver ESTADO_PROYECTO.md.
+_recursos/
+scratchpad_test_estado.png

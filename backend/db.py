@@ -62,9 +62,11 @@ def _ensure_transactions_table():
 
 
 def _ensure_store_meta_table():
-    """Guarda el total de reseñas que Google anuncia para cada tienda (lo
-    escribe el scraper al final de cada pasada), para poder marcar con un
-    check cuando ya tenemos el 100% capturado."""
+    """Tabla en desuso desde que se dejó de scrapear Maps en vivo (ver
+    ESTADO_PROYECTO.md) — se mantiene solo para no romper bases de datos
+    viejas que ya la tengan. Antes guardaba el total de reseñas que Google
+    anunciaba para cada tienda (lo escribía scraper/scraper_v2.py al final de
+    cada pasada)."""
     conn = get_connection()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS store_meta (
@@ -88,11 +90,10 @@ def _ensure_reviews_columns():
         for col in ("fecha_hora", "respuesta_texto", "respuesta_fecha"):
             if col not in cols:
                 conn.execute(f"ALTER TABLE reviews ADD COLUMN {col} TEXT")
-        # NULL/1 = sigue visible en Google (valor por defecto); 0 = la
-        # reconciliación manual (scraper --reconciliar) no la encontró en una
-        # pasada completa en vivo — la persona la borró o Google la retiró.
-        # La rellena backend/routes.py (POST /reviews/reconciliacion), nunca
-        # el scraper directamente (no escribe en la BD de producción).
+        # Columna en desuso desde que se dejó de scrapear Maps en vivo (ver
+        # ESTADO_PROYECTO.md) — se mantiene solo por compatibilidad con
+        # bases de datos viejas. NULL/1 = visible; 0 = una reconciliación
+        # manual antigua no la encontró en una pasada completa en vivo.
         if "visible_en_google" not in cols:
             conn.execute("ALTER TABLE reviews ADD COLUMN visible_en_google INTEGER")
         conn.commit()

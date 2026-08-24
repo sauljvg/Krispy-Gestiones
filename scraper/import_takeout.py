@@ -232,21 +232,6 @@ def save_to_sqlite(reviews):
     conn.close()
 
 
-def get_total_google(tienda):
-    if not os.path.exists(config.DB_PATH):
-        return None
-    conn = sqlite3.connect(config.DB_PATH)
-    try:
-        row = conn.execute(
-            "SELECT total_google FROM store_meta WHERE tienda = ?", (tienda,)
-        ).fetchone()
-        return row[0] if row else None
-    except sqlite3.OperationalError:
-        return None
-    finally:
-        conn.close()
-
-
 def _describir_estructura(root, max_depth=4, max_entradas=80):
     """Árbol compacto de lo que realmente hay dentro del .zip subido, para
     diagnosticar cuando no coincide con lo que se espera (los nombres de
@@ -317,8 +302,6 @@ def run_import(takeout_root, log=lambda msg: None):
         save_to_sqlite(processed)
 
         total_ahora = len(existing_ids | {p["review_id"] for p in processed})
-        total_google = get_total_google(tienda)
-        pct = f"{total_ahora * 100 // total_google}%" if total_google else "?"
 
         report.append({
             "tienda": tienda,
@@ -326,13 +309,11 @@ def run_import(takeout_root, log=lambda msg: None):
             "ya_teniamos": len(actualizadas),
             "nuevas": len(nuevas),
             "total_ahora": total_ahora,
-            "total_google": total_google,
-            "pct": pct,
         })
 
         log(f"{tienda}: {len(processed)} en Takeout | {len(nuevas)} nuevas | "
             f"{len(actualizadas)} ya existían (actualizadas) | "
-            f"total ahora: {total_ahora}" + (f"/{total_google} ({pct})" if total_google else ""))
+            f"total ahora: {total_ahora}")
 
     return report
 
@@ -349,8 +330,7 @@ def main():
     print("=" * 70)
     total_nuevas = sum(r["nuevas"] for r in report)
     for r in report:
-        print(f"  {r['tienda']:<14} +{r['nuevas']:<5} nuevas  "
-              f"(total: {r['total_ahora']}" + (f"/{r['total_google']} = {r['pct']}" if r['total_google'] else "") + ")")
+        print(f"  {r['tienda']:<14} +{r['nuevas']:<5} nuevas  (total: {r['total_ahora']})")
     print(f"\nTotal de reseñas NUEVAS encontradas gracias a Takeout: {total_nuevas}")
 
 

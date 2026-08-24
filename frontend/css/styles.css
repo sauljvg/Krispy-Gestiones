@@ -395,19 +395,6 @@ h3 {
 .stat-good .stat-value { color: var(--status-good); }
 
 .stat-value-row { display: flex; align-items: center; gap: 8px; }
-.stat-check {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--status-good);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: help;
-}
 
 .rating-progress-row {
   display: grid;
@@ -522,20 +509,6 @@ h3 {
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
 .filter-group { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
-.filter-toggle-google {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface-page);
-  color: var(--text-primary);
-  font-size: 14px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.filter-toggle-google input { margin: 0; }
 .filter-group select, .filter-group input {
   padding: 8px 10px;
   border-radius: 8px;
@@ -737,7 +710,6 @@ h3 {
 .badge-positivo { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
 .badge-neutral  { background: color-mix(in srgb, var(--status-warning) 22%, transparent); color: #9a6b00; }
 .badge-negativo { background: color-mix(in srgb, var(--status-critical) 16%, transparent); color: var(--status-critical); }
-.badge-no-google { background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-secondary); }
 
 .pagination { display: flex; gap: 6px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
 .pagination button {

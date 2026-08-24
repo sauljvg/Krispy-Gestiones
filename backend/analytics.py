@@ -472,7 +472,7 @@ def get_hourly_distribution_por_tienda(where, params):
     return {"por_hora": series_hora, "por_dia_semana": series_dia}
 
 
-def get_evolucion_por_tienda(date_from, date_to, solo_google=False):
+def get_evolucion_por_tienda(date_from, date_to):
     """Para la vista "Todas" con Desde/Hasta puestos: cuántas reseñas y qué
     valoración media tenía cada tienda ACUMULADO hasta cada fecha límite —
     así se ve cuánto creció cada una en ese periodo (al estilo del
@@ -481,9 +481,8 @@ def get_evolucion_por_tienda(date_from, date_to, solo_google=False):
 
     Se ignoran a propósito los filtros de estrellas/sentimiento/búsqueda —
     no tienen sentido para un comparativo de crecimiento — pero si respeta
-    las tiendas permitidas del usuario y el toggle "Solo Google".
+    las tiendas permitidas del usuario.
     """
-    filtro_google = " AND (visible_en_google IS NULL OR visible_en_google = 1)" if solo_google else ""
     conn = get_connection()
     permitidas = tiendas_permitidas_actual.get()
     clause_tienda = ""
@@ -495,7 +494,7 @@ def get_evolucion_por_tienda(date_from, date_to, solo_google=False):
     rows = conn.execute(f"""
         SELECT tienda, fecha_datetime, calificacion_num
         FROM reviews
-        WHERE tienda IS NOT NULL AND fecha_datetime IS NOT NULL{filtro_google}{clause_tienda}
+        WHERE tienda IS NOT NULL AND fecha_datetime IS NOT NULL{clause_tienda}
     """, params).fetchall()
     conn.close()
 
@@ -526,34 +525,7 @@ def get_evolucion_por_tienda(date_from, date_to, solo_google=False):
     return resultado
 
 
-def get_store_total_google(tienda):
-    """Total de reseñas que Google anunció la última vez que se scrapeó esta
-    tienda (o None si nunca se guardó). Sirve para el check de "100%
-    capturado" junto al stat de Total de reseñas."""
-    conn = get_connection()
-    cur = conn.execute("SELECT total_google FROM store_meta WHERE tienda = ?", (tienda,))
-    row = cur.fetchone()
-    conn.close()
-    return row["total_google"] if row and row["total_google"] else None
-
-
-def get_all_stores_completeness():
-    """Para la vista "Todas" (sin filtro de tienda): True solo si CADA
-    tienda con reseñas tiene su total_google registrado y ya lo alcanzó."""
-    conn = get_connection()
-    rows = conn.execute("""
-        SELECT r.tienda AS tienda, COUNT(*) AS total, sm.total_google AS total_google
-        FROM reviews r
-        LEFT JOIN store_meta sm ON sm.tienda = r.tienda
-        GROUP BY r.tienda
-    """).fetchall()
-    conn.close()
-    if not rows:
-        return False
-    return all(row["total_google"] and row["total"] >= row["total_google"] for row in rows)
-
-
-def get_store_stats(order_by="total", mes=None, solo_google=False):
+def get_store_stats(order_by="total", mes=None):
     """Reseñas, promedio y (si se han cargado) transacciones + tasa por
     tienda — para el selector de tienda y el ranking comparativo entre
     locales.
@@ -569,12 +541,7 @@ def get_store_stats(order_by="total", mes=None, solo_google=False):
     transacciones terminan en una reseña, así una tienda pequeña con pocas
     reseñas pero también pocas transacciones puede rankear mejor que una
     tienda grande con muchas reseñas pero muchísimas más transacciones.
-
-    `solo_google=True` excluye las reseñas marcadas visible_en_google=0 (ver
-    POST /reviews/reconciliacion) — no pasa por build_filters como el resto
-    de endpoints porque esta consulta arma su propio SQL con GROUP BY tienda.
     """
-    filtro_google = " AND (r.visible_en_google IS NULL OR r.visible_en_google = 1)" if solo_google else ""
     conn = get_connection()
     cur = conn.cursor()
     if mes:
@@ -583,7 +550,7 @@ def get_store_stats(order_by="total", mes=None, solo_google=False):
                    t.transacciones AS transacciones
             FROM reviews r
             LEFT JOIN store_transactions t ON t.tienda = r.tienda AND t.mes = ?
-            WHERE r.tienda IS NOT NULL AND substr(r.fecha_datetime, 1, 7) = ?{filtro_google}
+            WHERE r.tienda IS NOT NULL AND substr(r.fecha_datetime, 1, 7) = ?
             GROUP BY r.tienda
         """, (mes, mes))
     else:
@@ -596,7 +563,7 @@ def get_store_stats(order_by="total", mes=None, solo_google=False):
                 FROM store_transactions
                 GROUP BY tienda
             ) t ON t.tienda = r.tienda
-            WHERE r.tienda IS NOT NULL{filtro_google}
+            WHERE r.tienda IS NOT NULL
             GROUP BY r.tienda
         """)
     rows = dict_rows(cur)

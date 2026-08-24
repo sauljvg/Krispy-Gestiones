@@ -23,12 +23,8 @@ async function fetchJSON(url) {
 // por el middleware de permisos, así que aquí solo hace falta bloquear la UI.
 let tiendasPermitidas = [];
 
-function soloGoogleQS() {
-  return state.soloGoogle ? "solo_google=true" : "";
-}
-
 async function loadStores() {
-  const { stores } = await fetchJSON(`${API_BASE}/stores?${soloGoogleQS()}`);
+  const { stores } = await fetchJSON(`${API_BASE}/stores`);
   const select = document.getElementById("filter-tienda");
   const current = select.value;
   const restringidoAUna = tiendasPermitidas.length === 1;
@@ -79,8 +75,8 @@ async function loadStoreRanking() {
   // (igual que ya hacían las transacciones). El de valoración media usa el
   // acumulado histórico (stores sin `mes`), ya que no tiene sentido acotarlo.
   const [{ stores: storesMes }, { stores: storesTotal }, { transacciones: mesValores }] = await Promise.all([
-    fetchJSON(`${API_BASE}/stores?order_by=tasa&mes=${encodeURIComponent(mes)}&${soloGoogleQS()}`),
-    fetchJSON(`${API_BASE}/stores?${soloGoogleQS()}`),
+    fetchJSON(`${API_BASE}/stores?order_by=tasa&mes=${encodeURIComponent(mes)}`),
+    fetchJSON(`${API_BASE}/stores`),
     fetchJSON(`${API_BASE}/transactions?mes=${encodeURIComponent(mes)}`),
   ]);
   document.getElementById("store-ranking-list").innerHTML =
@@ -127,7 +123,7 @@ async function uploadTakeoutZip(file) {
       return;
     }
     const lineas = body.tiendas
-      .map((t) => `${t.tienda}: +${t.nuevas} nuevas (total ${t.total_ahora}${t.total_google ? `/${t.total_google}` : ""})`)
+      .map((t) => `${t.tienda}: +${t.nuevas} nuevas (total ${t.total_ahora})`)
       .join("\n");
     mostrarAviso(`Importación completa — ${body.total_nuevas} reseñas nuevas en total.\n\n${lineas}`);
     // Se actualiza primero y por separado: si loadStores/loadStoreRanking/
@@ -176,16 +172,6 @@ async function loadStats() {
   document.getElementById("stat-positivas").textContent = `${stats.porcentaje_positivas}%`;
   document.getElementById("stat-recientes").textContent = stats.resenas_recientes.toLocaleString("es-ES");
   renderDistributionChart(stats.distribucion_estrellas, stats.distribucion_por_tienda);
-
-  const checkEl = document.getElementById("stat-total-check");
-  if (stats.completo) {
-    checkEl.hidden = false;
-    checkEl.title = stats.total_google
-      ? `100% capturado (${stats.total.toLocaleString("es-ES")} de ${stats.total_google.toLocaleString("es-ES")} según Google)`
-      : "100% capturado en todas las tiendas";
-  } else {
-    checkEl.hidden = true;
-  }
 }
 
 function renderRatingProgress(p) {
@@ -239,7 +225,6 @@ async function loadEvolucionTabla() {
     return;
   }
   const params = new URLSearchParams({ date_from: state.dateFrom, date_to: state.dateTo });
-  if (state.soloGoogle) params.set("solo_google", "true");
   const { evolucion } = await fetchJSON(`${API_BASE}/timeline-evolucion?${params.toString()}`);
   detalle.hidden = evolucion.length === 0;
   if (!evolucion.length) return;
@@ -752,13 +737,6 @@ function reviewCardHTML(r) {
   const stars = r.calificacion_num ? "★".repeat(r.calificacion_num) + "☆".repeat(5 - r.calificacion_num) : "—";
   const fechaExacta = formatFechaExacta(r.fecha_datetime) || escapeHTML(r.fecha_categoria || "");
   const horaExacta = formatHoraExacta(r.fecha_hora);
-  // visible_en_google=0: la reconciliación manual (scraper --reconciliar) no
-  // la encontró en una pasada completa en vivo — se muestra igual (en modo
-  // "mostrar todo") pero marcada, para que quede claro por qué no suma en el
-  // toggle "Solo Google".
-  const noVisible = r.visible_en_google === 0
-    ? `<span class="badge badge-no-google" title="La reconciliación manual no la encontró visible en Google la última vez que se revisó">🚫 no visible en Google</span>`
-    : "";
   return `
     <div class="review-item">
       <div class="review-top">
@@ -767,7 +745,6 @@ function reviewCardHTML(r) {
           <span class="review-stars">${stars}</span>
           <span${horaExacta ? ` title="${horaExacta} (hora de Madrid)"` : ""}>${fechaExacta}</span>
           <span class="badge badge-${r.sentiment}">${r.sentiment}</span>
-          ${noVisible}
         </span>
       </div>
       <div class="review-text">${r.texto ? escapeHTML(r.texto) : '<i>Sin comentario, solo calificación.</i>'}</div>
@@ -935,18 +912,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   cargarUltimaImportacionTakeout();
 
   wireFilters(() => refreshAll(), () => loadReviews());
-
-  const soloGoogleEl = document.getElementById("filter-solo-google");
-  state.soloGoogle = localStorage.getItem("kt-resenas-solo-google") === "1";
-  soloGoogleEl.checked = state.soloGoogle;
-  soloGoogleEl.addEventListener("change", () => {
-    state.soloGoogle = soloGoogleEl.checked;
-    localStorage.setItem("kt-resenas-solo-google", state.soloGoogle ? "1" : "0");
-    state.page = 1;
-    Promise.all([loadStores(), loadStoreRanking(), refreshAll()]).catch((err) =>
-      console.error("Fallo aplicando el toggle Solo Google:", err)
-    );
-  });
 
   document.getElementById("btn-toggle-horario").addEventListener("click", (e) => {
     horarioVisible = !horarioVisible;
