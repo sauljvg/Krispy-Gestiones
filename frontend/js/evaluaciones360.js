@@ -1767,6 +1767,17 @@ async function crearAcceso(personaId) {
   return true;
 }
 
+async function rellenarEmailsFaltantes() {
+  const res = await fetch(`${AUTH_API_BASE}/evaluaciones360/accesos/rellenar-emails?empresa=${EMPRESA}`, { method: "POST" });
+  if (!res.ok) {
+    await mostrarAviso("No se pudieron rellenar los emails.");
+    return;
+  }
+  const { actualizados } = await res.json();
+  await cargarAccesos();
+  await mostrarAviso(actualizados > 0 ? `${actualizados} email${actualizados === 1 ? "" : "s"} rellenado${actualizados === 1 ? "" : "s"}.` : "Todo el mundo ya tenía email.");
+}
+
 async function crearTodosAccesos() {
   const pendientes = ACCESOS.filter((p) => !p.tiene_acceso);
   if (!(await pedirConfirmacion(`¿Crear una cuenta de portal para las ${pendientes.length} personas que aún no tienen? Cada una entrará por primera vez con su usuario y creará su propio PIN.`))) return;
@@ -1794,10 +1805,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   // de gente con el módulo concedido únicamente responde sus evaluaciones
   // asignadas (pestaña "Mis evaluaciones"), el backend ya rechaza con 403
   // cualquier intento de llamar a esos endpoints de gestión igualmente.
-  if (user.rol !== "admin") {
+  // Ocultas por defecto en el HTML (no solo escondidas aquí) para que a
+  // quien no es admin nunca le parpadee la barra completa mientras se
+  // resuelve checkAuth.
+  if (user.rol === "admin") {
     ["campanas", "organigrama", "preguntas", "accesos"].forEach((nombre) => {
       const btn = document.querySelector(`.eval360-tab-btn[data-tab="${nombre}"]`);
-      if (btn) btn.hidden = true;
+      if (btn) btn.hidden = false;
     });
   }
 
@@ -1807,6 +1821,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await activarTab("mis");
 
   document.getElementById("btn-crear-todos-accesos").addEventListener("click", crearTodosAccesos);
+  document.getElementById("btn-rellenar-emails").addEventListener("click", rellenarEmailsFaltantes);
   document.getElementById("btn-nueva-persona").addEventListener("click", () => abrirEditorPersona(null));
   document.getElementById("btn-cerrar-editor").addEventListener("click", cerrarEditorPersona);
   document.getElementById("btn-cerrar-editor-x").addEventListener("click", cerrarEditorPersona);

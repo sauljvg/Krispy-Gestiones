@@ -451,3 +451,9 @@ def crear_acceso_route(persona_id: int, user: dict = Depends(require_admin)):
     if not resultado or resultado.get("error"):
         raise HTTPException(status_code=400, detail="No se pudo crear el acceso (puede que ya tenga una cuenta vinculada).")
     return {"ok": True, **resultado}
+
+
+@router.post("/accesos/rellenar-emails")
+def rellenar_emails_route(empresa: str = "kk", _user: dict = Depends(require_admin)):
+    actualizados = eval360_module.rellenar_emails_automaticos(empresa)
+    return {"ok": True, "actualizados": actualizados}

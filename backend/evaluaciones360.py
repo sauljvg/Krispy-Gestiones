@@ -1027,6 +1027,26 @@ def email_de_persona(persona: dict) -> str | None:
     return f"{local}@krispykreme.es" if local != "persona" else None
 
 
+def rellenar_emails_automaticos(empresa="kk") -> int:
+    """Rellena el email de todas las personas activas de esta empresa que
+    todavía no tienen uno guardado, derivándolo del nombre (mismo patrón que
+    email_de_persona, incluida la excepción de JV) -- pensado para usarse
+    desde el botón de Accesos, no solo al lanzar una campaña."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT id, nombre_completo, email FROM eval360_personas WHERE empresa = ? AND activo = 1 AND (email IS NULL OR email = '')",
+        (empresa,),
+    ).fetchall()
+    conn.close()
+    actualizados = 0
+    for r in rows:
+        email = email_de_persona(dict(r))
+        if email:
+            actualizar_persona(r["id"], {"email": email})
+            actualizados += 1
+    return actualizados
+
+
 def notificar_campana_lanzada(campana_id) -> dict:
     """Al lanzar una campaña, avisa por email a cada evaluador con al menos
     una asignación pendiente ahí (un email por persona, aunque tenga varias
