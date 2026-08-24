@@ -857,6 +857,7 @@ function abrirEditorPersona(personaId) {
   // deja de reescribirse solo aunque seguir cambiando el nombre.
   emailInput.dataset.auto = persona?.email ? "0" : "1";
   document.getElementById("btn-eliminar-persona").hidden = !persona;
+  document.getElementById("btn-eliminar-persona-cuenta").hidden = !persona?.usuario_id;
   document.getElementById("editor-card").hidden = false;
   document.getElementById("lista-organigrama-wrap").hidden = true;
   document.getElementById("persona-nombre").focus();
@@ -904,6 +905,22 @@ async function eliminarPersona() {
   const res = await fetch(`${AUTH_API_BASE}/evaluaciones360/personas/${editandoPersonaId}`, { method: "DELETE" });
   if (!res.ok) {
     await mostrarAviso("No se pudo eliminar.");
+    return;
+  }
+  cerrarEditorPersona();
+  await cargarOrganigrama();
+}
+
+async function eliminarPersonaYCuenta() {
+  if (!editandoPersonaId) return;
+  if (!(await pedirConfirmacion(
+    "¿Borrar también la cuenta de portal de esta persona? Ya no podrá entrar a Krispy Gestiones con su usuario. " +
+    "Esto es distinto de \"Quitar del organigrama\": se gestiona igual que borrarla desde Ajustes → Usuarios, solo que desde aquí."
+  ))) return;
+  const res = await fetch(`${AUTH_API_BASE}/evaluaciones360/personas/${editandoPersonaId}/cuenta`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    await mostrarAviso(err.detail || "No se pudo borrar la cuenta.");
     return;
   }
   cerrarEditorPersona();
@@ -1684,6 +1701,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btn-cerrar-editor-x").addEventListener("click", cerrarEditorPersona);
   document.getElementById("btn-guardar-persona").addEventListener("click", guardarPersona);
   document.getElementById("btn-eliminar-persona").addEventListener("click", eliminarPersona);
+  document.getElementById("btn-eliminar-persona-cuenta").addEventListener("click", eliminarPersonaYCuenta);
   document.getElementById("persona-nombre").addEventListener("input", (e) => {
     const emailInput = document.getElementById("persona-email");
     if (emailInput.dataset.auto === "0") return; // ya lo editaron a mano, no se lo pisamos

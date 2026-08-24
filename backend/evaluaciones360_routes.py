@@ -145,6 +145,7 @@ def list_personas_de_puesto_route(puesto_id: int, user: dict = Depends(require_a
 
 @router.get("/personas")
 def list_personas_route(empresa: str = "kk", _user: dict = Depends(require_admin)):
+    eval360_module.sincronizar_personas_privilegiadas()
     return eval360_module.list_personas(empresa)
 
 
@@ -178,13 +179,17 @@ def crear_persona_route(body: PersonaBody, user: dict = Depends(require_admin)):
 
 @router.patch("/personas/{persona_id}")
 def editar_persona_route(persona_id: int, body: PersonaEditBody, user: dict = Depends(require_admin)):
-    _require_acceso_persona(persona_id, user)
+    persona = _require_acceso_persona(persona_id, user)
     campos = body.model_dump(exclude_unset=True)
     if "nombre_completo" in campos and campos["nombre_completo"]:
         campos["nombre_completo"] = campos["nombre_completo"].strip()
     if "email" in campos:
         campos["email"] = campos["email"].strip() or None if campos["email"] else None
     eval360_module.actualizar_persona(persona_id, campos)
+    # Espejo persona -> cuenta: si esta persona está vinculada a un usuario
+    # del portal, un cambio de nombre hecho desde 360 se refleja en Ajustes.
+    if persona.get("usuario_id") and campos.get("nombre_completo"):
+        auth_module.actualizar_usuario(persona["usuario_id"], nombre=campos["nombre_completo"])
     return {"ok": True}
 
 
@@ -192,6 +197,23 @@ def editar_persona_route(persona_id: int, body: PersonaEditBody, user: dict = De
 def eliminar_persona_route(persona_id: int, user: dict = Depends(require_admin)):
     _require_acceso_persona(persona_id, user)
     eval360_module.eliminar_persona(persona_id)
+    return {"ok": True}
+
+
+@router.delete("/personas/{persona_id}/cuenta")
+def eliminar_persona_y_cuenta_route(persona_id: int, admin: dict = Depends(require_admin)):
+    """Borrado real, gestionado desde 360: a diferencia de "Eliminar" (que
+    solo desactiva, ver eliminar_persona), esto borra la CUENTA de portal
+    vinculada de verdad -- mismo efecto que borrarla desde Ajustes, solo que
+    sin tener que salir de 360 a hacerlo. Deliberadamente distinto del botón
+    de quitar del organigrama, que no toca la cuenta."""
+    persona = _require_acceso_persona(persona_id, admin)
+    if not persona.get("usuario_id"):
+        raise HTTPException(status_code=400, detail="Esta persona no tiene una cuenta de portal vinculada")
+    if persona["usuario_id"] == admin["id"]:
+        raise HTTPException(status_code=400, detail="No puedes borrar tu propio usuario")
+    auth_module.eliminar_usuario(persona["usuario_id"])
+    eval360_module.desvincular_personas_de_usuario(persona["usuario_id"])
     return {"ok": True}
 
 
@@ -418,6 +440,7 @@ def finalizar_asignacion_route(asignacion_id: int, user: dict = Depends(get_curr
 
 @router.get("/accesos")
 def list_accesos_route(empresa: str = "kk", _user: dict = Depends(require_admin)):
+    eval360_module.sincronizar_personas_privilegiadas()
     return eval360_module.list_personas_con_estado_acceso(empresa)
 
 

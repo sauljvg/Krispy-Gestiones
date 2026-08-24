@@ -412,6 +412,89 @@ def get_persona_por_usuario(usuario_id, empresa=None):
     return dict(row) if row else None
 
 
+# ---------------------------------------------------------------------------
+# Espejo con Usuarios (Ajustes): admin/gerente/area_manager se gestionan
+# también desde 360 -- aparecen solos en el organigrama (sin tener que darlos
+# de alta a mano) y cualquier cambio de nombre en un lado se refleja en el
+# otro. A petición expresa: Ajustes se queda con la gente que usa el portal
+# a diario, 360 con quien usa solo eso, y el espejo mantiene ambos en sync.
+# ---------------------------------------------------------------------------
+
+ROLES_ESPEJO = ("admin", "gerente", "area_manager")
+
+
+def _empresas_de_usuario(usuario_id, rol) -> list[str]:
+    """A qué organigrama(s) de 360 pertenece este usuario. admin ve las dos
+    marcas; el resto se infiere de sus tiendas permitidas (las de SAONA
+    llevan el prefijo "saona_", ver scraper/stores.py) -- sin tiendas
+    asignadas (gerente/AM sin restringir) se asume KK, el caso de siempre."""
+    if rol == "admin":
+        return ["kk", "saona"]
+    tiendas = auth.get_tiendas_permitidas(usuario_id)
+    if not tiendas:
+        return ["kk"]
+    empresas = {"saona" if t.startswith("saona_") else "kk" for t in tiendas}
+    return sorted(empresas)
+
+
+def _get_persona_por_usuario_y_empresa(usuario_id, empresa):
+    """A diferencia de get_persona_por_usuario, incluye inactivas -- para no
+    recrear un duplicado si alguien la desactivó a propósito desde el
+    organigrama."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM eval360_personas WHERE usuario_id = ? AND empresa = ?", (usuario_id, empresa)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def sincronizar_personas_privilegiadas():
+    """Reconciliación idempotente: cada admin/gerente/area_manager con
+    cuenta en el portal tiene una persona espejo en el organigrama de 360 de
+    su(s) empresa(s), con el nombre al día. Se llama cada vez que se abre
+    Organigrama/Accesos en 360 -- barato (unas pocas filas) y así nunca hace
+    falta un cron aparte para mantenerlo fresco."""
+    conn = get_connection()
+    usuarios = conn.execute(
+        f"SELECT id, nombre, rol FROM usuarios WHERE rol IN ({','.join('?' * len(ROLES_ESPEJO))})", ROLES_ESPEJO
+    ).fetchall()
+    conn.close()
+    for u in usuarios:
+        usuario_id, nombre, rol = u["id"], u["nombre"], u["rol"]
+        for empresa in _empresas_de_usuario(usuario_id, rol):
+            persona = _get_persona_por_usuario_y_empresa(usuario_id, empresa)
+            if persona is None:
+                crear_persona(empresa, nombre, usuario_id=usuario_id)
+            elif persona["nombre_completo"] != nombre:
+                actualizar_persona(persona["id"], {"nombre_completo": nombre})
+
+
+def sincronizar_nombre_a_personas(usuario_id, nombre):
+    """Usuario -> personas: al renombrar una cuenta desde Ajustes, refleja
+    el nombre nuevo en cualquier persona espejo vinculada (puede haber una
+    por empresa, kk y saona)."""
+    conn = get_connection()
+    rows = conn.execute("SELECT id FROM eval360_personas WHERE usuario_id = ?", (usuario_id,)).fetchall()
+    conn.close()
+    for r in rows:
+        actualizar_persona(r["id"], {"nombre_completo": nombre})
+
+
+def desvincular_personas_de_usuario(usuario_id):
+    """Usuario -> personas al borrar la cuenta: no se borra la persona de
+    verdad (arrastraría respuestas de evaluaciones ya hechas y dejaría jefes
+    huérfanos a medio evaluar, igual que eliminar_persona) -- se desactiva y
+    se desvincula, que es la parte "de verdad" de haber dejado de tener
+    acceso al portal."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE eval360_personas SET activo = 0, usuario_id = NULL WHERE usuario_id = ?", (usuario_id,)
+    )
+    conn.commit()
+    conn.close()
+
+
 def crear_persona(empresa, nombre_completo, puesto_ids=None, jefe_directo_id=None, usuario_id=None, email=None):
     conn = get_connection()
     cur = conn.execute(

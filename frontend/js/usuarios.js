@@ -198,8 +198,8 @@ async function loadUsers(currentUserId) {
     .map(
       (u) => `
       <tr data-id="${u.id}">
-        <td>${u.username}</td>
-        <td>${u.nombre}</td>
+        <td><input type="text" class="username-input" data-id="${u.id}" value="${escapeHTML(u.username)}" style="width:110px;"></td>
+        <td><input type="text" class="nombre-input" data-id="${u.id}" value="${escapeHTML(u.nombre)}" style="width:130px;"></td>
         <td><select class="rol-select" data-id="${u.id}" ${u.id === currentUserId ? "disabled" : ""}>${rolSelectHTML(u.rol)}</select></td>
         <td>
           ${
@@ -462,6 +462,35 @@ async function loadUsers(currentUserId) {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         mostrarAviso(body.detail || "No se pudo cambiar el rol.");
+      }
+      loadUsers(currentUserId);
+    });
+  });
+
+  // Nombre y usuario se guardan solos al salir del campo (blur), como el
+  // email en el editor de personas de 360 -- si no cambiaron, no llama a
+  // la API. Antes no eran editables, había que borrar la cuenta y crearla
+  // de nuevo para corregir un nombre mal escrito.
+  tbody.querySelectorAll(".username-input, .nombre-input").forEach((input) => {
+    input.addEventListener("blur", async () => {
+      const id = input.dataset.id;
+      const valor = input.value.trim();
+      const original = users.find((u) => String(u.id) === String(id));
+      const campo = input.classList.contains("username-input") ? "username" : "nombre";
+      if (!valor || (original && original[campo] === valor)) {
+        input.value = original ? original[campo] : valor;
+        return;
+      }
+      const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [campo]: valor }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        mostrarAviso(body.detail || "No se pudo guardar el cambio.");
+        loadUsers(currentUserId);
+        return;
       }
       loadUsers(currentUserId);
     });
