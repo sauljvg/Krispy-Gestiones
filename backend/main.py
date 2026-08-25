@@ -98,12 +98,18 @@ async def restringir_tiendas_por_usuario(request, call_next):
 @app.middleware("http")
 async def no_cachear_estaticos(request, call_next):
     """StaticFiles no manda Cache-Control, así que el navegador cachea el
-    HTML/JS/CSS con heurística propia y puede tardar en recoger cambios
-    (hace falta recargar sin caché para verlos). Forzar revalidación en cada
-    carga evita ese desfase sin perder el beneficio del ETag/304."""
+    HTML/JS/CSS con heurística propia y puede tardar en recoger cambios (hace
+    falta recargar sin caché para verlos) -- se vio en producción con el HTML
+    de Evaluaciones 360°: alguien con una copia vieja en caché (de antes de
+    "hidden" en las pestañas de gestión) las veía parpadear un instante antes
+    de que el JS (ese sí, ya actualizado) las ocultara según su rol. "no-cache"
+    solo obliga a revalidar (el navegador puede seguir reusando el cuerpo si
+    el servidor responde 304); "no-store" prohíbe guardar copia local del
+    todo, así que cada carga trae SIEMPRE el HTML/JS/CSS actual, sin lugar a
+    ambigüedad de qué versión se está pintando."""
     response = await call_next(request)
     if not request.url.path.startswith("/api"):
-        response.headers["Cache-Control"] = "no-cache"
+        response.headers["Cache-Control"] = "no-store"
     return response
 
 # /api/auth/* queda público (login/logout) o resuelve su propia auth (me,
