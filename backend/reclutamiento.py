@@ -911,21 +911,36 @@ def marcar_ia_extraida(candidato_id: int):
     conn.close()
 
 
-def candidatos_con_pdf(empresa=None) -> list[tuple[int, int]]:
-    """[(candidato_id, archivo_id), ...] con el PDF más reciente de CADA
-    candidato que tenga al menos uno adjunto -- para poder re-extraer a
-    todo el mundo de una vez (ver /candidatos/reextraer-todos) sin que el
-    reclutador tenga que volver a subir nada ni entrar ficha a ficha: el PDF
-    ya está guardado en disco desde que se creó o se le adjuntó por lote."""
+def candidatos_con_pdf(empresa=None, candidato_ids: list[int] | None = None) -> list[tuple[int, int]]:
+    """[(candidato_id, archivo_id), ...] con el PDF más reciente de cada
+    candidato que tenga al menos uno adjunto -- para re-extraer varios de
+    golpe (ver /candidatos/reextraer-todos) sin que el reclutador tenga que
+    volver a subir nada ni entrar ficha a ficha: el PDF ya está guardado en
+    disco desde que se creó o se le adjuntó por lote. `candidato_ids`
+    limita a esa lista concreta (el filtro que tenga puesto la pantalla en
+    ese momento) -- con miles de candidatos, re-extraer TODOS de golpe cada
+    vez que se pulsa el botón sería carísimo cuando en realidad solo hacen
+    falta los que se acaban de añadir o los que el filtro tiene delante."""
     conn = get_connection()
-    clausula_empresa = "AND c.empresa = ?" if empresa else ""
-    params = (empresa,) if empresa else ()
+    clausulas = []
+    params = []
+    if empresa:
+        clausulas.append("c.empresa = ?")
+        params.append(empresa)
+    if candidato_ids is not None:
+        if not candidato_ids:
+            conn.close()
+            return []
+        marcadores = ",".join("?" * len(candidato_ids))
+        clausulas.append(f"ca.candidato_id IN ({marcadores})")
+        params.extend(candidato_ids)
+    clausula_where = ("AND " + " AND ".join(clausulas)) if clausulas else ""
     rows = conn.execute(f"""
         SELECT ca.candidato_id, ca.id AS archivo_id
         FROM candidato_archivos ca
         JOIN candidatos c ON c.id = ca.candidato_id
         WHERE ca.nombre_original LIKE '%.pdf'
-        {clausula_empresa}
+        {clausula_where}
         AND ca.id = (
             SELECT ca2.id FROM candidato_archivos ca2
             WHERE ca2.candidato_id = ca.candidato_id AND ca2.nombre_original LIKE '%.pdf'

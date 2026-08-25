@@ -2856,14 +2856,27 @@ async function revincularTests() {
 }
 
 async function reextraerTodosLocal() {
-  if (!confirm("Esto vuelve a leer el CV ya guardado de CADA candidato y sustituye formación/experiencia/idiomas por lo último que encuentre. Puede tardar un rato con muchos candidatos. ¿Continuar?")) return;
+  // Solo sobre quien está delante AHORA con el filtro puesto (búsqueda,
+  // vacante, estado, apto...) -- no sobre la base entera: con miles de
+  // candidatos, re-extraer a todo el mundo cada vez que hace falta corregir
+  // solo un puñado recién importado sería carísimo en tiempo.
+  const idsFiltrados = candidatosFiltradosPorApto().map((c) => c.id);
+  if (!idsFiltrados.length) {
+    await mostrarAviso("No hay ningún candidato con el filtro actual puesto.");
+    return;
+  }
+  if (!confirm(`Esto vuelve a leer el CV ya guardado de los ${idsFiltrados.length} candidato(s) que coinciden con el filtro actual y sustituye formación/experiencia/idiomas por lo último que encuentre. ¿Continuar?`)) return;
   const btn = document.getElementById("btn-reextraer-todos");
   const textoOriginal = btn.textContent;
   btn.disabled = true;
   btn.textContent = "Iniciando...";
   let res;
   try {
-    res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/reextraer-todos?empresa=${EMPRESA}`, { method: "POST" });
+    res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/reextraer-todos?empresa=${EMPRESA}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ candidato_ids: idsFiltrados }),
+    });
   } catch {
     res = null;
   }

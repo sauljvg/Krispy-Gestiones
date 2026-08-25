@@ -102,6 +102,10 @@ class VacanteMultipleIn(BaseModel):
     vacante_id: int | None = None
 
 
+class ReextraerTodosIn(BaseModel):
+    candidato_ids: list[int]
+
+
 class CompartirCandidatosIn(BaseModel):
     candidato_ids: list[int]
     usuario_id: int
@@ -639,7 +643,9 @@ def reanudar_lotes_ia_pendientes():
 
 
 @router.post("/candidatos/reextraer-todos")
-def reextraer_todos_route(empresa: str = "kk", user: dict = Depends(require_informes_o_reclutamiento)):
+def reextraer_todos_route(
+    body: ReextraerTodosIn, empresa: str = "kk", user: dict = Depends(require_informes_o_reclutamiento)
+):
     """Vuelve a extraer con el método local el PDF YA guardado de cada
     candidato que tenga uno -- para cuando una mejora del extractor local
     (ver cv_extraction.py) deja desactualizadas fichas que se procesaron
@@ -648,12 +654,18 @@ def reextraer_todos_route(empresa: str = "kk", user: dict = Depends(require_info
     la misma cola durable y el mismo mecanismo de progreso/notificación que
     /candidatos/adjuntar-pdf-lote/confirmar (ver _rellenar_huecos_en_segundo_plano)
     -- el banner del topbar y el aviso final al terminar funcionan igual sin
-    nada especial aquí."""
-    items = reclutamiento_module.candidatos_con_pdf(empresa=empresa)
+    nada especial aquí.
+
+    `body.candidato_ids` limita esto a los candidatos que la pantalla tiene
+    filtrados en ese momento (ver reextraerTodosLocal, compartidos.js) --
+    antes se re-extraía SIEMPRE a todo el mundo, algo que con miles de
+    candidatos sería carísimo cada vez que hiciera falta corregir solo un
+    puñado recién importado."""
+    items = reclutamiento_module.candidatos_con_pdf(empresa=empresa, candidato_ids=body.candidato_ids)
     if not items:
         return {"ok": True, "lote_id": None, "total": 0}
     lote_id = secrets.token_hex(8)
-    titulo_lote = "Re-extracción de todos los candidatos"
+    titulo_lote = f"Re-extracción de {len(items)} candidato(s) filtrados"
     _progreso_lotes[lote_id] = {
         "total": len(items), "procesados": 0, "terminado": False, "eta_segundos": None,
         "usuario_id": user["id"], "titulo": titulo_lote,
