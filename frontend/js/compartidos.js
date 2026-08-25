@@ -1964,6 +1964,7 @@ async function eliminarCandidatoActual() {
     return;
   }
   cerrarForm();
+  await refreshVacantes();
   await loadCandidatos();
 }
 
@@ -2255,6 +2256,11 @@ async function confirmarAsignarVacante() {
     body: JSON.stringify({ candidato_ids: ids, vacante_id: vacanteId }),
   });
   cerrarModalAsignarVacante();
+  // Mueve gente dentro/fuera de una vacante -- el contador de candidatos de
+  // su tarjeta (vacanteMiniCardHTML) se quedaba con el número de cuando se
+  // cargó la lista si no se refresca aquí (bug real: se quedaba "10
+  // candidatos" aunque se hubieran ido añadiendo más).
+  await refreshVacantes();
   if (origenAsignarVacante === "compartidos") {
     modoSeleccionCompartidos = false;
     compartidosSeleccionadosIds.clear();
