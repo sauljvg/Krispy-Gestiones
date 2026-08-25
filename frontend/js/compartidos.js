@@ -2718,14 +2718,17 @@ function abrirCampanaWhatsappSeleccionados() {
 }
 
 // Nunca se envía nada desde el servidor: se abre el cliente de correo del
-// propio usuario, que es quien de verdad manda el email desde su cuenta.
-// Antes esto era UN solo mailto: con todos los correos en copia oculta
-// (bcc) -- con una plantilla compartida así, {nombre}/{centro}/etc. no se
-// podían sustituir de verdad (todo el mundo recibía el mismo cuerpo, con
-// los corchetes tal cual, literalmente "Hola {nombre}"). Ahora funciona
-// igual que la campaña de WhatsApp: un enlace mailto: por candidato, cada
-// uno con su propio "Enviar", así los placeholders sí se rellenan por
-// persona (uno por uno, pero sin tener que redactar cada mensaje a mano).
+// propio usuario, que es quien de verdad manda el email desde su cuenta. UN
+// solo mailto: con todos los correos en copia oculta (bcc), a diferencia de
+// WhatsApp -- se probó el envío uno-a-uno (un mailto por candidato, igual
+// que wa.me) y con listas reales (18 candidatos) abrir 18 instancias del
+// cliente de correo de golpe no es manejable. Por eso aquí NO hay
+// {nombre}/{centro}/etc.: con un cuerpo compartido para todos no hay forma
+// de sustituirlos de verdad sin volver a abrir una instancia por persona;
+// solo {enlace} vale, porque es el mismo test para todo el mundo, no un
+// dato propio de cada candidato. La personalización por persona se queda
+// solo en WhatsApp (ver abrirCampanaWhatsapp), donde sí es viable ir
+// enviando uno a uno.
 let campanaEmailCandidatos = [];
 let campanaEmailTestsAbiertos = [];
 let campanaEmailEnlaceTest = "";
@@ -2775,30 +2778,6 @@ function onCambiaTestCampanaEmail() {
   if (select.value && !cuerpo.value.includes("{enlace}")) {
     cuerpo.value = `${cuerpo.value}\n\n{enlace}`;
   }
-  actualizarEnlacesCampanaEmail();
-}
-
-function candidatoEmailRowHTML(c, i) {
-  return `
-    <div class="candidato-mini-card candidato-whatsapp-row">
-      <div>
-        <h4>${escapeHTML(c.nombre_completo || `Candidato ${i + 1}`)}</h4>
-        <p>${escapeHTML(c.email)}</p>
-      </div>
-      <a class="btn btn-ghost btn-email-campana" data-idx="${i}" data-candidato-id="${c.id}" target="_blank" rel="noopener">${ICONO_MAILTO} Enviar</a>
-    </div>`;
-}
-
-function actualizarEnlacesCampanaEmail() {
-  const asuntoPlantilla = document.getElementById("campana-email-asunto").value;
-  const cuerpoPlantilla = document.getElementById("campana-email-cuerpo").value;
-  campanaEmailCandidatos.forEach((c, i) => {
-    const link = document.querySelector(`.btn-email-campana[data-idx="${i}"]`);
-    if (!link) return;
-    const asunto = sustituirPlaceholders(asuntoPlantilla, c, campanaEmailEnlaceTest);
-    const cuerpo = sustituirPlaceholders(cuerpoPlantilla, c, campanaEmailEnlaceTest);
-    link.href = `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
-  });
 }
 
 function cerrarCampanaEmail() {
@@ -2807,19 +2786,13 @@ function cerrarCampanaEmail() {
   document.getElementById("campana-email-wrap").innerHTML = "";
 }
 
-// A diferencia de wa.me (una pestaña real por candidato, sujeta a que el
-// navegador bloquee las que pasen de la primera), mailto: no navega de
-// verdad -- lo intercepta el propio sistema operativo y abre un borrador en
-// el cliente de correo, así que SÍ se pueden lanzar todos de golpe sin
-// toparse con el bloqueador de ventanas emergentes.
-async function enviarTodosEmail() {
-  const enlaces = [...document.querySelectorAll("#campana-email-wrap .btn-email-campana")];
-  if (!enlaces.length) return;
-  if (!(await pedirConfirmacion(`Esto abre ${enlaces.length} correo(s) ya escritos, uno detrás de otro, en tu cliente de correo. ¿Continuar?`))) return;
-  enlaces.forEach((a) => {
-    window.open(a.href, "_blank");
-    marcarInvitadoTest([Number(a.dataset.candidatoId)], campanaEmailTestIdSeleccionado);
-  });
+function confirmarAbrirEmail() {
+  const asunto = document.getElementById("campana-email-asunto").value.trim();
+  const cuerpo = document.getElementById("campana-email-cuerpo").value.replaceAll("{enlace}", campanaEmailEnlaceTest);
+  const destinatarios = campanaEmailCandidatos.map((c) => c.email).join(",");
+  window.location.href = `mailto:?bcc=${encodeURIComponent(destinatarios)}&subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+  marcarInvitadoTest(campanaEmailCandidatos.map((c) => c.id), campanaEmailTestIdSeleccionado);
+  cerrarCampanaEmail();
 }
 
 async function abrirCampanaEmail(candidatos) {
@@ -2840,10 +2813,8 @@ async function abrirCampanaEmail(candidatos) {
     <div class="vacante-form">
       <h3>${ICONO_MAILTO} Enviar email</h3>
       <p class="staff-hint">
-        Escribe el asunto/cuerpo una sola vez — usa <code>{nombre}</code>, <code>{nombre_completo}</code>, <code>{mail}</code>,
-        <code>{telefono}</code>, <code>{vacante}</code> o <code>{centro}</code> para insertar datos de cada candidato
-        ${campanaEmailTestsAbiertos.length ? `y <code>{enlace}</code> para el enlace del test que elijas abajo` : ""}.
-        Cada botón "Enviar" abre tu cliente de correo ya escrito para esa persona; tú confirmas el envío allí.
+        Se abrirá tu cliente de correo con estos ${conEmail.length} destinatario${conEmail.length === 1 ? "" : "s"} en copia oculta (BCC) — revisa/edita el asunto y el cuerpo antes de continuar.
+        ${campanaEmailTestsAbiertos.length ? `Usa <code>{enlace}</code> donde quieras que vaya el enlace del test que elijas abajo.` : ""}
       </p>
       ${campanaEmailTestSelectHTML()}
       <div class="form-field form-field-full" style="margin-bottom:10px;">
@@ -2854,25 +2825,15 @@ async function abrirCampanaEmail(candidatos) {
         <label>Cuerpo</label>
         <textarea id="campana-email-cuerpo" style="min-height:200px;">${escapeHTML(plantillaEmailPorDefecto())}</textarea>
       </div>
-      <p class="staff-hint">${conEmail.length} de ${candidatos.length} candidatos tienen email guardado.</p>
-      <div class="candidatos-grid">${conEmail.map(candidatoEmailRowHTML).join("")}</div>
       <div class="form-actions">
-        <button type="button" id="btn-email-enviar-todos" class="btn btn-primary">${ICONO_MAILTO} Enviar a todos</button>
+        <button type="button" id="btn-email-abrir" class="btn btn-primary">${ICONO_MAILTO} Abrir correo</button>
         <button type="button" id="btn-cerrar-campana-email" class="btn btn-ghost">Cerrar</button>
       </div>
     </div>`;
-  document.getElementById("campana-email-asunto").addEventListener("input", actualizarEnlacesCampanaEmail);
-  document.getElementById("campana-email-cuerpo").addEventListener("input", actualizarEnlacesCampanaEmail);
   document.getElementById("btn-cerrar-campana-email").addEventListener("click", cerrarCampanaEmail);
-  document.getElementById("btn-email-enviar-todos").addEventListener("click", enviarTodosEmail);
+  document.getElementById("btn-email-abrir").addEventListener("click", confirmarAbrirEmail);
   const testSelect = document.getElementById("campana-email-test");
   if (testSelect) testSelect.addEventListener("change", onCambiaTestCampanaEmail);
-  // El marcado de "invitado al test" se dispara en el clic real de Enviar
-  // (no al elegir el test arriba), igual que en la campaña de WhatsApp.
-  wrap.querySelectorAll(".btn-email-campana").forEach((btn) => {
-    btn.addEventListener("click", () => marcarInvitadoTest([Number(btn.dataset.candidatoId)], campanaEmailTestIdSeleccionado));
-  });
-  actualizarEnlacesCampanaEmail();
   wrap.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
