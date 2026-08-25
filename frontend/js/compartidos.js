@@ -76,6 +76,31 @@ function marcarInvitadoTest(candidatoIds, encuestaId) {
 }
 let usuarioActual = null; // se fija en initBaseCandidatos -- para firmar el email con el nombre de quien lo envía
 
+// c.vacante_puesto/vacante_centro NO existen en los candidatos de esta lista
+// (list_candidatos no hace ese join, a diferencia de get_candidato para una
+// ficha suelta) -- hay que resolverlo por c.vacante_id contra
+// vacantesTodasCache, igual que ya hace candidatoMiniCardHTML.
+function vacanteTextosDe(candidato) {
+  const v = vacantesTodasCache.find((v) => v.id === candidato.vacante_id);
+  return { vacante: v ? `${v.puesto}${v.centro ? ` · ${v.centro}` : ""}` : "", centro: v?.centro || "" };
+}
+
+// Compartido entre la campaña de WhatsApp y la de email -- mismos
+// placeholders en los dos sitios, para no tener que recordar cuáles
+// funcionan en cada uno.
+function sustituirPlaceholders(plantilla, candidato, enlaceTest) {
+  const primerNombre = (candidato.nombre_completo || "").trim().split(/\s+/)[0] || "";
+  const { vacante, centro } = vacanteTextosDe(candidato);
+  return plantilla
+    .replaceAll("{nombre}", primerNombre)
+    .replaceAll("{nombre_completo}", candidato.nombre_completo || "")
+    .replaceAll("{mail}", candidato.email || "")
+    .replaceAll("{telefono}", candidato.telefono || "")
+    .replaceAll("{vacante}", vacante)
+    .replaceAll("{centro}", centro)
+    .replaceAll("{enlace}", enlaceTest || "");
+}
+
 async function cargarTestsAbiertosCampana() {
   try {
     const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas`);
@@ -120,22 +145,7 @@ function actualizarEnlacesCampana() {
   campanaCandidatos.forEach((c, i) => {
     const link = document.querySelector(`.btn-whatsapp-campana[data-idx="${i}"]`);
     if (!link) return;
-    const primerNombre = (c.nombre_completo || "").trim().split(/\s+/)[0] || "";
-    // c.vacante_puesto/vacante_centro NO existen en los candidatos de esta
-    // lista (list_candidatos no hace ese join, a diferencia de get_candidato
-    // para una ficha suelta) -- hay que resolverlo por c.vacante_id contra
-    // vacantesTodasCache, igual que ya hace candidatoMiniCardHTML. Vacío (no
-    // "Sin vacante asignada") si no tiene, para que la frase quede natural
-    // sin tener que reescribir la plantilla según el caso.
-    const vacanteEncontrada = vacantesTodasCache.find((v) => v.id === c.vacante_id);
-    const vacanteTxt = vacanteEncontrada ? `${vacanteEncontrada.puesto}${vacanteEncontrada.centro ? ` · ${vacanteEncontrada.centro}` : ""}` : "";
-    const mensaje = plantilla
-      .replaceAll("{nombre}", primerNombre)
-      .replaceAll("{nombre_completo}", c.nombre_completo || "")
-      .replaceAll("{mail}", c.email || "")
-      .replaceAll("{telefono}", c.telefono || "")
-      .replaceAll("{vacante}", vacanteTxt)
-      .replaceAll("{enlace}", campanaEnlaceTest);
+    const mensaje = sustituirPlaceholders(plantilla, c, campanaEnlaceTest);
     link.href = `https://wa.me/${numeroWhatsapp(c.telefono)}?text=${encodeURIComponent(mensaje)}`;
   });
 }
@@ -180,7 +190,7 @@ async function abrirCampanaWhatsapp(candidatos) {
       <h3>💬 Mensaje por WhatsApp</h3>
       <p class="staff-hint">
         Escribe el mensaje una sola vez — usa <code>{nombre}</code>, <code>{nombre_completo}</code>, <code>{mail}</code>,
-        <code>{telefono}</code> o <code>{vacante}</code> para insertar datos de cada candidato
+        <code>{telefono}</code>, <code>{vacante}</code> o <code>{centro}</code> para insertar datos de cada candidato
         ${campanaTestsAbiertos.length ? `y <code>{enlace}</code> para el enlace del test que elijas abajo` : ""}.
         Cada botón "Enviar" abre WhatsApp con el mensaje ya escrito para esa persona; tú confirmas el envío allí.
       </p>
@@ -2685,15 +2695,15 @@ function abrirCampanaWhatsappSeleccionados() {
   abrirCampanaWhatsapp(candidatos);
 }
 
-// Igual que el recordatorio de Entrevista de Salida: nunca se envía nada
-// desde el servidor, se arma un enlace mailto: con todos los correos en
-// copia oculta (bcc) y se abre el cliente de correo del propio usuario, que
-// es quien de verdad manda el email desde su cuenta. A diferencia del
-// mailto directo de antes, ahora pasa por un panel editable (igual que la
-// campaña de WhatsApp) porque el asunto/cuerpo estándar de RRHH incluye el
-// enlace a un test -- hace falta elegir cuál antes de mandarlo, y conviene
-// poder revisar/ajustar el texto (p.ej. la ciudad) antes de que se abra el
-// cliente de correo.
+// Nunca se envía nada desde el servidor: se abre el cliente de correo del
+// propio usuario, que es quien de verdad manda el email desde su cuenta.
+// Antes esto era UN solo mailto: con todos los correos en copia oculta
+// (bcc) -- con una plantilla compartida así, {nombre}/{centro}/etc. no se
+// podían sustituir de verdad (todo el mundo recibía el mismo cuerpo, con
+// los corchetes tal cual, literalmente "Hola {nombre}"). Ahora funciona
+// igual que la campaña de WhatsApp: un enlace mailto: por candidato, cada
+// uno con su propio "Enviar", así los placeholders sí se rellenan por
+// persona (uno por uno, pero sin tener que redactar cada mensaje a mano).
 let campanaEmailCandidatos = [];
 let campanaEmailTestsAbiertos = [];
 let campanaEmailEnlaceTest = "";
@@ -2739,21 +2749,40 @@ function onCambiaTestCampanaEmail() {
     ? (testSeleccionado?.enlace_corto || `${location.origin}/encuesta.html?slug=${select.value}`)
     : "";
   campanaEmailTestIdSeleccionado = select.value ? Number(select.value) : null;
+  const cuerpo = document.getElementById("campana-email-cuerpo");
+  if (select.value && !cuerpo.value.includes("{enlace}")) {
+    cuerpo.value = `${cuerpo.value}\n\n{enlace}`;
+  }
+  actualizarEnlacesCampanaEmail();
+}
+
+function candidatoEmailRowHTML(c, i) {
+  return `
+    <div class="candidato-mini-card candidato-whatsapp-row">
+      <div>
+        <h4>${escapeHTML(c.nombre_completo || `Candidato ${i + 1}`)}</h4>
+        <p>${escapeHTML(c.email)}</p>
+      </div>
+      <a class="btn btn-ghost btn-email-campana" data-idx="${i}" data-candidato-id="${c.id}" target="_blank" rel="noopener">${ICONO_MAILTO} Enviar</a>
+    </div>`;
+}
+
+function actualizarEnlacesCampanaEmail() {
+  const asuntoPlantilla = document.getElementById("campana-email-asunto").value;
+  const cuerpoPlantilla = document.getElementById("campana-email-cuerpo").value;
+  campanaEmailCandidatos.forEach((c, i) => {
+    const link = document.querySelector(`.btn-email-campana[data-idx="${i}"]`);
+    if (!link) return;
+    const asunto = sustituirPlaceholders(asuntoPlantilla, c, campanaEmailEnlaceTest);
+    const cuerpo = sustituirPlaceholders(cuerpoPlantilla, c, campanaEmailEnlaceTest);
+    link.href = `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+  });
 }
 
 function cerrarCampanaEmail() {
   campanaEmailCandidatos = [];
   campanaEmailEnlaceTest = "";
   document.getElementById("campana-email-wrap").innerHTML = "";
-}
-
-function confirmarAbrirEmail() {
-  const asunto = document.getElementById("campana-email-asunto").value.trim();
-  const cuerpo = document.getElementById("campana-email-cuerpo").value.replaceAll("{enlace}", campanaEmailEnlaceTest);
-  const destinatarios = campanaEmailCandidatos.map((c) => c.email).join(",");
-  window.location.href = `mailto:?bcc=${encodeURIComponent(destinatarios)}&subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
-  marcarInvitadoTest(campanaEmailCandidatos.map((c) => c.id), campanaEmailTestIdSeleccionado);
-  cerrarCampanaEmail();
 }
 
 async function abrirCampanaEmail(candidatos) {
@@ -2774,8 +2803,10 @@ async function abrirCampanaEmail(candidatos) {
     <div class="vacante-form">
       <h3>${ICONO_MAILTO} Enviar email</h3>
       <p class="staff-hint">
-        Se abrirá tu cliente de correo con estos ${conEmail.length} destinatario${conEmail.length === 1 ? "" : "s"} en copia oculta (BCC) — revisa/edita el asunto y el cuerpo antes de continuar.
-        ${campanaEmailTestsAbiertos.length ? `Usa <code>{enlace}</code> donde quieras que vaya el enlace del test que elijas abajo.` : ""}
+        Escribe el asunto/cuerpo una sola vez — usa <code>{nombre}</code>, <code>{nombre_completo}</code>, <code>{mail}</code>,
+        <code>{telefono}</code>, <code>{vacante}</code> o <code>{centro}</code> para insertar datos de cada candidato
+        ${campanaEmailTestsAbiertos.length ? `y <code>{enlace}</code> para el enlace del test que elijas abajo` : ""}.
+        Cada botón "Enviar" abre tu cliente de correo ya escrito para esa persona; tú confirmas el envío allí.
       </p>
       ${campanaEmailTestSelectHTML()}
       <div class="form-field form-field-full" style="margin-bottom:10px;">
@@ -2786,15 +2817,23 @@ async function abrirCampanaEmail(candidatos) {
         <label>Cuerpo</label>
         <textarea id="campana-email-cuerpo" style="min-height:200px;">${escapeHTML(plantillaEmailPorDefecto())}</textarea>
       </div>
+      <p class="staff-hint">${conEmail.length} de ${candidatos.length} candidatos tienen email guardado.</p>
+      <div class="candidatos-grid">${conEmail.map(candidatoEmailRowHTML).join("")}</div>
       <div class="form-actions">
-        <button type="button" id="btn-email-abrir" class="btn btn-primary">${ICONO_MAILTO} Abrir correo</button>
         <button type="button" id="btn-cerrar-campana-email" class="btn btn-ghost">Cerrar</button>
       </div>
     </div>`;
+  document.getElementById("campana-email-asunto").addEventListener("input", actualizarEnlacesCampanaEmail);
+  document.getElementById("campana-email-cuerpo").addEventListener("input", actualizarEnlacesCampanaEmail);
   document.getElementById("btn-cerrar-campana-email").addEventListener("click", cerrarCampanaEmail);
-  document.getElementById("btn-email-abrir").addEventListener("click", confirmarAbrirEmail);
   const testSelect = document.getElementById("campana-email-test");
   if (testSelect) testSelect.addEventListener("change", onCambiaTestCampanaEmail);
+  // El marcado de "invitado al test" se dispara en el clic real de Enviar
+  // (no al elegir el test arriba), igual que en la campaña de WhatsApp.
+  wrap.querySelectorAll(".btn-email-campana").forEach((btn) => {
+    btn.addEventListener("click", () => marcarInvitadoTest([Number(btn.dataset.candidatoId)], campanaEmailTestIdSeleccionado));
+  });
+  actualizarEnlacesCampanaEmail();
   wrap.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
