@@ -201,11 +201,14 @@ async function abrirCampanaWhatsapp(candidatos) {
       <p class="staff-hint">${conTelefono} de ${candidatos.length} candidatos tienen teléfono guardado.</p>
       <div class="candidatos-grid">${candidatos.map(candidatoWhatsappRowHTML).join("")}</div>
       <div class="form-actions">
+        ${conTelefono ? `<button type="button" id="btn-whatsapp-enviar-todos" class="btn btn-primary">💬 Enviar a todos</button>` : ""}
         <button type="button" id="btn-cerrar-campana" class="btn btn-ghost">Cerrar</button>
       </div>
     </div>`;
   document.getElementById("campana-mensaje").addEventListener("input", actualizarEnlacesCampana);
   document.getElementById("btn-cerrar-campana").addEventListener("click", cerrarCampanaWhatsapp);
+  const btnEnviarTodos = document.getElementById("btn-whatsapp-enviar-todos");
+  if (btnEnviarTodos) btnEnviarTodos.addEventListener("click", enviarTodosWhatsapp);
   const testSelect = document.getElementById("campana-test");
   if (testSelect) testSelect.addEventListener("change", onCambiaTestCampana);
   // El marcado de "invitado al test" se dispara en el clic real de Enviar
@@ -216,6 +219,25 @@ async function abrirCampanaWhatsapp(candidatos) {
   });
   actualizarEnlacesCampana();
   wrap.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// Abre TODOS los enlaces wa.me de golpe (cada uno ya personalizado, mismo
+// href que pulsar "Enviar" fila a fila) en vez de obligar a ir uno por uno.
+// A diferencia del mailto (que no navega de verdad, lo gestiona el propio
+// SO), esto sí abre una pestaña real por candidato -- el navegador puede
+// bloquear las que pasen de la primera si las considera ventanas emergentes
+// no solicitadas; se avisa de antemano para que no parezca que se quedó a
+// medias.
+async function enviarTodosWhatsapp() {
+  const enlaces = [...document.querySelectorAll("#campana-whatsapp-wrap .btn-whatsapp-campana")];
+  if (!enlaces.length) return;
+  if (!(await pedirConfirmacion(
+    `Esto abre ${enlaces.length} chat(s) de WhatsApp ya escritos, uno detrás de otro. Si el navegador bloquea las ventanas emergentes, puede que solo se abra el primero -- permite las emergentes para este sitio si hace falta. ¿Continuar?`
+  ))) return;
+  enlaces.forEach((a) => {
+    window.open(a.href, "_blank");
+    marcarInvitadoTest([Number(a.dataset.candidatoId)], campanaTestIdSeleccionado);
+  });
 }
 
 const ESTADOS = ["pendiente", "entrevistado", "contratado", "descartado"];
@@ -2785,6 +2807,21 @@ function cerrarCampanaEmail() {
   document.getElementById("campana-email-wrap").innerHTML = "";
 }
 
+// A diferencia de wa.me (una pestaña real por candidato, sujeta a que el
+// navegador bloquee las que pasen de la primera), mailto: no navega de
+// verdad -- lo intercepta el propio sistema operativo y abre un borrador en
+// el cliente de correo, así que SÍ se pueden lanzar todos de golpe sin
+// toparse con el bloqueador de ventanas emergentes.
+async function enviarTodosEmail() {
+  const enlaces = [...document.querySelectorAll("#campana-email-wrap .btn-email-campana")];
+  if (!enlaces.length) return;
+  if (!(await pedirConfirmacion(`Esto abre ${enlaces.length} correo(s) ya escritos, uno detrás de otro, en tu cliente de correo. ¿Continuar?`))) return;
+  enlaces.forEach((a) => {
+    window.open(a.href, "_blank");
+    marcarInvitadoTest([Number(a.dataset.candidatoId)], campanaEmailTestIdSeleccionado);
+  });
+}
+
 async function abrirCampanaEmail(candidatos) {
   const conEmail = candidatos.filter((c) => c.email);
   if (conEmail.length === 0) {
@@ -2820,12 +2857,14 @@ async function abrirCampanaEmail(candidatos) {
       <p class="staff-hint">${conEmail.length} de ${candidatos.length} candidatos tienen email guardado.</p>
       <div class="candidatos-grid">${conEmail.map(candidatoEmailRowHTML).join("")}</div>
       <div class="form-actions">
+        <button type="button" id="btn-email-enviar-todos" class="btn btn-primary">${ICONO_MAILTO} Enviar a todos</button>
         <button type="button" id="btn-cerrar-campana-email" class="btn btn-ghost">Cerrar</button>
       </div>
     </div>`;
   document.getElementById("campana-email-asunto").addEventListener("input", actualizarEnlacesCampanaEmail);
   document.getElementById("campana-email-cuerpo").addEventListener("input", actualizarEnlacesCampanaEmail);
   document.getElementById("btn-cerrar-campana-email").addEventListener("click", cerrarCampanaEmail);
+  document.getElementById("btn-email-enviar-todos").addEventListener("click", enviarTodosEmail);
   const testSelect = document.getElementById("campana-email-test");
   if (testSelect) testSelect.addEventListener("change", onCambiaTestCampanaEmail);
   // El marcado de "invitado al test" se dispara en el clic real de Enviar
