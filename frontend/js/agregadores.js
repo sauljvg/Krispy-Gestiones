@@ -2461,6 +2461,97 @@ async function agrCargarEstado() {
   }
 }
 
+// Panel "Dashboard del scraper" -- mismos datos que el mini dashboard local
+// (scraper_agregadores/status_server.py), pero servido desde el propio backend con
+// sesión de staff (rol admin) en vez de tener que levantar un servidor aparte en el
+// portátil del scraper. Pedido explícito del usuario 26/08. Reutiliza AGR_API pero
+// con las rutas /panel/... (auth de sesión), no /admin/... (esas piden la X-API-Key
+// del scraper, que no debe vivir en el frontend).
+const AGR_CATEGORIAS_ESTADO = ["disponible", "no_disponible", "error", "sin_datos"];
+const AGR_CATEGORIA_LABEL = { disponible: "Disponibles", no_disponible: "No disponibles", error: "Error", sin_datos: "Sin datos" };
+
+function agrAbrirDashboardScraper() {
+  document.getElementById("agr-scraper-overlay").classList.add("visible");
+  agrCargarDashboardScraper();
+}
+
+function agrCerrarDashboardScraper() {
+  document.getElementById("agr-scraper-overlay").classList.remove("visible");
+}
+
+function agrCeldaEstadoHtml(conteos) {
+  const total = AGR_CATEGORIAS_ESTADO.reduce((s, c) => s + (conteos?.[c] || 0), 0);
+  const detalle = AGR_CATEGORIAS_ESTADO.map((c) => `${AGR_CATEGORIA_LABEL[c]}: <b>${conteos?.[c] || 0}</b>`).join(" · ");
+  return `<td><b>${total}</b> total<div class="agr-scraper-desglose">${detalle}</div></td>`;
+}
+
+async function agrCargarDashboardScraper() {
+  const contenido = document.getElementById("agr-scraper-contenido");
+  const actualizado = document.getElementById("agr-scraper-actualizado");
+  try {
+    const [resEstados, resDedup] = await Promise.all([
+      fetch(`${AGR_API}/panel/resumen-estados`, { credentials: "include" }),
+      fetch(`${AGR_API}/panel/resumen-deduplicado`, { credentials: "include" }),
+    ]);
+    if (!resEstados.ok || !resDedup.ok) throw new Error("fetch falló");
+    const estados = await resEstados.json();
+    const dedup = await resDedup.json();
+
+    const agregadores = Object.keys(AGR_NOMBRE_AGREGADOR);
+    const tiendas = Object.keys(estados).filter((t) => agrCentrosPorTienda[t]);
+    const cabeceras = agregadores.map((a) => `<th>${AGR_NOMBRE_AGREGADOR[a]}</th>`).join("");
+
+    const totales = {};
+    agregadores.forEach((a) => { totales[a] = { disponible: 0, no_disponible: 0, error: 0, sin_datos: 0 }; });
+    tiendas.forEach((t) => {
+      agregadores.forEach((a) => {
+        AGR_CATEGORIAS_ESTADO.forEach((c) => { totales[a][c] += estados[t]?.[a]?.[c] || 0; });
+      });
+    });
+
+    const filasTienda = tiendas.map((t) => {
+      const nombre = agrCentrosPorTienda[t]?.nombre || t;
+      return `<tr><td>${nombre}</td>${agregadores.map((a) => agrCeldaEstadoHtml(estados[t]?.[a])).join("")}</tr>`;
+    }).join("");
+    const filaTotales = agregadores.map((a) => agrCeldaEstadoHtml(totales[a])).join("");
+
+    const filaDedup = agregadores.map((a) => {
+      const info = dedup[a] || { vistos: 0, total: 0, faltan: 0, faltan_direcciones: [] };
+      const idLista = `agr-scraper-faltan-${a}`;
+      const lista = (info.faltan_direcciones || []).map((d) => `<li>${d}</li>`).join("") || "<li>(ninguna)</li>";
+      return `<td>
+        <b>${info.vistos}</b>/${info.total} vistos
+        <details><summary class="agr-scraper-dedup-faltan">${info.faltan} faltan</summary>
+          <ul class="agr-drill-lista" id="${idLista}" style="max-height:180px;overflow-y:auto;">${lista}</ul>
+        </details>
+      </td>`;
+    }).join("");
+
+    contenido.innerHTML = `
+      <h4 class="agr-scraper-titulo-seccion">Cobertura real (deduplicada entre tiendas)</h4>
+      <p class="agr-drill-nota">Cuenta sitios reales únicos, no filas -- los grids de tiendas vecinas se solapan geográficamente, así que el mismo sitio puede tener una fila por tienda.</p>
+      <div class="agr-scraper-tabla-wrap">
+        <table class="agr-scraper-tabla">
+          <thead><tr><th></th>${cabeceras}</tr></thead>
+          <tbody><tr><td><b>TOTAL único</b></td>${filaDedup}</tr></tbody>
+        </table>
+      </div>
+      <h4 class="agr-scraper-titulo-seccion">Por tienda (bruto, con solape entre tiendas vecinas)</h4>
+      <div class="agr-scraper-tabla-wrap">
+        <table class="agr-scraper-tabla">
+          <thead><tr><th>Tienda</th>${cabeceras}</tr></thead>
+          <tbody>${filasTienda}</tbody>
+          <tfoot><tr><td>TOTAL</td>${filaTotales}</tr></tfoot>
+        </table>
+      </div>
+    `;
+    actualizado.textContent = "Actualizado: " + new Date().toLocaleTimeString("es-ES", { timeZone: "Europe/Madrid" });
+  } catch {
+    contenido.innerHTML = `<p class="agr-drill-nota">No se pudo cargar el dashboard del scraper. Inténtalo de nuevo.</p>`;
+    actualizado.textContent = "";
+  }
+}
+
 async function agrCargarTodo() {
   // agrCargarMapa() debe ir primero: fija agrTiendaCentro/agrCentrosPorTienda,
   // que agrActualizarPoligonoLimite() usa para calcular los vértices del polígono.
@@ -2478,6 +2569,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   agrUsuarioActual = user;
   wireUserBar(user);
+  const btnDashboardScraper = document.getElementById("agr-btn-dashboard-scraper");
+  if (btnDashboardScraper) btnDashboardScraper.hidden = user.rol !== "admin";
   agrWireFiltroAgregador();
   agrAplicarColapsoTabla();
 

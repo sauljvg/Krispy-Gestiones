@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 import agregadores as agregadores_module
 import auth as auth_module
-from auth_routes import get_current_user
+from auth_routes import get_current_user, require_admin
 
 router = APIRouter()
 
@@ -494,6 +494,23 @@ def admin_resumen_estados_route():
     (agrupar por tienda-más-cercana necesita ver TODOS los puntos a la vez, no
     tiene sentido pedirlo tienda por tienda)."""
     return agregadores_module.get_resumen_estados_todas()
+
+
+@router.get("/panel/resumen-estados", dependencies=[Depends(require_admin)])
+def panel_resumen_estados_route():
+    """Igual que admin_resumen_estados_route pero con sesión de staff (rol admin) en
+    vez de la X-API-Key del scraper -- para el botón "Ver dashboard del scraper" en
+    agregadores.html. La X-API-Key no debe vivir en el frontend (cualquiera podría
+    extraerla del JS servido al navegador), así que estas dos rutas duplican el
+    gating con require_admin en vez de reusar las /admin/... de arriba."""
+    return agregadores_module.get_resumen_estados_todas()
+
+
+@router.get("/panel/resumen-deduplicado", dependencies=[Depends(require_admin)])
+def panel_resumen_deduplicado_route():
+    """Ver panel_resumen_estados_route -- misma razón para duplicar el endpoint con
+    auth de sesión en vez de X-API-Key."""
+    return agregadores_module.resumen_cobertura_deduplicada()
 
 
 @router.post("/admin/direcciones/deduplicar", dependencies=[Depends(require_api_key)])
