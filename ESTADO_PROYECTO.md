@@ -1,0 +1,128 @@
+# Krispy Gestiones — Estado del proyecto (resumen para retomar en otra conversación)
+
+> Generado el 2026-08-24. Léeme primero en vez de pedirle a Claude que explore
+> todo el repo desde cero — ahorra tokens.
+
+## Qué es esto
+
+"Krispy Gestiones" es una plataforma de backoffice multi-marca (Krispy Kreme,
+Saona, La Voz, La Receta) que cubre:
+
+- **RRHH**: reclutamiento (+ extracción de CVs), entrevistas (+PDF), tests
+  DISC (con formulario público), encuestas, clima laboral (+PDF), scoring de
+  valores, usuarios/auth.
+- **Comunicación interna**: boletines (con builder), blog, informes.
+- **Analítica de reseñas de Google Maps**: scraper Selenium + import de
+  Google Takeout, dashboard con stats/timeline/keywords/staff-mentions.
+- **Agregadores de delivery**: monitor de cobertura en Uber Eats, Just Eat,
+  Glovo (`scraper_agregadores/`), con un mapa "9am" (herramienta de pincel
+  para pintar zonas de cobertura).
+
+**Stack**: backend FastAPI (Python) en `backend/`, frontend estático
+(HTML/CSS/JS vanilla, sin build) en `frontend/`, SQLite (`krispy_kreme.db`,
+fuera de git). Repo en GitHub: `github.com/sauljvg/Krispy-Gestiones`.
+Se despliega en Railway (ver `Dockerfile`, `fly.toml` es vestigial).
+
+## Qué se hizo en esta sesión (24/08/2026)
+
+El escritorio tenía **7 carpetas sueltas**, cada una usada históricamente
+para un módulo distinto del proyecto:
+
+| Carpeta original | Qué tenía | Qué se hizo |
+|---|---|---|
+| `Krispy Gestiones` (sin guion) | Clon del repo **más actualizado** (commit `6d56aa0`, 23/08) + PDFs DISC, fuentes, logos, textos clima laboral | Es la base de la carpeta final. Recursos sueltos → `_recursos/` |
+| `Krispy-Gestiones` (con guion) | Clon del mismo repo pero **117 commits desactualizado** (commit `22f43c1`, 10/08) + 10 archivos sueltos de agregadores sin commitear | Los 10 archivos se copiaron al repo bueno. La carpeta en sí **no se pudo borrar** (ver pendientes) |
+| `Reseñas KK` | Datos de Google Takeout (export oficial de reseñas) | Copiado a `_recursos/resenas-takeout/` |
+| `Clima Laboral` | Excel/PDFs reales de clima laboral por tienda | Copiado a `_recursos/clima-laboral/` |
+| `Agregadores KK` | Copia vieja de `scraper_agregadores` + docs sueltos (ofertas de trabajo, plan de monitor) | Docs → `_recursos/agregadores-docs/`. El código no se copió (ya superado por el del repo bueno) |
+| `BBDD SV` | App aparte "candidatos-app" (Next.js/Prisma, sin relación con el backend actual) | **Obsoleta, enviada a la papelera** por decisión del usuario |
+| `App` | App aparte "Cribar CVs" (Node.js, offline, sin integrar en el backend) | **Obsoleta, enviada a la papelera** por decisión del usuario |
+
+**Resultado**: todo unificado en **`Escritorio/Krispy-Gestiones/`** (esta
+misma carpeta — no se creó ninguna carpeta nueva, se actualizó la que ya
+existía). Contiene:
+- El código del repo, actualizado al commit más reciente de `origin/main`
+  (`6d56aa0`, 23/08) vía `git reset --hard origin/main`, con los 10 archivos
+  sueltos de agregadores conservados sin commitear.
+- `_recursos/` — todo lo que no es código: `disc/`, `clima-laboral/`,
+  `resenas-takeout/`, `fuentes-logos/`, `agregadores-docs/`.
+
+(Se creó una carpeta intermedia `Krispy-Gestiones-FINAL` durante el proceso,
+pero ya se fusionó aquí y se borró — no debería quedar en el escritorio.)
+
+## Pendiente (no completado en esta sesión)
+
+**2 carpetas del escritorio siguen sin eliminar** porque son el directorio
+de trabajo de otras dos conversaciones de Claude Code de este mismo
+proyecto (agrupadas junto a esta en la app):
+
+- `Reseñas KK` → conversación "Krispy Kreme reviews ATS platform"
+- `Agregadores KK` → conversación "Leer archivos markdown"
+
+Ambas están inactivas (`isRunning: false`), pero al intentar borrarlas
+apareció un proceso que las bloqueaba (posible tarea programada de Windows
+ligada a `scraper_agregadores/setup_tarea_programada.ps1`, relanzándose).
+El usuario pidió no forzar el borrado por ahora, para no romper esas
+conversaciones mientras decide si centraliza todo aquí.
+
+**Nada de contenido único se perdería si se borran** — ya está todo copiado
+dentro de `_recursos/`. Cuando el usuario confirme, el siguiente paso es:
+1. Archivar esas 2 sesiones (`mcp__ccd_session_mgmt__archive_session`).
+2. Revisar el Programador de tareas de Windows por si hay una tarea
+   apuntando a esas carpetas, y editarla para que apunte a
+   `Krispy-Gestiones\scraper_agregadores` en su lugar (o deshabilitarla).
+3. Borrar `Reseñas KK` y `Agregadores KK` (papelera de reciclaje, no
+   borrado permanente).
+
+Las otras 4 carpetas sobrantes (`Krispy Gestiones`, `Clima Laboral`,
+`BBDD SV`, `App`) ya se enviaron a la Papelera de reciclaje.
+
+## Se quitó el número "total de Google" de reseñas (24/08/2026)
+
+Como ya no se scrapea Maps en vivo (solo se importa vía Google Takeout), se
+eliminó todo lo relacionado con `total_google`/`visible_en_google` por estar
+siempre desactualizado y confundir en el popup de importación: el toggle
+"Solo Google" del dashboard, el check "✓ 100% capturado", la insignia "no
+visible en Google" en cada reseña, y el endpoint
+`POST /api/reviews/reconciliacion`. Las columnas de la BD se dejaron intactas
+(sin migración) por compatibilidad, simplemente ya no se leen ni escriben.
+`scraper/scraper_v2.py --reconciliar` sigue existiendo como script suelto,
+pero si se corre ahora fallará al intentar subir el resultado (con un aviso
+claro, no un crash) porque ese endpoint ya no existe.
+
+## Solicitud de acceso a la API de reseñas de Google (24/08/2026)
+
+Llevábamos meses esperando que Google aprobara el acceso a la API de reseñas
+de Business Profile (`accounts.locations.reviews.list`/`batchGetReviews`,
+`mybusiness.googleapis.com/v4`) — el plazo se cumplió el 5/08/2026 sin
+respuesta. Se comprobó en Cloud Console (proyecto `krispy-reviews-export`,
+número `48525790961`) que el acceso nunca se concedió (no aparece en la
+lista de APIs habilitadas), aunque las credenciales OAuth 2.0 sí estaban
+listas ("Krispy Reviews OAuth"). Se reenvió una segunda solicitud el
+24/08/2026 vía `support.google.com/business/contact/api_default`
+("Application for Basic API Access"), cubriendo solo las 6 tiendas de
+Krispy Kreme (sin Saona, es un negocio aparte).
+
+**Caso de soporte abierto: `9263000040737`** — revisión estimada 7-10 días
+laborables (≈ 2-4 de septiembre de 2026).
+
+**Si aprueban el acceso**: se podría sustituir la importación manual de
+Google Takeout por una llamada automática a la API (con OAuth ya
+configurado en el proyecto `krispy-reviews-export`), integrándolo en
+`scraper/import_takeout.py` o un módulo nuevo equivalente. Hasta entonces,
+seguir usando Takeout como hasta ahora — no hay nada que cambiar en el
+código todavía.
+
+## Para la próxima conversación
+
+- Trabajar directamente sobre `Escritorio/Krispy-Gestiones/` — ya está al
+  día con origin/main.
+- Verificar `git status` al empezar: quedan sin commitear los 10 archivos
+  de `scraper_agregadores/`, `AGREGADORES_MAPA.md`, un `.png` de scratchpad,
+  y `_recursos/` (que probablemente no se quiera commitear a git, son
+  binarios/datos — considerar añadir `_recursos/` a `.gitignore`).
+- Si `Reseñas KK` / `Agregadores KK` siguen en el escritorio, ver la sección
+  de pendientes arriba antes de intentar borrarlas.
+- Revisar si llegó respuesta al caso `9263000040737` (ver sección de arriba)
+  — si aprobaron el acceso a la API de reseñas, se puede empezar a
+  reemplazar el flujo de Takeout.

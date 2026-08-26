@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krispy Gestiones · Clima Laboral · Test</title>
+<link rel="icon" type="image/png" href="assets/favicon-kk.png">
+<script>
+  (function () {
+    var guardado = localStorage.getItem("kt-theme");
+    if (guardado === "light" || guardado === "dark") {
+      document.documentElement.dataset.theme = guardado;
+    }
+  })();
+</script>
+<link rel="stylesheet" href="css/styles.css?v=20260823c">
+<style>
+  .tests-wrap { max-width: 1000px; margin: 0 auto; padding: 0 0 60px; }
+  .clima-breadcrumb { font-size: 13px; color: var(--text-secondary); margin: 4px 0 0; }
+  .clima-breadcrumb a { color: var(--text-secondary); }
+  .tests-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 16px 0; }
+  .tests-toolbar p { flex: 1; min-width: 0; }
+  .tests-toolbar .btn { flex-shrink: 0; white-space: nowrap; }
+  .tests-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .tests-table th, .tests-table td { padding: 8px 10px; border-bottom: 1px solid var(--gridline); text-align: left; vertical-align: middle; }
+  .badge { padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .badge-cerrada { background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-secondary); }
+  .badge-abierta { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
+
+  .embudo-fila { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; }
+  .embudo-etiqueta { width: 80px; flex: none; color: var(--text-secondary); }
+  .embudo-barra-fondo { flex: 1; height: 16px; border-radius: 8px; background: var(--surface-page); overflow: hidden; }
+  .embudo-barra-relleno { height: 100%; background: var(--acento); border-radius: 8px; }
+  .embudo-valor { width: 90px; flex: none; text-align: right; color: var(--text-secondary); }
+
+  .editor-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-top: 20px; position: relative; }
+  #editor-titulo-h2 { padding-right: 30px; }
+  .btn-cerrar-editor-x {
+    position: absolute; top: 14px; right: 14px; width: 28px; height: 28px;
+    border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary);
+    border-radius: 50%; font-size: 15px; line-height: 1; cursor: pointer; display: flex;
+    align-items: center; justify-content: center; padding: 0;
+  }
+  .btn-cerrar-editor-x:hover { border-color: var(--acento); color: var(--text-primary); }
+  .editor-field { margin-bottom: 12px; }
+  .editor-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+  .editor-field input, .editor-field select, .editor-field textarea {
+    width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 14px; font-family: inherit; box-sizing: border-box;
+  }
+  #test-color-boton { width: 90px; height: 44px; padding: 4px; cursor: pointer; }
+  .editor-field label.chk { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-primary); padding: 9px 0; cursor: pointer; }
+  .editor-field label.chk input { width: auto; }
+  .editor-fields-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .editor-fields-row .editor-field { flex: 1; min-width: 160px; }
+  .editor-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 20px; }
+
+  .clima-plantilla-fila { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .clima-plantilla-fila input[type="text"] { flex: 2; }
+  .clima-plantilla-fila input[type="number"] { flex: 1; min-width: 90px; }
+  .clima-plantilla-fila button { flex: none; }
+
+  .pagina-card { background: var(--surface-page); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+  .pagina-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+  .pagina-condicion { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 8px; margin-bottom: 10px; background: var(--surface-1); border: 1px dashed var(--border); border-radius: 8px; font-size: 12px; }
+  .pagina-condicion label:first-child { color: var(--text-secondary); white-space: nowrap; }
+  .pagina-condicion-pregunta { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 12px; max-width: 260px; }
+  .pagina-condicion-valores { display: flex; flex-wrap: wrap; gap: 10px; }
+  .pagina-condicion-valores label.chk { font-size: 12px; color: var(--text-secondary); }
+  .pagina-head textarea { flex: 1; min-height: 44px; }
+  .pagina-acciones, .pregunta-acciones { display: flex; gap: 4px; flex-wrap: nowrap; }
+  .btn-mini {
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+    border-radius: 6px; padding: 3px 7px; font-size: 12px; cursor: pointer; white-space: nowrap;
+  }
+  .btn-mini:hover { border-color: var(--acento); }
+
+  .pregunta-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--gridline); flex-wrap: wrap; }
+  .pregunta-row .tipo-badge { font-size: 11px; padding: 2px 6px; border-radius: 6px; background: var(--surface-1); color: var(--text-secondary); white-space: nowrap; }
+  .pregunta-row .etiqueta-txt { flex: 1; min-width: 200px; font-size: 14px; }
+  .pregunta-row .obligatoria-txt { font-size: 11px; color: var(--text-muted); }
+  .dashboard-badge { font-size: 11px; padding: 2px 6px; border-radius: 6px; background: color-mix(in srgb, var(--acento) 18%, transparent); color: var(--acento); white-space: nowrap; }
+  .pregunta-handle { cursor: grab; color: var(--text-muted); font-size: 15px; user-select: none; }
+  .pregunta-handle:active { cursor: grabbing; }
+  .pregunta-item.arrastrando { opacity: 0.4; }
+  .pregunta-item.drop-antes { box-shadow: inset 0 3px 0 var(--acento); }
+  .pregunta-item.drop-despues { box-shadow: inset 0 -3px 0 var(--acento); }
+  .preguntas-lista { min-height: 8px; }
+
+  .nueva-pregunta-form { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); display: flex; flex-direction: column; gap: 8px; }
+  .nueva-pregunta-form-fila { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .nueva-pregunta-form select, .nueva-pregunta-form input { padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 13px; }
+  .nueva-pregunta-form input.etiqueta { flex: 1; min-width: 220px; }
+  .nueva-pregunta-form label.chk { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+
+  .opciones-editor { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; }
+  .opciones-editor-ayuda { font-size: 11px; color: var(--text-secondary); margin: 0 0 2px; }
+  .opciones-editor-filas { display: flex; flex-direction: column; gap: 6px; }
+  .opcion-editor-row { display: flex; gap: 6px; align-items: center; }
+  .opcion-editor-input { flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 13px; }
+  .opcion-editor-punto { font-size: 11px; color: var(--text-secondary); width: 28px; flex-shrink: 0; }
+  .btn-opcion-agregar { align-self: flex-start; }
+  .opcion-editor-row label.chk.opcion-descarta-chk { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--status-critical); white-space: nowrap; flex-shrink: 0; }
+
+  .pregunta-edit-form { display: flex; flex-direction: column; gap: 8px; padding: 10px; margin: 6px 0; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; }
+
+  .respuesta-detalle-tabla { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+  .respuesta-detalle-tabla td { padding: 6px 8px; border-bottom: 1px solid var(--gridline); vertical-align: top; white-space: normal; }
+  .respuesta-detalle-pregunta { width: 45%; color: var(--text-secondary); }
+  .respuesta-detalle-valor { font-weight: 500; }
+  .respuesta-detalle-tabla tr:last-child td { border-bottom: none; }
+  .pregunta-edit-etiqueta { width: 100%; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 13px; box-sizing: border-box; }
+  .pregunta-edit-flags { display: flex; gap: 14px; flex-wrap: wrap; }
+  .pregunta-edit-flags label.chk { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+  .pregunta-edit-acciones { display: flex; gap: 8px; }
+
+  .fondo-preview { max-width: 220px; max-height: 120px; border-radius: 8px; border: 1px solid var(--border); display: block; margin-top: 6px; }
+  .respuestas-tabla { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+  .respuestas-tabla th, .respuestas-tabla td { padding: 6px 8px; border-bottom: 1px solid var(--gridline); text-align: left; }
+  .staff-hint { color: var(--text-secondary); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon" id="brand-icon">🍩</span>
+      <div>
+        <h1 id="brand-title">Krispy Gestiones</h1>
+        <p class="subtitle">Clima Laboral · Test</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="btn btn-ghost hamburger-btn" title="Atrás" aria-label="Atrás" onclick="history.back()">←</button>
+      <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
+      <div class="hamburger-wrap">
+        <button id="btn-hamburger" class="btn btn-ghost hamburger-btn" aria-label="Menú" aria-haspopup="true" aria-expanded="false">☰</button>
+        <div id="hamburger-menu" class="hamburger-menu" hidden>
+          <span id="topbar-user" class="topbar-user" hidden></span>
+          <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema">🌙 Cambiar tema</button>
+          <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="tests-wrap">
+    <div class="hero-banner">
+      <span class="eyebrow">Portal interno</span>
+      <h1>Clima Laboral · Test</h1>
+      <p>Las oleadas (Encuesta completa o Pulso) de Clima Laboral, sus preguntas y a quién le llegan.</p>
+    </div>
+    <p class="clima-breadcrumb"><a id="link-clima-landing" href="clima.html">← Clima Laboral</a></p>
+
+    <div id="lista-tests-wrap">
+      <div class="tests-toolbar">
+        <p class="staff-hint">Solo se muestran aquí los tests que alimentan una oleada de Clima Laboral.</p>
+        <button id="btn-nuevo-test" class="btn btn-primary" type="button">＋ Nuevo test</button>
+      </div>
+
+      <table class="tests-table">
+        <thead><tr><th>Título</th><th>Estado</th><th>Respuestas</th><th>Acciones</th></tr></thead>
+        <tbody id="tests-tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="editor-card" id="editor-card" hidden>
+      <button type="button" class="btn-cerrar-editor-x" id="btn-cerrar-editor-x" title="Cerrar">✕</button>
+      <h2 id="editor-titulo-h2" style="margin-top:0;">Editar test</h2>
+
+      <div class="editor-fields-row">
+        <div class="editor-field">
+          <label for="test-titulo">Título</label>
+          <input type="text" id="test-titulo" placeholder="Título del test">
+        </div>
+        <div class="editor-field">
+          <label for="test-tipo-informe" id="test-tipo-informe-label">¿A qué informe, Entrevista de Salida o Clima Laboral alimenta? (opcional)</label>
+          <select id="test-tipo-informe"><option value="">— No calcular puntuación —</option></select>
+        </div>
+      </div>
+
+      <div class="editor-field" id="clima-plantilla-wrap" hidden>
+        <label>Empleados esperados por centro (para calcular el % de participación)</label>
+        <p class="staff-hint">Solo cuenta cuántas respuestas llegan de cada centro -- no identifica quién respondió, así que el test sigue siendo anónimo.</p>
+        <p class="staff-hint">Importante: los nombres de los centros aquí deben coincidir tal cual con las opciones de la pregunta "¿Cuál es tu centro de trabajo?" del test. Para que una fábrica o una oficina se distinga bien de una tienda, el nombre debe incluir la palabra "Fábrica" u "Oficina" (con o sin tilde) -- por ejemplo "ParqueSur Fábrica" u "Oficina Valencia".</p>
+        <div id="clima-plantilla-filas"></div>
+        <button id="btn-clima-plantilla-agregar" class="btn btn-ghost" type="button" style="margin-top:6px;">＋ Añadir centro</button>
+      </div>
+
+      <div class="editor-fields-row">
+        <div class="editor-field">
+          <label for="test-color-boton">Color del botón</label>
+          <input type="color" id="test-color-boton" value="#5b2a2a">
+        </div>
+        <div class="editor-field">
+          <label>Enlace público</label>
+          <input type="text" id="test-enlace-publico" readonly>
+        </div>
+      </div>
+      <div class="editor-fields-row">
+        <div class="editor-field">
+          <label for="test-enlace-corto">Enlace corto (ej. TinyURL, opcional)</label>
+          <input type="text" id="test-enlace-corto" placeholder="https://tinyurl.com/...">
+        </div>
+        <div class="editor-field">
+          <label>&nbsp;</label>
+          <label class="chk" id="test-evitar-duplicados-label">
+            <input type="checkbox" id="test-evitar-duplicados">
+            No permitir responder más de una vez (por IP, nombre, teléfono o email)
+          </label>
+        </div>
+      </div>
+      <div class="editor-fields-row">
+        <div class="editor-field">
+          <label for="test-fecha-cierre">Fecha de caducidad (opcional)</label>
+          <input type="date" id="test-fecha-cierre">
+          <p class="staff-hint">Disponible hasta las 23:59 de ese día. Se cierra solo, sin tener que despublicarlo a mano -- si alargas la fecha, vuelve a estar disponible.</p>
+        </div>
+      </div>
+      <div class="editor-field">
+        <label for="test-mensaje-final">Mensaje final (al terminar el test)</label>
+        <textarea id="test-mensaje-final" style="min-height:60px;">Gracias por completar el formulario.</textarea>
+      </div>
+      <div id="test-no-apto-seccion">
+        <div class="editor-field">
+          <label class="chk" id="test-usar-mensaje-no-apto-label">
+            <input type="checkbox" id="test-usar-mensaje-no-apto" checked>
+            Mostrar un mensaje distinto si el resultado es "No apto"
+          </label>
+          <p class="staff-hint">Solo aplica a tests que se evalúan (por scoring o por una opción descalificatoria).</p>
+        </div>
+        <div class="editor-field" id="test-mensaje-no-apto-wrap">
+          <label for="test-mensaje-no-apto">Mensaje si el resultado es "No apto"</label>
+          <textarea id="test-mensaje-no-apto" style="min-height:60px;">Gracias por contestar nuestro test. En esta ocasión no has superado el proceso, pero te deseamos mucha suerte.</textarea>
+        </div>
+      </div>
+      <div class="editor-field">
+        <label>Imagen de fondo</label>
+        <label class="btn btn-ghost btn-upload">
+          ⬆ Subir imagen de fondo
+          <input type="file" id="input-fondo-upload" accept=".jpg,.jpeg,.png,.webp" hidden>
+        </label>
+        <img class="fondo-preview" id="fondo-preview" hidden>
+      </div>
+
+      <div class="editor-actions">
+        <button id="btn-guardar-test" class="btn btn-primary" type="button">Guardar</button>
+        <button id="btn-publicar-test" class="btn btn-ghost" type="button" hidden>Publicar (abrir)</button>
+        <button id="btn-despublicar-test" class="btn btn-ghost" type="button" hidden>Despublicar (cerrar)</button>
+        <button id="btn-ver-respuestas" class="btn btn-ghost" type="button" hidden>Ver respuestas</button>
+        <button id="btn-ver-embudo" class="btn btn-ghost" type="button" hidden>Ver estadísticas de abandono</button>
+        <button id="btn-eliminar-test" class="btn btn-ghost" type="button" hidden>Eliminar</button>
+        <button id="btn-cerrar-editor" class="btn btn-ghost" type="button">Cerrar</button>
+      </div>
+
+      <div id="paginas-wrap"></div>
+      <button id="btn-nueva-pagina" class="btn btn-ghost" type="button" hidden>＋ Añadir página</button>
+
+      <div id="embudo-wrap" hidden>
+        <h3 style="font-size:15px; margin-top:24px; display:flex; align-items:center; gap:10px;">
+          Estadísticas de abandono
+          <button id="btn-reiniciar-embudo" class="btn btn-ghost" type="button" style="font-size:12px; padding:2px 10px;">Reiniciar estadísticas</button>
+        </h3>
+        <p id="embudo-en-vivo" class="staff-hint"></p>
+        <p id="embudo-resumen" class="staff-hint"></p>
+        <div id="embudo-barras"></div>
+      </div>
+
+      <div id="respuestas-wrap" hidden>
+        <h3 style="font-size:15px; margin-top:24px;">Respuestas recibidas</h3>
+        <table class="respuestas-tabla">
+          <thead><tr><th>Fecha</th><th>IP</th><th>Dispositivo</th><th>Datos</th><th></th></tr></thead>
+          <tbody id="respuestas-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="js/theme.js?v=20260724a"></script>
+<script src="js/dialogs.js?v=20260818a"></script>
+<script src="js/icons.js?v=20260824a"></script>
+<script src="js/auth-common.js?v=20260824a"></script>
+<script src="js/topbar-menu.js?v=20260821a"></script>
+<script src="js/common.js?v=20260823a"></script>
+<script src="js/tests.js?v=20260821i"></script>
+</body>
+</html>

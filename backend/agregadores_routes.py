@@ -360,6 +360,20 @@ def cerrar_sesion_route(sesion_id: int, body: SesionCerrarIn):
     return {"ok": True}
 
 
+class SesionTiendaActualIn(BaseModel):
+    tienda: str
+
+
+@router.put("/sesiones/{sesion_id}/tienda-actual", dependencies=[Depends(require_api_key)])
+def actualizar_tienda_actual_route(sesion_id: int, body: SesionTiendaActualIn):
+    """El daemon avisa aquí qué tienda está recorriendo AHORA MISMO dentro de
+    la pasada en curso (ver scheduler.py) -- para el contador en vivo del
+    dashboard (pedido explícito del usuario 10/08, solo visible para el
+    admin)."""
+    agregadores_module.actualizar_tienda_actual(sesion_id, body.tienda)
+    return {"ok": True}
+
+
 @router.post("/alertas", dependencies=[Depends(require_api_key)])
 def crear_alerta_route(body: AlertaIn):
     agregadores_module.registrar_alerta(body.tipo, body.mensaje, body.tienda, body.agregador)
@@ -525,6 +539,115 @@ def admin_eliminar_limite_route(tienda: str, agregador: str, angulo_grados: floa
     forzar que un ángulo se recalcule en el próximo relanzamiento."""
     if not agregadores_module.eliminar_limite(tienda, agregador, angulo_grados):
         raise HTTPException(status_code=404, detail="Límite no encontrado")
+    return {"ok": True}
+
+
+@router.delete("/limites/{tienda}")
+def eliminar_limite_route(
+    tienda: str,
+    agregador: str,
+    angulo_grados: float,
+    _user: dict = Depends(require_agregadores),
+):
+    """Igual que admin_eliminar_limite_route pero con sesión de usuario --
+    para poder quitar a mano, desde el propio popup del vértice en el mapa,
+    un punto del borde que se ve claramente mal (contaminado, muy alejado
+    del resto) sin tener que usar la API key (pedido explícito del usuario
+    10/08: quiere poder "estilizar" el borde tocando esos vértices)."""
+    if not agregadores_module.eliminar_limite(tienda, agregador, angulo_grados):
+        raise HTTPException(status_code=404, detail="Límite no encontrado")
+    return {"ok": True}
+
+
+class LimiteMoverIn(BaseModel):
+    lat: float
+    lng: float
+
+
+@router.put("/limites/{tienda}")
+def mover_limite_route(
+    tienda: str,
+    agregador: str,
+    angulo_grados: float,
+    body: LimiteMoverIn,
+    _user: dict = Depends(require_agregadores),
+):
+    """Arrastrar un vértice del borde para ajustarlo a mano, en vez de solo
+    poder borrarlo -- recalcula el límite (distancia real) desde la nueva
+    posición (pedido explícito del usuario 10/08)."""
+    resultado = agregadores_module.mover_limite(tienda, agregador, angulo_grados, body.lat, body.lng)
+    if resultado is None:
+        raise HTTPException(status_code=400, detail="Tienda no reconocida")
+    return resultado
+
+
+class UnionIn(BaseModel):
+    tienda: str
+    agregador: str
+    lat_a: float
+    lng_a: float
+    lat_b: float
+    lng_b: float
+    direccion_id_a: int | None = None
+    direccion_id_b: int | None = None
+
+
+@router.post("/uniones")
+def crear_union_route(body: UnionIn, _user: dict = Depends(require_agregadores)):
+    """Puente manual entre dos puntos: el usuario ve dos dots disponibles (o
+    dos vértices ya calculados del borde) con un hueco/pico raro entre
+    medias y decide a ojo que ahí también hay cobertura, sin depender de un
+    relleno automático poco fiable (ver agregadores_uniones, pedido
+    explícito del usuario 10/08: "haré clic sobre un punto y sobre un
+    segundo punto y eso va a unir el borde límite"). Por lat/lng en vez de
+    direccion_id porque los vértices del borde no siempre tienen una fila de
+    dirección real detrás."""
+    return agregadores_module.crear_union(
+        body.tienda, body.agregador, body.lat_a, body.lng_a, body.lat_b, body.lng_b,
+        body.direccion_id_a, body.direccion_id_b,
+    )
+
+
+@router.get("/uniones/{tienda}")
+def get_uniones_route(tienda: str, agregador: str | None = None, _user: dict = Depends(require_agregadores)):
+    return agregadores_module.get_uniones(tienda, agregador)
+
+
+@router.delete("/uniones/{union_id}")
+def eliminar_union_route(union_id: int, _user: dict = Depends(require_agregadores)):
+    if not agregadores_module.eliminar_union(union_id):
+        raise HTTPException(status_code=404, detail="Unión no encontrada")
+    return {"ok": True}
+
+
+class RellenoIn(BaseModel):
+    tienda: str
+    agregador: str
+    puntos: list[list[float]]
+
+
+@router.post("/rellenos")
+def crear_relleno_route(body: RellenoIn, _user: dict = Depends(require_agregadores)):
+    """Pincel: zona pintada a mano (varios puntos formando un área) que se
+    fusiona con el polígono calculado (turf.union en el frontend), para
+    huecos DENTRO de la figura -- un puente recto entre dos puntos del borde
+    (ver /uniones) no puede rellenar un hueco que no está en el borde
+    (pedido explícito del usuario 10/08: "hay unas zonas que debemos poder
+    rellenar dentro del mismo polígono")."""
+    if len(body.puntos) < 3:
+        raise HTTPException(status_code=400, detail="Hacen falta al menos 3 puntos")
+    return agregadores_module.crear_relleno(body.tienda, body.agregador, body.puntos)
+
+
+@router.get("/rellenos/{tienda}")
+def get_rellenos_route(tienda: str, agregador: str | None = None, _user: dict = Depends(require_agregadores)):
+    return agregadores_module.get_rellenos(tienda, agregador)
+
+
+@router.delete("/rellenos/{relleno_id}")
+def eliminar_relleno_route(relleno_id: int, _user: dict = Depends(require_agregadores)):
+    if not agregadores_module.eliminar_relleno(relleno_id):
+        raise HTTPException(status_code=404, detail="Relleno no encontrado")
     return {"ok": True}
 
 

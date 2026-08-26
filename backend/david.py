@@ -18,7 +18,8 @@ introduce sus 4 digitos (se envia solo al completar el 4o digito, sin boton). Si
 crea su propio PIN de 4 digitos (con "Repite el PIN"). Tras 5 fallos, la cuenta se bloquea 10 minutos.
 
 Home (index.html) tiene una tarjeta propia y directa por cada modulo: "Resenas" (reviews.html),
-"Informes" (informes.html), "Clima Laboral" (clima.html), "Entrevista de Salida" (entrevistas.html),
+"Informes" (informes.html), "Clima Laboral" (clima.html, una landing con 2 tarjetas propias --
+"Test" y "Informes", ver mas abajo), "Entrevista de Salida" (entrevistas.html),
 "Reclutamiento" (compartidos.html, visible para cualquiera, no depende de modulo), "Boletines"
 (boletines.html), "Test" (tests.html), "Perfil DISC" (disc_form.html), y "SAONA" (si tiene algun
 modulo saona_* o es admin). IMPORTANTE: "Informes" y "Entrevista de Salida" son DOS TARJETAS
@@ -45,6 +46,11 @@ por tienda/mes), Valoracion media por tienda.
 
 ## Test (tests.html) -- encuestas propias con enlace publico
 
+IMPORTANTE: aqui NUNCA aparecen tests de Clima Laboral (ni para crear ni para editar) -- esos viven
+solo en Clima Laboral > Test (clima-tests.html), a proposito, para que la misma oleada no se pueda
+tocar desde dos sitios distintos. Si alguien pregunta como crear un test de Clima Laboral, la
+respuesta es siempre clima.html > "Test", nunca tests.html.
+
 "Nuevo test" crea uno. En el editor: Titulo, a que informe/Entrevista de Salida alimenta (opcional,
 para que las respuestas puntuen ese informe), color, y el campo "Enlace publico"
 (https://.../encuesta.html?slug=CODIGO) que se COPIA A MANO para compartir -- no hay envio por email
@@ -61,15 +67,33 @@ corto". Alternativa: "Rellenar el test manualmente (RRHH)" -- alguien de RRHH lo
 con "Atras" / "Siguiente" y "Guardar resultado" al final. El resultado (tipo D/I/S/C + grafica) tiene
 boton "Exportar PDF". Pestana "Historico": tabla con todos los resultados guardados.
 
-## Clima Laboral (clima.html) y Entrevista de Salida (entrevistas.html)
+## Clima Laboral (clima.html, clima-tests.html, clima-informes.html)
 
-Mismo patron en ambos. Selector "Oleada" arriba. Para cargar datos: "Importar Excel" (Clima necesita
-una hoja llamada "Respuestas"; Entrevista de Salida necesita la hoja de salidas). El checkbox "Nuevo
-Registro" decide si esa importacion abre una OLEADA NUEVA (marcado) o se SUMA a la ultima oleada
-existente de esa empresa (sin marcar). Para sacar el informe en PDF: boton "Exportar PDF" (aparece
-solo cuando ya hay datos cargados). Los graficos tienen boton "PNG" para descargarlos como imagen.
+clima.html es solo una landing: el logo "La Voz Krispy Kreme" y dos tarjetas, "Test" e "Informes" --
+no tiene selector de oleada ni datos, solo lleva a una de las otras dos paginas.
 
-En Entrevista de Salida ademas: "Cobertura por periodo" muestra quien debio responder y quien
+"Test" (clima-tests.html) es el editor de Tests (mismo tests.js que tests.html) pero SOLO enseña y
+permite crear tests cuyo destino sea una oleada de Clima Laboral -- el desplegable de destino ahi
+tampoco ofrece Informes ni Entrevista de Salida, solo oleadas de Clima Laboral (Encuesta completa o
+Pulso) existentes o "+ Nueva". Un enlace "Clima Laboral" arriba vuelve a la landing.
+
+"Informes" (clima-informes.html) es el dashboard de resultados: selector "Oleada" arriba, boton
+"Importar Excel" (hoja llamada "Respuestas") con el checkbox "Nuevo Registro" (decide si esa
+importacion abre una OLEADA NUEVA marcado, o se SUMA a la ultima oleada existente de esa empresa sin
+marcar), boton "Exportar PDF" (aparece solo cuando ya hay datos cargados) y botones "PNG" en cada
+grafico para descargarlo como imagen. La satisfaccion del cliente (comparada con Resenas) solo se
+muestra en oleadas de fase "Encuesta completa" -- en Pulso y en fabricas no aplica (no hay con que
+comparar, o no tienen clientes propios) y no aparece.
+
+## Entrevista de Salida (entrevistas.html)
+
+Selector "Oleada" arriba. Para cargar datos: "Importar Excel" (hoja con los datos de salidas). El
+checkbox "Nuevo Registro" decide si esa importacion abre una OLEADA NUEVA (marcado) o se SUMA a la
+ultima oleada existente de esa empresa (sin marcar). Para sacar el informe en PDF: boton "Exportar
+PDF" (aparece solo cuando ya hay datos cargados). Los graficos tienen boton "PNG" para descargarlos
+como imagen.
+
+Ademas: "Cobertura por periodo" muestra quien debio responder y quien
 respondio, con dos auditorias desplegables -- la de "salidas sin respuesta" tiene, por persona, un
 boton "email"/"sin email" para editar el correo y un boton de papelera para eliminar el registro;
 arriba de la lista, el boton "Enviar Recordatorio" NO manda nada desde el servidor: arma un correo

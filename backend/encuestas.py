@@ -12,6 +12,7 @@ import os
 import re
 from zoneinfo import ZoneInfo
 
+import clima as clima_module
 import entrevistas as entrevistas_module
 import informes as informes_module
 import reclutamiento as reclutamiento_module
@@ -25,6 +26,18 @@ LIKERT_OPCIONES = [
     "Totalmente en desacuerdo", "En desacuerdo", "Ni de acuerdo ni en desacuerdo",
     "De acuerdo", "Totalmente de acuerdo",
 ]
+
+# El módulo de Test guarda el PUNTO (1-5) de una pregunta de escala, no el
+# texto de la leyenda (igual que ya asume _likert_points_strict en
+# scoring_valores.py) -- pero Clima Laboral (clima.py) espera el texto tal
+# cual lo trae un Excel de Forms. Se traduce aquí, SOLO para lo que se
+# manda a clima_module.ingest_respuesta_directa (ver guardar_respuesta),
+# nunca dentro de clima.py: esa función recalcula en caliente TODAS las
+# oleadas -- incluidas las importadas por Excel hace tiempo -- cada vez que
+# se abre un informe, así que traducir números ahí tendría efecto
+# retroactivo sobre informes ya entregados si algún dato histórico tuviera
+# por casualidad un valor numérico suelto.
+LIKERT_TEXTO_POR_PUNTO = {"1": LIKERT_OPCIONES[0], "2": LIKERT_OPCIONES[1], "3": LIKERT_OPCIONES[2], "4": LIKERT_OPCIONES[3], "5": LIKERT_OPCIONES[4]}
 
 
 def ensure_encuestas_tables():
@@ -55,6 +68,51 @@ def ensure_encuestas_tables():
         # recordatorios en vez del "enlace público" largo — puramente
         # informativo, el backend no lo usa para resolver la encuesta.
         conn.execute("ALTER TABLE encuestas ADD COLUMN enlace_corto TEXT")
+    if "mensaje_no_apto" not in cols_encuestas:
+        # Mensaje alternativo mostrado en vez de mensaje_final cuando la
+        # respuesta recién enviada resulta "No apto" (ver guardar_respuesta)
+        # -- editable en Ajustes igual que mensaje_final, con un texto
+        # sugerido por defecto para no dejarlo vacío en los tests ya creados.
+        conn.execute(
+            "ALTER TABLE encuestas ADD COLUMN mensaje_no_apto TEXT NOT NULL DEFAULT "
+            "'Gracias por contestar nuestro test. En esta ocasión no has superado el proceso, pero te deseamos mucha suerte.'"
+        )
+    if "evitar_duplicados" not in cols_encuestas:
+        # Casilla en Ajustes de cada test: si está activa, guardar_respuesta
+        # rechaza una respuesta nueva cuando coincide con una anterior de la
+        # MISMA encuesta por IP, nombre completo, teléfono o email (ver
+        # _es_respuesta_duplicada) -- pensado para que la misma persona no
+        # pueda responder dos veces. Por defecto desactivada (0), para no
+        # cambiar el comportamiento de los tests ya existentes.
+        conn.execute("ALTER TABLE encuestas ADD COLUMN evitar_duplicados INTEGER NOT NULL DEFAULT 0")
+    if "usar_mensaje_no_apto" not in cols_encuestas:
+        # Interruptor en Ajustes: el concepto de "No apto" (por puntuación de
+        # scoring_valores o por una opción marcada como descalificatoria)
+        # solo tiene sentido en tests que SE EVALÚAN -- para Entrevista de
+        # Salida o Clima Laboral, que son solo respuestas sin resultado
+        # apto/no apto, mostrar y usar ese mensaje no encaja. Default 1
+        # (activado) para no cambiar el comportamiento de los tests ya
+        # existentes, que ya cuentan con este mensaje configurado.
+        conn.execute("ALTER TABLE encuestas ADD COLUMN usar_mensaje_no_apto INTEGER NOT NULL DEFAULT 1")
+    if "fecha_cierre" not in cols_encuestas:
+        # Fecha de caducidad (opcional): el test deja de estar disponible
+        # automáticamente al llegar esta fecha, a las 23:59 hora de Madrid
+        # (ver _vencido) -- sin tener que acordarse de pulsar "Despublicar".
+        # NO se pisa el campo "estado" al vencer: si luego se alarga la
+        # fecha, el test vuelve a estar disponible solo con cambiar la
+        # fecha, sin tener que volver a publicarlo a mano.
+        conn.execute("ALTER TABLE encuestas ADD COLUMN fecha_cierre TEXT")
+    if "clima_oleada_id" not in cols_encuestas:
+        # Tercer destino posible (mutuamente excluyente con tipo_informe_clave
+        # y tipo_entrevista_empresa, mismo motivo que ese comentario): un test
+        # de Clima Laboral alimenta directamente una oleada del módulo
+        # dedicado (backend/clima.py), reemplazando el paso de exportar de
+        # Microsoft Forms y subir el Excel a mano -- ver guardar_respuesta.
+        # A diferencia de los otros dos destinos (una clave fija por
+        # categoría/empresa), aquí se guarda el id de una oleada concreta
+        # porque cada fase de Clima (encuesta completa, pulso...) es su
+        # propia oleada con su propia plantilla de empleados esperados.
+        conn.execute("ALTER TABLE encuestas ADD COLUMN clima_oleada_id INTEGER REFERENCES clima_oleadas(id)")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS encuesta_paginas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,6 +164,18 @@ def ensure_encuestas_tables():
     if "migrada_opcion_simple" not in cols_preguntas:
         conn.execute("ALTER TABLE encuesta_preguntas ADD COLUMN migrada_opcion_simple INTEGER NOT NULL DEFAULT 0")
         conn.execute("UPDATE encuesta_preguntas SET tipo = 'opcion_simple' WHERE tipo = 'opcion_multiple'")
+    # opciones_descarta_json: lista de booleanos en paralelo a opciones_json
+    # (misma posición = misma opción) -- marca qué opciones de una pregunta
+    # de opción simple descalifican al candidato. Solo tiene sentido en
+    # "opcion_simple" (ver condicionEditorHTML en tests.js, que restringe
+    # igual las preguntas usables para ramificar). Si quien responde elige
+    # una opción marcada así, guardar_respuesta() fuerza RESULTADO = "No
+    # apto" en la fila de Informes que genera esa respuesta -- así entra en
+    # el mismo filtro "Excluir/Solo no aptos" que ya existía para las
+    # respuestas puntuadas por scoring_valores, sin tener que duplicar esa
+    # lógica de filtro.
+    if "opciones_descarta_json" not in cols_preguntas:
+        conn.execute("ALTER TABLE encuesta_preguntas ADD COLUMN opciones_descarta_json TEXT")
     # Sin fila_hash/dedup a propósito: cada persona real puede responder una
     # sola vez desde el propio flujo (no hay reenvío), y a diferencia de
     # Informes esto no se alimenta por Excel donde sí hace falta deduplicar
@@ -160,9 +230,59 @@ def ensure_encuestas_tables():
             ultima_actividad TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # ip: cada apertura del enlace genera un token nuevo (ver comentario de
+    # arriba), así que la misma persona recargando la página o volviendo a
+    # abrir el enlace varias veces contaba como varias "aperturas" distintas
+    # en el embudo. Con la ip guardada, get_embudo() puede agrupar por
+    # persona (misma idea que _es_respuesta_duplicada en guardar_respuesta)
+    # en vez de por sesión suelta.
+    cols_sesiones = {row[1] for row in conn.execute("PRAGMA table_info(encuesta_sesiones)")}
+    if "ip" not in cols_sesiones:
+        conn.execute("ALTER TABLE encuesta_sesiones ADD COLUMN ip TEXT")
+    _deduplicar_sesiones_repetidas(conn)
     conn.commit()
     conn.close()
     os.makedirs(FONDOS_DIR, exist_ok=True)
+
+
+def _deduplicar_sesiones_repetidas(conn):
+    """get_embudo() ya agrupa por ip al contar (ver ahí), pero la tabla en
+    sí puede seguir teniendo varias filas para la misma persona (recargó la
+    página, volvió a abrir el enlace...) de antes de ese cambio. Se
+    fusionan aquí una sola vez: por cada (encuesta_id, ip) con más de una
+    fila, se queda la más antigua (menor id) con la página más lejana
+    alcanzada por cualquiera de ellas y marcada como completada si
+    CUALQUIERA llegó a enviarse, y se borran las demás. Idempotente (tras
+    la primera pasada ya no queda ningún grupo con más de una fila). No
+    toca las filas sin ip (de antes de que existiera esa columna): esas
+    siguen contando cada una por separado, igual que en get_embudo()."""
+    grupos = conn.execute("""
+        SELECT encuesta_id, ip FROM encuesta_sesiones
+        WHERE ip IS NOT NULL AND ip != ''
+        GROUP BY encuesta_id, ip
+        HAVING COUNT(*) > 1
+    """).fetchall()
+    for grupo in grupos:
+        filas = conn.execute("""
+            SELECT id, pagina_maxima, completado, iniciado_en, ultima_actividad
+            FROM encuesta_sesiones WHERE encuesta_id = ? AND ip = ? ORDER BY id
+        """, (grupo["encuesta_id"], grupo["ip"])).fetchall()
+        superviviente = filas[0]["id"]
+        conn.execute("""
+            UPDATE encuesta_sesiones
+            SET pagina_maxima = ?, completado = ?, iniciado_en = ?, ultima_actividad = ?
+            WHERE id = ?
+        """, (
+            max(f["pagina_maxima"] for f in filas),
+            max(f["completado"] for f in filas),
+            min(f["iniciado_en"] for f in filas),
+            max(f["ultima_actividad"] for f in filas),
+            superviviente,
+        ))
+        conn.executemany(
+            "DELETE FROM encuesta_sesiones WHERE id = ?",
+            [(f["id"],) for f in filas if f["id"] != superviviente],
+        )
 
 
 # Igual que EN_LINEA_MINUTOS en auth.py (usuarios internos) — aquí es cuánto
@@ -173,19 +293,19 @@ def ensure_encuestas_tables():
 EN_VIVO_MINUTOS = 2
 
 
-def registrar_sesion(identificador, token, pagina):
+def registrar_sesion(identificador, token, pagina, ip=None):
     conn = get_connection()
     row = _fila_por_slug_o_codigo(conn, identificador)
     if not row:
         conn.close()
         return
     conn.execute("""
-        INSERT INTO encuesta_sesiones (encuesta_id, token, pagina_maxima)
-        VALUES (?, ?, ?)
+        INSERT INTO encuesta_sesiones (encuesta_id, token, pagina_maxima, ip)
+        VALUES (?, ?, ?, ?)
         ON CONFLICT(token) DO UPDATE SET
             pagina_maxima = MAX(pagina_maxima, excluded.pagina_maxima),
             ultima_actividad = datetime('now')
-    """, (row["id"], token, pagina))
+    """, (row["id"], token, pagina, ip))
     conn.commit()
     conn.close()
 
@@ -240,26 +360,37 @@ def borrar_sesiones(encuesta_id):
 
 
 def get_embudo(encuesta_id):
-    """Aperturas vs completados y, página a página, cuántas sesiones
+    """Aperturas vs completados y, página a página, cuántas personas
     llegaron al menos hasta ahí — para ver dónde se cae la gente en un test
-    largo, no solo cuántos lo acaban."""
+    largo, no solo cuántos lo acaban.
+
+    Cada apertura del enlace genera un token de sesión nuevo (ver
+    ensure_encuestas_tables), así que la misma persona recargando la página
+    o volviendo a abrir el enlace varias veces generaría varias filas en
+    encuesta_sesiones. Para no contarla varias veces, se agrupa por ip en
+    vez de por fila -- si dos sesiones comparten ip se tratan como la misma
+    persona (se queda con la página más lejana a la que llegó, y cuenta
+    como completada si CUALQUIERA de sus sesiones se completó). Las
+    sesiones sin ip (registradas antes de que existiera esta columna) se
+    cuentan cada una por separado, con COALESCE(ip, 'sesion:'||id), para no
+    fusionarlas entre sí por error."""
     conn = get_connection()
     total_paginas = conn.execute(
         "SELECT COUNT(*) FROM encuesta_paginas WHERE encuesta_id = ?", (encuesta_id,)
     ).fetchone()[0]
-    aperturas = conn.execute(
-        "SELECT COUNT(*) FROM encuesta_sesiones WHERE encuesta_id = ?", (encuesta_id,)
-    ).fetchone()[0]
-    completados = conn.execute(
-        "SELECT COUNT(*) FROM encuesta_sesiones WHERE encuesta_id = ? AND completado = 1", (encuesta_id,)
-    ).fetchone()[0]
+    personas = conn.execute("""
+        SELECT COALESCE(ip, 'sesion:' || id) AS persona,
+               MAX(pagina_maxima) AS pagina_maxima,
+               MAX(completado) AS completado
+        FROM encuesta_sesiones WHERE encuesta_id = ?
+        GROUP BY persona
+    """, (encuesta_id,)).fetchall()
+    aperturas = len(personas)
+    completados = sum(1 for p in personas if p["completado"])
     por_pagina = []
     if aperturas:
         for pagina in range(1, total_paginas + 1):
-            n = conn.execute(
-                "SELECT COUNT(*) FROM encuesta_sesiones WHERE encuesta_id = ? AND pagina_maxima >= ?",
-                (encuesta_id, pagina),
-            ).fetchone()[0]
+            n = sum(1 for p in personas if p["pagina_maxima"] >= pagina)
             por_pagina.append({"pagina": pagina, "llegaron": n})
     conn.close()
     return {"aperturas": aperturas, "completados": completados, "total_paginas": total_paginas, "por_pagina": por_pagina}
@@ -320,9 +451,27 @@ def _generar_slug_unico(conn, titulo, excluir_id=None):
     return slug
 
 
+def _vencido(fecha_cierre):
+    """True si la fecha de caducidad (YYYY-MM-DD) ya pasó -- disponible
+    hasta las 23:59:59 de ese día, hora de Madrid (mismo huso que "Fecha
+    del test" en guardar_respuesta, para que caducidad y fecha del test
+    hablen del mismo día para quien lo administra)."""
+    if not fecha_cierre:
+        return False
+    try:
+        limite = datetime.datetime.strptime(fecha_cierre, "%Y-%m-%d").replace(
+            hour=23, minute=59, second=59, tzinfo=ZoneInfo("Europe/Madrid")
+        )
+    except ValueError:
+        return False
+    return datetime.datetime.now(ZoneInfo("Europe/Madrid")) > limite
+
+
 def _row_encuesta(r):
     d = dict(r)
     d["tiene_fondo"] = d.pop("fondo_ruta", None) is not None
+    d["evitar_duplicados"] = bool(d["evitar_duplicados"])
+    d["vencido"] = _vencido(d.get("fecha_cierre"))
     return d
 
 
@@ -364,6 +513,7 @@ def _fetch_estructura(conn, encuesta_id):
         for q in preguntas:
             qd = dict(q)
             qd["opciones"] = json.loads(qd.pop("opciones_json") or "[]")
+            qd["opciones_descarta"] = json.loads(qd.pop("opciones_descarta_json") or "[]")
             qd["obligatoria"] = bool(qd["obligatoria"])
             qd["mostrar_dashboard"] = bool(qd["mostrar_dashboard"])
             preguntas_dict.append(qd)
@@ -403,7 +553,7 @@ def get_encuesta_publica(identificador):
     al candidato)."""
     conn = get_connection()
     row = _fila_por_slug_o_codigo(conn, identificador)
-    if not row or row["estado"] != "abierta":
+    if not row or row["estado"] != "abierta" or _vencido(row["fecha_cierre"]):
         conn.close()
         return None
     encuesta = _row_encuesta(row)
@@ -411,6 +561,7 @@ def get_encuesta_publica(identificador):
     conn.close()
     encuesta.pop("tipo_informe_clave", None)
     encuesta.pop("tipo_entrevista_empresa", None)
+    encuesta.pop("clima_oleada_id", None)
     return encuesta
 
 
@@ -426,13 +577,17 @@ def create_encuesta(titulo):
     return encuesta_id
 
 
-def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None):
+def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None, evitar_duplicados=False, mensaje_no_apto=None, clima_oleada_id=None, usar_mensaje_no_apto=True, fecha_cierre=None):
     conn = get_connection()
     conn.execute(
         "UPDATE encuestas SET titulo = ?, mensaje_final = ?, color_boton = ?, tipo_informe_clave = ?, "
-        "tipo_entrevista_empresa = ?, enlace_corto = ? WHERE id = ?",
+        "tipo_entrevista_empresa = ?, enlace_corto = ?, evitar_duplicados = ?, mensaje_no_apto = ?, "
+        "clima_oleada_id = ?, usar_mensaje_no_apto = ?, fecha_cierre = ? WHERE id = ?",
         (titulo.strip(), mensaje_final.strip(), color_boton.strip(), tipo_informe_clave or None,
-         tipo_entrevista_empresa or None, (enlace_corto or "").strip() or None, encuesta_id),
+         tipo_entrevista_empresa or None, (enlace_corto or "").strip() or None,
+         1 if evitar_duplicados else 0, (mensaje_no_apto or "").strip() or mensaje_final.strip(),
+         clima_oleada_id or None, 1 if usar_mensaje_no_apto else 0, (fecha_cierre or "").strip() or None,
+         encuesta_id),
     )
     conn.commit()
     conn.close()
@@ -545,7 +700,7 @@ def mover_pagina(pagina_id, direccion):
     conn.close()
 
 
-def add_pregunta(pagina_id, tipo, etiqueta, obligatoria=True, opciones=None, mostrar_dashboard=False):
+def add_pregunta(pagina_id, tipo, etiqueta, obligatoria=True, opciones=None, mostrar_dashboard=False, opciones_descarta=None):
     if tipo not in TIPOS_PREGUNTA:
         raise ValueError(f"Tipo de pregunta desconocido: {tipo}")
     conn = get_connection()
@@ -553,10 +708,11 @@ def add_pregunta(pagina_id, tipo, etiqueta, obligatoria=True, opciones=None, mos
         "SELECT COALESCE(MAX(orden), 0) + 1 FROM encuesta_preguntas WHERE pagina_id = ?", (pagina_id,)
     ).fetchone()[0]
     cur = conn.execute(
-        "INSERT INTO encuesta_preguntas (pagina_id, orden, tipo, etiqueta, obligatoria, opciones_json, mostrar_dashboard) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO encuesta_preguntas (pagina_id, orden, tipo, etiqueta, obligatoria, opciones_json, mostrar_dashboard, opciones_descarta_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (pagina_id, orden, tipo, etiqueta.strip(), 1 if obligatoria else 0,
-         json.dumps(opciones or [], ensure_ascii=False), 1 if mostrar_dashboard else 0),
+         json.dumps(opciones or [], ensure_ascii=False), 1 if mostrar_dashboard else 0,
+         json.dumps(opciones_descarta or [], ensure_ascii=False)),
     )
     pregunta_id = cur.lastrowid
     conn.commit()
@@ -564,12 +720,85 @@ def add_pregunta(pagina_id, tipo, etiqueta, obligatoria=True, opciones=None, mos
     return pregunta_id
 
 
-def update_pregunta(pregunta_id, etiqueta, obligatoria, opciones=None, mostrar_dashboard=False):
+# Cuestionario real de "Clima Laboral — Encuesta completa" (Krispy Kreme):
+# centro de trabajo + 25 preguntas de escala en 5 secciones (5+5+5+4+6) + 2
+# abiertas, mismo texto y orden que el PDF que se usaba en Microsoft Forms.
+# Cada pregunta se etiqueta "Sección.Pregunta" -- mismo formato que ya
+# reconoce clima._column_roles() para los Excel de Forms, así que Clima
+# Laboral categoriza bien "Resultados de Engagement" (primera sección) vs
+# "Impulsores de Engagement" (el resto) sin ningún cambio en ese lado.
+CLIMA_CENTROS = ["ParqueSur Tienda", "ParqueSur Fábrica", "Princesa", "Caleido", "La Gavia", "Gran Plaza 2", "Oficinas"]
+CLIMA_SECCIONES = [
+    ("Satisfacción y compromiso", [
+        "Estoy contento/a con mi trabajo en Krispy Kreme",
+        "Recomendaría Krispy Kreme como un gran lugar para trabajar",
+        "Espero seguir trabajando en Krispy Kreme en los próximos seis meses",
+        "Me siento personalmente comprometido a ayudar a Krispy Kreme a alcanzar el éxito",
+        "Me siento lleno de energía cuando hago mi trabajo",
+    ]),
+    ("Desarrollo y apoyo al desempeño", [
+        "Tengo oportunidades de aprender y crecer en mi trabajo",
+        "Recibo la capacitación que necesito para hacer bien mi trabajo",
+        "Mi gerente valora mis opiniones y comentarios",
+        "Mi gerente me brinda comentarios oportunos que ayudan a mejorar mi desempeño",
+        "Tengo oportunidades constantes de utilizar mis fortalezas en el trabajo",
+    ]),
+    ("Recursos y reconocimiento", [
+        "Recibo la información que necesito para tener un buen desempeño",
+        "Recibo reconocimiento por el trabajo que hago",
+        "Confío en los otros miembros del equipo de mi tienda/fábrica/oficina",
+        "Considero que mi trabajo es gratificante",
+        "Mis compañeros de trabajo están comprometidos a brindar una gran experiencia a nuestros clientes",
+    ]),
+    ("Liderazgo y cultura de equipo", [
+        "Mi gerente está comprometido a brindar una gran experiencia a cada cliente",
+        "Recomendaría a otras personas a trabajar para mi gerente",
+        "El equipo gerencial habla a menudo con nuestro equipo sobre los comentarios de los clientes",
+        "Mi gerente se preocupa por mí",
+    ]),
+    ("Bienestar, condiciones y pertenencia", [
+        "En mi tienda, todos se tratan con respeto",
+        "Siento que estoy trabajando en un lugar seguro",
+        "Considero mi retribución competitiva en comparación con el mercado",
+        "Tengo un equilibrio adecuado entre el trabajo y la vida personal",
+        "Me siento identificado con los valores de Krispy Kreme",
+        "Me siento orgulloso de trabajar en Krispy Kreme",
+    ]),
+]
+CLIMA_ABIERTAS = [
+    "¿Qué es lo que más te gusta de trabajar con nosotros?",
+    "¿Qué consideras que podemos mejorar?",
+]
+
+
+def crear_plantilla_clima_encuesta_completa(encuesta_id):
+    """Rellena un test recién creado (y todavía vacío) con la Encuesta
+    completa estándar de Clima Laboral -- para "+ Nueva Encuesta completa de
+    Clima Laboral" en el editor de Test (ver tests.js): en vez de partir de
+    un test en blanco, ya queda con las 26 preguntas reales listas para
+    revisar/editar antes de publicar. No se usa para "+ Nuevo Pulso" (un
+    pulso normalmente lleva un subconjunto más corto, decidido caso a
+    caso -- ver conversación con el usuario)."""
+    pagina_centro = add_pagina(encuesta_id, "")
+    add_pregunta(
+        pagina_centro, "opcion_simple", "¿Cuál es tu centro de trabajo?", True,
+        CLIMA_CENTROS, False, [False] * len(CLIMA_CENTROS),
+    )
+    for nombre_seccion, preguntas in CLIMA_SECCIONES:
+        pagina_id = add_pagina(encuesta_id, "")
+        for pregunta in preguntas:
+            add_pregunta(pagina_id, "likert", f"{nombre_seccion}.{pregunta}", True, LIKERT_OPCIONES, False)
+    pagina_abiertas = add_pagina(encuesta_id, "")
+    for pregunta in CLIMA_ABIERTAS:
+        add_pregunta(pagina_abiertas, "abierta", pregunta, True)
+
+
+def update_pregunta(pregunta_id, etiqueta, obligatoria, opciones=None, mostrar_dashboard=False, opciones_descarta=None):
     conn = get_connection()
     conn.execute(
-        "UPDATE encuesta_preguntas SET etiqueta = ?, obligatoria = ?, opciones_json = ?, mostrar_dashboard = ? WHERE id = ?",
+        "UPDATE encuesta_preguntas SET etiqueta = ?, obligatoria = ?, opciones_json = ?, mostrar_dashboard = ?, opciones_descarta_json = ? WHERE id = ?",
         (etiqueta.strip(), 1 if obligatoria else 0, json.dumps(opciones or [], ensure_ascii=False),
-         1 if mostrar_dashboard else 0, pregunta_id),
+         1 if mostrar_dashboard else 0, json.dumps(opciones_descarta or [], ensure_ascii=False), pregunta_id),
     )
     conn.commit()
     conn.close()
@@ -652,6 +881,41 @@ def _detectar_dispositivo(user_agent):
     return "Desconocido"
 
 
+def _normalizar_telefono(v):
+    return re.sub(r"\D", "", v or "")
+
+
+def _es_respuesta_duplicada(conn, encuesta_id, ip, campos_contacto):
+    """Compara esta respuesta contra TODAS las anteriores de la misma
+    encuesta por IP, nombre completo, teléfono o email -- suelen ser datos
+    únicos por persona, así que coincidir en cualquiera de ellos es buena
+    señal de que es la MISMA persona respondiendo otra vez. Solo se llama
+    si el test tiene la casilla "evitar_duplicados" activada (ver Ajustes
+    en tests.js)."""
+    nombre = (campos_contacto.get("nombre_completo") or "").strip().lower()
+    telefono = _normalizar_telefono(campos_contacto.get("telefono"))
+    email = (campos_contacto.get("email") or "").strip().lower()
+    if not (nombre or telefono or email or ip):
+        return False
+    filas = conn.execute(
+        "SELECT ip, datos_json FROM encuesta_respuestas WHERE encuesta_id = ?", (encuesta_id,)
+    ).fetchall()
+    for fila in filas:
+        if ip and fila["ip"] == ip:
+            return True
+        campos_previos, _ = reclutamiento_module.mapear_datos_a_candidato(json.loads(fila["datos_json"]))
+        nombre_previo = (campos_previos.get("nombre_completo") or "").strip().lower()
+        telefono_previo = _normalizar_telefono(campos_previos.get("telefono"))
+        email_previo = (campos_previos.get("email") or "").strip().lower()
+        if nombre and nombre == nombre_previo:
+            return True
+        if telefono and telefono == telefono_previo:
+            return True
+        if email and email == email_previo:
+            return True
+    return False
+
+
 def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, token=None):
     """respuestas_por_pregunta: {pregunta_id (str o int): valor}. Se guarda
     tal cual (por id) para la vista de administración, y además se arma un
@@ -661,20 +925,39 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
     su enunciado, igual que en el Excel de Forms)."""
     conn = get_connection()
     row = _fila_por_slug_o_codigo(conn, identificador)
-    if not row or row["estado"] != "abierta":
+    if not row or row["estado"] != "abierta" or _vencido(row["fecha_cierre"]):
         conn.close()
         raise ValueError("Esta encuesta no está abierta actualmente")
     encuesta_id = row["id"]
     tipo_informe_clave = row["tipo_informe_clave"]
 
     preguntas = conn.execute("""
-        SELECT eq.id, eq.etiqueta, eq.mostrar_dashboard FROM encuesta_preguntas eq
+        SELECT eq.id, eq.etiqueta, eq.mostrar_dashboard, eq.tipo, eq.opciones_json, eq.opciones_descarta_json
+        FROM encuesta_preguntas eq
         JOIN encuesta_paginas ep ON ep.id = eq.pagina_id
         WHERE ep.encuesta_id = ?
         ORDER BY ep.orden, eq.orden
     """, (encuesta_id,)).fetchall()
     etiqueta_por_id = {str(p["id"]): p["etiqueta"] for p in preguntas}
     mostrar_dashboard_por_id = {str(p["id"]): bool(p["mostrar_dashboard"]) for p in preguntas}
+
+    # ¿Alguna respuesta eligió una opción marcada como descalificatoria? Solo
+    # se mira en preguntas de opción simple (ver opciones_descarta_json) --
+    # si es así, la fila que esto genere en Informes se fuerza a "No apto"
+    # más abajo, sin importar lo que calcule scoring_valores.
+    es_no_apto = False
+    for pid, valor in respuestas_por_pregunta.items():
+        pid = str(pid)
+        pregunta = next((p for p in preguntas if str(p["id"]) == pid), None)
+        if not pregunta or pregunta["tipo"] != "opcion_simple":
+            continue
+        opciones = json.loads(pregunta["opciones_json"] or "[]")
+        descarta = json.loads(pregunta["opciones_descarta_json"] or "[]")
+        if valor in opciones:
+            idx = opciones.index(valor)
+            if idx < len(descarta) and descarta[idx]:
+                es_no_apto = True
+                break
 
     # Dos preguntas pueden compartir el mismo enunciado a propósito (p.ej. la
     # misma pregunta de "Ordena las siguientes afirmaciones..." repetida en
@@ -688,6 +971,7 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
     # a Scoring/Dashboard para verlas de un vistazo (ver
     # scoring_valores.calcular()).
     fila_por_etiqueta = {}
+    clave_a_pid = {}
     columnas_extra = set()
     for pid, etiqueta in etiqueta_por_id.items():
         if pid not in respuestas_por_pregunta:
@@ -699,8 +983,27 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
             clave = f"{etiqueta} ({sufijo})"
             sufijo += 1
         fila_por_etiqueta[clave] = valor
+        clave_a_pid[clave] = pid
         if mostrar_dashboard_por_id[pid]:
             columnas_extra.add(clave)
+
+    if row["evitar_duplicados"]:
+        campos_contacto, _ = reclutamiento_module.mapear_datos_a_candidato(fila_por_etiqueta)
+        if _es_respuesta_duplicada(conn, encuesta_id, ip, campos_contacto):
+            conn.close()
+            raise ValueError("Ya has respondido este test anteriormente. Si crees que es un error, contacta con quien te lo compartió.")
+
+    # Se valida ANTES de insertar (a diferencia de Informes/Entrevista de
+    # Salida, que se resuelven después): si falta la pregunta de centro de
+    # trabajo, mejor rechazar el envío con un error claro que aceptarlo y
+    # perder en silencio la única forma de que esta respuesta anónima cuente
+    # para su tienda en Clima Laboral.
+    centro_clima = None
+    if row["clima_oleada_id"]:
+        centro_clima = clima_module.detectar_centro(fila_por_etiqueta)
+        if not centro_clima:
+            conn.close()
+            raise ValueError('Falta la pregunta "¿Cuál es tu centro de trabajo?" en este test -- contacta con quien lo configuró.')
 
     dispositivo = _detectar_dispositivo(user_agent)
     cur = conn.execute(
@@ -735,6 +1038,21 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
             )
             conn2.commit()
             conn2.close()
+            if es_no_apto:
+                # Se fuerza DESPUÉS de ingest_fila_directa (que puede haber
+                # calculado su propio RESULTADO vía scoring_valores si la
+                # pregunta encajaba con el cuestionario de Valores y
+                # Competencias) para que la respuesta descalificatoria gane
+                # siempre, sin importar el score.
+                informes_module.forzar_no_apto(enlace["respuesta_id"])
+            else:
+                # scoring_valores puede haber calculado "No apto" por su
+                # cuenta (cuestionario de Valores y Competencias) sin que
+                # ninguna opción estuviera marcada como descalificatoria --
+                # también cuenta para decidir qué mensaje mostrar.
+                resp_final = informes_module.get_respuesta(enlace["respuesta_id"])
+                if resp_final and "No apto" in (json.loads(resp_final["datos_json"]).get("RESULTADO") or ""):
+                    es_no_apto = True
             # Si quien acaba de responder ya está en la base de Reclutamiento
             # (creado a mano, por CV, o desde una vacante) pero todavía sin
             # test enlazado, se conecta automáticamente con esta respuesta en
@@ -750,9 +1068,28 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
         entrevistas_module.ingest_fila_directa(
             row["tipo_entrevista_empresa"], fila_por_etiqueta, origen=f"Test web: {row['titulo']}"
         )
+    if row["clima_oleada_id"]:
+        # centro_clima ya se validó arriba, antes de insertar. Clima Laboral
+        # es completamente anónimo: fila_por_etiqueta se reenvía tal cual
+        # (solo el centro y las respuestas de escala/abiertas) igual que si
+        # viniera del Excel de Forms -- un test de Clima real no tiene
+        # pregunta de nombre/teléfono/email que reenviar. Las preguntas de
+        # tipo "likert" sí se traducen de punto (1-5) a texto de leyenda
+        # antes de mandarlas (ver LIKERT_TEXTO_POR_PUNTO) -- clima.py espera
+        # el texto tal cual trae un Excel de Forms, no el punto crudo. Se
+        # identifica la pregunta por id (clave_a_pid), no por su texto, para
+        # que dos preguntas de escala con el mismo enunciado (posible si se
+        # repite la misma frase en dos páginas) no se confundan entre sí.
+        tipo_por_id = {str(p["id"]): p["tipo"] for p in preguntas}
+        fila_para_clima = {
+            clave: (LIKERT_TEXTO_POR_PUNTO.get(str(valor), valor) if tipo_por_id.get(clave_a_pid[clave]) == "likert" else valor)
+            for clave, valor in fila_por_etiqueta.items()
+        }
+        clima_module.ingest_respuesta_directa(row["clima_oleada_id"], centro_clima, fila_para_clima)
 
     marcar_sesion_completada(token)
-    return {"ok": True}
+    mostrar_no_apto = es_no_apto and bool(row["usar_mensaje_no_apto"])
+    return {"ok": True, "mensaje": row["mensaje_no_apto"] if mostrar_no_apto else row["mensaje_final"]}
 
 
 def list_respuestas(encuesta_id):

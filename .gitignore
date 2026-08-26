@@ -13,6 +13,17 @@ uploads/
 *.pid
 
 *.db
+*.db-shm
+*.db-wal
 backups/
 scraper/reconciliacion_*.csv
 .aider*
+
+# Documentos/recursos sueltos (PDFs, Excel, logos, datos de Takeout) — no
+# son código, no van al repo. Ver ESTADO_PROYECTO.md.
+_recursos/
+scratchpad_test_estado.png
+
+# Copia local temporal usada para migrar fotos/CVs de candidatos entre
+# cuentas de Railway (24/08/2026, ver ESTADO_PROYECTO.md) -- no es código.
+fotos-candidatos-backup/

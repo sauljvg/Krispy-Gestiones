@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 import auth as auth_module
 import clima as clima_module
@@ -7,6 +8,16 @@ from auth_routes import get_current_user
 from clima_pdf import generar_pdf
 
 router = APIRouter()
+
+
+class NuevaOleadaBody(BaseModel):
+    etiqueta: str
+    empresa: str = "kk"
+    fase: str = "completa"
+
+
+class PlantillaBody(BaseModel):
+    plantilla: dict[str, int]
 
 
 def _modulo_para_empresa(empresa: str) -> str:
@@ -41,6 +52,53 @@ def list_centros_conocidos_route(_user: dict = Depends(require_clima)):
     tipos-informe, ver informes_routes.py) — no depende de una oleada
     concreta, así que no usa require_clima_oleada."""
     return clima_module.list_centros_conocidos()
+
+
+@router.post("/oleadas")
+def crear_oleada_route(body: NuevaOleadaBody, user: dict = Depends(get_current_user)):
+    """Para "+ Nueva oleada de Clima Laboral" desde el editor de Tests (ver
+    tests.js) -- requiere el módulo de Clima de esa empresa, no solo Tests,
+    para que alguien con acceso a Tests pero sin Clima Laboral no pueda
+    crear oleadas a las que luego no tiene forma de entrar."""
+    if not auth_module.tiene_modulo(user, _modulo_para_empresa(body.empresa)):
+        raise HTTPException(status_code=403, detail="No tienes acceso a Clima Laboral")
+    if not body.etiqueta.strip():
+        raise HTTPException(status_code=400, detail="Ponle un nombre a la oleada")
+    fase = body.fase if body.fase in ("completa", "pulso") else "completa"
+    oleada_id = clima_module.crear_oleada(body.etiqueta.strip(), body.empresa, fase)
+    return {"ok": True, "id": oleada_id}
+
+
+class RenombrarOleadaBody(BaseModel):
+    etiqueta: str
+
+
+@router.put("/{oleada_id}/etiqueta")
+def renombrar_oleada_route(oleada_id: int, body: RenombrarOleadaBody, _user: dict = Depends(require_clima_oleada)):
+    if not body.etiqueta.strip():
+        raise HTTPException(status_code=400, detail="Ponle un nombre a la oleada")
+    clima_module.renombrar_oleada(oleada_id, body.etiqueta.strip())
+    return {"ok": True}
+
+
+@router.delete("/{oleada_id}")
+def eliminar_oleada_route(oleada_id: int, _user: dict = Depends(require_clima_oleada)):
+    try:
+        clima_module.eliminar_oleada(oleada_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
+@router.get("/{oleada_id}/plantilla")
+def get_plantilla_route(oleada_id: int, _user: dict = Depends(require_clima_oleada)):
+    return clima_module.get_plantilla(oleada_id)
+
+
+@router.put("/{oleada_id}/plantilla")
+def set_plantilla_route(oleada_id: int, body: PlantillaBody, _user: dict = Depends(require_clima_oleada)):
+    clima_module.set_plantilla(oleada_id, body.plantilla)
+    return {"ok": True}
 
 
 @router.get("/{oleada_id}/centros")

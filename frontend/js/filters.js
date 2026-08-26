@@ -15,11 +15,6 @@ const state = {
   hora: "",
   diaSemana: "",
   sort: "recientes",
-  // Toggle "Solo Google": excluye las reseñas que la reconciliación manual
-  // (scraper --reconciliar, ver POST /reviews/reconciliacion) marcó como ya
-  // no visibles en Google — es un modo de vista persistente, no un filtro de
-  // búsqueda, así que clearFilters() NO lo resetea.
-  soloGoogle: false,
 };
 
 function currentQueryParams(extra = {}) {
@@ -33,7 +28,6 @@ function currentQueryParams(extra = {}) {
   if (state.staff) params.set("staff", state.staff);
   if (state.hora !== "") params.set("hora", state.hora);
   if (state.diaSemana) params.set("dia_semana", state.diaSemana);
-  if (state.soloGoogle) params.set("solo_google", "true");
   Object.entries(extra).forEach(([k, v]) => params.set(k, v));
   return params;
 }

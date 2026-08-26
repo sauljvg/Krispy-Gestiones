@@ -13,7 +13,7 @@
     }
   })();
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260728a">
+<link rel="stylesheet" href="css/styles.css?v=20260823c">
 <style>
   .home-wrap { min-height: 100vh; }
   .home-wrap .home-grid { max-width: 900px; margin: 24px auto 0; gap: 20px; }
@@ -45,55 +45,60 @@
 
   <div class="home-title hero-banner">
     <span class="eyebrow">Portal interno</span>
-    <h1>¿A dónde quieres ir?</h1>
+    <h1 id="home-titulo">¿A dónde quieres ir?</h1>
     <p>Selecciona un apartado para empezar.</p>
   </div>
 
   <div class="home-grid" id="home-grid">
     <a class="home-card" href="reviews.html" id="card-resenas" hidden>
-      <span class="icon-badge"><span class="home-icon">⭐</span></span>
+      <span class="icon-badge" data-c="gold"><span class="home-icon">⭐</span></span>
       <h2>Reseñas</h2>
       <p>Analítica de reseñas de Google Maps de las 6 tiendas: ranking, sentimiento, horarios y más.</p>
     </a>
     <a class="home-card" href="informes.html" id="card-informes" hidden>
-      <span class="icon-badge"><span class="home-icon">📋</span></span>
+      <span class="icon-badge" data-c="blue"><span class="home-icon">📋</span></span>
       <h2>Informes</h2>
       <p>Valores y competencias y más encuestas de Microsoft Forms.</p>
     </a>
     <a class="home-card" href="clima.html" id="card-clima" hidden>
-      <span class="icon-badge"><span class="home-icon">📊</span></span>
+      <span class="icon-badge" data-c="teal"><span class="home-icon">📊</span></span>
       <h2>Clima Laboral</h2>
       <p>Engagement por centro: resultados, impulsores, fortalezas y oportunidades.</p>
     </a>
     <a class="home-card" href="entrevistas.html" id="card-entrevistas" hidden>
-      <span class="icon-badge"><span class="home-icon">🚪</span></span>
+      <span class="icon-badge" data-c="violet"><span class="home-icon">🚪</span></span>
       <h2>Entrevista de Salida</h2>
       <p>Motivos de salida, satisfacción por bloque y comentarios abiertos.</p>
     </a>
     <a class="home-card" href="disc_form.html" id="card-disc" hidden>
-      <span class="icon-badge"><span class="home-icon">🧭</span></span>
+      <span class="icon-badge" data-c="indigo"><span class="home-icon">🧭</span></span>
       <h2>Perfil DISC</h2>
       <p>Test de comportamiento D/I/S/C, perfil Adaptado/Natural e histórico.</p>
     </a>
     <a class="home-card" href="agregadores.html" id="card-agregadores" hidden>
-      <span class="icon-badge"><span class="home-icon">🛵</span></span>
+      <span class="icon-badge" data-c="orange"><span class="home-icon">🛵</span></span>
       <h2>Agregadores</h2>
       <p>Disponibilidad en JustEat, Glovo y Uber Eats: cuándo y dónde nos bloquean.</p>
     </a>
-    <a class="home-card" href="compartidos.html" id="card-compartidos">
-      <span class="icon-badge"><span class="home-icon">📁</span></span>
+    <a class="home-card" href="compartidos.html" id="card-compartidos" hidden>
+      <span class="icon-badge" data-c="rose"><span class="home-icon">📁</span></span>
       <h2>Reclutamiento</h2>
       <p>Candidatos y currículums que te han compartido desde Informes para entrevistar.</p>
     </a>
     <a class="home-card" href="boletines.html" id="card-boletines" hidden>
-      <span class="icon-badge"><span class="home-icon">📰</span></span>
+      <span class="icon-badge" data-c="slate"><span class="home-icon">📰</span></span>
       <h2>Boletines</h2>
       <p>Publica boletines semanales y envíalos por email a quien elijas.</p>
     </a>
     <a class="home-card" href="tests.html" id="card-tests" hidden>
-      <span class="icon-badge"><span class="home-icon">📝</span></span>
+      <span class="icon-badge" data-c="cyan"><span class="home-icon">📝</span></span>
       <h2>Test</h2>
       <p>Crea encuestas y tests públicos por páginas, sin depender de Microsoft Forms.</p>
+    </a>
+    <a class="home-card" href="evaluaciones360.html" id="card-evaluaciones360" hidden>
+      <span class="icon-badge" data-c="green"><span class="home-icon">🧑‍🤝‍🧑</span></span>
+      <h2>Evaluaciones 360°</h2>
+      <p>Organigrama, campañas de evaluación 360° y resultados por persona.</p>
     </a>
     <a class="home-card" href="saona.html" id="card-saona" hidden>
       <span class="icon-badge"><img class="home-icon-img" src="assets/saona-logo.png" alt="Saona"></span>
@@ -103,8 +108,10 @@
   </div>
 </div>
 <script src="js/theme.js?v=20260723f"></script>
-<script src="js/auth-common.js?v=20260723f"></script>
-<script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/home.js?v=20260723f"></script>
+<script src="js/dialogs.js?v=20260818a"></script>
+<script src="js/icons.js?v=20260824a"></script>
+<script src="js/auth-common.js?v=20260824a"></script>
+<script src="js/topbar-menu.js?v=20260821a"></script>
+<script src="js/home.js?v=20260824a"></script>
 </body>
 </html>

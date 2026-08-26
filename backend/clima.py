@@ -35,6 +35,14 @@ LIKERT_ALIASES = {
 
 
 def _canonicalizar_likert(valor):
+    # A propósito NO se reconocen aquí los puntos numéricos ("1"-"5") que
+    # manda el módulo de Test -- esta función recalcula en caliente TODAS
+    # las oleadas, incluidas las importadas por Excel hace tiempo, cada vez
+    # que alguien abre un informe. Reconocer números aquí cambiaría (con
+    # efecto retroactivo) el resultado de informes ya entregados si algún
+    # dato histórico tuviera por casualidad un valor numérico suelto -- la
+    # traducción de punto a texto para las respuestas del Test en vivo se
+    # hace en encuestas.py::guardar_respuesta ANTES de guardar, no aquí.
     if valor in LIKERT_ORDEN:
         return valor
     return LIKERT_ALIASES.get(str(valor or "").strip().lower())
@@ -115,6 +123,17 @@ def ensure_clima_tables():
     cols_oleadas = {row[1] for row in conn.execute("PRAGMA table_info(clima_oleadas)")}
     if "empresa" not in cols_oleadas:
         conn.execute("ALTER TABLE clima_oleadas ADD COLUMN empresa TEXT NOT NULL DEFAULT 'kk'")
+    # fase: 'completa' (encuesta anual de siempre) o 'pulso' (versión corta,
+    # meses después, sobre el mismo cuestionario base). "Anterior" (ver
+    # get_anterior_score/get_satisfaccion_cliente) compara cada oleada contra
+    # la última de SU MISMA fase -- si comparara contra la oleada
+    # inmediatamente anterior sin más, una Encuesta completa de 2027 acabaría
+    # comparándose contra el Pulso de 2026 en vez de contra la Encuesta
+    # completa de 2026, mezclando un cuestionario corto con uno completo.
+    # Las oleadas ya existentes son todas encuestas completas (el concepto de
+    # pulso no existía hasta ahora), de ahí el default.
+    if "fase" not in cols_oleadas:
+        conn.execute("ALTER TABLE clima_oleadas ADD COLUMN fase TEXT NOT NULL DEFAULT 'completa'")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS clima_respuestas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -341,7 +360,124 @@ def _parse_plantilla(wb):
     return resultado
 
 
-def get_or_create_oleada(nueva, etiqueta=None, empresa="kk"):
+def detectar_centro(fila_por_etiqueta):
+    """Igual que centro_col en _column_roles (mismo criterio: la primera
+    columna cuyo texto normalizado contiene "centro"), pero para una fila
+    que llega directa del módulo de Test en vez de un Excel -- así el test
+    en vivo y la importación manual reconocen la pregunta de centro de
+    trabajo exactamente de la misma forma."""
+    for etiqueta, valor in fila_por_etiqueta.items():
+        if "centro" in _normaliza_header(etiqueta):
+            return str(valor).strip() if valor else None
+    return None
+
+
+def crear_oleada(etiqueta, empresa="kk", fase="completa"):
+    """Como get_or_create_oleada(nueva=True, ...), pero con nombre más
+    explícito para el caso de uso de "+ Nueva oleada de Clima Laboral" desde
+    el editor de Tests (ver encuestas_routes.py) -- cada fase (encuesta
+    completa, pulso...) es una oleada propia con su propia plantilla."""
+    return get_or_create_oleada(True, etiqueta=etiqueta, empresa=empresa, fase=fase)
+
+
+def renombrar_oleada(oleada_id, etiqueta):
+    """Para poder ponerle nombre a una oleada que se creó sin uno (p.ej. las
+    importadas por Excel antes de que "+ Nueva oleada" pidiera un nombre) --
+    no toca fase ni empresa, solo la etiqueta que se ve en los desplegables."""
+    conn = get_connection()
+    conn.execute("UPDATE clima_oleadas SET etiqueta = ? WHERE id = ?", (etiqueta.strip(), oleada_id))
+    conn.commit()
+    conn.close()
+
+
+def eliminar_oleada(oleada_id):
+    """Borra por completo una oleada (p.ej. una de prueba creada mientras se
+    exploraba "+ Nueva oleada") y todo lo que tenga dentro -- respuestas,
+    plantilla e importaciones. Se niega si algún Test todavía la tiene
+    configurada como destino, mismo motivo que informes.eliminar_tipo:
+    borrarla igual dejaría a ese Test apuntando a una oleada inexistente, y
+    su próxima respuesta fallaría en vez de guardarse."""
+    conn = get_connection()
+    row = conn.execute("SELECT id FROM clima_oleadas WHERE id = ?", (oleada_id,)).fetchone()
+    if row is None:
+        conn.close()
+        raise ValueError(f"Oleada de Clima Laboral desconocida: {oleada_id}")
+    tests_conectados = [r["titulo"] for r in conn.execute(
+        "SELECT titulo FROM encuestas WHERE clima_oleada_id = ?", (oleada_id,)
+    ).fetchall()]
+    if tests_conectados:
+        conn.close()
+        lista = ", ".join(f'"{t}"' for t in tests_conectados)
+        plural = "test" if len(tests_conectados) == 1 else "tests"
+        raise ValueError(
+            f"No se puede eliminar: todavía la alimenta el {plural} {lista}. "
+            "Cambia primero a qué oleada alimenta (o ciérralo) antes de borrar esta oleada."
+        )
+    conn.execute("DELETE FROM clima_respuestas WHERE oleada_id = ?", (oleada_id,))
+    conn.execute("DELETE FROM clima_plantilla WHERE oleada_id = ?", (oleada_id,))
+    conn.execute("DELETE FROM clima_importaciones WHERE oleada_id = ?", (oleada_id,))
+    conn.execute("DELETE FROM clima_oleadas WHERE id = ?", (oleada_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_plantilla(oleada_id):
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT centro, empleados FROM clima_plantilla WHERE oleada_id = ? ORDER BY centro", (oleada_id,)
+    ).fetchall()
+    conn.close()
+    return {r["centro"]: r["empleados"] for r in rows}
+
+
+def set_plantilla(oleada_id, mapa_centro_empleados):
+    """Reemplaza entera la plantilla de una oleada -- pensado para el editor
+    de Tests, donde el admin escribe la lista completa de centros y
+    empleados esperados de una vez (a diferencia de import_excel, que solo
+    añade/actualiza lo que trae el Excel sin borrar lo demás)."""
+    conn = get_connection()
+    conn.execute("DELETE FROM clima_plantilla WHERE oleada_id = ?", (oleada_id,))
+    for centro, empleados in mapa_centro_empleados.items():
+        centro = str(centro).strip()
+        if not centro:
+            continue
+        try:
+            empleados = int(empleados)
+        except (TypeError, ValueError):
+            continue
+        if empleados <= 0:
+            continue
+        conn.execute(
+            "INSERT INTO clima_plantilla (oleada_id, centro, empleados) VALUES (?, ?, ?)",
+            (oleada_id, centro, empleados),
+        )
+    conn.commit()
+    conn.close()
+
+
+def ingest_respuesta_directa(oleada_id, centro, fila_por_etiqueta):
+    """Como import_excel, pero para UNA respuesta que llega en vivo desde el
+    módulo de Test en vez de un Excel subido a mano -- mismo dedup por hash
+    de la fila completa, para no duplicar si el navegador reenvía la misma
+    respuesta dos veces (p.ej. doble clic en Enviar)."""
+    fila_hash = _hash_fila(fila_por_etiqueta)
+    conn = get_connection()
+    existe = conn.execute(
+        "SELECT id FROM clima_respuestas WHERE oleada_id = ? AND fila_hash = ?", (oleada_id, fila_hash)
+    ).fetchone()
+    if existe:
+        conn.close()
+        return
+    datos_json = json.dumps(fila_por_etiqueta, ensure_ascii=False, default=str)
+    conn.execute(
+        "INSERT INTO clima_respuestas (oleada_id, centro, fila_hash, datos_json) VALUES (?, ?, ?, ?)",
+        (oleada_id, centro, fila_hash, datos_json),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_or_create_oleada(nueva, etiqueta=None, empresa="kk", fase="completa"):
     conn = get_connection()
     if not nueva:
         row = conn.execute(
@@ -351,7 +487,9 @@ def get_or_create_oleada(nueva, etiqueta=None, empresa="kk"):
             oleada_id = row[0]
             conn.close()
             return oleada_id
-    cur = conn.execute("INSERT INTO clima_oleadas (etiqueta, empresa) VALUES (?, ?)", (etiqueta, empresa))
+    cur = conn.execute(
+        "INSERT INTO clima_oleadas (etiqueta, empresa, fase) VALUES (?, ?, ?)", (etiqueta, empresa, fase)
+    )
     conn.commit()
     oleada_id = cur.lastrowid
     conn.close()
@@ -363,6 +501,13 @@ def get_oleada_empresa(oleada_id):
     row = conn.execute("SELECT empresa FROM clima_oleadas WHERE id = ?", (oleada_id,)).fetchone()
     conn.close()
     return row["empresa"] if row else None
+
+
+def get_oleada_fase(oleada_id):
+    conn = get_connection()
+    row = conn.execute("SELECT fase FROM clima_oleadas WHERE id = ?", (oleada_id,)).fetchone()
+    conn.close()
+    return row["fase"] if row else None
 
 
 def import_excel(file_bytes, archivo_nombre, subido_por, nueva_oleada=False, empresa="kk"):
@@ -437,7 +582,7 @@ def list_oleadas(empresa="kk"):
     # en el selector ("Oleada #3" cuando en realidad es la primera de Saona).
     conn = get_connection()
     rows = conn.execute("""
-        SELECT o.id, o.etiqueta, o.creado_en, COUNT(r.id) AS num_respuestas,
+        SELECT o.id, o.etiqueta, o.creado_en, o.fase, COUNT(r.id) AS num_respuestas,
                ROW_NUMBER() OVER (ORDER BY o.id ASC) AS numero
         FROM clima_oleadas o
         LEFT JOIN clima_respuestas r ON r.oleada_id = o.id
@@ -472,7 +617,12 @@ def list_centros(oleada_id, centros_permitidos=None):
 
 
 def _es_oficinas(centro):
-    return _normaliza_header(centro) == "oficinas"
+    """Igual criterio que _es_fabrica (por nombre, no por lista fija): antes
+    solo reconocía el nombre exacto "Oficinas", así que una segunda oficina
+    (p.ej. "Oficina Valencia") se habría contado por error como tienda en
+    el desglose -- con esto, cualquier centro que contenga "oficina" queda
+    excluido igual que la oficina original."""
+    return "oficina" in _normaliza_header(centro)
 
 
 def _es_fabrica(centro):
@@ -649,7 +799,7 @@ def compute_reporte(oleada_id, centro=None, centros_permitidos=None, solo_tipo=N
         nube_palabras[header] = [{"palabra": p, "veces": c} for p, c in top_palabras]
 
     anterior = get_anterior_score(centro, oleada_id)
-    satisfaccion = get_satisfaccion_cliente(centro, oleada_id)
+    satisfaccion = get_satisfaccion_cliente(centro, oleada_id, solo_tipo)
 
     conn.close()
     return {
@@ -712,15 +862,30 @@ def _tiendas_para_centro(centro, empresa="kk"):
     return _CENTRO_A_TIENDAS.get(_normaliza_header(centro))
 
 
-def get_satisfaccion_cliente(centro, oleada_id):
+def get_satisfaccion_cliente(centro, oleada_id, solo_tipo=None):
     """Satisfacción de cliente (estrellas de Google) para el mismo centro,
     para mostrarla junto al engagement. Presente = media de todas las
     reseñas a día de hoy. Anterior = media de reseñas hasta la fecha de la
-    oleada anterior (así se compara el mismo punto en el tiempo que el
-    engagement de esa oleada). None si el centro no tiene tienda física
-    (p.ej. Oficinas), no hay reseñas, o la oleada es de otra empresa sin
-    Reseñas propias conectadas."""
+    ÚLTIMA oleada de la MISMA fase (así se compara el mismo punto en el
+    tiempo que el engagement de esa oleada, y una Encuesta completa no
+    compara contra la fecha de un Pulso intermedio -- ver fase en
+    ensure_clima_tables). None si el centro no tiene tienda física (p.ej.
+    Oficinas), no hay reseñas, o la oleada es de otra empresa sin Reseñas
+    propias conectadas. solo_tipo="fabrica": vista agregada "Todas las
+    fábricas" (centro=None) -- sin esto, al no tener centro concreto caía en
+    la rama "empresa entera" y mostraba la satisfacción de las TIENDAS, como
+    si las fábricas tuvieran clientes propios (no los tienen). Pulso: se
+    desactiva SIEMPRE (a propósito, no solo cuando falta el "anterior") --
+    un Pulso mide lo mismo que ya mide el engagement de esa misma oleada, y
+    la comparación "anterior" nunca tendría con qué salir hasta el segundo
+    Pulso que se cree, así que ni siquiera vale la pena mostrar el
+    "presente" para no dar una sensación a medias."""
+    if solo_tipo == "fabrica":
+        return None
+    if (get_oleada_fase(oleada_id) or "completa") == "pulso":
+        return None
     empresa = get_oleada_empresa(oleada_id) or "kk"
+    fase = get_oleada_fase(oleada_id) or "completa"
     tiendas = _tiendas_para_centro(centro, empresa)
     if not tiendas:
         return None
@@ -729,10 +894,11 @@ def get_satisfaccion_cliente(centro, oleada_id):
     # AND empresa = ?: la oleada "anterior" tiene que ser de la MISMA
     # empresa — si no, una Saona compararía su engagement contra el de
     # Krispy Kreme solo porque su id es menor (bug real que se dio con las
-    # primeras oleadas de Saona).
+    # primeras oleadas de Saona). AND fase = ?: mismo criterio, para no
+    # comparar una Encuesta completa contra un Pulso intermedio.
     anterior_oleada = conn.execute(
-        "SELECT creado_en FROM clima_oleadas WHERE id < ? AND empresa = ? ORDER BY id DESC LIMIT 1",
-        (oleada_id, empresa),
+        "SELECT creado_en FROM clima_oleadas WHERE id < ? AND empresa = ? AND fase = ? ORDER BY id DESC LIMIT 1",
+        (oleada_id, empresa, fase),
     ).fetchone()
     fecha_anterior = anterior_oleada["creado_en"] if anterior_oleada else None
 
@@ -757,11 +923,15 @@ def get_anterior_score(centro, oleada_id):
     # Igual que en get_satisfaccion_cliente: la "oleada anterior" tiene que
     # ser de la MISMA empresa, si no una oleada de Saona podría tomar el
     # engagement de Krispy Kreme como su "Anterior" solo por tener un id
-    # más alto (bug real reportado con las primeras oleadas de Saona).
+    # más alto (bug real reportado con las primeras oleadas de Saona). Y de
+    # la MISMA fase (completa/pulso), para que una Encuesta completa nunca
+    # compare contra un Pulso intermedio más corto ni viceversa.
     empresa = get_oleada_empresa(oleada_id) or "kk"
+    fase = get_oleada_fase(oleada_id) or "completa"
     conn = get_connection()
     oleadas_previas = conn.execute(
-        "SELECT id FROM clima_oleadas WHERE id < ? AND empresa = ? ORDER BY id DESC", (oleada_id, empresa)
+        "SELECT id FROM clima_oleadas WHERE id < ? AND empresa = ? AND fase = ? ORDER BY id DESC",
+        (oleada_id, empresa, fase),
     ).fetchall()
     conn.close()
     for row in oleadas_previas:

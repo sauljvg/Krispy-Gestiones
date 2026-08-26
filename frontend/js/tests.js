@@ -8,25 +8,141 @@ const ICONO_FLECHA_ABAJO = `<svg width="12" height="12" viewBox="0 0 24 24" fill
 const ICONO_LAPIZ = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
 const ICONO_ARRASTRAR = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>`;
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
+function claveDesdeNombre(nombre) {
+  return nombre
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+// escapeHTML ahora vive en common.js (cargado antes que este script).
+
+// clima-tests.html carga este mismo tests.js (mismo editor, misma API) pero
+// como "Clima Laboral > Test" -- solo se distingue por la URL, no hace
+// falta ningún parámetro ni marca especial en el HTML. Los dos módulos son
+// mutuamente excluyentes a propósito (a petición del usuario, para que la
+// misma oleada nunca se pueda tocar desde dos sitios distintos): el Test
+// general (tests.html, el de la Home) NO enseña ni permite crear tests de
+// Clima Laboral -- eso es exclusivo de esta página. Y viceversa: aquí no
+// aparecen Informes ni Entrevista de Salida.
+function esClimaTests() {
+  return window.location.pathname.endsWith("/clima-tests.html");
 }
 
 async function loadTiposInforme() {
-  const res = await fetch(`${AUTH_API_BASE}/encuestas/tipos-informe-disponibles`);
-  const tipos = await res.json();
+  const clima = esClimaTests();
+  const [resInformes, resClima] = await Promise.all([
+    clima ? Promise.resolve(null) : fetch(`${AUTH_API_BASE}/encuestas/tipos-informe-disponibles`),
+    clima ? fetch(`${AUTH_API_BASE}/encuestas/clima-oleadas-disponibles`) : Promise.resolve(null),
+  ]);
+  const tipos = resInformes ? await resInformes.json() : [];
+  const oleadas = resClima ? await resClima.json() : [];
   const select = document.getElementById("test-tipo-informe");
-  select.innerHTML =
-    `<option value="">— No calcular puntuación —</option>` +
-    `<optgroup label="Informes">` +
-    tipos.map((t) => `<option value="informe:${escapeHTML(t.clave)}">${escapeHTML(t.nombre)}</option>`).join("") +
-    `</optgroup>` +
-    `<optgroup label="Entrevista de Salida">` +
-    `<option value="entrevista:kk">Entrevista de Salida — Krispy Kreme</option>` +
-    `<option value="entrevista:saona">Entrevista de Salida — SAONA</option>` +
-    `</optgroup>`;
+  const label = document.getElementById("test-tipo-informe-label");
+  if (label && clima) label.textContent = "¿A qué oleada de Clima Laboral alimenta? (opcional)";
+  const grupoInformes = clima
+    ? ""
+    : `<optgroup label="Informes">` +
+      tipos.map((t) => `<option value="informe:${escapeHTML(t.clave)}">${escapeHTML(t.nombre)}</option>`).join("") +
+      `<option value="informe:nueva:kk">+ Nuevo tipo de Informe — Krispy Kreme</option>` +
+      `<option value="informe:nueva:saona">+ Nuevo tipo de Informe — SAONA</option>` +
+      `</optgroup>`;
+  const grupoEntrevista = clima
+    ? ""
+    : `<optgroup label="Entrevista de Salida">` +
+      `<option value="entrevista:kk">Entrevista de Salida — Krispy Kreme</option>` +
+      `<option value="entrevista:saona">Entrevista de Salida — SAONA</option>` +
+      `</optgroup>`;
+  const grupoClima = !clima
+    ? ""
+    : `<optgroup label="Clima Laboral">` +
+      oleadas
+        .map((o) => {
+          const faseTxt = o.fase === "pulso" ? "Pulso" : "Encuesta completa";
+          const nombre = o.etiqueta || `Oleada #${o.numero} sin nombre`;
+          return `<option value="clima:${o.id}">${escapeHTML(nombre)} (${faseTxt})</option>`;
+        })
+        .join("") +
+      `<option value="clima:nueva:kk:completa">+ Nueva Encuesta completa de Clima Laboral — Krispy Kreme</option>` +
+      `<option value="clima:nueva:kk:pulso">+ Nuevo Pulso de Clima Laboral — Krispy Kreme</option>` +
+      `<option value="clima:nueva:saona:completa">+ Nueva Encuesta completa de Clima Laboral — SAONA</option>` +
+      `<option value="clima:nueva:saona:pulso">+ Nuevo Pulso de Clima Laboral — SAONA</option>` +
+      `</optgroup>`;
+  select.innerHTML = `<option value="">— No calcular puntuación —</option>` + grupoInformes + grupoEntrevista + grupoClima;
+}
+
+// Clima Laboral es el único destino donde el test necesita configuración
+// propia además de elegirlo en el desplegable (la plantilla de empleados
+// esperados por centro, ver clima-plantilla-wrap en tests.html) -- se
+// guarda aparte (no en el body de guardarTest) porque vive en su propia
+// tabla (clima_plantilla), no en la fila de la encuesta.
+let climaPlantillaOleadaId = null;
+// true solo justo después de crear una oleada nueva de fase "completa" (no
+// "pulso", que normalmente lleva un subconjunto más corto decidido caso a
+// caso) -- guardarTest() lo consume una sola vez para rellenar el test con
+// las 26 preguntas reales de la Encuesta completa en vez de dejarlo vacío.
+let climaCargarPlantillaCompleta = false;
+
+function filaClimaPlantillaHTML(centro = "", empleados = "") {
+  return `
+    <div class="clima-plantilla-fila">
+      <input type="text" class="clima-plantilla-centro" placeholder="Centro de trabajo" value="${escapeHTML(centro)}">
+      <input type="number" class="clima-plantilla-empleados" placeholder="Empleados esperados" min="1" value="${empleados || ""}">
+      <button type="button" class="btn btn-ghost btn-clima-plantilla-quitar">✕</button>
+    </div>`;
+}
+
+function wireClimaPlantillaFilas() {
+  document.querySelectorAll(".btn-clima-plantilla-quitar").forEach((btn) => {
+    btn.addEventListener("click", () => btn.closest(".clima-plantilla-fila").remove());
+  });
+}
+
+function renderClimaPlantillaFilas(plantilla) {
+  const cont = document.getElementById("clima-plantilla-filas");
+  const entradas = Object.entries(plantilla || {});
+  cont.innerHTML = (entradas.length ? entradas : [["", ""]]).map(([c, e]) => filaClimaPlantillaHTML(c, e)).join("");
+  wireClimaPlantillaFilas();
+}
+
+// Entrevista de Salida y Clima Laboral son solo respuestas -- no tienen
+// resultado apto/no apto, así que ni siquiera tiene sentido ofrecer la
+// opción de configurar ese mensaje (a diferencia de Informes o "sin
+// destino", donde sí puede aplicar por scoring o por una opción
+// descalificatoria). La sección entera se oculta para esos dos destinos.
+function destinoUsaConceptoNoApto(destino) {
+  return !destino.startsWith("entrevista:") && !destino.startsWith("clima:");
+}
+
+function actualizarVisibilidadMensajeNoApto() {
+  const destino = document.getElementById("test-tipo-informe").value;
+  const aplica = destinoUsaConceptoNoApto(destino);
+  document.getElementById("test-no-apto-seccion").hidden = !aplica;
+  document.getElementById("test-mensaje-no-apto-wrap").hidden =
+    !aplica || !document.getElementById("test-usar-mensaje-no-apto").checked;
+}
+
+// Se llama cada vez que cambia el desplegable de destino (y al abrir un
+// test ya guardado) -- muestra/oculta el bloque de plantilla y, si el
+// destino es una oleada existente, precarga lo que ya se había guardado
+// para esa oleada (puede venir de un Excel importado antes, no solo de
+// este mismo test).
+async function actualizarVistaClimaPlantilla() {
+  const val = document.getElementById("test-tipo-informe").value;
+  const wrap = document.getElementById("clima-plantilla-wrap");
+  if (!val.startsWith("clima:") || val.startsWith("clima:nueva:")) {
+    wrap.hidden = true;
+    climaPlantillaOleadaId = null;
+    document.getElementById("clima-plantilla-filas").innerHTML = "";
+    return;
+  }
+  climaPlantillaOleadaId = Number(val.slice("clima:".length));
+  wrap.hidden = false;
+  const res = await fetch(`${AUTH_API_BASE}/clima/${climaPlantillaOleadaId}/plantilla`);
+  renderClimaPlantillaFilas(res.ok ? await res.json() : {});
 }
 
 // El numero de respuestas en el listado enlaza al informe donde se acumulan
@@ -45,12 +161,16 @@ function enlaceRespuestasTest(t) {
     const params = new URLSearchParams({ empresa: t.tipo_entrevista_empresa });
     return `<a href="/entrevistas.html?${params.toString()}" target="_blank">${t.num_respuestas}</a>`;
   }
+  if (t.clima_oleada_id) {
+    return `<a href="/clima-informes.html?oleada=${t.clima_oleada_id}" target="_blank">${t.num_respuestas}</a>`;
+  }
   return `${t.num_respuestas}`;
 }
 
 async function loadTests() {
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas`);
-  const tests = await res.json();
+  let tests = await res.json();
+  tests = esClimaTests() ? tests.filter((t) => t.clima_oleada_id) : tests.filter((t) => !t.clima_oleada_id);
   const tbody = document.getElementById("tests-tbody");
   if (tests.length === 0) {
     tbody.innerHTML = `<tr><td colspan="4" class="staff-hint">Todavía no has creado ningún test.</td></tr>`;
@@ -62,7 +182,7 @@ async function loadTests() {
     <tr>
       <td>${escapeHTML(t.titulo)}</td>
       <td>
-        <span class="badge ${t.estado === "abierta" ? "badge-abierta" : "badge-cerrada"}">${t.estado === "abierta" ? "Abierta" : "Cerrada"}</span>
+        <span class="badge ${t.estado === "abierta" && !t.vencido ? "badge-abierta" : "badge-cerrada"}">${t.estado === "abierta" ? (t.vencido ? "Vencida" : "Abierta") : "Cerrada"}</span>
         <span class="en-vivo-badge" data-id="${t.id}" hidden>🟢 <span class="en-vivo-n"></span> en vivo</span>
       </td>
       <td>${enlaceRespuestasTest(t)}</td>
@@ -97,10 +217,18 @@ setInterval(() => {
 // (por defecto) se mantiene para abrir el editor por primera vez (desde la
 // lista o "Nuevo test"), donde sí conviene llevar la vista hacia la tarjeta.
 async function abrirEditor(testId, { scroll = true } = {}) {
-  if (testId !== currentTestId) editandoPreguntas.clear();
+  if (testId !== currentTestId) {
+    editandoPreguntas.clear();
+    climaCargarPlantillaCompleta = false;
+  }
   currentTestId = testId;
   const editorCard = document.getElementById("editor-card");
   editorCard.hidden = false;
+  // Mientras se configura un test, la lista entera (toolbar + tabla) se
+  // oculta -- así el editor queda justo debajo de la cabecera, sin tener
+  // que bajar hasta el final de una lista larga, y sin la distracción del
+  // resto de tests mientras se está montando este.
+  document.getElementById("lista-tests-wrap").hidden = true;
   document.getElementById("respuestas-wrap").hidden = true;
 
   if (testId) {
@@ -109,20 +237,28 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("editor-titulo-h2").textContent = "Editar test";
     document.getElementById("test-titulo").value = currentTest.titulo;
     document.getElementById("test-mensaje-final").value = currentTest.mensaje_final;
+    document.getElementById("test-mensaje-no-apto").value = currentTest.mensaje_no_apto;
+    document.getElementById("test-usar-mensaje-no-apto").checked = currentTest.usar_mensaje_no_apto !== false;
+    actualizarVisibilidadMensajeNoApto();
     document.getElementById("test-color-boton").value = currentTest.color_boton;
     if (currentTest.tipo_entrevista_empresa) {
       document.getElementById("test-tipo-informe").value = `entrevista:${currentTest.tipo_entrevista_empresa}`;
     } else if (currentTest.tipo_informe_clave) {
       document.getElementById("test-tipo-informe").value = `informe:${currentTest.tipo_informe_clave}`;
+    } else if (currentTest.clima_oleada_id) {
+      document.getElementById("test-tipo-informe").value = `clima:${currentTest.clima_oleada_id}`;
     } else {
       document.getElementById("test-tipo-informe").value = "";
     }
+    await actualizarVistaClimaPlantilla();
     // Código corto y correlativo (el propio id, con 4 cifras) en vez del
     // slug de texto — el backend acepta ambos, así que un enlace ya
     // compartido con el slug largo sigue funcionando igual.
     const codigoCorto = String(currentTest.id).padStart(4, "0");
     document.getElementById("test-enlace-publico").value = `${location.origin}/encuesta.html?slug=${codigoCorto}`;
     document.getElementById("test-enlace-corto").value = currentTest.enlace_corto || "";
+    document.getElementById("test-evitar-duplicados").checked = !!currentTest.evitar_duplicados;
+    document.getElementById("test-fecha-cierre").value = currentTest.fecha_cierre || "";
     document.getElementById("fondo-preview").hidden = !currentTest.tiene_fondo;
     if (currentTest.tiene_fondo) {
       document.getElementById("fondo-preview").src = `${AUTH_API_BASE}/encuestas/encuestas/${testId}/fondo?t=${Date.now()}`;
@@ -139,10 +275,16 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("editor-titulo-h2").textContent = "Nuevo test";
     document.getElementById("test-titulo").value = "";
     document.getElementById("test-mensaje-final").value = "Gracias por completar el formulario.";
+    document.getElementById("test-mensaje-no-apto").value = "Gracias por contestar nuestro test. En esta ocasión no has superado el proceso, pero te deseamos mucha suerte.";
+    document.getElementById("test-usar-mensaje-no-apto").checked = true;
+    actualizarVisibilidadMensajeNoApto();
     document.getElementById("test-color-boton").value = "#5b2a2a";
     document.getElementById("test-tipo-informe").value = "";
+    await actualizarVistaClimaPlantilla();
     document.getElementById("test-enlace-publico").value = "";
     document.getElementById("test-enlace-corto").value = "";
+    document.getElementById("test-evitar-duplicados").checked = false;
+    document.getElementById("test-fecha-cierre").value = "";
     document.getElementById("fondo-preview").hidden = true;
     document.getElementById("btn-publicar-test").hidden = true;
     document.getElementById("btn-despublicar-test").hidden = true;
@@ -158,13 +300,15 @@ async function abrirEditor(testId, { scroll = true } = {}) {
 function cerrarEditor() {
   currentTestId = null;
   currentTest = null;
+  climaCargarPlantillaCompleta = false;
   document.getElementById("editor-card").hidden = true;
+  document.getElementById("lista-tests-wrap").hidden = false;
 }
 
 async function guardarTest() {
   const titulo = document.getElementById("test-titulo").value.trim();
   if (!titulo) {
-    alert("El título es obligatorio.");
+    mostrarAviso("El título es obligatorio.");
     return;
   }
   if (!currentTestId) {
@@ -175,7 +319,7 @@ async function guardarTest() {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert(err.detail || "No se pudo crear el test.");
+      mostrarAviso(err.detail || "No se pudo crear el test.");
       return;
     }
     const data = await res.json();
@@ -185,10 +329,15 @@ async function guardarTest() {
   const body = {
     titulo,
     mensaje_final: document.getElementById("test-mensaje-final").value.trim(),
+    mensaje_no_apto: document.getElementById("test-mensaje-no-apto").value.trim(),
     color_boton: document.getElementById("test-color-boton").value,
     tipo_informe_clave: destino.startsWith("informe:") ? destino.slice("informe:".length) : null,
     tipo_entrevista_empresa: destino.startsWith("entrevista:") ? destino.slice("entrevista:".length) : null,
+    clima_oleada_id: destino.startsWith("clima:") ? Number(destino.slice("clima:".length)) : null,
     enlace_corto: document.getElementById("test-enlace-corto").value.trim() || null,
+    evitar_duplicados: document.getElementById("test-evitar-duplicados").checked,
+    usar_mensaje_no_apto: destinoUsaConceptoNoApto(destino) && document.getElementById("test-usar-mensaje-no-apto").checked,
+    fecha_cierre: document.getElementById("test-fecha-cierre").value || null,
   };
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}`, {
     method: "PUT",
@@ -197,8 +346,25 @@ async function guardarTest() {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || "No se pudo guardar el test.");
+    mostrarAviso(err.detail || "No se pudo guardar el test.");
     return;
+  }
+  if (climaPlantillaOleadaId) {
+    const plantilla = {};
+    document.querySelectorAll(".clima-plantilla-fila").forEach((fila) => {
+      const centro = fila.querySelector(".clima-plantilla-centro").value.trim();
+      const empleados = Number(fila.querySelector(".clima-plantilla-empleados").value);
+      if (centro && empleados > 0) plantilla[centro] = empleados;
+    });
+    await fetch(`${AUTH_API_BASE}/clima/${climaPlantillaOleadaId}/plantilla`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plantilla }),
+    });
+  }
+  if (climaCargarPlantillaCompleta) {
+    climaCargarPlantillaCompleta = false;
+    await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/plantilla-clima-completa`, { method: "POST" });
   }
   await loadTests();
   await abrirEditor(currentTestId, { scroll: false });
@@ -211,7 +377,7 @@ async function publicarTest(publicar) {
 }
 
 async function eliminarTest() {
-  if (!confirm("¿Eliminar este test y todas sus respuestas? Esta acción no se puede deshacer.")) return;
+  if (!(await pedirConfirmacion("¿Eliminar este test y todas sus respuestas? Esta acción no se puede deshacer."))) return;
   await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}`, { method: "DELETE" });
   cerrarEditor();
   await loadTests();
@@ -223,7 +389,7 @@ async function subirFondo(file) {
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/fondo`, { method: "POST", body: formData });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || "No se pudo subir la imagen.");
+    mostrarAviso(err.detail || "No se pudo subir la imagen.");
     return;
   }
   await abrirEditor(currentTestId, { scroll: false });
@@ -277,7 +443,7 @@ function etiquetaVisible(q) {
   return q.etiqueta;
 }
 
-function opcionesEditorHTML(tipo, opciones) {
+function opcionesEditorHTML(tipo, opciones, opcionesDescarta) {
   if (tipo === "likert") {
     // El puntaje SIEMPRE es 1-5 según la posición (no el texto) — así el
     // admin puede cambiar la leyenda de cada nivel libremente sin arriesgar
@@ -301,13 +467,21 @@ function opcionesEditorHTML(tipo, opciones) {
   }
   if (!TIPOS_CON_OPCIONES.has(tipo)) return "";
   const lista = opciones && opciones.length ? opciones : ["", ""];
-  return `<div class="opciones-editor">
+  // Solo tiene sentido marcar una opción como descalificatoria en opción
+  // simple (una sola respuesta posible) -- en opción múltiple no habría
+  // forma inequívoca de decidir si "descalifica" con una sola marcada entre
+  // varias. Es la misma restricción que ya usa preguntasRamificablesAntesDe
+  // para las ramificaciones condicionales.
+  const permiteDescarta = tipo === "opcion_simple";
+  const descarta = opcionesDescarta && opcionesDescarta.length === lista.length ? opcionesDescarta : lista.map(() => false);
+  return `<div class="opciones-editor" data-permite-descarta="${permiteDescarta ? "1" : "0"}">
     <div class="opciones-editor-filas">
       ${lista
         .map(
           (op, i) => `
         <div class="opcion-editor-row">
           <input type="text" class="opcion-editor-input" value="${escapeHTML(op)}" placeholder="Opción ${i + 1}">
+          ${opcionDescartaChkHTML(permiteDescarta, descarta[i])}
           <button type="button" class="btn-mini btn-opcion-quitar" title="Quitar esta opción"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
         </div>`
         )
@@ -317,9 +491,18 @@ function opcionesEditorHTML(tipo, opciones) {
   </div>`;
 }
 
+// Si quien responde elige esta opción, su respuesta se marca "No apto" en
+// Informes (ver encuestas.guardar_respuesta) -- solo aparece en preguntas
+// de opción simple.
+function opcionDescartaChkHTML(permiteDescarta, marcada) {
+  if (!permiteDescarta) return "";
+  return `<label class="chk opcion-descarta-chk" title="Si eligen esta opción, la respuesta se marca como 'No apto' en Informes"><input type="checkbox" class="opcion-editor-descarta" ${marcada ? "checked" : ""}> No apto</label>`;
+}
+
 function bindOpcionesEditor(root) {
   root.querySelectorAll(".opciones-editor").forEach((editor) => {
     const filas = editor.querySelector(".opciones-editor-filas");
+    const permiteDescarta = editor.dataset.permiteDescarta === "1";
     editor.querySelectorAll(".btn-opcion-quitar").forEach((btn) => {
       btn.addEventListener("click", () => {
         if (filas.children.length <= 2) return;
@@ -330,7 +513,7 @@ function bindOpcionesEditor(root) {
     btnAgregar?.addEventListener("click", () => {
       const row = document.createElement("div");
       row.className = "opcion-editor-row";
-      row.innerHTML = `<input type="text" class="opcion-editor-input" placeholder="Nueva opción"><button type="button" class="btn-mini btn-opcion-quitar" title="Quitar esta opción"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>`;
+      row.innerHTML = `<input type="text" class="opcion-editor-input" placeholder="Nueva opción">${opcionDescartaChkHTML(permiteDescarta, false)}<button type="button" class="btn-mini btn-opcion-quitar" title="Quitar esta opción"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>`;
       filas.appendChild(row);
       row.querySelector(".btn-opcion-quitar").addEventListener("click", () => {
         if (filas.children.length <= 2) return;
@@ -342,9 +525,18 @@ function bindOpcionesEditor(root) {
 
 function leerOpciones(editorRoot) {
   if (!editorRoot) return [];
-  return Array.from(editorRoot.querySelectorAll(".opcion-editor-input"))
-    .map((el) => el.value.trim())
+  return Array.from(editorRoot.querySelectorAll(".opcion-editor-row"))
+    .map((row) => row.querySelector(".opcion-editor-input").value.trim())
     .filter(Boolean);
+}
+
+// Paralelo a leerOpciones: misma posición = misma opción, filtrando igual
+// las filas vacías para que las dos listas queden con la misma longitud.
+function leerOpcionesDescarta(editorRoot) {
+  if (!editorRoot) return [];
+  return Array.from(editorRoot.querySelectorAll(".opcion-editor-row"))
+    .filter((row) => row.querySelector(".opcion-editor-input").value.trim())
+    .map((row) => row.querySelector(".opcion-editor-descarta")?.checked || false);
 }
 
 // Preguntas de opción SIMPLE (una sola respuesta) de páginas ANTERIORES a
@@ -428,7 +620,7 @@ function renderPaginas() {
             <div class="pregunta-edit-form">
               <span class="tipo-badge">${TIPOS_PREGUNTA_LABELS[q.tipo] || q.tipo}</span>
               <input type="text" class="pregunta-edit-etiqueta" value="${escapeHTML(q.etiqueta)}" placeholder="Enunciado de la pregunta...">
-              <div class="pregunta-edit-opciones">${opcionesEditorHTML(q.tipo, q.opciones)}</div>
+              <div class="pregunta-edit-opciones">${opcionesEditorHTML(q.tipo, q.opciones, q.opciones_descarta)}</div>
               <div class="pregunta-edit-flags">
                 <label class="chk"><input type="checkbox" class="pregunta-edit-obligatoria" ${q.obligatoria ? "checked" : ""}> Obligatoria</label>
                 <label class="chk"><input type="checkbox" class="pregunta-edit-dashboard" ${q.mostrar_dashboard ? "checked" : ""}> Mostrar en el dashboard de resultados</label>
@@ -508,7 +700,7 @@ function renderPaginas() {
   );
   wrap.querySelectorAll(".btn-pagina-borrar").forEach((btn) =>
     btn.addEventListener("click", async () => {
-      if (!confirm("¿Eliminar esta página y sus preguntas?")) return;
+      if (!(await pedirConfirmacion("¿Eliminar esta página y sus preguntas?"))) return;
       await fetch(`${AUTH_API_BASE}/encuestas/paginas/${btn.dataset.paginaId}`, { method: "DELETE" });
       await abrirEditor(currentTestId, { scroll: false });
     })
@@ -527,7 +719,7 @@ function renderPaginas() {
   );
   wrap.querySelectorAll(".btn-pregunta-borrar").forEach((btn) =>
     btn.addEventListener("click", async () => {
-      if (!confirm("¿Eliminar esta pregunta?")) return;
+      if (!(await pedirConfirmacion("¿Eliminar esta pregunta?"))) return;
       await fetch(`${AUTH_API_BASE}/encuestas/preguntas/${btn.dataset.preguntaId}`, { method: "DELETE" });
       await abrirEditor(currentTestId, { scroll: false });
     })
@@ -550,25 +742,29 @@ function renderPaginas() {
       const item = wrap.querySelector(`.pregunta-item[data-pregunta-id="${preguntaId}"]`);
       const etiqueta = item.querySelector(".pregunta-edit-etiqueta").value.trim();
       if (!etiqueta) {
-        alert("Escribe el enunciado de la pregunta.");
+        mostrarAviso("Escribe el enunciado de la pregunta.");
         return;
       }
       const obligatoria = item.querySelector(".pregunta-edit-obligatoria").checked;
       const mostrarDashboard = item.querySelector(".pregunta-edit-dashboard").checked;
       const editorOpciones = item.querySelector(".pregunta-edit-opciones .opciones-editor");
       const opciones = editorOpciones ? leerOpciones(editorOpciones) : [];
+      const opcionesDescarta = editorOpciones ? leerOpcionesDescarta(editorOpciones) : [];
       if (editorOpciones && opciones.length < 2) {
-        alert("Escribe al menos 2 opciones.");
+        mostrarAviso("Escribe al menos 2 opciones.");
         return;
       }
       const res = await fetch(`${AUTH_API_BASE}/encuestas/preguntas/${preguntaId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tipo: item.dataset.tipo, etiqueta, obligatoria, opciones, mostrar_dashboard: mostrarDashboard }),
+        body: JSON.stringify({
+          tipo: item.dataset.tipo, etiqueta, obligatoria, opciones, mostrar_dashboard: mostrarDashboard,
+          opciones_descarta: opcionesDescarta,
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        alert(err.detail || "No se pudo guardar la pregunta.");
+        mostrarAviso(err.detail || "No se pudo guardar la pregunta.");
         return;
       }
       editandoPreguntas.delete(preguntaId);
@@ -593,24 +789,28 @@ function renderPaginas() {
       const obligatoria = wrap.querySelector(`.nueva-pregunta-obligatoria[data-pagina-id="${paginaId}"]`).checked;
       const mostrarDashboard = wrap.querySelector(`.nueva-pregunta-dashboard[data-pagina-id="${paginaId}"]`).checked;
       if (!etiqueta) {
-        alert("Escribe el enunciado de la pregunta.");
+        mostrarAviso("Escribe el enunciado de la pregunta.");
         return;
       }
       const slot = wrap.querySelector(`.nueva-pregunta-opciones[data-pagina-id="${paginaId}"]`);
       const editorOpciones = slot.querySelector(".opciones-editor");
       const opciones = editorOpciones ? leerOpciones(editorOpciones) : [];
+      const opcionesDescarta = editorOpciones ? leerOpcionesDescarta(editorOpciones) : [];
       if (editorOpciones && opciones.length < 2) {
-        alert("Escribe al menos 2 opciones.");
+        mostrarAviso("Escribe al menos 2 opciones.");
         return;
       }
       const res = await fetch(`${AUTH_API_BASE}/encuestas/paginas/${paginaId}/preguntas`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tipo, etiqueta, obligatoria, opciones, mostrar_dashboard: mostrarDashboard }),
+        body: JSON.stringify({
+          tipo, etiqueta, obligatoria, opciones, mostrar_dashboard: mostrarDashboard,
+          opciones_descarta: opcionesDescarta,
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        alert(err.detail || "No se pudo añadir la pregunta.");
+        mostrarAviso(err.detail || "No se pudo añadir la pregunta.");
         return;
       }
       await abrirEditor(currentTestId, { scroll: false });
@@ -729,10 +929,10 @@ async function actualizarEnVivoDetalle() {
 }
 
 async function reiniciarEmbudo() {
-  if (!confirm("Esto borra todas las aperturas y abandonos registrados de este test (por ejemplo, pruebas que hayas hecho tú mismo). No afecta a las respuestas ya enviadas. ¿Continuar?")) return;
+  if (!(await pedirConfirmacion("Esto borra todas las aperturas y abandonos registrados de este test (por ejemplo, pruebas que hayas hecho tú mismo). No afecta a las respuestas ya enviadas. ¿Continuar?"))) return;
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/sesiones`, { method: "DELETE" });
   if (!res.ok) {
-    alert("No se pudo reiniciar (error " + res.status + ").");
+    mostrarAviso("No se pudo reiniciar (error " + res.status + ").");
     return;
   }
   await verEmbudo({ forzarRecarga: true });
@@ -855,14 +1055,14 @@ async function verRespuestas() {
 }
 
 async function borrarRespuesta(respuestaId) {
-  if (!confirm("¿Eliminar esta respuesta? No se puede deshacer.")) return;
+  if (!(await pedirConfirmacion("¿Eliminar esta respuesta? No se puede deshacer."))) return;
   await fetch(`${AUTH_API_BASE}/encuestas/encuestas/respuestas/${respuestaId}`, { method: "DELETE" });
   document.getElementById("respuestas-wrap").hidden = true;
   await verRespuestas();
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  const user = await checkAuth("/tests.html");
+  const user = await checkAuth(window.location.pathname);
   if (!user) return;
   if (!(user.modulos || []).includes("tests")) {
     window.location.href = "/";
@@ -875,6 +1075,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("btn-nuevo-test").addEventListener("click", () => abrirEditor(null));
   document.getElementById("btn-cerrar-editor").addEventListener("click", cerrarEditor);
+  document.getElementById("btn-cerrar-editor-x").addEventListener("click", cerrarEditor);
   document.getElementById("btn-guardar-test").addEventListener("click", guardarTest);
   document.getElementById("btn-publicar-test").addEventListener("click", () => publicarTest(true));
   document.getElementById("btn-despublicar-test").addEventListener("click", () => publicarTest(false));
@@ -888,5 +1089,66 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!file) return;
     await subirFondo(file);
     e.target.value = "";
+  });
+
+  document.getElementById("test-tipo-informe").addEventListener("change", async (e) => {
+    const val = e.target.value;
+    if (val.startsWith("clima:nueva:")) {
+      const [, , empresa, fase] = val.split(":");
+      const sugerido = fase === "pulso" ? "2026 · Pulso" : "2026 · Encuesta completa";
+      const etiqueta = await pedirTexto(`Nombre de esta oleada de Clima Laboral (ej. "${sugerido}"):`);
+      if (!etiqueta || !etiqueta.trim()) {
+        e.target.value = currentTest?.clima_oleada_id ? `clima:${currentTest.clima_oleada_id}` : "";
+        return;
+      }
+      const res = await fetch(`${AUTH_API_BASE}/clima/oleadas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ etiqueta: etiqueta.trim(), empresa, fase }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        mostrarAviso(err.detail || "No se pudo crear la oleada.");
+        e.target.value = currentTest?.clima_oleada_id ? `clima:${currentTest.clima_oleada_id}` : "";
+        return;
+      }
+      const data = await res.json();
+      await loadTiposInforme();
+      e.target.value = `clima:${data.id}`;
+      climaCargarPlantillaCompleta = fase !== "pulso" && !(currentTest?.paginas?.length);
+    } else if (val.startsWith("informe:nueva:")) {
+      // El nombre de este nuevo tipo de informe es el MISMO título que el
+      // test ya tiene puesto arriba -- no tiene sentido volver a preguntarlo
+      // (el test y el tipo de informe que alimenta siempre van a llamarse
+      // igual en la práctica) ni interrumpir con un prompt() nativo del
+      // navegador para ello.
+      const empresa = val.split(":")[2];
+      const nombre = document.getElementById("test-titulo").value.trim();
+      if (!nombre) {
+        await mostrarAviso("Escribe primero el título del test, arriba: se usará también como nombre de este nuevo tipo de informe.");
+        e.target.value = currentTest?.tipo_informe_clave ? `informe:${currentTest.tipo_informe_clave}` : "";
+        return;
+      }
+      const res = await fetch(`${AUTH_API_BASE}/informes/tipos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clave: claveDesdeNombre(nombre), nombre, empresa }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        mostrarAviso(err.detail || "No se pudo crear el tipo de informe.");
+        e.target.value = currentTest?.tipo_informe_clave ? `informe:${currentTest.tipo_informe_clave}` : "";
+        return;
+      }
+      await loadTiposInforme();
+      e.target.value = `informe:${claveDesdeNombre(nombre)}`;
+    }
+    actualizarVisibilidadMensajeNoApto();
+    await actualizarVistaClimaPlantilla();
+  });
+  document.getElementById("test-usar-mensaje-no-apto").addEventListener("change", actualizarVisibilidadMensajeNoApto);
+  document.getElementById("btn-clima-plantilla-agregar").addEventListener("click", () => {
+    document.getElementById("clima-plantilla-filas").insertAdjacentHTML("beforeend", filaClimaPlantillaHTML());
+    wireClimaPlantillaFilas();
   });
 });

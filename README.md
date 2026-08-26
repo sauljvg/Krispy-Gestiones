@@ -90,13 +90,13 @@ en `/`, así que un único proceso basta tanto en local como al desplegar (ver
   existiendo como herramienta de terminal en local
   (`scraper/scraper_v2.py`, con o sin `--update`), para quien tenga Chrome
   con sesión propia.
-- `python scraper/scraper_v2.py <clave> --reconciliar` / `scraper/scrap_absoluto.py`
-  — auditoría manual y opt-in (nada de esto corre solo) contra el número de
-  reseñas que Google anuncia públicamente: identifica cuáles de las que
-  tenemos guardadas ya no aparecen en vivo y, con `KT_USERNAME`/`KT_PIN` en
-  el entorno, sube el resultado a producción vía `POST
-  /api/reviews/reconciliacion`. El dashboard tiene un toggle "Solo Google"
-  para ver las cifras excluyendo esas reseñas.
+- `scraper/scraper_v2.py <clave> --reconciliar` y `scraper/scrap_absoluto.py`
+  siguen existiendo como scripts de terminal, pero **la vía para subir su
+  resultado a producción (`POST /api/reviews/reconciliacion`) se quitó**: ya
+  no se scrapea Maps en vivo, solo se importa vía Google Takeout, así que el
+  número de reseñas "que Google anuncia" quedaba siempre desactualizado y
+  confundía. El dashboard ya no muestra ese número ni tiene el toggle "Solo
+  Google".
 
 La mayoría de endpoints de lectura aceptan los mismos
 filtros `tienda`, `rating`, `sentiment`, `date_from`, `date_to`, `q` — así que

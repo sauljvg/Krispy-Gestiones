@@ -17,6 +17,7 @@ ROLES = {
     "director_operaciones": "Director de Operaciones",
     "area_manager": "Area Manager",
     "gerente": "Gerente",
+    "colaborador": "Colaborador",
 }
 
 # Módulos que se pueden conceder explícitamente por checkbox al crear/editar
@@ -31,15 +32,19 @@ MODULOS = {
     "tests": "Test",
     "disc": "Perfil DISC",
     "agregadores": "Agregadores",
+    "evaluaciones360": "Evaluaciones 360°",
+    "reclutamiento": "Reclutamiento",
     "saona_resenas": "SAONA · Reseñas",
     "saona_informes": "SAONA · Informes",
     "saona_clima": "SAONA · Clima Laboral",
+    "saona_evaluaciones360": "SAONA · Evaluaciones 360°",
+    "saona_reclutamiento": "SAONA · Reclutamiento",
 }
 
 # Módulos que pertenecen al "hub" SAONA en Home — un usuario ve la tarjeta
 # SAONA si tiene al menos uno de estos (o es admin), igual que cada tarjeta
 # individual de Krispy Kreme depende de su propio módulo.
-MODULOS_SAONA = ["saona_resenas", "saona_informes", "saona_clima"]
+MODULOS_SAONA = ["saona_resenas", "saona_informes", "saona_clima", "saona_evaluaciones360"]
 
 PIN_REGEX = re.compile(r"^\d{4}$")
 
@@ -165,6 +170,43 @@ def create_user(username: str, nombre: str, rol: str) -> int:
     user_id = cur.lastrowid
     conn.close()
     return user_id
+
+
+def eliminar_usuario(usuario_id: int):
+    """Borrado real de la cuenta (no hay papelera) -- factorizado aparte de
+    delete_user_route para poder llamarlo también desde el espejo de
+    Evaluaciones 360 (borrar ahí borra la cuenta de verdad, ver
+    evaluaciones360_routes.eliminar_persona_y_cuenta_route)."""
+    conn = get_connection()
+    conn.execute("DELETE FROM usuarios WHERE id = ?", (usuario_id,))
+    conn.commit()
+    conn.close()
+
+
+def actualizar_usuario(usuario_id: int, nombre: str | None = None, username: str | None = None) -> str | None:
+    """Editar nombre y/o username de una cuenta ya creada -- antes solo se
+    podían fijar al crearla, así que renombrar a alguien obligaba a borrar
+    la cuenta y crearla de nuevo (perdiendo módulos, tiendas, PIN...).
+    Devuelve un mensaje de error si el username ya lo tiene otra cuenta, o
+    None si fue bien."""
+    sets, params = [], []
+    if nombre is not None:
+        sets.append("nombre = ?")
+        params.append(nombre)
+    if username is not None:
+        existente = get_user_by_username(username)
+        if existente and existente["id"] != usuario_id:
+            return "Ese nombre de usuario ya lo tiene otra cuenta"
+        sets.append("username = ?")
+        params.append(username)
+    if not sets:
+        return None
+    conn = get_connection()
+    params.append(usuario_id)
+    conn.execute(f"UPDATE usuarios SET {', '.join(sets)} WHERE id = ?", params)
+    conn.commit()
+    conn.close()
+    return None
 
 
 def get_tiendas_permitidas(usuario_id: int) -> list[str]:

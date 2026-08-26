@@ -83,6 +83,46 @@ function moverColumna(col, delta) {
   renderTable();
 }
 
+// Arrastrar las cabeceras de la tabla para reordenar columnas — alternativa
+// más directa a los botones ↑↓ del panel "Columnas" (que se mantienen, esto
+// no los sustituye). Drag-and-drop nativo HTML5, sin librerías: se
+// re-vincula en cada renderTable() porque el <thead> se reconstruye entero
+// cada vez, igual que ya hace todo lo demás en esta tabla.
+function wireDragColumnas(thead) {
+  let colArrastrada = null;
+  thead.querySelectorAll("th[draggable='true']").forEach((th) => {
+    th.addEventListener("dragstart", (e) => {
+      colArrastrada = th.dataset.col;
+      th.classList.add("col-arrastrando");
+      e.dataTransfer.effectAllowed = "move";
+    });
+    th.addEventListener("dragend", () => {
+      th.classList.remove("col-arrastrando");
+      thead.querySelectorAll("th.col-drop-target").forEach((el) => el.classList.remove("col-drop-target"));
+    });
+    th.addEventListener("dragover", (e) => {
+      if (!colArrastrada || colArrastrada === th.dataset.col) return;
+      e.preventDefault();
+      th.classList.add("col-drop-target");
+    });
+    th.addEventListener("dragleave", () => th.classList.remove("col-drop-target"));
+    th.addEventListener("drop", (e) => {
+      e.preventDefault();
+      th.classList.remove("col-drop-target");
+      const destino = th.dataset.col;
+      if (!colArrastrada || colArrastrada === destino) return;
+      const i = colOrder.indexOf(colArrastrada);
+      if (i === -1) return;
+      colOrder.splice(i, 1);
+      const j = colOrder.indexOf(destino);
+      colOrder.splice(j, 0, colArrastrada);
+      guardarOrdenColumnas();
+      renderColumnasPanel();
+      renderTable();
+    });
+  });
+}
+
 function renderColumnasPanel() {
   const list = document.getElementById("columnas-checklist");
   list.innerHTML = colOrder
@@ -109,30 +149,74 @@ function renderColumnasPanel() {
   });
 }
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
+// escapeHTML ahora vive en common.js (cargado antes que este script).
+
+// Las fechas se guardan en datos_json como ISO ("2026-08-16" o
+// "2026-08-16T10:30:00") — aquí solo se cambia cómo se MUESTRAN en la
+// tabla (DD/MM/AA), el valor crudo se conserva en el title (tooltip) y es
+// el que se sigue usando para ordenar/filtrar, así que no hace falta tocar
+// el backend para esto.
+function formatFechaCorta(valor) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(valor ?? ""));
+  if (!m) return valor ?? "";
+  const [, anio, mes, dia] = m;
+  return `${dia}/${mes}/${anio.slice(2)}`;
 }
 
 async function loadTipos() {
-  const res = await fetch(`${AUTH_API_BASE}/informes/tipos?empresa=${EMPRESA}`);
+  const verArchivados = document.getElementById("tipos-ver-archivados").checked;
+  const res = await fetch(`${AUTH_API_BASE}/informes/tipos?empresa=${EMPRESA}&incluir_archivados=${verArchivados}`);
   const tipos = await res.json();
   const grid = document.getElementById("tipos-grid");
   grid.innerHTML = tipos
     .map(
       (t) => `
-      <a href="#" class="home-card" data-clave="${t.clave}" data-nombre="${escapeHTML(t.nombre)}">
+      <div class="home-card${t.archivado ? " tipo-archivado" : ""}" data-clave="${t.clave}" data-nombre="${escapeHTML(t.nombre)}">
         <span class="home-icon">📋</span>
-        <h2>${escapeHTML(t.nombre)}</h2>
+        <h2>${escapeHTML(t.nombre)}${t.archivado ? '<span class="tipo-archivado-badge">Archivado</span>' : ""}</h2>
         <p>${t.num_respuestas} respuesta(s) importada(s).</p>
-      </a>`
+        <div class="tipo-card-acciones">
+          <button type="button" class="btn btn-ghost btn-archivar-tipo" data-clave="${t.clave}" data-archivado="${t.archivado ? 1 : 0}">
+            ${t.archivado ? "♻️ Desarchivar" : "🗄️ Archivar"}
+          </button>
+          <button type="button" class="btn btn-ghost btn-eliminar-tipo" data-clave="${t.clave}" data-nombre="${escapeHTML(t.nombre)}">🗑️ Eliminar</button>
+        </div>
+      </div>`
     )
     .join("");
   grid.querySelectorAll(".home-card").forEach((card) => {
-    card.addEventListener("click", (e) => {
-      e.preventDefault();
-      openTipo(card.dataset.clave, card.dataset.nombre);
+    card.addEventListener("click", () => openTipo(card.dataset.clave, card.dataset.nombre));
+  });
+  grid.querySelectorAll(".btn-archivar-tipo").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const archivarAhora = btn.dataset.archivado !== "1";
+      const res2 = await fetch(`${AUTH_API_BASE}/informes/tipos/${btn.dataset.clave}/archivar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archivado: archivarAhora }),
+      });
+      if (!res2.ok) {
+        const err = await res2.json().catch(() => ({}));
+        mostrarAviso(err.detail || "No se pudo archivar el tipo.");
+        return;
+      }
+      await loadTipos();
+    });
+  });
+  grid.querySelectorAll(".btn-eliminar-tipo").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!(await pedirConfirmacion(
+        `¿Eliminar por completo "${btn.dataset.nombre}"? Esto borra todas sus respuestas e importaciones. No es reversible -- si solo quieres dejar de verlo, usa "Archivar" en vez de esto.`
+      ))) return;
+      const res2 = await fetch(`${AUTH_API_BASE}/informes/tipos/${btn.dataset.clave}`, { method: "DELETE" });
+      if (!res2.ok) {
+        const err = await res2.json().catch(() => ({}));
+        mostrarAviso(err.detail || "No se pudo eliminar el tipo.");
+        return;
+      }
+      await loadTipos();
     });
   });
 }
@@ -155,8 +239,9 @@ function currentFiltros() {
     if (desde) params.set("fecha_desde", desde);
     if (hasta) params.set("fecha_hasta", hasta);
   }
-  if (document.getElementById("f-excluir-no-aptos").checked) {
-    params.set("excluir_no_aptos", "true");
+  const filtroAptos = document.getElementById("f-filtro-aptos").value;
+  if (filtroAptos && filtroAptos !== "todos") {
+    params.set("filtro_aptos", filtroAptos);
   }
   params.set("page_size", "500");
   return params;
@@ -241,7 +326,7 @@ function renderHojasPanel() {
   });
   list.querySelectorAll(".btn-eliminar-hoja").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!confirm(`¿Eliminar por completo la hoja "${btn.dataset.hoja}"? Esto borra sus datos, no es reversible.`)) return;
+      if (!(await pedirConfirmacion(`¿Eliminar por completo la hoja "${btn.dataset.hoja}"? Esto borra sus datos, no es reversible.`))) return;
       await fetch(`${AUTH_API_BASE}/informes/${currentTipo}/hojas/eliminar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -312,12 +397,13 @@ function renderTable() {
   const thead = document.getElementById("tipo-detail-thead");
   thead.innerHTML =
     `<th><input type="checkbox" id="check-all"></th>` +
-    columnasVisibles.map((c) => `<th title="${escapeHTML(c)}">${escapeHTML(c)}</th>`).join("") +
-    `<th>CV</th>`;
+    columnasVisibles.map((c) => `<th title="${escapeHTML(c)}" draggable="true" data-col="${escapeHTML(c)}">${escapeHTML(c)}</th>`).join("") +
+    `<th>Vacante</th><th>Compartido con</th><th>CV</th>`;
+  wireDragColumnas(thead);
 
   const tbody = document.getElementById("tipo-detail-tbody");
   if (data.respuestas.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="${columnasVisibles.length + 2}">Todavía no hay respuestas importadas. Usa "Importar Excel" arriba.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${columnasVisibles.length + 4}">Todavía no hay respuestas importadas. Usa "Importar Excel" arriba.</td></tr>`;
   } else {
     tbody.innerHTML = data.respuestas
       .map((r) => {
@@ -325,12 +411,22 @@ function renderTable() {
         const cvBtn = r.tiene_cv
           ? `<a href="${AUTH_API_BASE}/informes/respuestas/${r.id}/cv" target="_blank" class="btn btn-ghost btn-cv">📄 Ver</a>`
           : "";
-        return `<tr data-id="${r.id}">
+        const compartidoCon = r.compartido_con || [];
+        const compartida = compartidoCon.length > 0;
+        const gerentes = r.vacante_gerentes || [];
+        const vacanteTitle = gerentes.length ? `Responsable${gerentes.length === 1 ? "" : "s"}: ${gerentes.join(", ")}` : "Sin responsable asignado todavía";
+        const vacanteHTML = r.vacante_nombre
+          ? `<span title="${escapeHTML(vacanteTitle)}">📁 ${escapeHTML(r.vacante_nombre)}${gerentes.length ? ` · 👤 ${escapeHTML(gerentes.join(", "))}` : ""}</span>`
+          : `<span class="staff-hint">—</span>`;
+        return `<tr data-id="${r.id}" class="${compartida ? "fila-compartida" : ""}">
           <td><input type="checkbox" class="row-check" data-id="${r.id}" ${checked}></td>
           ${columnasVisibles.map((c) => {
             const valor = r.datos[c] ?? "";
-            return `<td title="${escapeHTML(valor)}">${escapeHTML(valor)}</td>`;
+            const mostrar = data.columnas_fecha.includes(c) ? formatFechaCorta(valor) : valor;
+            return `<td title="${escapeHTML(valor)}">${escapeHTML(mostrar)}</td>`;
           }).join("")}
+          <td class="col-vacante">${vacanteHTML}</td>
+          <td class="col-compartido-con" title="${escapeHTML(compartidoCon.join(", "))}">${compartida ? `🔗 ${escapeHTML(compartidoCon.join(", "))}` : ""}</td>
           <td>
             ${cvBtn}
             <label class="btn btn-ghost btn-cv btn-upload">⬆
@@ -361,6 +457,19 @@ function renderTable() {
     });
   });
 
+  // Clic en cualquier parte de la fila marca/desmarca su checkbox — salvo
+  // en los propios controles de CV (enlace "Ver" / subir), que ya tienen su
+  // propia acción y no deben además cambiar la selección.
+  tbody.querySelectorAll("tr[data-id]").forEach((row) => {
+    row.addEventListener("click", (e) => {
+      if (e.target.closest(".row-check, .btn-cv, .input-cv-upload")) return;
+      const cb = row.querySelector(".row-check");
+      if (!cb) return;
+      cb.checked = !cb.checked;
+      cb.dispatchEvent(new Event("change"));
+    });
+  });
+
   tbody.querySelectorAll(".input-cv-upload").forEach((input) => {
     input.addEventListener("change", async (e) => {
       const file = e.target.files[0];
@@ -371,7 +480,7 @@ function renderTable() {
       const res = await fetch(`${AUTH_API_BASE}/informes/respuestas/${id}/cv`, { method: "POST", body: formData });
       e.target.value = "";
       if (!res.ok) {
-        alert("No se pudo subir el CV.");
+        mostrarAviso("No se pudo subir el CV.");
         return;
       }
       loadRespuestas();
@@ -458,21 +567,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     e.target.value = "";
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert(err.detail || "Fallo al importar el Excel.");
+      mostrarAviso(err.detail || "Fallo al importar el Excel.");
       return;
     }
     const result = await res.json();
     const detalle = Object.entries(result.hojas)
       .map(([hoja, r]) => `${hoja}: ${r.nuevas} nueva(s), ${r.ya_existian} ya existían (de ${r.total_en_excel})`)
       .join("\n");
-    alert(`Importación completa:\n${detalle}`);
+    mostrarAviso(`Importación completa:\n${detalle}`);
     await loadTipos();
     await loadHojas();
     await loadRespuestas();
   });
 
   document.getElementById("btn-new-tipo").addEventListener("click", async () => {
-    const nombre = prompt("Nombre del nuevo tipo de informe (ej. 'Encuesta de Onboarding'):");
+    const nombre = await pedirTexto("Nombre del nuevo tipo de informe (ej. 'Encuesta de Onboarding'):");
     if (!nombre || !nombre.trim()) return;
     const clave = nombre
       .trim()
@@ -488,16 +597,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert(err.detail || "No se pudo crear el tipo.");
+      mostrarAviso(err.detail || "No se pudo crear el tipo.");
       return;
     }
     await loadTipos();
   });
 
+  document.getElementById("tipos-ver-archivados").addEventListener("change", () => loadTipos());
+
   ["f-buscar"].forEach((id) => {
     document.getElementById(id).addEventListener("input", () => loadRespuestas());
   });
-  ["f-orden", "f-orden-dir", "f-fecha-desde", "f-fecha-hasta", "f-excluir-no-aptos"].forEach((id) => {
+  ["f-orden", "f-orden-dir", "f-fecha-desde", "f-fecha-hasta", "f-filtro-aptos"].forEach((id) => {
     document.getElementById(id).addEventListener("change", () => loadRespuestas());
   });
 
@@ -507,7 +618,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("f-orden-dir").value = "asc";
     document.getElementById("f-fecha-desde").value = "";
     document.getElementById("f-fecha-hasta").value = "";
-    document.getElementById("f-excluir-no-aptos").checked = false;
+    document.getElementById("f-filtro-aptos").value = "todos";
     loadRespuestas();
   });
 
@@ -552,17 +663,43 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btn-compartir-cancelar").addEventListener("click", cerrarModalCompartir);
   document.getElementById("btn-compartir-confirmar").addEventListener("click", async () => {
     const usuarioId = Number(document.getElementById("compartir-usuario-select").value);
+    const usuario = usuariosParaCompartir.find((u) => u.id === usuarioId);
+    if (usuario && lastData) {
+      // Compartir es EXCLUSIVO (ver informes.compartir_respuestas en el
+      // backend): si ya estaba compartido con otra persona, esa persona
+      // pierde el acceso y pasa a ser del nuevo destinatario -- se avisa
+      // antes de hacerlo. Re-compartir con la MISMA persona no cambia nada,
+      // solo se informa (probable duplicado sin querer).
+      const mismoDestinatario = [];
+      const otroDestinatario = [];
+      lastData.respuestas.forEach((r) => {
+        if (!selectedIds.has(r.id)) return;
+        const con = r.compartido_con || [];
+        if (con.length === 0) return;
+        const nombre = r.datos["Nombre y apellido"] || r.datos["Nombre"] || `#${r.id}`;
+        if (con.includes(usuario.nombre)) mismoDestinatario.push(nombre);
+        else otroDestinatario.push(`${nombre} (de ${con.join(", ")})`);
+      });
+      const partes = [];
+      if (mismoDestinatario.length) {
+        partes.push(`${mismoDestinatario.join(", ")} ya estaba(n) compartido(s) con ${usuario.nombre}.`);
+      }
+      if (otroDestinatario.length) {
+        partes.push(`${otroDestinatario.join(", ")} pasará(n) a ser de ${usuario.nombre} (deja de verlo(s) quien lo(s) tenía antes).`);
+      }
+      if (partes.length && !(await pedirConfirmacion(`${partes.join(" ")}\n¿Continuar?`))) return;
+    }
     const res = await fetch(`${AUTH_API_BASE}/informes/compartir`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ respuesta_ids: Array.from(selectedIds), usuario_id: usuarioId }),
     });
     if (!res.ok) {
-      alert("No se pudo compartir.");
+      mostrarAviso("No se pudo compartir.");
       return;
     }
     cerrarModalCompartir();
-    alert(`Compartido con éxito (${selectedIds.size} candidato(s)).`);
+    mostrarAviso(`Compartido con éxito (${selectedIds.size} candidato(s)).`);
     selectedIds.clear();
     loadRespuestas();
   });

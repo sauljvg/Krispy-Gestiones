@@ -13,11 +13,18 @@
     }
   })();
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260728a">
+<link rel="stylesheet" href="css/styles.css?v=20260823c">
 <style>
   .informes-wrap { max-width: 1200px; margin: 0 auto; padding: 0 0 60px; }
   .informes-wrap .home-grid { margin: 20px 0 28px; }
   .informes-wrap .home-card { cursor: pointer; }
+  .informes-wrap .home-card.tipo-archivado { opacity: 0.55; }
+  .tipo-archivado-badge {
+    font-size: 11px; font-weight: normal; color: var(--text-secondary); background: var(--surface-page);
+    border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; margin-left: 6px; vertical-align: middle;
+  }
+  .tipo-card-acciones { display: flex; gap: 6px; margin-top: 10px; }
+  .tipo-card-acciones .btn { font-size: 11px; padding: 4px 8px; }
   .informes-header { display: flex; justify-content: space-between; align-items: center; }
   #tipo-detail-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
   .table-scroll { overflow-x: auto; }
@@ -26,9 +33,12 @@
   .hoja-tab { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary); cursor: pointer; font-size: 13px; }
   .hoja-tab.active { background: var(--acento); color: #fff; border-color: var(--acento); }
   .filtros-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 14px 0; }
+  .filtros-row .campo { flex: 1 1 120px; min-width: 100px; }
+  .filtros-row .campo.campo-ancho { flex: 1.6 1 170px; }
+  .filtros-row .campo.campo-boton { flex: 0 0 auto; }
   .filtros-row .campo label { display: block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; }
   .filtros-row input, .filtros-row select {
-    padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border);
+    width: 100%; box-sizing: border-box; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border);
     background: var(--surface-page); color: var(--text-primary); font-size: 13px;
   }
   .compartir-bar {
@@ -73,7 +83,23 @@
 
   #tipo-detail-table td, #tipo-detail-table th {
     max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    text-align: center;
   }
+  #tipo-detail-table td:first-child, #tipo-detail-table th:first-child {
+    position: sticky; left: 0; z-index: 5;
+    background: var(--surface-1);
+    box-shadow: 2px 0 4px -2px rgba(0,0,0,0.15);
+  }
+  #tipo-detail-table tbody tr { cursor: pointer; }
+  #tipo-detail-table tbody tr:hover td { background: var(--surface-page); }
+  #tipo-detail-table tbody tr:hover td:first-child { background: var(--surface-page); }
+  #tipo-detail-table tbody tr.fila-compartida td { background: color-mix(in srgb, var(--status-good) 12%, var(--surface-1)); }
+  #tipo-detail-table tbody tr.fila-compartida:hover td { background: color-mix(in srgb, var(--status-good) 20%, var(--surface-1)); }
+  #tipo-detail-table .col-compartido-con { color: var(--status-good); font-size: 12px; white-space: normal; }
+  #tipo-detail-table .col-vacante { color: var(--text-secondary); font-size: 12px; white-space: normal; }
+  #tipo-detail-table th[draggable="true"] { cursor: grab; }
+  #tipo-detail-table th.col-arrastrando { opacity: 0.4; }
+  #tipo-detail-table th.col-drop-target { box-shadow: inset 2px 0 0 var(--acento); }
 </style>
 </head>
 <body>
@@ -109,7 +135,12 @@
 
     <div class="informes-header">
       <h2 style="font-size:18px; margin:0;">Selecciona un informe</h2>
-      <button id="btn-new-tipo" class="btn btn-ghost">+ Nuevo tipo</button>
+      <div style="display:flex; align-items:center; gap:14px;">
+        <label class="staff-hint" style="display:flex; align-items:center; gap:6px;">
+          <input type="checkbox" id="tipos-ver-archivados"> Ver archivados
+        </label>
+        <button id="btn-new-tipo" class="btn btn-ghost">+ Nuevo tipo</button>
+      </div>
     </div>
     <div class="home-grid" id="tipos-grid"></div>
 
@@ -138,7 +169,7 @@
       </div>
 
       <div class="filtros-row">
-        <div class="campo">
+        <div class="campo campo-ancho">
           <label for="f-buscar">Buscar</label>
           <input type="text" id="f-buscar" placeholder="Nombre, correo, texto…">
         </div>
@@ -162,16 +193,18 @@
           <input type="date" id="f-fecha-hasta">
         </div>
         <div class="campo" id="f-no-aptos-wrap" hidden>
-          <label>&nbsp;</label>
-          <label style="display:flex; align-items:center; gap:6px; font-size:13px; white-space:nowrap; padding:7px 0;">
-            <input type="checkbox" id="f-excluir-no-aptos">
-            Excluir "No aptos"
-          </label>
+          <label for="f-filtro-aptos">Aptos</label>
+          <select id="f-filtro-aptos">
+            <option value="todos">Todos</option>
+            <option value="excluir_no_aptos">Aptos</option>
+            <option value="solo_no_aptos">No Aptos</option>
+          </select>
         </div>
-        <div class="campo">
+        <div class="campo campo-boton">
+          <label>&nbsp;</label>
           <button type="button" id="btn-limpiar-filtros" class="btn btn-ghost">✕ Limpiar</button>
         </div>
-        <div class="campo columnas-wrap">
+        <div class="campo campo-boton columnas-wrap">
           <label>&nbsp;</label>
           <button type="button" id="btn-columnas" class="btn btn-ghost">⚏ Columnas</button>
           <div class="columnas-panel" id="columnas-panel">
@@ -212,8 +245,11 @@
 </div>
 
 <script src="js/theme.js?v=20260723g"></script>
-<script src="js/auth-common.js?v=20260723g"></script>
-<script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/informes.js?v=20260727b"></script>
+<script src="js/dialogs.js?v=20260818a"></script>
+<script src="js/icons.js?v=20260824a"></script>
+<script src="js/auth-common.js?v=20260824a"></script>
+<script src="js/topbar-menu.js?v=20260821a"></script>
+<script src="js/common.js?v=20260823a"></script>
+<script src="js/informes.js?v=20260821a"></script>
 </body>
 </html>

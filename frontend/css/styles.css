@@ -164,7 +164,12 @@ h3 {
 .brand h1 { margin: 0; font-size: 20px; }
 .subtitle { margin: 2px 0 0; color: var(--text-secondary); font-size: 13px; }
 
-.topbar-actions { display: flex; align-items: center; gap: 8px; }
+/* flex-wrap: sin esto, una página con botones propios en la topbar (ej.
+   "Exportar Excel" en Reseñas) obligaba a toda la fila (grupo de botones +
+   volver/inicio/menú) a caber en una sola línea sin encoger -- en móvil
+   eso empujaba la página entera a scroll horizontal. Con wrap, el grupo de
+   botones de la página cae a su propia línea cuando no cabe. */
+.topbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* Grupos de botones de acción dentro del topbar (Actualizar / Importar+Exportar
    / etc.) — cada .topbar-group junta botones relacionados, con un separador
@@ -231,6 +236,21 @@ h3 {
   font-size: 11px; font-weight: 700; text-align: center;
 }
 
+/* Indicador de lotes de IA en curso (ver topbar-menu.js) -- mismo icono +
+   globo + panel que las campanitas de notificaciones, junto al resto de
+   botones del topbar. */
+#lotes-progreso-lista li { padding: 6px 8px; font-size: 12.5px; color: var(--text-primary); }
+#lotes-progreso-lista li + li { border-top: 1px solid var(--border); }
+
+/* Campanita genérica de avisos (ver topbar-menu.js) -- reutiliza
+   .notif-badge-btn/.notif-badge-count/.notif-tests-panel/.notif-tests-lista
+   (mismo look que la de "respuestas nuevas de Test"), solo cambia cómo se ve
+   cada fila: mensaje + fecha en dos líneas en vez de título + contador. */
+.notif-aviso-item { flex-direction: column; align-items: flex-start !important; gap: 2px !important; }
+.notif-aviso-item span:first-child { font-size: 12.5px; line-height: 1.35; }
+.notif-aviso-fecha { font-size: 11px; color: var(--text-secondary); }
+.notif-aviso-no-vista { background: color-mix(in srgb, var(--acento) 10%, transparent); }
+
 /* Indicador de "quién está en línea" (solo visible para el usuario admin
    "saul", ver topbar-menu.js) — mismo patrón visual que .notif-badge. */
 .en-linea-badge-wrap { position: relative; }
@@ -295,6 +315,8 @@ h3 {
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
   transition: border-color .15s ease, background-color .15s ease, transform .1s ease, box-shadow .15s ease;
 }
 .btn:hover { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 6%, var(--surface-1)); }
@@ -373,19 +395,6 @@ h3 {
 .stat-good .stat-value { color: var(--status-good); }
 
 .stat-value-row { display: flex; align-items: center; gap: 8px; }
-.stat-check {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--status-good);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: help;
-}
 
 .rating-progress-row {
   display: grid;
@@ -500,20 +509,6 @@ h3 {
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
 .filter-group { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
-.filter-toggle-google {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface-page);
-  color: var(--text-primary);
-  font-size: 14px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.filter-toggle-google input { margin: 0; }
 .filter-group select, .filter-group input {
   padding: 8px 10px;
   border-radius: 8px;
@@ -548,6 +543,14 @@ h3 {
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
 .chart-card h2, .keywords-card h2, .reviews-card h2, .staff-card h2 { margin: 0 0 12px; font-size: 15px; }
+
+/* .staff-table nunca envuelve sus celdas (white-space: nowrap, para que
+   los números de la tabla no se lean en varias líneas) -- en una pantalla
+   estrecha eso la hace más ancha que la tarjeta que la contiene. Sin este
+   overflow, esa anchura se filtraba fuera de la tarjeta y empujaba la
+   página entera a scroll horizontal; con él, es la tarjeta la que gana su
+   propia barra de scroll, sin afectar al resto de la página. */
+.staff-card { overflow-x: auto; }
 
 .keywords-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .keyword-chip {
@@ -707,7 +710,6 @@ h3 {
 .badge-positivo { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
 .badge-neutral  { background: color-mix(in srgb, var(--status-warning) 22%, transparent); color: #9a6b00; }
 .badge-negativo { background: color-mix(in srgb, var(--status-critical) 16%, transparent); color: var(--status-critical); }
-.badge-no-google { background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-secondary); }
 
 .pagination { display: flex; gap: 6px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
 .pagination button {
@@ -801,10 +803,32 @@ h3 {
   height: 48px;
   border-radius: 50%;
   background: color-mix(in srgb, var(--acento) 12%, var(--surface-1));
+  color: var(--acento);
   font-size: 22px;
   flex-shrink: 0;
 }
 .icon-badge img { height: 24px; width: auto; }
+
+/* Paleta de las tarjetas de la home -- cada módulo con su propio color en
+   vez de que todo salga verde/gris; los tonos se eligen para que lean bien
+   tanto en tema claro como oscuro (saturación media, ni pastel ni neón). */
+.icon-badge[data-c="gold"]   { background: color-mix(in srgb, #c9960c 16%, var(--surface-1)); color: #c9960c; }
+.icon-badge[data-c="teal"]   { background: color-mix(in srgb, #0e8a86 16%, var(--surface-1)); color: #0e8a86; }
+.icon-badge[data-c="blue"]   { background: color-mix(in srgb, #1d6fb8 16%, var(--surface-1)); color: #1d6fb8; }
+.icon-badge[data-c="violet"] { background: color-mix(in srgb, #7b4fb0 16%, var(--surface-1)); color: #7b4fb0; }
+.icon-badge[data-c="indigo"] { background: color-mix(in srgb, #4a5fc1 16%, var(--surface-1)); color: #4a5fc1; }
+.icon-badge[data-c="orange"] { background: color-mix(in srgb, #e0641e 16%, var(--surface-1)); color: #e0641e; }
+.icon-badge[data-c="rose"]   { background: color-mix(in srgb, #c23a72 16%, var(--surface-1)); color: #c23a72; }
+.icon-badge[data-c="slate"]  { background: color-mix(in srgb, #3d5a80 16%, var(--surface-1)); color: #3d5a80; }
+.icon-badge[data-c="cyan"]   { background: color-mix(in srgb, #0aa3a3 16%, var(--surface-1)); color: #0aa3a3; }
+.icon-badge[data-c="green"]  { background: color-mix(in srgb, var(--status-good) 16%, var(--surface-1)); color: var(--status-good); }
+
+/* Iconos SVG que sustituyen a los emojis sueltos del texto (ver
+   js/icons.js) -- inline-flex + vertical-align para que se alineen con la
+   línea de texto igual que hacía el emoji, en vez de colgar más abajo como
+   suelen hacer los SVG inline por defecto. */
+.icono-svg { display: inline-flex; vertical-align: -0.125em; line-height: 1; }
+.icono-svg svg { display: block; }
 
 /* Control segmentado tipo "pill" (rangos de fecha, alternar vistas) —
    pieza nueva reutilizable, mismo lenguaje visual que .pagination pero

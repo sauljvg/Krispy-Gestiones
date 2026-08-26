@@ -5,11 +5,7 @@ let postTienePdf = false; // el PDF cuenta como contenido en sí mismo — no ex
 // Icono SVG en vez de 🔗 — se ve igual de nítido en cualquier sistema.
 const ICONO_ENLACE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script).
 
 async function loadPosts() {
   const res = await fetch(`${AUTH_API_BASE}/boletines/posts`);
@@ -64,7 +60,7 @@ async function nuevoPost() {
     body: JSON.stringify({ titulo: "Nuevo boletín", resumen: "", contenido_html: "<p></p>" }),
   });
   if (!res.ok) {
-    alert("No se pudo crear el boletín.");
+    mostrarAviso("No se pudo crear el boletín.");
     return;
   }
   const data = await res.json();
@@ -117,11 +113,11 @@ async function guardarPost() {
   const titulo = document.getElementById("post-titulo").value.trim();
   const resumen = document.getElementById("post-resumen").value.trim();
   if (!titulo) {
-    alert("El título es obligatorio.");
+    mostrarAviso("El título es obligatorio.");
     return;
   }
   if (!BoletinBuilder.tieneBloques() && !postTienePdf) {
-    alert("Añade al menos un bloque de contenido o adjunta un PDF.");
+    mostrarAviso("Añade al menos un bloque de contenido o adjunta un PDF.");
     return;
   }
   const body = JSON.stringify({
@@ -134,7 +130,7 @@ async function guardarPost() {
   const res = await fetch(`${AUTH_API_BASE}/boletines/posts/${currentPostId}`, { method: "PUT", headers, body });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || "No se pudo guardar el boletín.");
+    mostrarAviso(err.detail || "No se pudo guardar el boletín.");
     return;
   }
   await loadPosts();
@@ -154,7 +150,7 @@ async function despublicarPost() {
 }
 
 async function eliminarPost() {
-  if (!confirm("¿Eliminar este boletín? Esta acción no se puede deshacer.")) return;
+  if (!(await pedirConfirmacion("¿Eliminar este boletín? Esta acción no se puede deshacer."))) return;
   await fetch(`${AUTH_API_BASE}/boletines/posts/${currentPostId}`, { method: "DELETE" });
   cerrarEditor();
   await loadPosts();
@@ -180,7 +176,7 @@ function renderDestinatarios() {
 async function enviarBoletin() {
   const ids = Array.from(document.querySelectorAll(".chk-destinatario:checked")).map((chk) => Number(chk.value));
   if (ids.length === 0) {
-    alert("Selecciona al menos un destinatario.");
+    mostrarAviso("Selecciona al menos un destinatario.");
     return;
   }
   const res = await fetch(`${AUTH_API_BASE}/boletines/posts/${currentPostId}/enviar`, {
@@ -209,7 +205,7 @@ async function enviarBoletin() {
 function generarMailtoBoletin() {
   const ids = Array.from(document.querySelectorAll(".chk-destinatario:checked")).map((chk) => Number(chk.value));
   if (ids.length === 0) {
-    alert("Selecciona al menos un destinatario.");
+    mostrarAviso("Selecciona al menos un destinatario.");
     return;
   }
   const emails = contactosActuales.filter((c) => ids.includes(c.id)).map((c) => c.email);
@@ -257,7 +253,7 @@ async function agregarContacto() {
   const nombre = document.getElementById("contacto-nombre").value.trim();
   const email = document.getElementById("contacto-email").value.trim();
   if (!nombre || !EMAIL_RE.test(email)) {
-    alert("Nombre y email con formato válido (ej. nombre@dominio.com) son obligatorios.");
+    mostrarAviso("Nombre y email con formato válido (ej. nombre@dominio.com) son obligatorios.");
     return;
   }
   const res = await fetch(`${AUTH_API_BASE}/boletines/contactos`, {
@@ -267,7 +263,7 @@ async function agregarContacto() {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || "No se pudo agregar el contacto.");
+    mostrarAviso(err.detail || "No se pudo agregar el contacto.");
     return;
   }
   document.getElementById("contacto-nombre").value = "";
@@ -281,7 +277,7 @@ async function subirPdf(file) {
   const res = await fetch(`${AUTH_API_BASE}/boletines/posts/${currentPostId}/pdf`, { method: "POST", body: formData });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || "No se pudo subir el PDF.");
+    mostrarAviso(err.detail || "No se pudo subir el PDF.");
     return;
   }
   await abrirEditor(currentPostId);
@@ -293,11 +289,11 @@ async function importarContactosExcel(file) {
   const res = await fetch(`${AUTH_API_BASE}/boletines/contactos/importar`, { method: "POST", body: formData });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    alert(err.detail || "No se pudo importar el Excel.");
+    mostrarAviso(err.detail || "No se pudo importar el Excel.");
     return;
   }
   const data = await res.json();
-  alert(`Importación completa: ${data.nuevos} contactos nuevos, ${data.ya_existian} ya existían, ${data.invalidos} filas sin email válido.`);
+  mostrarAviso(`Importación completa: ${data.nuevos} contactos nuevos, ${data.ya_existian} ya existían, ${data.invalidos} filas sin email válido.`);
   await loadContactos();
 }
 

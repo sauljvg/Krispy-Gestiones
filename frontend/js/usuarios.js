@@ -3,11 +3,7 @@ let MODULOS_CACHE = [];
 let TIPOS_INFORME_CACHE = null; // null = todavía no se ha pedido (se carga la primera vez que hace falta)
 let CLIMA_CENTROS_CACHE = null; // idem, para el checklist de restricción por centro de Clima Laboral
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script).
 
 // Mismas tiendas del selector de Reseñas (KK + SAONA) — ParqueSur es una
 // sola ficha de Google (fábrica y tienda comparten la misma reseña pública),
@@ -202,8 +198,8 @@ async function loadUsers(currentUserId) {
     .map(
       (u) => `
       <tr data-id="${u.id}">
-        <td>${u.username}</td>
-        <td>${u.nombre}</td>
+        <td><input type="text" class="username-input" data-id="${u.id}" value="${escapeHTML(u.username)}" style="width:110px;"></td>
+        <td>${escapeHTML(u.nombre)}</td>
         <td><select class="rol-select" data-id="${u.id}" ${u.id === currentUserId ? "disabled" : ""}>${rolSelectHTML(u.rol)}</select></td>
         <td>
           ${
@@ -388,7 +384,7 @@ async function loadUsers(currentUserId) {
         body: JSON.stringify({ modulos }),
       });
       if (!res.ok) {
-        alert("No se pudieron guardar los módulos.");
+        mostrarAviso("No se pudieron guardar los módulos.");
         return;
       }
       loadUsers(currentUserId);
@@ -408,7 +404,7 @@ async function loadUsers(currentUserId) {
         body: JSON.stringify({ tiendas }),
       });
       if (!res.ok) {
-        alert("No se pudieron guardar las tiendas.");
+        mostrarAviso("No se pudieron guardar las tiendas.");
         return;
       }
       loadUsers(currentUserId);
@@ -428,7 +424,7 @@ async function loadUsers(currentUserId) {
         body: JSON.stringify({ tipos_informes }),
       });
       if (!res.ok) {
-        alert("No se pudieron guardar los informes.");
+        mostrarAviso("No se pudieron guardar los informes.");
         return;
       }
       loadUsers(currentUserId);
@@ -448,7 +444,7 @@ async function loadUsers(currentUserId) {
         body: JSON.stringify({ centros }),
       });
       if (!res.ok) {
-        alert("No se pudieron guardar los centros de Clima Laboral.");
+        mostrarAviso("No se pudieron guardar los centros de Clima Laboral.");
         return;
       }
       loadUsers(currentUserId);
@@ -465,7 +461,34 @@ async function loadUsers(currentUserId) {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        alert(body.detail || "No se pudo cambiar el rol.");
+        mostrarAviso(body.detail || "No se pudo cambiar el rol.");
+      }
+      loadUsers(currentUserId);
+    });
+  });
+
+  // El usuario se guarda solo al salir del campo (blur) -- si no cambió, no
+  // llama a la API. El nombre de la persona es texto plano a propósito: se
+  // edita desde la ficha de la persona en Evaluaciones 360, no desde aquí.
+  tbody.querySelectorAll(".username-input").forEach((input) => {
+    input.addEventListener("blur", async () => {
+      const id = input.dataset.id;
+      const valor = input.value.trim();
+      const original = users.find((u) => String(u.id) === String(id));
+      if (!valor || (original && original.username === valor)) {
+        input.value = original ? original.username : valor;
+        return;
+      }
+      const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: valor }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        mostrarAviso(body.detail || "No se pudo guardar el cambio.");
+        loadUsers(currentUserId);
+        return;
       }
       loadUsers(currentUserId);
     });
@@ -477,7 +500,7 @@ async function loadUsers(currentUserId) {
       const input = tbody.querySelector(`.pin-input[data-id="${id}"]`);
       const pin = input.value.trim();
       if (!/^\d{4}$/.test(pin)) {
-        alert("El PIN debe ser de 4 dígitos.");
+        mostrarAviso("El PIN debe ser de 4 dígitos.");
         return;
       }
       const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}/pin`, {
@@ -486,9 +509,9 @@ async function loadUsers(currentUserId) {
         body: JSON.stringify({ pin }),
       });
       if (!res.ok) {
-        alert("No se pudo guardar el PIN.");
+        mostrarAviso("No se pudo guardar el PIN.");
       } else {
-        alert("PIN actualizado.");
+        mostrarAviso("PIN actualizado.");
       }
     });
   });
@@ -496,10 +519,10 @@ async function loadUsers(currentUserId) {
   tbody.querySelectorAll(".btn-reset-pin").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = btn.dataset.id;
-      if (!confirm("¿Borrar el PIN de este usuario? La próxima vez que entre, tendrá que crear uno nuevo.")) return;
+      if (!(await pedirConfirmacion("¿Borrar el PIN de este usuario? La próxima vez que entre, tendrá que crear uno nuevo."))) return;
       const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}/reset-pin`, { method: "POST" });
       if (!res.ok) {
-        alert("No se pudo resetear el PIN.");
+        mostrarAviso("No se pudo resetear el PIN.");
         return;
       }
       loadUsers(currentUserId);
@@ -508,11 +531,11 @@ async function loadUsers(currentUserId) {
 
   tbody.querySelectorAll(".btn-delete-user").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!confirm("¿Eliminar este usuario?")) return;
+      if (!(await pedirConfirmacion("¿Eliminar este usuario?"))) return;
       const id = btn.dataset.id;
       const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}`, { method: "DELETE" });
       if (!res.ok) {
-        alert("No se pudo eliminar el usuario.");
+        mostrarAviso("No se pudo eliminar el usuario.");
       } else {
         loadUsers(currentUserId);
       }
@@ -532,10 +555,10 @@ function wireBackup() {
     if (!file) return;
     errorEl.hidden = true;
     okEl.hidden = true;
-    if (!confirm(
+    if (!(await pedirConfirmacion(
       "Esto SOBREESCRIBE toda la base de datos actual (Test, Informes, Boletines, Reclutamiento, etc.) con el " +
       "contenido de este archivo. Todo lo que se haya recibido después de esta copia se perderá. ¿Continuar?"
-    )) {
+    ))) {
       e.target.value = "";
       return;
     }
@@ -581,10 +604,10 @@ function wireRetencion() {
 
   btnPurgar.addEventListener("click", async () => {
     const meses = Number(mesesInput.value) || 12;
-    if (!confirm(`Esto borra PERMANENTEMENTE ${ultimaLista.length} ficha(s) de candidato, sus notas y archivos subidos. No se puede deshacer. ¿Continuar?`)) return;
+    if (!(await pedirConfirmacion(`Esto borra PERMANENTEMENTE ${ultimaLista.length} ficha(s) de candidato, sus notas y archivos subidos. No se puede deshacer. ¿Continuar?`))) return;
     const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/purgar-descartados?meses=${meses}`, { method: "POST" });
     if (!res.ok) {
-      alert("No se pudo completar el borrado.");
+      mostrarAviso("No se pudo completar el borrado.");
       return;
     }
     const data = await res.json();

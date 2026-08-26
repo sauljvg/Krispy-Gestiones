@@ -6,6 +6,7 @@ import base64
 import io
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 from openpyxl import load_workbook
@@ -392,11 +393,25 @@ def enviar_boletin(post_id, contacto_ids):
     ).fetchall() if contacto_ids else []
     conn.close()
 
+    # Antes se mandaba uno por uno en un bucle secuencial dentro del propio
+    # request -- con una lista de contactos grande, el endpoint podía tardar
+    # minutos y agotar el timeout de Railway antes de terminar. Con varios
+    # hilos a la vez (cada llamada a Resend es una petición HTTP normal, no
+    # hay estado compartido entre ellas) el tiempo total baja a lo que tarda
+    # el contacto más lento, no la suma de todos. Los resultados se escriben
+    # en la BD después, secuencialmente en el hilo principal, para no abrir
+    # una conexión SQLite por hilo.
+    def enviar_uno(contacto):
+        ok, error = _enviar_email_resend(contacto["email"], contacto["nombre"], post["titulo"], post["contenido_html"], adjunto)
+        return contacto, ok, error
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        resultados = list(executor.map(enviar_uno, rows))
+
     enviados = 0
     fallidos = []
     conn = get_connection()
-    for contacto in rows:
-        ok, error = _enviar_email_resend(contacto["email"], contacto["nombre"], post["titulo"], post["contenido_html"], adjunto)
+    for contacto, ok, error in resultados:
         conn.execute(
             "INSERT INTO boletin_envios (post_id, contacto_id, ok, error) VALUES (?, ?, ?, ?)",
             (post_id, contacto["id"], 1 if ok else 0, error),

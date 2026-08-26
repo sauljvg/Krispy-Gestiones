@@ -213,6 +213,20 @@ async def deduplicar_direcciones(aplicar: bool = False) -> dict:
             return await resp.json()
 
 
+async def actualizar_tienda_actual(sesion_id: int, tienda: str):
+    if config.MODO_LOCAL or sesion_id == -1:
+        return
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/sesiones/{sesion_id}/tienda-actual"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.put(url, json={"tienda": tienda}, headers=_headers(), timeout=15) as resp:
+                resp.raise_for_status()
+    except Exception as exc:
+        # Contador informativo para el dashboard -- si falla no debe tumbar
+        # la pasada real de chequeos.
+        logger.warning("No se pudo avisar de la tienda actual (%s): %r", tienda, exc)
+
+
 async def registrar_alerta(tipo: str, mensaje: str, tienda: str = None, agregador: str = None):
     if config.MODO_LOCAL:
         logger.info("[MODO_LOCAL] alerta no registrada en KG: [%s] %s", tipo, mensaje)

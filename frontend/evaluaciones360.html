@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krispy Gestiones · Evaluaciones 360°</title>
+<link rel="icon" type="image/png" href="assets/favicon-kk.png">
+<script>
+  (function () {
+    var guardado = localStorage.getItem("kt-theme");
+    if (guardado === "light" || guardado === "dark") {
+      document.documentElement.dataset.theme = guardado;
+    }
+  })();
+</script>
+<link rel="stylesheet" href="css/styles.css?v=20260823c">
+<style>
+  .eval360-wrap { max-width: 1000px; margin: 0 auto; padding: 0 0 60px; }
+  /* flex-wrap: sin esto, un grupo de botones que no encoge (flex-shrink:0,
+     como el de zoom + "Nuevo puesto") exprimía el texto de ayuda de al lado
+     hasta una columna carísimamente estrecha en móvil -- con min-width:0
+     el párrafo SÍ podía encoger tanto, y una palabra por línea es lo que
+     queda cuando el hueco es más angosto que la palabra más larga. Con
+     wrap, el grupo de botones cae a su propia línea cuando no cabe. */
+  .eval360-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin: 16px 0; }
+  .eval360-toolbar p { flex: 1; min-width: 200px; }
+  .eval360-toolbar .btn { flex-shrink: 0; white-space: nowrap; }
+
+  .eval360-tabs { display: flex; gap: 6px; margin: 20px 0 4px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .eval360-tab-btn {
+    padding: 10px 14px; border: none; background: none; color: var(--text-secondary);
+    font-size: 14px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .eval360-tab-btn.activa { color: var(--text-primary); border-bottom-color: var(--accent, var(--status-good)); }
+  .eval360-vista { display: none; }
+  .eval360-vista.activa { display: block; }
+  .eval360-subtab-btn { padding: 8px 12px; border: none; background: none; color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .eval360-subtab-btn.activa { color: var(--text-primary); border-bottom-color: var(--accent, var(--status-good)); }
+
+  .puesto-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-1); margin-bottom: 8px; flex-wrap: wrap; }
+  .puesto-row .puesto-nombre { font-weight: 600; }
+  .puesto-row .puesto-personas { color: var(--text-secondary); font-size: 13px; }
+  .puesto-row .puesto-vacante { color: var(--text-muted); font-size: 13px; font-style: italic; }
+  .puesto-row .puesto-acciones { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
+
+  /* Árbol visual de puestos, tipo Bizneo: nodos conectados por líneas, con
+     drag & drop para reasignar el puesto al que reporta cada uno. Patrón
+     CSS clásico de organigrama (ul/li anidados + bordes en ::before/::after
+     dibujando las líneas), en vez de una librería de diagramas aparte. */
+  .orgchart-scroll {
+    overflow: auto; padding: 24px 12px 40px; margin: 12px -12px 0; cursor: grab; max-height: 70vh;
+    border: 2px solid var(--status-good); border-radius: 12px;
+  }
+  .orgchart-scroll.panning { cursor: grabbing; user-select: none; }
+  #puestos-arbol-inner { width: max-content; margin: 0 auto; transform-origin: top center; }
+  .orgchart, .orgchart ul { list-style: none; margin: 0; padding: 0; display: flex; justify-content: center; width: max-content; }
+  .orgchart { padding-top: 0; margin: 0 auto; }
+  .orgchart li { position: relative; padding: 28px 10px 0; text-align: center; }
+  .orgchart li ul { padding-top: 28px; position: relative; margin: 0 auto; }
+  .orgchart-toggle {
+    position: absolute; bottom: -9px; left: 50%; transform: translateX(-50%); z-index: 2;
+    width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-secondary); font-size: 10px; line-height: 1;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0;
+  }
+  .orgchart-toggle:hover { background: var(--surface-2); color: var(--text-primary); }
+  .orgchart-box { position: relative; }
+  .orgchart li ul::before {
+    content: ""; position: absolute; top: 0; left: 50%; width: 0; height: 28px;
+    border-left: 2px solid var(--border);
+  }
+  .orgchart li::before, .orgchart li::after {
+    content: ""; position: absolute; top: 0; right: 50%; width: 50%; height: 28px;
+    border-top: 2px solid var(--border);
+  }
+  .orgchart li::after { right: auto; left: 50%; border-left: 2px solid var(--border); }
+  .orgchart li:only-child::before, .orgchart li:only-child::after { display: none; }
+  .orgchart li:first-child::before { border: 0 none; }
+  .orgchart li:last-child::after { border: 0 none; }
+  .orgchart li:last-child::before { border-radius: 0 8px 0 0; }
+  .orgchart li:first-child::after { border-radius: 8px 0 0 0; }
+  .orgchart-box {
+    display: inline-block; min-width: 130px; padding: 8px 12px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface-1); cursor: grab; text-align: left;
+  }
+  .orgchart-box:active { cursor: grabbing; }
+  .orgchart-box.arrastrando { opacity: 0.4; }
+  /* Clon flotante que sigue al cursor mientras se arrastra (Pointer Events,
+     ver wireArrastrePuntero) -- no es un elemento real de la caja, es una
+     copia visual con pointer-events:none, así que nunca intercepta clics. */
+  .orgtree-clon-arrastre {
+    opacity: 0.92; box-shadow: 0 10px 28px rgba(0,0,0,0.35); cursor: grabbing;
+    transform: rotate(-1deg);
+  }
+  .orgchart-box.drop-valido { border-color: var(--status-good); box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-good) 40%, transparent); }
+  .orgchart-box.drop-invalido { border-color: var(--status-bad, #c62828); }
+  .orgchart-box .puesto-nombre { display: block; font-weight: 600; font-size: 13px; white-space: nowrap; }
+  .orgchart-box .puesto-personas { display: block; color: var(--text-secondary); font-size: 12px; margin-top: 2px; max-width: 200px; white-space: normal; }
+  .orgchart-box .puesto-vacante { display: block; color: var(--text-muted); font-size: 12px; font-style: italic; margin-top: 2px; }
+  .orgchart-box .puesto-acciones { display: flex; gap: 4px; margin-top: 6px; }
+  .orgchart-box .puesto-acciones button { font-size: 11px; padding: 2px 6px; }
+  .orgchart-box-individual { border-style: dashed; }
+  .orgchart-box-individual .puesto-nombre { font-weight: 500; font-size: 11px; color: var(--text-secondary); }
+  .orgchart-box-individual .puesto-personas { font-weight: 600; font-size: 13px; color: var(--text-primary); max-width: none; }
+  .orgchart-box-huerfanos { border-color: var(--status-bad, #c62828); cursor: default; }
+  .orgchart-raiz-extra { margin-top: 10px; }
+  .persona-chip {
+    display: inline-block; cursor: grab; border-radius: 4px; padding: 0 2px;
+  }
+  .persona-chip:not(:last-child)::after { content: ", "; color: var(--text-secondary); cursor: default; }
+  .persona-chip:hover { background: var(--surface-2); text-decoration: underline; }
+  .persona-chip.arrastrando { opacity: 0.4; }
+
+  /* "Por persona": lista indentada tipo Bizneo, con chevron para
+     expandir/colapsar la rama de cada persona (a diferencia de "Por puesto
+     de trabajo", aquí cada fila ya es una única persona, así que no hace
+     falta el concepto de "ver individualmente" -- solo mostrar/ocultar
+     hijos). */
+  .persona-tree-children { list-style: none; margin: 0; padding-left: 18px; margin-left: 9px; border-left: 1px dashed var(--border); }
+  .persona-tree-node { margin: 1px 0; }
+  .persona-toggle, .persona-toggle-spacer { width: 18px; height: 18px; flex-shrink: 0; }
+  .persona-toggle {
+    border-radius: 4px; border: 1px solid var(--border); background: var(--surface-page);
+    color: var(--text-secondary); font-size: 10px; cursor: pointer; display: flex;
+    align-items: center; justify-content: center; padding: 0;
+  }
+  .persona-toggle:hover { background: var(--surface-2); color: var(--text-primary); }
+
+  .organigrama-lista, .lista-simple { list-style: none; margin: 0; padding: 0; }
+  .organigrama-lista li { padding: 4px 0; }
+  .persona-row, .fila-simple {
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-1); margin-bottom: 8px; flex-wrap: wrap;
+  }
+  .persona-row .persona-nombre, .fila-simple .fila-titulo { font-weight: 600; }
+  .persona-row .persona-puesto { color: var(--text-secondary); font-size: 13px; }
+  .persona-row .persona-acciones, .fila-simple .fila-acciones { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
+  .persona-row { cursor: grab; }
+  .persona-row:active { cursor: grabbing; }
+  .persona-row.arrastrando { opacity: 0.4; }
+  .persona-row.drop-valido { border-color: var(--status-good); box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-good) 40%, transparent); }
+  .persona-row.drop-invalido { border-color: var(--status-bad, #c62828); }
+  .badge-cuenta { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); white-space: nowrap; }
+  .badge-sin-cuenta { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-secondary); white-space: nowrap; }
+  .badge-estado { font-size: 11px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .badge-borrador { background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-secondary); }
+  .badge-abierta { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
+  .badge-cerrada { background: color-mix(in srgb, var(--status-bad, #c62828) 18%, transparent); color: var(--status-bad, #c62828); }
+
+  .editor-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-top: 20px; position: relative; }
+  .editor-card h2 { margin-top: 0; padding-right: 30px; }
+  .btn-cerrar-editor-x {
+    position: absolute; top: 14px; right: 14px; width: 28px; height: 28px;
+    border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary);
+    border-radius: 50%; font-size: 15px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; padding: 0;
+  }
+  .btn-cerrar-editor-x:hover { background: var(--surface-2); color: var(--text-primary); }
+  .editor-field { margin-bottom: 12px; }
+  .editor-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+  .editor-field input, .editor-field select, .editor-field textarea {
+    width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 14px; font-family: inherit;
+    box-sizing: border-box;
+  }
+  .editor-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .staff-hint { color: var(--text-secondary); font-size: 13px; }
+
+  .preguntas-grupo { margin-bottom: 22px; border-radius: 8px; }
+  .preguntas-grupo.arrastrando { opacity: 0.4; }
+  .preguntas-grupo-handle {
+    font-size: 14px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary);
+    margin: 0 0 8px; cursor: grab; user-select: none;
+  }
+  .preguntas-grupo-handle:active { cursor: grabbing; }
+  .pregunta-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--gridline); cursor: grab; }
+  .pregunta-row.arrastrando { opacity: 0.4; }
+  .pregunta-row:active { cursor: grabbing; }
+  .pregunta-drag-handle { color: var(--text-muted); flex-shrink: 0; }
+  .pregunta-row input[type="text"] {
+    flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 13px;
+  }
+  .pregunta-row input[type="text"]:disabled { opacity: 0.5; }
+
+  .campana-detalle { margin-top: 20px; }
+  .picker-lista { max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 10px; }
+  .picker-lista label { display: flex; align-items: center; gap: 8px; padding: 4px 2px; font-size: 14px; cursor: pointer; }
+  .relacion-tag { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); color: var(--text-secondary); }
+
+  .form-pregunta-likert { padding: 10px 0; border-bottom: 1px solid var(--gridline); }
+  .form-pregunta-likert p { margin: 0 0 8px; font-size: 14px; }
+  .escala-likert { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+  .escala-likert label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .form-pregunta-abierta { padding: 10px 0; }
+  .form-pregunta-abierta p { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+  .form-pregunta-abierta textarea {
+    width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary);
+    font-size: 14px; font-family: inherit; resize: vertical;
+  }
+  .form-pregunta-abierta [data-contador] { margin: 4px 0 0; font-size: 12px; }
+
+  /* Sticky mientras se contesta un formulario largo -- se ve siempre a
+     quién se está evaluando, sin tener que volver a subir para
+     recordarlo. */
+  #responder-titulo {
+    position: sticky; top: 0; z-index: 5; background: var(--surface-1);
+    padding: 4px 0; margin-top: 0;
+  }
+
+  #buscar-nuevo-evaluador {
+    width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 14px; font-family: inherit;
+    box-sizing: border-box;
+  }
+  .autocomplete-sugerencias {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 5;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    max-height: 220px; overflow-y: auto; box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+  }
+  .autocomplete-sugerencias button {
+    display: block; width: 100%; text-align: left; padding: 8px 10px; border: none; background: none;
+    color: var(--text-primary); font-size: 14px; cursor: pointer;
+  }
+  .autocomplete-sugerencias button:hover { background: var(--surface-2); }
+  .autocomplete-sugerencias .sin-resultados { padding: 8px 10px; color: var(--text-secondary); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon" id="brand-icon">🍩</span>
+      <div>
+        <h1 id="brand-title">Krispy Gestiones</h1>
+        <p class="subtitle">Evaluaciones 360°</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="btn btn-ghost hamburger-btn" title="Atrás" aria-label="Atrás" onclick="history.back()">←</button>
+      <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
+      <div class="hamburger-wrap">
+        <button id="btn-hamburger" class="btn btn-ghost hamburger-btn" aria-label="Menú" aria-haspopup="true" aria-expanded="false">☰</button>
+        <div id="hamburger-menu" class="hamburger-menu" hidden>
+          <span id="topbar-user" class="topbar-user" hidden></span>
+          <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema">🌙 Cambiar tema</button>
+          <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="eval360-wrap">
+    <div class="hero-banner">
+      <span class="eyebrow">Portal interno</span>
+      <h1>Evaluaciones 360°</h1>
+      <p>Organigrama, campañas de evaluación y tus propias evaluaciones pendientes.</p>
+    </div>
+
+    <div class="eval360-tabs">
+      <button type="button" class="eval360-tab-btn" data-tab="mis">Mis evaluaciones</button>
+      <button type="button" class="eval360-tab-btn" data-tab="campanas" hidden>Campañas</button>
+      <button type="button" class="eval360-tab-btn" data-tab="organigrama" hidden>Organigrama</button>
+      <button type="button" class="eval360-tab-btn" data-tab="preguntas" hidden>Preguntas</button>
+      <button type="button" class="eval360-tab-btn" data-tab="accesos" hidden>Accesos</button>
+    </div>
+
+    <!-- Mis evaluaciones -->
+    <div class="eval360-vista" id="vista-mis">
+      <div id="mis-lista-wrap">
+        <p class="staff-hint">Evaluaciones que te han asignado y siguen sin responder.</p>
+        <ul class="lista-simple" id="mis-pendientes-lista"></ul>
+      </div>
+
+      <div class="editor-card" id="form-responder-card" hidden>
+        <button type="button" class="btn-cerrar-editor-x" id="btn-cerrar-responder">✕</button>
+        <h2 id="responder-titulo">Evaluando a:</h2>
+        <p class="staff-hint">Tus respuestas son anónimas para la persona evaluada. Puedes marcar "N/A" si no te corresponde valorar algo.</p>
+        <div id="responder-preguntas"></div>
+        <div class="editor-actions">
+          <button id="btn-finalizar-evaluacion" class="btn btn-primary" type="button">Enviar evaluación</button>
+          <button id="btn-cerrar-responder-2" class="btn btn-ghost" type="button">Guardar y salir más tarde</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Campañas -->
+    <div class="eval360-vista" id="vista-campanas">
+      <div id="campanas-lista-wrap">
+        <div class="eval360-toolbar">
+          <p class="staff-hint">Cada campaña agrupa a quién se evalúa, quién evalúa a quién, y sus resultados.</p>
+          <button id="btn-nueva-campana" class="btn btn-primary" type="button">＋ Nueva campaña</button>
+        </div>
+        <ul class="lista-simple" id="campanas-lista"></ul>
+      </div>
+
+      <div class="editor-card" id="form-campana-card" hidden>
+        <button type="button" class="btn-cerrar-editor-x" id="btn-cerrar-campana">✕</button>
+        <h2>Nueva campaña</h2>
+        <div class="editor-field">
+          <label for="campana-nombre">Nombre</label>
+          <input type="text" id="campana-nombre" placeholder="Evaluación 360 2026">
+        </div>
+        <div class="editor-field">
+          <label for="campana-desde">Periodo desde</label>
+          <input type="date" id="campana-desde">
+        </div>
+        <div class="editor-field">
+          <label for="campana-hasta">Periodo hasta</label>
+          <input type="date" id="campana-hasta">
+        </div>
+        <div class="editor-actions">
+          <button id="btn-guardar-campana" class="btn btn-primary" type="button">Crear</button>
+          <button id="btn-cerrar-campana-2" class="btn btn-ghost" type="button">Cancelar</button>
+        </div>
+      </div>
+
+      <div class="campana-detalle" id="campana-detalle" hidden>
+        <button type="button" class="btn btn-ghost btn-mini" id="btn-volver-campanas">← Volver a campañas</button>
+        <h2 id="campana-detalle-titulo" style="margin-bottom:2px;"></h2>
+        <p class="staff-hint" id="campana-detalle-periodo"></p>
+        <div class="eval360-toolbar">
+          <p class="staff-hint" id="campana-detalle-hint"></p>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="btn-anadir-evaluados" class="btn btn-ghost" type="button">＋ Añadir evaluados</button>
+            <button id="btn-lanzar-campana" class="btn btn-primary" type="button">🚀 Lanzar campaña</button>
+            <button id="btn-cerrar-campana-formal" class="btn btn-ghost" type="button" hidden>Cerrar campaña</button>
+            <button id="btn-reabrir-campana" class="btn btn-ghost" type="button" hidden>Reabrir campaña</button>
+            <button id="btn-recordatorio-campana" class="btn btn-ghost" type="button" hidden>✉️ Recordatorio</button>
+            <button id="btn-eliminar-campana" class="btn btn-ghost" type="button" style="color: var(--status-critical, #d03b3b);">🗑️ Eliminar campaña</button>
+          </div>
+        </div>
+
+        <details id="pendientes-campana-wrap" hidden style="margin-bottom:14px;">
+          <summary class="staff-hint" style="cursor:pointer;" id="pendientes-campana-resumen">Evaluadores pendientes</summary>
+          <ul class="lista-simple" id="pendientes-campana-lista" style="margin-top:8px;"></ul>
+        </details>
+
+        <div id="picker-evaluados-wrap" hidden>
+          <div class="editor-actions" style="margin-top:0; margin-bottom:8px;">
+            <button id="btn-seleccionar-todos-evaluados" class="btn btn-ghost btn-mini" type="button">Seleccionar todos</button>
+            <button id="btn-deseleccionar-todos-evaluados" class="btn btn-ghost btn-mini" type="button">Ninguno</button>
+          </div>
+          <div class="picker-lista" id="picker-evaluados-lista"></div>
+          <div class="editor-actions">
+            <button id="btn-confirmar-evaluados" class="btn btn-primary" type="button">Añadir seleccionados</button>
+            <button id="btn-cancelar-evaluados" class="btn btn-ghost" type="button">Cancelar</button>
+          </div>
+        </div>
+
+        <ul class="lista-simple" id="campana-evaluados-lista"></ul>
+      </div>
+
+      <div class="campana-detalle" id="evaluadores-detalle" hidden>
+        <button type="button" class="btn btn-ghost btn-mini" id="btn-volver-evaluados">← Volver</button>
+        <h2 id="evaluadores-titulo" style="margin-bottom:14px;"></h2>
+        <ul class="lista-simple" id="evaluadores-lista"></ul>
+        <div class="eval360-toolbar" style="position:relative; align-items:flex-start;">
+          <div style="flex:1; position:relative;">
+            <input type="text" id="buscar-nuevo-evaluador" placeholder="Escribe un nombre para buscarlo..." autocomplete="off">
+            <div class="autocomplete-sugerencias" id="sugerencias-evaluador" hidden></div>
+          </div>
+          <button id="btn-anadir-evaluador-manual" class="btn btn-ghost" type="button" disabled>＋ Añadir</button>
+        </div>
+        <div id="resultados-wrap" hidden>
+          <h3>Resultados</h3>
+          <div id="resultados-contenido"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Organigrama -->
+    <div class="eval360-vista" id="vista-organigrama">
+      <div class="eval360-tabs" style="margin-top:0;">
+        <button type="button" class="eval360-subtab-btn" data-subvista="personas">Por persona</button>
+        <button type="button" class="eval360-subtab-btn" data-subvista="puestos">Por puesto de trabajo</button>
+      </div>
+
+      <div id="lista-organigrama-wrap">
+        <div class="eval360-toolbar">
+          <p class="staff-hint">Cada persona necesita un jefe directo para poder calcular sus pares (compañeros con el mismo jefe) y sus reportes.</p>
+          <button id="btn-nueva-persona" class="btn btn-primary" type="button">＋ Nueva persona</button>
+        </div>
+        <ul class="organigrama-lista" id="organigrama-lista"></ul>
+      </div>
+
+      <div id="lista-puestos-wrap" hidden>
+        <div class="eval360-toolbar">
+          <p class="staff-hint">Arrastra una caja sobre otra para cambiar a quién reporta. Arrastra el fondo vacío para moverte por el árbol. Un mismo puesto puede tener varias personas, por ejemplo los gerentes.</p>
+          <div style="display:flex; gap:6px; flex-shrink:0;">
+            <button id="btn-zoom-menos" class="btn btn-ghost btn-mini" type="button" title="Alejar">－</button>
+            <button id="btn-zoom-reset" class="btn btn-ghost btn-mini" type="button" title="Restablecer zoom">100%</button>
+            <button id="btn-zoom-mas" class="btn btn-ghost btn-mini" type="button" title="Acercar">＋</button>
+            <button id="btn-reparar-organigrama" class="btn btn-ghost" type="button" title="Corrige de golpe los puestos que no coinciden con quién reporta a quién en &quot;Por persona&quot;">🔧 Reparar organigrama</button>
+            <button id="btn-nuevo-puesto-raiz" class="btn btn-primary" type="button">＋ Nuevo puesto</button>
+          </div>
+        </div>
+        <div class="orgchart-scroll" id="puestos-arbol">
+          <div id="puestos-arbol-inner"></div>
+        </div>
+      </div>
+
+      <div class="editor-card" id="editor-puesto-card" hidden>
+        <button type="button" class="btn-cerrar-editor-x" id="btn-cerrar-editor-puesto-x">✕</button>
+        <h2 id="editor-puesto-titulo-h2">Nuevo puesto</h2>
+        <div class="editor-field">
+          <label for="puesto-nombre">Nombre del puesto</label>
+          <input type="text" id="puesto-nombre" placeholder="Ej. Gerente de Retail">
+        </div>
+        <div class="editor-field">
+          <label for="puesto-padre">Puesto al que reporta</label>
+          <select id="puesto-padre">
+            <option value="">— Es un puesto raíz —</option>
+          </select>
+        </div>
+        <div class="editor-actions">
+          <button id="btn-guardar-puesto" class="btn btn-primary" type="button">Guardar</button>
+          <button id="btn-desactivar-puesto" class="btn btn-ghost" type="button" hidden>Desactivar</button>
+          <button id="btn-cerrar-editor-puesto" class="btn btn-ghost" type="button">Cerrar</button>
+        </div>
+      </div>
+
+      <div class="editor-card" id="editor-card" hidden>
+        <button type="button" class="btn-cerrar-editor-x" id="btn-cerrar-editor-x" title="Cerrar">✕</button>
+        <h2 id="editor-titulo-h2">Nueva persona</h2>
+
+        <div class="editor-field">
+          <label for="persona-nombre">Nombre completo</label>
+          <input type="text" id="persona-nombre" placeholder="Nombre y apellidos">
+        </div>
+
+        <div class="editor-field">
+          <label>Puestos (puede tener más de uno, ej. un director interino de dos áreas)</label>
+          <div class="picker-lista" id="persona-puestos-lista"></div>
+          <button type="button" class="btn btn-ghost btn-mini" id="btn-nuevo-puesto">＋ Nuevo puesto</button>
+        </div>
+
+        <div class="editor-field">
+          <label for="persona-jefe">Jefe directo</label>
+          <select id="persona-jefe">
+            <option value="">— Sin jefe (raíz del organigrama) —</option>
+          </select>
+        </div>
+
+        <div class="editor-field">
+          <label for="persona-usuario">Cuenta vinculada (para que le aparezcan sus evaluaciones al entrar)</label>
+          <select id="persona-usuario">
+            <option value="">— Sin vincular —</option>
+          </select>
+        </div>
+
+        <div class="editor-field">
+          <label for="persona-email">Email</label>
+          <input type="email" id="persona-email" placeholder="nombre.inicialdeapellido@krispykreme.es">
+        </div>
+
+        <div class="editor-actions">
+          <button id="btn-guardar-persona" class="btn btn-primary" type="button">Guardar</button>
+          <button id="btn-eliminar-persona" class="btn btn-ghost" type="button" hidden title="Solo la quita del organigrama -- no toca su cuenta de portal si tiene una vinculada">Quitar del organigrama</button>
+          <button id="btn-eliminar-persona-cuenta" class="btn btn-ghost" type="button" hidden style="color: var(--status-critical, #d03b3b);" title="Borra también su acceso al portal, como hacerlo desde Ajustes">🗑️ Borrar cuenta y persona</button>
+          <button id="btn-cerrar-editor" class="btn btn-ghost" type="button">Cerrar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Preguntas -->
+    <div class="eval360-vista" id="vista-preguntas">
+      <div class="eval360-toolbar">
+        <p class="staff-hint">Escala Likert de 5 niveles + N/A. Los cambios de texto se guardan solos al salir del campo.</p>
+        <button id="btn-nueva-pregunta" class="btn btn-ghost" type="button">＋ Nueva pregunta</button>
+      </div>
+      <div id="preguntas-contenido"></div>
+    </div>
+
+    <!-- Accesos -->
+    <div class="eval360-vista" id="vista-accesos">
+      <div class="eval360-toolbar">
+        <p class="staff-hint">Todas las personas del organigrama, con o sin cuenta de portal -- el usuario y el PIN se pueden editar aquí mismo (se sincronizan solos con Ajustes → Usuarios); el nombre se edita desde su ficha en Organigrama. "Crear acceso" es para quien todavía no puede entrar a responder sus evaluaciones.</p>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <label for="accesos-campana-filtro" class="staff-hint" style="white-space:nowrap;">Campaña:</label>
+          <select id="accesos-campana-filtro">
+            <option value="">Todas las personas</option>
+          </select>
+        </div>
+        <button id="btn-rellenar-emails" class="btn btn-ghost" type="button">Autocompletar emails que faltan</button>
+        <button id="btn-crear-todos-accesos" class="btn btn-primary" type="button">Crear todos los accesos que faltan</button>
+      </div>
+      <ul class="lista-simple" id="accesos-lista"></ul>
+    </div>
+  </div>
+</div>
+<script src="js/theme.js?v=20260723f"></script>
+<script src="js/dialogs.js?v=20260818a"></script>
+<script src="js/icons.js?v=20260824a"></script>
+<script src="js/auth-common.js?v=20260824a"></script>
+<script src="js/topbar-menu.js?v=20260821a"></script>
+<script src="js/common.js?v=20260823a"></script>
+<script src="js/evaluaciones360.js?v=20260824g"></script>
+</body>
+</html>

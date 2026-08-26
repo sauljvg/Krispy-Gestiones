@@ -46,11 +46,7 @@ function indicesVisibles() {
   return encuesta.paginas.map((_, i) => i).filter((i) => paginaVisible(encuesta.paginas[i]));
 }
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script).
 
 function mostrarError(mensaje) {
   document.getElementById("encuesta-card").innerHTML = `<div class="encuesta-error"><p>${escapeHTML(mensaje)}</p></div>`;
@@ -331,7 +327,7 @@ function validarPagina(pagina) {
     const valor = respuestas[q.id];
     const sinResponder = Array.isArray(valor) && q.tipo !== "prioridad" ? valor.length === 0 : !valor;
     if (q.obligatoria && sinResponder) {
-      alert("Por favor, responde todas las preguntas obligatorias (*) antes de continuar.");
+      mostrarAviso("Por favor, responde todas las preguntas obligatorias (*) antes de continuar.");
       return false;
     }
   }
@@ -351,9 +347,9 @@ async function enviarRespuestas() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ respuestas: respuestasPlano, token: SESION_TOKEN }),
   });
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    alert(err.detail || "No se pudo enviar el formulario. Inténtalo de nuevo.");
+    mostrarAviso(data.detail || "No se pudo enviar el formulario. Inténtalo de nuevo.");
     btn.disabled = false;
     btn.textContent = "Enviar";
     return;
@@ -361,7 +357,7 @@ async function enviarRespuestas() {
   document.getElementById("encuesta-card").innerHTML = `
     <div class="encuesta-final">
       <div class="icono">✅</div>
-      <p>${escapeHTML(encuesta.mensaje_final)}</p>
+      <p>${escapeHTML(data.mensaje || encuesta.mensaje_final)}</p>
     </div>`;
 }
 

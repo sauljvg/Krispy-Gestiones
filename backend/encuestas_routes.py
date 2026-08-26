@@ -3,6 +3,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 import auth as auth_module
+import clima as clima_module
 import encuestas as encuestas_module
 import informes as informes_module
 from auth_routes import get_current_user
@@ -27,7 +28,12 @@ class EncuestaEditarIn(BaseModel):
     color_boton: str = "#5b2a2a"
     tipo_informe_clave: str | None = None
     tipo_entrevista_empresa: str | None = None
+    clima_oleada_id: int | None = None
     enlace_corto: str | None = None
+    evitar_duplicados: bool = False
+    mensaje_no_apto: str = "Gracias por contestar nuestro test. En esta ocasión no has superado el proceso, pero te deseamos mucha suerte."
+    usar_mensaje_no_apto: bool = True
+    fecha_cierre: str | None = None
 
 
 class PaginaIn(BaseModel):
@@ -42,6 +48,7 @@ class PreguntaIn(BaseModel):
     obligatoria: bool = True
     opciones: list[str] = []
     mostrar_dashboard: bool = False
+    opciones_descarta: list[bool] = []
 
 
 class RespuestaIn(BaseModel):
@@ -78,6 +85,15 @@ def marcar_notificaciones_route(user: dict = Depends(require_tests)):
 def tipos_informe_disponibles_route(_user: dict = Depends(require_tests)):
     """Para el desplegable "¿A qué informe alimenta?" del editor."""
     return informes_module.list_tipos()
+
+
+@router.get("/clima-oleadas-disponibles")
+def clima_oleadas_disponibles_route(_user: dict = Depends(require_tests)):
+    """Para el mismo desplegable, grupo "Clima Laboral" -- oleadas de las dos
+    empresas juntas (mismo criterio que tipos_informe_disponibles_route: el
+    editor de Tests no filtra por empresa del usuario, solo por si tiene
+    acceso a Tests en general)."""
+    return clima_module.list_oleadas("kk") + clima_module.list_oleadas("saona")
 
 
 @router.get("/encuestas")
@@ -145,7 +161,8 @@ def update_encuesta_route(encuesta_id: int, body: EncuestaEditarIn, _user: dict 
         raise HTTPException(status_code=404, detail="Encuesta no encontrada")
     encuestas_module.update_encuesta(
         encuesta_id, body.titulo, body.mensaje_final, body.color_boton,
-        body.tipo_informe_clave, body.tipo_entrevista_empresa, body.enlace_corto,
+        body.tipo_informe_clave, body.tipo_entrevista_empresa, body.enlace_corto, body.evitar_duplicados,
+        body.mensaje_no_apto, body.clima_oleada_id, body.usar_mensaje_no_apto, body.fecha_cierre,
     )
     return {"ok": True}
 
@@ -213,6 +230,17 @@ def add_pagina_route(encuesta_id: int, body: PaginaIn, _user: dict = Depends(req
     return {"ok": True, "id": pagina_id}
 
 
+@router.post("/encuestas/{encuesta_id}/plantilla-clima-completa")
+def crear_plantilla_clima_route(encuesta_id: int, _user: dict = Depends(require_tests)):
+    """Para "+ Nueva Encuesta completa de Clima Laboral" en el editor de
+    Test (ver tests.js) -- rellena el test con las 26 preguntas reales del
+    cuestionario en vez de dejarlo en blanco."""
+    if not encuestas_module.get_encuesta(encuesta_id):
+        raise HTTPException(status_code=404, detail="Encuesta no encontrada")
+    encuestas_module.crear_plantilla_clima_encuesta_completa(encuesta_id)
+    return {"ok": True}
+
+
 @router.put("/paginas/{pagina_id}")
 def update_pagina_route(pagina_id: int, body: PaginaIn, _user: dict = Depends(require_tests)):
     encuestas_module.update_pagina(pagina_id, body.instrucciones, body.condicion_pregunta_id, body.condicion_valores)
@@ -243,7 +271,8 @@ def add_pregunta_route(pagina_id: int, body: PreguntaIn, _user: dict = Depends(r
         raise HTTPException(status_code=400, detail="El enunciado de la pregunta es obligatorio")
     try:
         pregunta_id = encuestas_module.add_pregunta(
-            pagina_id, body.tipo, body.etiqueta, body.obligatoria, body.opciones, body.mostrar_dashboard
+            pagina_id, body.tipo, body.etiqueta, body.obligatoria, body.opciones, body.mostrar_dashboard,
+            body.opciones_descarta,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -252,7 +281,9 @@ def add_pregunta_route(pagina_id: int, body: PreguntaIn, _user: dict = Depends(r
 
 @router.put("/preguntas/{pregunta_id}")
 def update_pregunta_route(pregunta_id: int, body: PreguntaIn, _user: dict = Depends(require_tests)):
-    encuestas_module.update_pregunta(pregunta_id, body.etiqueta, body.obligatoria, body.opciones, body.mostrar_dashboard)
+    encuestas_module.update_pregunta(
+        pregunta_id, body.etiqueta, body.obligatoria, body.opciones, body.mostrar_dashboard, body.opciones_descarta
+    )
     return {"ok": True}
 
 
@@ -322,9 +353,9 @@ def enviar_respuesta_route(slug: str, body: RespuestaIn, request: Request):
 
 
 @router_publico.post("/{slug}/sesion")
-def registrar_sesion_route(slug: str, body: SesionIn):
+def registrar_sesion_route(slug: str, body: SesionIn, request: Request):
     """Late para trackear aperturas/abandono: encuesta.js llama esto al
     cargar y cada vez que cambia de página (más un heartbeat cada 20s en la
     misma página) — nunca bloquea ni rompe el formulario si falla."""
-    encuestas_module.registrar_sesion(slug, body.token, body.pagina)
+    encuestas_module.registrar_sesion(slug, body.token, body.pagina, ip=_ip_cliente(request))
     return {"ok": True}

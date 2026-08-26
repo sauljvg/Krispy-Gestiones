@@ -24,6 +24,17 @@ def require_informes(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
+def require_informes_o_reclutamiento(user: dict = Depends(get_current_user)) -> dict:
+    """Como require_informes, pero deja pasar también a quien solo tiene el
+    módulo Reclutamiento (sin el resto de Informes) -- para las rutas que
+    usa la propia página de Reclutamiento (compartidos.js), que vive en
+    reclutamiento_routes.py pero reutiliza estos dos endpoints."""
+    modulos = ("informes", "saona_informes", "reclutamiento", "saona_reclutamiento")
+    if not any(auth_module.tiene_modulo(user, m) for m in modulos):
+        raise HTTPException(status_code=403, detail="No tienes acceso a Informes o Reclutamiento")
+    return user
+
+
 def require_tipo_acceso(tipo_clave: str, user: dict = Depends(get_current_user)) -> dict:
     """La empresa se resuelve del propio tipo (no hace falta que el
     frontend la repita en la URL): un tipo 'kk' exige el módulo "informes",
@@ -48,9 +59,25 @@ class NewTipoBody(BaseModel):
     empresa: str = "kk"
 
 
+class ArchivarTipoBody(BaseModel):
+    archivado: bool = True
+
+
 class CompartirBody(BaseModel):
     respuesta_ids: list[int]
     usuario_id: int
+
+
+class CambiarDestinatarioItem(BaseModel):
+    tipo: str  # "directo" | "informe"
+    candidato_id: int | None = None
+    respuesta_id: int | None = None
+    usuario_id_actual: int
+
+
+class CambiarDestinatarioBody(BaseModel):
+    items: list[CambiarDestinatarioItem]
+    nuevo_usuario_id: int
 
 
 class HojaOcultaBody(BaseModel):
@@ -63,7 +90,7 @@ class HojaNombreBody(BaseModel):
 
 
 @router.get("/tipos")
-def list_tipos_route(empresa: str | None = None, user: dict = Depends(require_informes)):
+def list_tipos_route(empresa: str | None = None, incluir_archivados: bool = False, user: dict = Depends(require_informes)):
     # empresa=None (p.ej. desde la pantalla de Usuarios, para armar el
     # checklist de permisos) devuelve los tipos de las dos empresas juntos —
     # require_informes ya exige tener acceso a alguna. Si se pide una empresa
@@ -74,7 +101,7 @@ def list_tipos_route(empresa: str | None = None, user: dict = Depends(require_in
         modulo = "saona_informes" if empresa == "saona" else "informes"
         if not auth_module.tiene_modulo(user, modulo):
             raise HTTPException(status_code=403, detail="No tienes acceso a ese módulo de Informes")
-    tipos = informes_module.list_tipos(empresa=empresa)
+    tipos = informes_module.list_tipos(empresa=empresa, incluir_archivados=incluir_archivados)
     permitidos = informes_module.get_tipos_permitidos(user["id"])
     if permitidos:
         tipos = [t for t in tipos if t["clave"] in permitidos]
@@ -93,8 +120,26 @@ def create_tipo_route(body: NewTipoBody, user: dict = Depends(require_informes))
     return {"ok": True, "id": tipo_id}
 
 
+@router.post("/tipos/{tipo_clave}/archivar")
+def archivar_tipo_route(tipo_clave: str, body: ArchivarTipoBody, _user: dict = Depends(require_tipo_acceso)):
+    try:
+        informes_module.archivar_tipo(tipo_clave, body.archivado)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"ok": True}
+
+
+@router.delete("/tipos/{tipo_clave}")
+def eliminar_tipo_route(tipo_clave: str, _user: dict = Depends(require_tipo_acceso)):
+    try:
+        informes_module.eliminar_tipo(tipo_clave)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
 @router.get("/usuarios-para-compartir")
-def usuarios_para_compartir_route(_user: dict = Depends(require_informes)):
+def usuarios_para_compartir_route(_user: dict = Depends(require_informes_o_reclutamiento)):
     conn = get_connection()
     rows = conn.execute("SELECT id, username, nombre, rol FROM usuarios ORDER BY nombre").fetchall()
     conn.close()
@@ -170,7 +215,7 @@ def respuestas_route(
     fecha_col: str | None = None,
     fecha_desde: str | None = None,
     fecha_hasta: str | None = None,
-    excluir_no_aptos: bool = False,
+    filtro_aptos: str = "todos",
     _user: dict = Depends(require_tipo_acceso),
 ):
     try:
@@ -178,7 +223,7 @@ def respuestas_route(
             tipo_clave, hoja=hoja, page=page, page_size=page_size, q=q,
             orden=orden, orden_dir=orden_dir,
             fecha_col=fecha_col, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
-            excluir_no_aptos=excluir_no_aptos,
+            filtro_aptos=filtro_aptos,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -226,4 +271,11 @@ def compartir_route(body: CompartirBody, user: dict = Depends(require_informes))
 @router.delete("/compartir/{respuesta_id}/{usuario_id}")
 def dejar_de_compartir_route(respuesta_id: int, usuario_id: int, _user: dict = Depends(require_informes)):
     informes_module.dejar_de_compartir(respuesta_id, usuario_id)
+    return {"ok": True}
+
+
+@router.put("/compartidos-por-mi/destinatario")
+def cambiar_destinatario_route(body: CambiarDestinatarioBody, _user: dict = Depends(require_informes_o_reclutamiento)):
+    items = [it.model_dump() for it in body.items]
+    informes_module.cambiar_destinatario_compartidos(items, body.nuevo_usuario_id)
     return {"ok": True}

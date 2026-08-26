@@ -10,11 +10,7 @@ let totalPaginasDisc = 1;
 let chartResultado = null;
 let ultimoResultado = null;
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script).
 
 function shuffle(arr) {
   const a = arr.slice();
@@ -260,7 +256,7 @@ async function guardarResultado() {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert(err.detail || "No se pudo guardar el resultado.");
+      mostrarAviso(err.detail || "No se pudo guardar el resultado.");
       return;
     }
     const data = await res.json();
@@ -474,7 +470,7 @@ function renderHistorico(items) {
   tbody.querySelectorAll(".btn-borrar-historico").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = btn.closest("tr").dataset.id;
-      if (!confirm("¿Borrar este resultado DISC?")) return;
+      if (!(await pedirConfirmacion("¿Borrar este resultado DISC?"))) return;
       const res = await fetch(`${AUTH_API_BASE}/disc/resultado/${id}`, { method: "DELETE" });
       if (res.ok) await cargarHistorico();
     });

@@ -153,11 +153,7 @@ async function renderPdfInline(url, contenedor) {
   }
 }
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script).
 
 // cache: "no-store" en ambos fetch de esta página -- las respuestas de
 // /api/* no llevan cabecera Cache-Control (ver no_cachear_estaticos en

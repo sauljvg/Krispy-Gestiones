@@ -15,8 +15,62 @@
     }
   })();
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260731b">
+<link rel="stylesheet" href="css/styles.css?v=20260823c">
 <script src="js/vendor/chart.umd.min.js?v=20260723g"></script>
+<style>
+  .staff-ranking-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .staff-ranking-header h2 { margin: 0; }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none;
+    align-items: center; justify-content: center; z-index: 100; padding: 20px;
+  }
+  .modal-overlay.visible { display: flex; }
+  .modal-box {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 24px; width: 100%; max-width: 360px;
+  }
+  .modal-box h3 { margin: 0 0 14px; font-size: 16px; }
+  .modal-box select, .modal-box input[type="text"], .modal-box input[type="date"] {
+    width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); margin-bottom: 10px; box-sizing: border-box;
+  }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
+  #personal-modal .modal-box { max-width: 620px; max-height: 85vh; overflow-y: auto; }
+  .personal-tienda-grupo { margin-bottom: 18px; }
+  .personal-tienda-grupo h4 { margin: 0 0 8px; font-size: 13px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; }
+  .personal-fila {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+    padding: 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; background: var(--surface-page);
+  }
+  .personal-fila.former { opacity: 0.7; }
+  .personal-fila-info { min-width: 0; }
+  .personal-fila-info b { font-size: 13px; }
+  .personal-fila-info p { margin: 2px 0 0; font-size: 12px; color: var(--text-secondary); }
+  .personal-variantes-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .personal-chip {
+    background: color-mix(in srgb, var(--acento) 12%, transparent); color: var(--acento);
+    border-radius: 999px; padding: 1px 8px; font-size: 11px;
+  }
+  .personal-fila-acciones { display: flex; gap: 6px; flex-shrink: 0; }
+  .personal-fila-acciones button { font-size: 12px; padding: 4px 8px; }
+  .personal-badge-former { color: var(--status-warning); font-size: 11px; }
+
+  #form-nuevo-personal { border: 1px dashed var(--border); border-radius: 10px; padding: 14px; margin-top: 16px; }
+  #form-nuevo-personal h4 { margin: 0 0 10px; font-size: 13px; }
+  .personal-variantes-sugeridas { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
+  .personal-variante-toggle {
+    border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary);
+    border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+  }
+  .personal-variante-toggle.activa { background: var(--acento); border-color: var(--acento); color: #fff; }
+
+  .salida-form { margin-top: 8px; padding: 10px; border-radius: 8px; background: var(--surface-1); border: 1px solid var(--border); }
+  .salida-form label { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-bottom: 6px; }
+  .personal-hint { font-size: 12px; color: var(--text-secondary); margin: 0 0 10px; }
+</style>
 </head>
 <body>
 <div class="app">
@@ -73,7 +127,6 @@
         <span class="stat-label">Total de reseñas</span>
         <span class="stat-value-row">
           <span class="stat-value" id="stat-total">—</span>
-          <span class="stat-check" id="stat-total-check" hidden>✓</span>
         </span>
       </div>
       <div class="stat-tile">
@@ -158,12 +211,6 @@
            basta con quitar este `hidden` para volver a mostrarlo. El
            checkbox y todo su cableado en dashboard.js/backend se dejan
            intactos para no tener que reconstruirlo luego. -->
-      <div class="filter-group" hidden>
-        <label>&nbsp;</label>
-        <label class="filter-toggle-google" title="Excluye del todo (totales, promedio, % positivas, ranking) las reseñas que la reconciliación manual (scraper --reconciliar) marcó como ya no visibles en Google — para ver exactamente lo mismo que muestra la ficha pública.">
-          <input type="checkbox" id="filter-solo-google"> Solo Google
-        </label>
-      </div>
       <div class="filter-group">
         <label>&nbsp;</label>
         <button id="btn-clear-filters" class="btn btn-ghost">✕ Limpiar filtros</button>
@@ -237,7 +284,10 @@
 
    <aside class="side-col">
     <section class="staff-card">
-      <h2 id="staff-ranking-title">Ranking de Krispy Team</h2>
+      <div class="staff-ranking-header">
+        <h2 id="staff-ranking-title">Ranking de Krispy Team</h2>
+        <button id="btn-gestionar-personal" class="btn btn-ghost btn-sm" hidden>⚙ Gestionar personal</button>
+      </div>
       <p id="staff-select-hint" class="staff-hint" hidden>Mostrando el personal de todas las tiendas — el mismo nombre de pila puede ser una persona distinta en cada local.</p>
       <div id="staff-tables">
         <p class="staff-hint">Clic en un nombre para ver solo sus reseñas</p>
@@ -298,9 +348,40 @@
   </main>
 </div>
 
+<div class="modal-overlay" id="personal-modal">
+  <div class="modal-box">
+    <h3>Gestionar personal</h3>
+    <p class="personal-hint">Nombres del personal por tienda que se buscan en el texto de las reseñas. Al dar de alta a alguien, puedes pedirle a la IA que sugiera variantes/diminutivos habituales.</p>
+    <div id="personal-listado"></div>
+
+    <div id="form-nuevo-personal">
+      <h4>+ Añadir persona</h4>
+      <select id="personal-nuevo-tienda"></select>
+      <input type="text" id="personal-nuevo-nombre" placeholder="Nombre (ej. Pilar)">
+      <button type="button" class="btn btn-ghost btn-sm" id="btn-sugerir-variantes">✨ Sugerir variantes con IA</button>
+      <div id="personal-variantes-sugeridas" class="personal-variantes-sugeridas"></div>
+      <input type="text" id="personal-nuevo-variantes-extra" placeholder="Otras variantes, separadas por coma (opcional)">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:10px;">
+        Fecha de entrada
+        <input type="date" id="personal-nuevo-fecha" style="margin:0;width:auto;flex:1;">
+      </label>
+      <div class="modal-actions" style="justify-content:flex-start;">
+        <button type="button" class="btn btn-primary btn-sm" id="btn-crear-personal">Añadir</button>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="btn-personal-cerrar">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 <script src="js/theme.js?v=20260723g"></script>
-<script src="js/auth-common.js?v=20260723g"></script>
-<script src="js/topbar-menu.js?v=20260727a"></script>
+<script src="js/dialogs.js?v=20260818a"></script>
+<script src="js/icons.js?v=20260824a"></script>
+<script src="js/auth-common.js?v=20260824a"></script>
+<script src="js/topbar-menu.js?v=20260821a"></script>
+<script src="js/common.js?v=20260823a"></script>
 <script src="js/filters.js?v=20260731a"></script>
 <script src="js/analytics.js?v=20260731f"></script>
 <script src="js/dashboard.js?v=20260803b"></script>

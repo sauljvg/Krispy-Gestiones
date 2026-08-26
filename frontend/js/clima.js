@@ -89,11 +89,7 @@ function colorTextoActual() {
   return getComputedStyle(document.documentElement).getPropertyValue("--text-primary").trim() || "#000";
 }
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script).
 
 // o.oportunidad ya viene calculado desde el backend: la suma de las DOS
 // categorías que más pesen entre Neutral/En desacuerdo/Totalmente en
@@ -105,18 +101,37 @@ function textoOportunidad(o) {
   return `${pct}% no muestra acuerdo total`;
 }
 
+// ?oleada=<id> permite enlazar directo a una oleada concreta (ver
+// enlaceRespuestasTest en tests.js, que enlaza aquí el número de respuestas
+// de un test de Clima Laboral) -- sessionStorage evita un bucle infinito si
+// esa oleada no existe en NINGUNA empresa (se intenta la otra empresa una
+// sola vez, no en cada carga).
+const OLEADA_OBJETIVO = new URLSearchParams(location.search).get("oleada");
+
 async function loadOleadas() {
   const res = await fetch(`${AUTH_API_BASE}/clima/oleadas?${conEmpresa(new URLSearchParams())}`);
   const oleadas = await res.json();
   const select = document.getElementById("select-oleada");
   select.innerHTML = oleadas
-    .map((o) => `<option value="${o.id}">${o.etiqueta || `Oleada #${o.numero}`} (${o.num_respuestas} respuestas · ${o.creado_en.slice(0, 10)})</option>`)
+    .map((o) => {
+      const faseTxt = o.fase === "pulso" ? "Pulso" : "Encuesta completa";
+      return `<option value="${o.id}">${o.etiqueta || `Oleada #${o.numero}`} · ${faseTxt} (${o.num_respuestas} respuestas · ${o.creado_en.slice(0, 10)})</option>`;
+    })
     .join("");
   if (oleadas.length === 0) {
     document.getElementById("centro-grid").innerHTML = `<p class="staff-hint">Todavía no has importado ningún Excel de Clima Laboral.</p>`;
     return;
   }
-  currentOleada = oleadas[0].id;
+  if (OLEADA_OBJETIVO && !oleadas.some((o) => String(o.id) === OLEADA_OBJETIVO)) {
+    const otraEmpresa = EMPRESA === "saona" ? "kk" : "saona";
+    if (!sessionStorage.getItem("kt-clima-oleada-redirect")) {
+      sessionStorage.setItem("kt-clima-oleada-redirect", "1");
+      location.href = `/clima-informes.html?empresa=${otraEmpresa}&oleada=${OLEADA_OBJETIVO}`;
+      return;
+    }
+  }
+  sessionStorage.removeItem("kt-clima-oleada-redirect");
+  currentOleada = OLEADA_OBJETIVO && oleadas.some((o) => String(o.id) === OLEADA_OBJETIVO) ? Number(OLEADA_OBJETIVO) : oleadas[0].id;
   select.value = currentOleada;
   await loadCentros();
 }
@@ -418,7 +433,7 @@ function renderListaComentarios(container, textos) {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  const user = await checkAuth("/clima.html");
+  const user = await checkAuth("/clima-informes.html");
   if (!user) return;
   const moduloRequerido = EMPRESA === "saona" ? "saona_clima" : "clima";
   if (!(user.modulos || []).includes(moduloRequerido)) {
@@ -427,6 +442,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   wireUserBar(user);
   aplicarBrandingEmpresa();
+  const linkLanding = document.getElementById("link-clima-landing");
+  if (linkLanding && EMPRESA === "saona") linkLanding.href = "clima.html?empresa=saona";
 
   await cargarTokensDiseno();
   await loadOleadas();
@@ -436,6 +453,43 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("reporte-wrap").hidden = true;
     document.getElementById("btn-exportar-pdf").hidden = true;
     await loadCentros();
+  });
+
+  document.getElementById("btn-renombrar-oleada").addEventListener("click", async () => {
+    if (!currentOleada) return;
+    const select = document.getElementById("select-oleada");
+    const actual = select.options[select.selectedIndex]?.textContent.split(" (")[0] || "";
+    const nombre = await pedirTexto("Nuevo nombre para esta oleada:", actual);
+    if (!nombre || !nombre.trim()) return;
+    const res = await fetch(`${AUTH_API_BASE}/clima/${currentOleada}/etiqueta`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ etiqueta: nombre.trim() }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      mostrarAviso(err.detail || "No se pudo renombrar la oleada.");
+      return;
+    }
+    await loadOleadas();
+  });
+
+  document.getElementById("btn-eliminar-oleada").addEventListener("click", async () => {
+    if (!currentOleada) return;
+    const select = document.getElementById("select-oleada");
+    const nombre = select.options[select.selectedIndex]?.textContent || "esta oleada";
+    if (!(await pedirConfirmacion(
+      `¿Eliminar por completo "${nombre}"? Esto borra todas sus respuestas, plantilla e importaciones. No es reversible.`
+    ))) return;
+    const res = await fetch(`${AUTH_API_BASE}/clima/${currentOleada}`, { method: "DELETE" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      mostrarAviso(err.detail || "No se pudo eliminar la oleada.");
+      return;
+    }
+    document.getElementById("reporte-wrap").hidden = true;
+    document.getElementById("btn-exportar-pdf").hidden = true;
+    await loadOleadas();
   });
 
   document.getElementById("input-clima-upload").addEventListener("change", async (e) => {
@@ -451,11 +505,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("check-nueva-oleada").checked = false;
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert(err.detail || "Fallo al importar el Excel.");
+      mostrarAviso(err.detail || "Fallo al importar el Excel.");
       return;
     }
     const result = await res.json();
-    alert(`Importación completa: ${result.nuevas} respuestas nuevas, ${result.ya_existian} ya existían (de ${result.total_en_excel} filas).`);
+    mostrarAviso(`Importación completa: ${result.nuevas} respuestas nuevas, ${result.ya_existian} ya existían (de ${result.total_en_excel} filas).`);
     await loadOleadas();
   });
 

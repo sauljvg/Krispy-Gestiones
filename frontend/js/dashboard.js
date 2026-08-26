@@ -16,23 +16,15 @@ async function fetchJSON(url) {
 }
 
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
-}
+// escapeHTML ahora vive en common.js (cargado antes que este script).
 
 // Cuando el usuario (gerente) está restringido a una sola tienda, no tiene
 // sentido ofrecerle "Todas" ni un desplegable — /api/stores ya viene filtrado
 // por el middleware de permisos, así que aquí solo hace falta bloquear la UI.
 let tiendasPermitidas = [];
 
-function soloGoogleQS() {
-  return state.soloGoogle ? "solo_google=true" : "";
-}
-
 async function loadStores() {
-  const { stores } = await fetchJSON(`${API_BASE}/stores?${soloGoogleQS()}`);
+  const { stores } = await fetchJSON(`${API_BASE}/stores`);
   const select = document.getElementById("filter-tienda");
   const current = select.value;
   const restringidoAUna = tiendasPermitidas.length === 1;
@@ -83,8 +75,8 @@ async function loadStoreRanking() {
   // (igual que ya hacían las transacciones). El de valoración media usa el
   // acumulado histórico (stores sin `mes`), ya que no tiene sentido acotarlo.
   const [{ stores: storesMes }, { stores: storesTotal }, { transacciones: mesValores }] = await Promise.all([
-    fetchJSON(`${API_BASE}/stores?order_by=tasa&mes=${encodeURIComponent(mes)}&${soloGoogleQS()}`),
-    fetchJSON(`${API_BASE}/stores?${soloGoogleQS()}`),
+    fetchJSON(`${API_BASE}/stores?order_by=tasa&mes=${encodeURIComponent(mes)}`),
+    fetchJSON(`${API_BASE}/stores`),
     fetchJSON(`${API_BASE}/transactions?mes=${encodeURIComponent(mes)}`),
   ]);
   document.getElementById("store-ranking-list").innerHTML =
@@ -112,7 +104,7 @@ async function uploadTransaccionesFile(file) {
   const res = await fetch(conEmpresaURL(`${API_BASE}/transactions/upload?mes=${encodeURIComponent(mes)}`), { method: "POST", body: formData });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    alert(`No se pudo procesar el Excel: ${body.detail || res.statusText}`);
+    mostrarAviso(`No se pudo procesar el Excel: ${body.detail || res.statusText}`);
     return;
   }
   await loadStoreRanking();
@@ -127,13 +119,13 @@ async function uploadTakeoutZip(file) {
     const res = await fetch(conEmpresaURL(`${API_BASE}/import/takeout`), { method: "POST", body: formData });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-      alert(`No se pudo importar el Takeout: ${body.detail || res.statusText || `error HTTP ${res.status}`}`);
+      mostrarAviso(`No se pudo importar el Takeout: ${body.detail || res.statusText || `error HTTP ${res.status}`}`);
       return;
     }
     const lineas = body.tiendas
-      .map((t) => `${t.tienda}: +${t.nuevas} nuevas (total ${t.total_ahora}${t.total_google ? `/${t.total_google}` : ""})`)
+      .map((t) => `${t.tienda}: +${t.nuevas} nuevas (total ${t.total_ahora})`)
       .join("\n");
-    alert(`Importación completa — ${body.total_nuevas} reseñas nuevas en total.\n\n${lineas}`);
+    mostrarAviso(`Importación completa — ${body.total_nuevas} reseñas nuevas en total.\n\n${lineas}`);
     // Se actualiza primero y por separado: si loadStores/loadStoreRanking/
     // refreshAll fallan por lo que sea, no debe arrastrar consigo la fecha
     // de última importación (que sí se guardó bien en el servidor).
@@ -180,16 +172,6 @@ async function loadStats() {
   document.getElementById("stat-positivas").textContent = `${stats.porcentaje_positivas}%`;
   document.getElementById("stat-recientes").textContent = stats.resenas_recientes.toLocaleString("es-ES");
   renderDistributionChart(stats.distribucion_estrellas, stats.distribucion_por_tienda);
-
-  const checkEl = document.getElementById("stat-total-check");
-  if (stats.completo) {
-    checkEl.hidden = false;
-    checkEl.title = stats.total_google
-      ? `100% capturado (${stats.total.toLocaleString("es-ES")} de ${stats.total_google.toLocaleString("es-ES")} según Google)`
-      : "100% capturado en todas las tiendas";
-  } else {
-    checkEl.hidden = true;
-  }
 }
 
 function renderRatingProgress(p) {
@@ -243,7 +225,6 @@ async function loadEvolucionTabla() {
     return;
   }
   const params = new URLSearchParams({ date_from: state.dateFrom, date_to: state.dateTo });
-  if (state.soloGoogle) params.set("solo_google", "true");
   const { evolucion } = await fetchJSON(`${API_BASE}/timeline-evolucion?${params.toString()}`);
   detalle.hidden = evolucion.length === 0;
   if (!evolucion.length) return;
@@ -331,6 +312,413 @@ function clearStaffFilter() {
   return refreshAll();
 }
 
+// ---- Gestionar personal (admin): alta manual, sugerencia de variantes con
+// IA, y salida (baja definitiva o traslado a otra tienda) — sustituye a
+// STORE_STAFF fijo por tablas editables desde aquí mismo (ver personal.py).
+let personalModalCache = [];
+let personalTiendasCache = [];
+let personalEditandoAsignacionId = null;
+let personalSalidaAsignacionId = null;
+let personalFusionandoAsignacionId = null;
+let personalVariantesSugeridas = [];
+let personalVariantesSeleccionadas = new Set();
+
+function personalSalidaFormHTML(p) {
+  const destinoOpciones = personalTiendasCache
+    .filter((t) => t !== p.tienda)
+    .map((t) => `<option value="${escapeHTML(t)}">${escapeHTML(t)}</option>`)
+    .join("");
+  const hoy = new Date().toISOString().slice(0, 10);
+  return `
+    <div class="salida-form" data-asignacion-id="${p.asignacion_id}">
+      <label><input type="radio" name="salida-tipo-${p.asignacion_id}" value="traslado" checked> Traslado a otra tienda</label>
+      <select class="salida-tienda-destino">${destinoOpciones}</select>
+      <label><input type="radio" name="salida-tipo-${p.asignacion_id}" value="baja"> Salida definitiva</label>
+      <label>Fecha <input type="date" class="salida-fecha" value="${hoy}"></label>
+      <div class="modal-actions" style="justify-content:flex-start;">
+        <button type="button" class="btn btn-primary btn-sm btn-salida-confirmar" data-asignacion-id="${p.asignacion_id}">Confirmar</button>
+        <button type="button" class="btn btn-ghost btn-sm btn-salida-cancelar">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+function personalFusionFormHTML(p) {
+  const otras = personalModalCache.filter(
+    (o) => o.tienda === p.tienda && o.activo && o.personal_id !== p.personal_id
+  );
+  if (otras.length === 0) {
+    return `
+      <div class="salida-form" data-fusion-asignacion-id="${p.asignacion_id}">
+        <p class="personal-hint" style="margin:0 0 8px;">No hay más personal activo en ${escapeHTML(p.tienda)} con quien fusionar.</p>
+        <div class="modal-actions" style="justify-content:flex-start;">
+          <button type="button" class="btn btn-ghost btn-sm btn-fusion-cancelar">Cerrar</button>
+        </div>
+      </div>`;
+  }
+  const opciones = otras.map((o) => `<option value="${o.personal_id}">${escapeHTML(o.nombre_canonico)}</option>`).join("");
+  return `
+    <div class="salida-form" data-fusion-asignacion-id="${p.asignacion_id}">
+      <p class="personal-hint" style="margin:0 0 6px;">Es la misma persona que...</p>
+      <select class="fusion-destino-select">${opciones}</select>
+      <div class="modal-actions" style="justify-content:flex-start;">
+        <button type="button" class="btn btn-primary btn-sm btn-fusion-confirmar" data-personal-id="${p.personal_id}">Fusionar</button>
+        <button type="button" class="btn btn-ghost btn-sm btn-fusion-cancelar">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+function personalFilaHTML(p) {
+  if (personalEditandoAsignacionId === p.asignacion_id) {
+    return `
+      <div class="personal-fila-wrap">
+        <div class="personal-fila" data-asignacion-id="${p.asignacion_id}">
+          <div class="personal-fila-info" style="flex:1;">
+            <input type="text" class="personal-editar-nombre" value="${escapeHTML(p.nombre_canonico)}">
+            <input type="text" class="personal-editar-variantes" value="${escapeHTML(p.variantes.join(", "))}" placeholder="Variantes separadas por coma">
+          </div>
+          <div class="personal-fila-acciones">
+            <button type="button" class="btn btn-primary btn-personal-guardar-edicion" data-personal-id="${p.personal_id}">Guardar</button>
+            <button type="button" class="btn btn-ghost btn-personal-cancelar-edicion">Cancelar</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  const chips = p.variantes.map((v) => `<span class="personal-chip">${escapeHTML(v)}</span>`).join("");
+  const fechas = p.activo
+    ? (p.fecha_inicio ? `Desde ${p.fecha_inicio}` : "Fecha de entrada sin registrar")
+    : `${p.fecha_inicio ? `${p.fecha_inicio} → ` : ""}${p.fecha_fin || "?"} · ${p.motivo_fin === "traslado" ? "trasladada" : "baja"}`;
+  const acciones = p.activo
+    ? `<button type="button" class="btn btn-ghost btn-personal-editar" data-asignacion-id="${p.asignacion_id}" title="Editar nombre/variantes">✏️</button>
+       <button type="button" class="btn btn-ghost btn-personal-fusionar" data-asignacion-id="${p.asignacion_id}" title="Es la misma persona que otra ficha de esta tienda">🔗 Fusionar...</button>
+       <button type="button" class="btn btn-ghost btn-personal-salida" data-asignacion-id="${p.asignacion_id}">Salida...</button>`
+    : `<button type="button" class="btn btn-ghost btn-personal-eliminar" data-personal-id="${p.personal_id}" title="Borrar (solo si se dio de alta por error)">🗑</button>`;
+
+  return `
+    <div class="personal-fila-wrap">
+      <div class="personal-fila ${p.activo ? "" : "former"}" data-asignacion-id="${p.asignacion_id}">
+        <div class="personal-fila-info">
+          <b>${escapeHTML(p.nombre_canonico)}</b>${p.activo ? "" : ` <span class="personal-badge-former">ya no está aquí</span>`}
+          <p>${escapeHTML(fechas)}</p>
+          <div class="personal-variantes-chips">${chips}</div>
+        </div>
+        <div class="personal-fila-acciones">${acciones}</div>
+      </div>
+      ${personalSalidaAsignacionId === p.asignacion_id ? personalSalidaFormHTML(p) : ""}
+      ${personalFusionandoAsignacionId === p.asignacion_id ? personalFusionFormHTML(p) : ""}
+    </div>`;
+}
+
+function wirePersonalSalidaRadios() {
+  document.querySelectorAll(".salida-form").forEach((form) => {
+    const select = form.querySelector(".salida-tienda-destino");
+    const actualizar = () => {
+      const tipo = form.querySelector('input[type="radio"]:checked').value;
+      select.style.display = tipo === "traslado" ? "" : "none";
+    };
+    form.querySelectorAll('input[type="radio"]').forEach((r) => r.addEventListener("change", actualizar));
+    actualizar();
+  });
+}
+
+function renderPersonalListado() {
+  const grupos = {};
+  for (const p of personalModalCache) (grupos[p.tienda] ||= []).push(p);
+  const tiendasOrdenadas = Object.keys(grupos).sort();
+  document.getElementById("personal-listado").innerHTML = tiendasOrdenadas.length
+    ? tiendasOrdenadas
+        .map((tienda) => {
+          const filas = grupos[tienda]
+            .sort((a, b) => (a.activo === b.activo ? a.nombre_canonico.localeCompare(b.nombre_canonico) : a.activo ? -1 : 1))
+            .map(personalFilaHTML)
+            .join("");
+          return `<div class="personal-tienda-grupo"><h4>${escapeHTML(tienda)}</h4>${filas}</div>`;
+        })
+        .join("")
+    : `<p class="personal-hint">Sin personal registrado todavía.</p>`;
+  wirePersonalSalidaRadios();
+}
+
+async function loadPersonalModal() {
+  const [{ personal }, { stores }] = await Promise.all([
+    fetchJSON(`${API_BASE}/personal`),
+    fetchJSON(`${API_BASE}/stores`),
+  ]);
+  personalModalCache = personal;
+  personalTiendasCache = stores.map((s) => s.tienda);
+  document.getElementById("personal-nuevo-tienda").innerHTML = personalTiendasCache
+    .map((t) => `<option value="${escapeHTML(t)}">${escapeHTML(t)}</option>`)
+    .join("");
+  renderPersonalListado();
+}
+
+function abrirModalPersonal() {
+  personalEditandoAsignacionId = null;
+  personalSalidaAsignacionId = null;
+  personalFusionandoAsignacionId = null;
+  personalVariantesSugeridas = [];
+  personalVariantesSeleccionadas = new Set();
+  document.getElementById("personal-nuevo-nombre").value = "";
+  document.getElementById("personal-nuevo-variantes-extra").value = "";
+  document.getElementById("personal-nuevo-fecha").value = new Date().toISOString().slice(0, 10);
+  document.getElementById("personal-variantes-sugeridas").innerHTML = "";
+  document.getElementById("personal-modal").classList.add("visible");
+  loadPersonalModal().catch((err) => console.error("Fallo cargando personal:", err));
+}
+
+function cerrarModalPersonal() {
+  document.getElementById("personal-modal").classList.remove("visible");
+}
+
+function renderVariantesSugeridas() {
+  document.getElementById("personal-variantes-sugeridas").innerHTML = personalVariantesSugeridas
+    .map((v) => {
+      const activa = personalVariantesSeleccionadas.has(v);
+      return `<button type="button" class="personal-variante-toggle ${activa ? "activa" : ""}" data-variante="${escapeHTML(v)}">${escapeHTML(v)}</button>`;
+    })
+    .join("");
+}
+
+async function sugerirVariantesPersonal() {
+  const nombre = document.getElementById("personal-nuevo-nombre").value.trim();
+  if (!nombre) {
+    mostrarAviso("Escribe primero el nombre.");
+    return;
+  }
+  const boton = document.getElementById("btn-sugerir-variantes");
+  boton.disabled = true;
+  boton.textContent = "Pensando...";
+  try {
+    const res = await fetch(`${API_BASE}/personal/sugerir-variantes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nombre }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Error ${res.status}`);
+    }
+    const data = await res.json();
+    personalVariantesSugeridas = data.variantes || [];
+    personalVariantesSeleccionadas = new Set(personalVariantesSugeridas);
+    renderVariantesSugeridas();
+  } catch (err) {
+    mostrarAviso(`No se pudieron sugerir variantes: ${err.message}\n\nPuedes escribirlas a mano en "Otras variantes".`);
+  } finally {
+    boton.disabled = false;
+    boton.textContent = "✨ Sugerir variantes con IA";
+  }
+}
+
+// Pregunta al confirmar un posible duplicado (misma persona en la misma
+// tienda con nombre/variante repetida): OK = fusionar en una sola ficha,
+// Cancelar = son personas distintas, seguir y crear/trasladar aparte.
+function confirmarEsMismaPersona(duplicados) {
+  const nombres = duplicados.map((d) => d.nombre_canonico).join(", ");
+  return pedirConfirmacion(
+    `Ya hay alguien con ese nombre en esa tienda (${nombres}). ¿Es la misma persona?\n\n` +
+    `Aceptar = sí, fusionar en una sola ficha (sus reseñas se cuentan juntas).\n` +
+    `Cancelar = no, son personas distintas, añadir aparte.`
+  );
+}
+
+async function enviarCreacionPersonal(payload) {
+  const res = await fetch(`${API_BASE}/personal`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (res.status === 409) {
+    const err = await res.json().catch(() => ({}));
+    const duplicados = err.detail?.duplicados || [];
+    if (await confirmarEsMismaPersona(duplicados)) {
+      return enviarCreacionPersonal({ ...payload, fusionar_con_personal_id: duplicados[0].personal_id });
+    }
+    return enviarCreacionPersonal({ ...payload, confirmar_duplicado: true });
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    mostrarAviso(`No se pudo añadir: ${err.detail || res.status}`);
+    return false;
+  }
+  return true;
+}
+
+async function enviarSalidaPersonal(payload) {
+  const res = await fetch(`${API_BASE}/personal/salida`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (res.status === 409) {
+    const err = await res.json().catch(() => ({}));
+    const duplicados = err.detail?.duplicados || [];
+    if (await confirmarEsMismaPersona(duplicados)) {
+      return enviarSalidaPersonal({ ...payload, fusionar_con_personal_id: duplicados[0].personal_id });
+    }
+    return enviarSalidaPersonal({ ...payload, confirmar_duplicado: true });
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    mostrarAviso(`No se pudo registrar la salida: ${err.detail || res.status}`);
+    return false;
+  }
+  return true;
+}
+
+async function crearPersonalNuevo() {
+  const tienda = document.getElementById("personal-nuevo-tienda").value;
+  const nombre = document.getElementById("personal-nuevo-nombre").value.trim();
+  if (!tienda || !nombre) {
+    mostrarAviso("Elige la tienda y escribe el nombre de la persona.");
+    return;
+  }
+  const extra = document.getElementById("personal-nuevo-variantes-extra").value
+    .split(",").map((v) => v.trim()).filter(Boolean);
+  const variantes = [...new Set([...personalVariantesSeleccionadas, ...extra])];
+  const fecha_inicio = document.getElementById("personal-nuevo-fecha").value || null;
+
+  const ok = await enviarCreacionPersonal({ tienda, nombre_canonico: nombre, variantes, fecha_inicio });
+  if (!ok) return;
+
+  document.getElementById("personal-nuevo-nombre").value = "";
+  document.getElementById("personal-nuevo-variantes-extra").value = "";
+  personalVariantesSugeridas = [];
+  personalVariantesSeleccionadas = new Set();
+  document.getElementById("personal-variantes-sugeridas").innerHTML = "";
+  await loadPersonalModal();
+  loadStaffMentions().catch((err) => console.error("Fallo refrescando ranking de personal:", err));
+}
+
+function wirePersonalListado() {
+  document.getElementById("personal-listado").addEventListener("click", async (e) => {
+    const btnEditar = e.target.closest(".btn-personal-editar");
+    if (btnEditar) {
+      personalEditandoAsignacionId = Number(btnEditar.dataset.asignacionId);
+      personalSalidaAsignacionId = null;
+      personalFusionandoAsignacionId = null;
+      renderPersonalListado();
+      return;
+    }
+    if (e.target.closest(".btn-personal-cancelar-edicion")) {
+      personalEditandoAsignacionId = null;
+      renderPersonalListado();
+      return;
+    }
+    const btnGuardarEdicion = e.target.closest(".btn-personal-guardar-edicion");
+    if (btnGuardarEdicion) {
+      const fila = btnGuardarEdicion.closest(".personal-fila");
+      const nombre = fila.querySelector(".personal-editar-nombre").value.trim();
+      const variantes = fila.querySelector(".personal-editar-variantes").value.split(",").map((v) => v.trim()).filter(Boolean);
+      if (!nombre) {
+        mostrarAviso("El nombre no puede quedar vacío.");
+        return;
+      }
+      const res = await fetch(`${API_BASE}/personal/${btnGuardarEdicion.dataset.personalId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nombre_canonico: nombre, variantes }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        mostrarAviso(`No se pudo guardar: ${err.detail || res.status}`);
+        return;
+      }
+      personalEditandoAsignacionId = null;
+      await loadPersonalModal();
+      loadStaffMentions().catch((err) => console.error("Fallo refrescando ranking de personal:", err));
+      return;
+    }
+    const btnSalida = e.target.closest(".btn-personal-salida");
+    if (btnSalida) {
+      personalSalidaAsignacionId = Number(btnSalida.dataset.asignacionId);
+      personalEditandoAsignacionId = null;
+      personalFusionandoAsignacionId = null;
+      renderPersonalListado();
+      return;
+    }
+    if (e.target.closest(".btn-salida-cancelar")) {
+      personalSalidaAsignacionId = null;
+      renderPersonalListado();
+      return;
+    }
+    const btnSalidaConfirmar = e.target.closest(".btn-salida-confirmar");
+    if (btnSalidaConfirmar) {
+      const form = btnSalidaConfirmar.closest(".salida-form");
+      const tipo = form.querySelector('input[type="radio"]:checked').value;
+      const fecha = form.querySelector(".salida-fecha").value;
+      const tienda_destino = tipo === "traslado" ? form.querySelector(".salida-tienda-destino").value : null;
+      if (!fecha) {
+        mostrarAviso("Indica la fecha de salida.");
+        return;
+      }
+      if (tipo === "traslado" && !tienda_destino) {
+        mostrarAviso("Elige la tienda de destino del traslado.");
+        return;
+      }
+      const ok = await enviarSalidaPersonal({
+        asignacion_id: Number(btnSalidaConfirmar.dataset.asignacionId), fecha, tipo, tienda_destino,
+      });
+      if (!ok) return;
+      personalSalidaAsignacionId = null;
+      await loadPersonalModal();
+      loadStaffMentions().catch((err) => console.error("Fallo refrescando ranking de personal:", err));
+      return;
+    }
+    const btnFusionar = e.target.closest(".btn-personal-fusionar");
+    if (btnFusionar) {
+      personalFusionandoAsignacionId = Number(btnFusionar.dataset.asignacionId);
+      personalEditandoAsignacionId = null;
+      personalSalidaAsignacionId = null;
+      renderPersonalListado();
+      return;
+    }
+    if (e.target.closest(".btn-fusion-cancelar")) {
+      personalFusionandoAsignacionId = null;
+      renderPersonalListado();
+      return;
+    }
+    const btnFusionConfirmar = e.target.closest(".btn-fusion-confirmar");
+    if (btnFusionConfirmar) {
+      const form = btnFusionConfirmar.closest(".salida-form");
+      const personalIdDestino = Number(form.querySelector(".fusion-destino-select").value);
+      const res = await fetch(`${API_BASE}/personal/fusionar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          personal_id_origen: Number(btnFusionConfirmar.dataset.personalId),
+          personal_id_destino: personalIdDestino,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        mostrarAviso(`No se pudo fusionar: ${err.detail || res.status}`);
+        return;
+      }
+      personalFusionandoAsignacionId = null;
+      await loadPersonalModal();
+      loadStaffMentions().catch((err) => console.error("Fallo refrescando ranking de personal:", err));
+      return;
+    }
+    const btnEliminar = e.target.closest(".btn-personal-eliminar");
+    if (btnEliminar) {
+      if (!(await pedirConfirmacion("¿Borrar a esta persona y todo su historial? Pensado solo para altas hechas por error."))) return;
+      await fetch(`${API_BASE}/personal/${btnEliminar.dataset.personalId}`, { method: "DELETE" });
+      await loadPersonalModal();
+      loadStaffMentions().catch((err) => console.error("Fallo refrescando ranking de personal:", err));
+    }
+  });
+
+  document.getElementById("personal-variantes-sugeridas").addEventListener("click", (e) => {
+    const btn = e.target.closest(".personal-variante-toggle");
+    if (!btn) return;
+    const v = btn.dataset.variante;
+    if (personalVariantesSeleccionadas.has(v)) personalVariantesSeleccionadas.delete(v);
+    else personalVariantesSeleccionadas.add(v);
+    renderVariantesSugeridas();
+  });
+}
+
 const MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
 function formatFechaExacta(fechaDatetime) {
@@ -349,13 +737,6 @@ function reviewCardHTML(r) {
   const stars = r.calificacion_num ? "★".repeat(r.calificacion_num) + "☆".repeat(5 - r.calificacion_num) : "—";
   const fechaExacta = formatFechaExacta(r.fecha_datetime) || escapeHTML(r.fecha_categoria || "");
   const horaExacta = formatHoraExacta(r.fecha_hora);
-  // visible_en_google=0: la reconciliación manual (scraper --reconciliar) no
-  // la encontró en una pasada completa en vivo — se muestra igual (en modo
-  // "mostrar todo") pero marcada, para que quede claro por qué no suma en el
-  // toggle "Solo Google".
-  const noVisible = r.visible_en_google === 0
-    ? `<span class="badge badge-no-google" title="La reconciliación manual no la encontró visible en Google la última vez que se revisó">🚫 no visible en Google</span>`
-    : "";
   return `
     <div class="review-item">
       <div class="review-top">
@@ -364,7 +745,6 @@ function reviewCardHTML(r) {
           <span class="review-stars">${stars}</span>
           <span${horaExacta ? ` title="${horaExacta} (hora de Madrid)"` : ""}>${fechaExacta}</span>
           <span class="badge badge-${r.sentiment}">${r.sentiment}</span>
-          ${noVisible}
         </span>
       </div>
       <div class="review-text">${r.texto ? escapeHTML(r.texto) : '<i>Sin comentario, solo calificación.</i>'}</div>
@@ -533,18 +913,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   wireFilters(() => refreshAll(), () => loadReviews());
 
-  const soloGoogleEl = document.getElementById("filter-solo-google");
-  state.soloGoogle = localStorage.getItem("kt-resenas-solo-google") === "1";
-  soloGoogleEl.checked = state.soloGoogle;
-  soloGoogleEl.addEventListener("change", () => {
-    state.soloGoogle = soloGoogleEl.checked;
-    localStorage.setItem("kt-resenas-solo-google", state.soloGoogle ? "1" : "0");
-    state.page = 1;
-    Promise.all([loadStores(), loadStoreRanking(), refreshAll()]).catch((err) =>
-      console.error("Fallo aplicando el toggle Solo Google:", err)
-    );
-  });
-
   document.getElementById("btn-toggle-horario").addEventListener("click", (e) => {
     horarioVisible = !horarioVisible;
     document.getElementById("horario-charts").hidden = !horarioVisible;
@@ -574,6 +942,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     e.target.textContent = table.hidden ? "Mostrar anteriores" : "Ocultar anteriores";
   });
 
+  if (user.rol === "admin") {
+    const btnGestionarPersonal = document.getElementById("btn-gestionar-personal");
+    btnGestionarPersonal.hidden = false;
+    btnGestionarPersonal.addEventListener("click", abrirModalPersonal);
+    document.getElementById("btn-personal-cerrar").addEventListener("click", cerrarModalPersonal);
+    document.getElementById("btn-sugerir-variantes").addEventListener("click", sugerirVariantesPersonal);
+    document.getElementById("btn-crear-personal").addEventListener("click", crearPersonalNuevo);
+    wirePersonalListado();
+  }
+
   loadStores().catch((err) => console.error("Fallo cargando tiendas:", err));
   loadStoreRanking().catch((err) => console.error("Fallo cargando ranking de tiendas:", err));
 
@@ -597,7 +975,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!file) return;
     uploadTakeoutZip(file).catch((err) => {
       console.error("Fallo importando Takeout:", err);
-      alert("Fallo importando el Takeout — revisa la consola del navegador.");
+      mostrarAviso("Fallo importando el Takeout — revisa la consola del navegador.");
     });
     e.target.value = "";
   });

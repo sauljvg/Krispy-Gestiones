@@ -44,7 +44,10 @@ from disc_module import router_publico as disc_router_publico
 from encuestas_routes import router as encuestas_router
 from encuestas_routes import router_publico as encuestas_router_publico
 from entrevistas_routes import router as entrevistas_router
+from evaluaciones360_routes import router as evaluaciones360_router
 from informes_routes import router as informes_router
+from notificaciones_routes import router as notificaciones_router
+from reclutamiento_routes import reanudar_lotes_ia_pendientes
 from reclutamiento_routes import router as reclutamiento_router
 from request_context import tiendas_permitidas_actual
 from routes import router
@@ -95,12 +98,18 @@ async def restringir_tiendas_por_usuario(request, call_next):
 @app.middleware("http")
 async def no_cachear_estaticos(request, call_next):
     """StaticFiles no manda Cache-Control, así que el navegador cachea el
-    HTML/JS/CSS con heurística propia y puede tardar en recoger cambios
-    (hace falta recargar sin caché para verlos). Forzar revalidación en cada
-    carga evita ese desfase sin perder el beneficio del ETag/304."""
+    HTML/JS/CSS con heurística propia y puede tardar en recoger cambios (hace
+    falta recargar sin caché para verlos) -- se vio en producción con el HTML
+    de Evaluaciones 360°: alguien con una copia vieja en caché (de antes de
+    "hidden" en las pestañas de gestión) las veía parpadear un instante antes
+    de que el JS (ese sí, ya actualizado) las ocultara según su rol. "no-cache"
+    solo obliga a revalidar (el navegador puede seguir reusando el cuerpo si
+    el servidor responde 304); "no-store" prohíbe guardar copia local del
+    todo, así que cada carga trae SIEMPRE el HTML/JS/CSS actual, sin lugar a
+    ambigüedad de qué versión se está pintando."""
     response = await call_next(request)
     if not request.url.path.startswith("/api"):
-        response.headers["Cache-Control"] = "no-cache"
+        response.headers["Cache-Control"] = "no-store"
     return response
 
 # /api/auth/* queda público (login/logout) o resuelve su propia auth (me,
@@ -112,6 +121,7 @@ app.include_router(informes_router, prefix="/api/informes")
 app.include_router(reclutamiento_router, prefix="/api/reclutamiento")
 app.include_router(clima_router, prefix="/api/clima")
 app.include_router(entrevistas_router, prefix="/api/entrevistas")
+app.include_router(evaluaciones360_router, prefix="/api/evaluaciones360")
 app.include_router(boletines_router, prefix="/api/boletines")
 app.include_router(boletines_router_publico, prefix="/api/public/boletines")
 app.include_router(encuestas_router, prefix="/api/encuestas")
@@ -120,6 +130,7 @@ app.include_router(disc_router, prefix="/api/disc")
 app.include_router(disc_router_publico, prefix="/api/public/disc")
 app.include_router(david_router, prefix="/api/david")
 app.include_router(agregadores_router, prefix="/api/agregadores")
+app.include_router(notificaciones_router, prefix="/api")
 app.include_router(router, prefix="/api", dependencies=[Depends(require_resenas)])
 
 
@@ -127,6 +138,7 @@ app.include_router(router, prefix="/api", dependencies=[Depends(require_resenas)
 def _start_db_backups():
     backups_module.start_scheduler()
     agregadores_module.start_scheduler_limpieza_capturas()
+    reanudar_lotes_ia_pendientes()
 
 
 @app.on_event("shutdown")

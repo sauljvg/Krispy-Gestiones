@@ -1,3 +1,4 @@
+import datetime
 import hashlib
 import io
 import json
@@ -114,6 +115,13 @@ def ensure_informe_tables():
     # existentes son todos de Krispy Kreme, de ahí el default.
     if "empresa" not in cols_tipos:
         conn.execute("ALTER TABLE informe_tipos ADD COLUMN empresa TEXT NOT NULL DEFAULT 'kk'")
+    # archivado: para un tipo creado a mano (ver create_tipo/"+ Nuevo tipo")
+    # que ya no se usa pero cuyos datos no se quieren borrar -- deja de
+    # aparecer en la pantalla principal de Informes y en el desplegable de
+    # "a qué informe alimenta" de Tests (ver list_tipos), sin tocar sus
+    # respuestas ya guardadas.
+    if "archivado" not in cols_tipos:
+        conn.execute("ALTER TABLE informe_tipos ADD COLUMN archivado INTEGER NOT NULL DEFAULT 0")
 
     # candidato_id enlaza cada "compartido" con su ficha en candidatos
     # (backend/reclutamiento.py) — se rellena al compartir (ver
@@ -191,9 +199,32 @@ def ensure_informe_tables():
     for clave, nombre in DEFAULT_TIPOS_SAONA:
         conn.execute("INSERT OR IGNORE INTO informe_tipos (clave, nombre, empresa) VALUES (?, ?, 'saona')", (clave, nombre))
 
+    _backfill_umbral_apto_saona(conn)
+
     conn.commit()
     conn.close()
     os.makedirs(CV_DIR, exist_ok=True)
+
+
+def _backfill_umbral_apto_saona(conn):
+    """Saona pasó a considerar apto desde 65% en vez de 70% (ver
+    scoring_valores.UMBRAL_APTO_POR_EMPRESA) -- esto solo afecta a los tests
+    calculados a partir de aquí. Las respuestas de Saona que ya se habían
+    guardado como "No apto" bajo el 70% viejo, pero que en realidad llegaban
+    a 65%, se corrigen aquí una sola vez para que el historial quede
+    coherente con el criterio nuevo. Idempotente (la condición WHERE deja de
+    encontrar filas una vez corregidas) y a salvo de tocar por error un "No
+    apto" forzado por respuesta descalificatoria (ver forzar_no_apto): ese
+    texto lleva un sufijo extra y no coincide con el '= ❌ No apto' exacto de
+    abajo."""
+    conn.execute("""
+        UPDATE informe_respuestas
+        SET datos_json = json_set(datos_json, '$.RESULTADO', '✅ Alineado')
+        WHERE hoja IN ('Scoring', 'Dashboard')
+          AND json_extract(datos_json, '$.RESULTADO') = '❌ No apto'
+          AND CAST(json_extract(datos_json, '$.SCORE GLOBAL') AS REAL) >= 65
+          AND tipo_id IN (SELECT id FROM informe_tipos WHERE empresa = 'saona')
+    """)
 
 
 def _migrate_legacy_respuestas(conn):
@@ -264,14 +295,17 @@ def _hoja_para_conteo(conn, tipo):
     return row["hoja"] if row else None
 
 
-def list_tipos(empresa=None):
+def list_tipos(empresa=None, incluir_archivados=False):
     conn = get_connection()
+    clauses = []
+    params = []
     if empresa:
-        tipos = [dict(r) for r in conn.execute(
-            "SELECT * FROM informe_tipos WHERE empresa = ? ORDER BY id", (empresa,)
-        ).fetchall()]
-    else:
-        tipos = [dict(r) for r in conn.execute("SELECT * FROM informe_tipos ORDER BY id").fetchall()]
+        clauses.append("empresa = ?")
+        params.append(empresa)
+    if not incluir_archivados:
+        clauses.append("(archivado IS NULL OR archivado = 0)")
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    tipos = [dict(r) for r in conn.execute(f"SELECT * FROM informe_tipos {where} ORDER BY id", params).fetchall()]
     for tipo in tipos:
         hoja = _hoja_para_conteo(conn, tipo)
         if hoja is None:
@@ -292,6 +326,53 @@ def create_tipo(clave, nombre, empresa="kk"):
     tipo_id = cur.lastrowid
     conn.close()
     return tipo_id
+
+
+def archivar_tipo(clave, archivado=True):
+    tipo = get_tipo(clave)
+    if tipo is None:
+        raise ValueError(f"Tipo de informe desconocido: {clave}")
+    conn = get_connection()
+    conn.execute("UPDATE informe_tipos SET archivado = ? WHERE id = ?", (1 if archivado else 0, tipo["id"]))
+    conn.commit()
+    conn.close()
+
+
+def eliminar_tipo(clave):
+    """Borra por completo un tipo creado a mano (ver create_tipo) y todo lo
+    que tenga dentro (respuestas, importaciones, hojas, compartidos) — a
+    diferencia de archivar_tipo, esto no es reversible. Se niega si algún
+    Test todavía lo tiene configurado como destino (ver
+    encuestas.tipo_informe_clave): borrarlo igual dejaría a ese Test
+    apuntando a un tipo inexistente, y la próxima respuesta que llegara
+    fallaría en vez de guardarse."""
+    tipo = get_tipo(clave)
+    if tipo is None:
+        raise ValueError(f"Tipo de informe desconocido: {clave}")
+    conn = get_connection()
+    tests_conectados = [r["titulo"] for r in conn.execute(
+        "SELECT titulo FROM encuestas WHERE tipo_informe_clave = ?", (clave,)
+    ).fetchall()]
+    if tests_conectados:
+        conn.close()
+        lista = ", ".join(f'"{t}"' for t in tests_conectados)
+        plural = "test" if len(tests_conectados) == 1 else "tests"
+        raise ValueError(
+            f"No se puede eliminar: todavía lo alimenta el {plural} {lista}. "
+            "Cambia primero a qué informe alimenta (o ciérralo) antes de borrar este informe."
+        )
+    conn.execute("""
+        DELETE FROM informe_compartidos WHERE respuesta_id IN (
+            SELECT id FROM informe_respuestas WHERE tipo_id = ?
+        )
+    """, (tipo["id"],))
+    conn.execute("DELETE FROM informe_respuestas WHERE tipo_id = ?", (tipo["id"],))
+    conn.execute("DELETE FROM informe_importaciones WHERE tipo_id = ?", (tipo["id"],))
+    conn.execute("DELETE FROM informe_hojas_ocultas WHERE tipo_id = ?", (tipo["id"],))
+    conn.execute("DELETE FROM usuario_informe_tipos WHERE tipo_clave = ?", (clave,))
+    conn.execute("DELETE FROM informe_tipos WHERE id = ?", (tipo["id"],))
+    conn.commit()
+    conn.close()
 
 
 def list_hojas(tipo_clave, incluir_ocultas=True):
@@ -407,14 +488,15 @@ def read_workbook_sheets(file_bytes):
     return resultado
 
 
-def _quiza_calcular_scoring(hojas, columnas_extra=None):
+def _quiza_calcular_scoring(hojas, columnas_extra=None, empresa=None):
     """Si el Excel trae una hoja "Respuestas" cruda (export directo de Forms,
     sin Dashboard ya calculado) y se reconoce como de Valores y Competencias
     por sus preguntas, calculamos aquí el Scoring/Dashboard — así el usuario
     solo sube el Excel plano sin depender del script externo. Si el Excel ya
     trae su propio Dashboard (el flujo de siempre), no se toca nada. Funciona
     igual para cualquier tipo/empresa (Krispy Kreme, Saona...) porque detecta
-    el cuestionario por su contenido, no por el nombre del tipo.
+    el cuestionario por su contenido, no por el nombre del tipo -- salvo el
+    umbral de apto, que sí depende de la empresa (ver scoring_valores.calcular).
 
     columnas_extra se reenvía tal cual a scoring_valores.calcular() — ver ahí
     su propósito (solo lo usa el módulo de Test, nunca la importación manual
@@ -424,7 +506,7 @@ def _quiza_calcular_scoring(hojas, columnas_extra=None):
         return hojas
     if not scoring_valores.parece_valores_competencias(respuestas):
         return hojas
-    scoring_rows, dashboard_rows = scoring_valores.calcular(respuestas, columnas_extra)
+    scoring_rows, dashboard_rows = scoring_valores.calcular(respuestas, columnas_extra, empresa=empresa)
     nuevas = dict(hojas)
     nuevas["Scoring"] = scoring_rows
     nuevas["Dashboard"] = dashboard_rows
@@ -479,7 +561,7 @@ def import_excel(tipo_clave, file_bytes, archivo_nombre, subido_por):
     hojas = read_workbook_sheets(file_bytes)
     if not hojas:
         raise ValueError("El Excel no tiene filas de datos en ninguna hoja")
-    hojas = _quiza_calcular_scoring(hojas)
+    hojas = _quiza_calcular_scoring(hojas, empresa=tipo.get("empresa"))
 
     conn = get_connection()
     cur = conn.execute(
@@ -514,7 +596,7 @@ def ingest_fila_directa(tipo_clave, fila, origen="Formulario web", columnas_extr
     if tipo is None:
         raise ValueError(f"Tipo de informe desconocido: {tipo_clave}")
 
-    hojas = _quiza_calcular_scoring({"Respuestas": [fila]}, columnas_extra)
+    hojas = _quiza_calcular_scoring({"Respuestas": [fila]}, columnas_extra, empresa=tipo.get("empresa"))
 
     conn = get_connection()
     cur = conn.execute(
@@ -541,12 +623,29 @@ def ingest_fila_directa(tipo_clave, fila, origen="Formulario web", columnas_extr
     }
 
 
+def forzar_no_apto(respuesta_id):
+    """Fuerza RESULTADO = "No apto" en una respuesta ya insertada -- usado
+    cuando quien respondió un Test marcó una opción configurada como
+    descalificatoria (ver encuestas.guardar_respuesta), sin importar lo que
+    scoring_valores.calcular() hubiera calculado. El texto contiene "No
+    apto" a propósito, igual que el que genera scoring_valores, para caer
+    en el mismo filtro filtro_aptos de get_respuestas() sin duplicar esa
+    lógica."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE informe_respuestas SET datos_json = json_set(datos_json, '$.RESULTADO', ?) WHERE id = ?",
+        ("❌ No apto (respuesta descalificatoria)", respuesta_id),
+    )
+    conn.commit()
+    conn.close()
+
+
 def _detect_date_columns(columnas):
     return [c for c in columnas if any(hint in c.lower() for hint in DATE_HINTS)]
 
 
 def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=None, orden_dir="asc",
-                    fecha_col=None, fecha_desde=None, fecha_hasta=None, excluir_no_aptos=False):
+                    fecha_col=None, fecha_desde=None, fecha_hasta=None, filtro_aptos="todos"):
     tipo = get_tipo(tipo_clave)
     if tipo is None:
         raise ValueError(f"Tipo de informe desconocido: {tipo_clave}")
@@ -571,11 +670,13 @@ def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=N
     if fecha_col and fecha_hasta:
         clauses.append("json_extract(datos_json, ?) <= ?")
         params.extend([f"$.\"{fecha_col}\"", fecha_hasta])
-    if excluir_no_aptos:
+    if filtro_aptos == "excluir_no_aptos":
         # RESULTADO viene del Excel de Valores y Competencias como "❌ No
         # apto" — otros tipos de informe no tienen esta columna, así que se
         # deja pasar cuando es NULL en vez de excluir de más.
         clauses.append("(json_extract(datos_json, '$.RESULTADO') IS NULL OR json_extract(datos_json, '$.RESULTADO') NOT LIKE '%No apto%')")
+    elif filtro_aptos == "solo_no_aptos":
+        clauses.append("json_extract(datos_json, '$.RESULTADO') LIKE '%No apto%'")
     where = "WHERE " + " AND ".join(clauses)
 
     order_sql = "id DESC"
@@ -590,6 +691,57 @@ def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=N
         f"ORDER BY {order_sql} LIMIT ? OFFSET ?",
         params + [page_size, offset],
     ).fetchall()
+
+    ids_pagina = [row["id"] for row in rows]
+    compartidos_por_respuesta = {}
+    if ids_pagina:
+        placeholders = ",".join("?" * len(ids_pagina))
+        # Unión de los dos caminos de compartir, igual que
+        # reclutamiento._compartidos_por_candidato -- antes esto solo miraba
+        # informe_compartidos y se dejaba fuera a quien se hubiera compartido
+        # como "directo" desde Reclutamiento (candidato_compartidos), así que
+        # el sombreado verde y el aviso de "ya compartido" de Informes iban
+        # por debajo de lo que de verdad había (se veían menos filas
+        # compartidas aquí que en Reclutamiento, que sí unía las dos).
+        for r in conn.execute(f"""
+            SELECT respuesta_id, usuario_nombre FROM (
+                SELECT ic.respuesta_id AS respuesta_id, u.nombre AS usuario_nombre
+                FROM informe_compartidos ic JOIN usuarios u ON u.id = ic.usuario_id
+                WHERE ic.respuesta_id IN ({placeholders})
+                UNION
+                SELECT cand.respuesta_id AS respuesta_id, u.nombre AS usuario_nombre
+                FROM candidatos cand
+                JOIN candidato_compartidos cc ON cc.candidato_id = cand.id
+                JOIN usuarios u ON u.id = cc.usuario_id
+                WHERE cand.respuesta_id IN ({placeholders})
+            )
+        """, ids_pagina + ids_pagina).fetchall():
+            compartidos_por_respuesta.setdefault(r["respuesta_id"], []).append(r["usuario_nombre"])
+
+    # Vacante del candidato ligado a esta respuesta (si lo hay) -- para saber
+    # de un vistazo a quién compartir sin adivinar; si la vacante ya tiene
+    # responsables asignados (compartir_vacante), no hace falta compartir el
+    # candidato individualmente porque ya tienen acceso a todos los suyos.
+    vacante_por_respuesta = {}
+    if ids_pagina:
+        placeholders = ",".join("?" * len(ids_pagina))
+        for r in conn.execute(f"""
+            SELECT cand.respuesta_id AS respuesta_id, v.id AS vacante_id,
+                   v.puesto AS vacante_puesto, v.centro AS vacante_centro,
+                   GROUP_CONCAT(DISTINCT u.nombre) AS gerentes
+            FROM candidatos cand
+            JOIN vacantes v ON v.id = cand.vacante_id
+            LEFT JOIN vacante_compartidos vc ON vc.vacante_id = v.id
+            LEFT JOIN usuarios u ON u.id = vc.usuario_id
+            WHERE cand.respuesta_id IN ({placeholders})
+            GROUP BY cand.respuesta_id
+        """, ids_pagina).fetchall():
+            nombre_vacante = r["vacante_puesto"] + (f" · {r['vacante_centro']}" if r["vacante_centro"] else "")
+            vacante_por_respuesta[r["respuesta_id"]] = {
+                "vacante_id": r["vacante_id"],
+                "vacante_nombre": nombre_vacante,
+                "vacante_gerentes": r["gerentes"].split(",") if r["gerentes"] else [],
+            }
     conn.close()
 
     respuestas = []
@@ -601,12 +753,15 @@ def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=N
             if k not in seen:
                 seen.add(k)
                 columnas.append(k)
+        vacante_info = vacante_por_respuesta.get(row["id"], {"vacante_id": None, "vacante_nombre": None, "vacante_gerentes": []})
         respuestas.append({
             "id": row["id"],
             "creado_en": row["creado_en"],
             "datos": datos,
             "tiene_cv": row["cv_ruta"] is not None,
             "cv_nombre": row["cv_nombre_original"],
+            "compartido_con": compartidos_por_respuesta.get(row["id"], []),
+            **vacante_info,
         })
 
     return {
@@ -689,9 +844,22 @@ def _candidato_id_para_respuesta(respuesta_id, compartido_por):
 
 
 def compartir_respuestas(respuesta_ids, usuario_id, compartido_por):
+    """Comparte cada respuesta con `usuario_id` -- igual que
+    reclutamiento.compartir_candidatos_directo, esto es EXCLUSIVO: si el
+    candidato ligado a la respuesta ya estaba compartido con otra persona
+    (por este camino o por el directo de Reclutamiento), se le quita el
+    acceso a esa persona antes de dárselo al nuevo destinatario."""
     conn = get_connection()
     for rid in respuesta_ids:
         candidato_id = _candidato_id_para_respuesta(rid, compartido_por)
+        conn.execute(
+            "DELETE FROM candidato_compartidos WHERE candidato_id = ? AND usuario_id != ?",
+            (candidato_id, usuario_id),
+        )
+        conn.execute(
+            "DELETE FROM informe_compartidos WHERE candidato_id = ? AND usuario_id != ?",
+            (candidato_id, usuario_id),
+        )
         # Upsert en vez de INSERT OR IGNORE: si ya se había compartido antes,
         # volver a compartir debe refrescar la fecha (y quién lo hizo), para
         # que el orden de Reclutamiento refleje la última vez que se compartió.
@@ -716,6 +884,60 @@ def dejar_de_compartir(respuesta_id, usuario_id):
     )
     conn.commit()
     conn.close()
+
+
+def cambiar_destinatario_informe(pares, nuevo_usuario_id, compartido_en):
+    """Igual que reclutamiento.cambiar_destinatario_directo pero para
+    informe_compartidos (pares = [(respuesta_id, usuario_id_actual), ...])."""
+    conn = get_connection()
+    for respuesta_id, usuario_id_actual in pares:
+        if usuario_id_actual == nuevo_usuario_id:
+            conn.execute(
+                "UPDATE informe_compartidos SET compartido_en = ? WHERE respuesta_id = ? AND usuario_id = ?",
+                (compartido_en, respuesta_id, nuevo_usuario_id),
+            )
+            continue
+        ya_existe = conn.execute(
+            "SELECT 1 FROM informe_compartidos WHERE respuesta_id = ? AND usuario_id = ?",
+            (respuesta_id, nuevo_usuario_id),
+        ).fetchone()
+        if ya_existe:
+            conn.execute(
+                "DELETE FROM informe_compartidos WHERE respuesta_id = ? AND usuario_id = ?",
+                (respuesta_id, usuario_id_actual),
+            )
+            conn.execute(
+                "UPDATE informe_compartidos SET compartido_en = ? WHERE respuesta_id = ? AND usuario_id = ?",
+                (compartido_en, respuesta_id, nuevo_usuario_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE informe_compartidos SET usuario_id = ?, compartido_en = ? "
+                "WHERE respuesta_id = ? AND usuario_id = ?",
+                (nuevo_usuario_id, compartido_en, respuesta_id, usuario_id_actual),
+            )
+    conn.commit()
+    conn.close()
+
+
+def cambiar_destinatario_compartidos(items, nuevo_usuario_id):
+    """Orquesta el cambio de destinatario/fusión de tanda para una
+    selección mixta de "Compartidos por ti" (candidatos compartidos directo
+    + candidatos que llegaron vía Informes -- ver frontend/js/compartidos.js).
+    `items` son dicts {tipo: 'directo'|'informe', candidato_id o
+    respuesta_id, usuario_id_actual}. Todos quedan re-estampados con el
+    MISMO timestamp (calculado una sola vez aquí), así que sea cual sea su
+    tanda/destinatario original, aparecen agrupados juntos después -- esto
+    cubre a la vez "cambiar a quién se compartió" (Heber -> Adhara) y
+    "fusionar tandas sueltas en una sola" (mismo destinatario, timestamps
+    distintos)."""
+    ahora = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    pares_directo = [(it["candidato_id"], it["usuario_id_actual"]) for it in items if it["tipo"] == "directo"]
+    pares_informe = [(it["respuesta_id"], it["usuario_id_actual"]) for it in items if it["tipo"] == "informe"]
+    if pares_directo:
+        reclutamiento_module.cambiar_destinatario_directo(pares_directo, nuevo_usuario_id, ahora)
+    if pares_informe:
+        cambiar_destinatario_informe(pares_informe, nuevo_usuario_id, ahora)
 
 
 def usuario_tiene_acceso_respuesta(usuario_id, respuesta_id):
@@ -779,8 +1001,10 @@ def _candidato_directo_como_item(row, incluir_destinatario=False):
         "estado": row["estado"],
         "notas": row["notas"],
         "telefono": row["telefono"],
+        "email": row["email"],
         "puesto_solicitado": row["puesto_solicitado"],
         "test_resultado": row["test_resultado"],
+        "vacante_id": row["vacante_id"],
     }
     if incluir_destinatario:
         item["destinatario_id"] = row["destinatario_id"]
@@ -801,7 +1025,8 @@ def get_compartidos_con(usuario_id, empresa=None):
                r.id AS respuesta_id, r.datos_json, r.hoja, r.cv_ruta, r.cv_nombre_original,
                t.nombre AS tipo_nombre, t.clave AS tipo_clave,
                cand.estado AS candidato_estado, cand.notas AS candidato_notas,
-               cand.telefono AS candidato_telefono, cand.puesto_solicitado AS candidato_puesto
+               cand.telefono AS candidato_telefono, cand.email AS candidato_email,
+               cand.puesto_solicitado AS candidato_puesto, cand.vacante_id AS candidato_vacante_id
         FROM informe_compartidos c
         JOIN informe_respuestas r ON r.id = c.respuesta_id
         JOIN informe_tipos t ON t.id = r.tipo_id
@@ -820,6 +1045,7 @@ def get_compartidos_con(usuario_id, empresa=None):
             "respuesta_id": row["respuesta_id"],
             "datos": datos,
             "hoja": row["hoja"],
+            "vacante_id": row["candidato_vacante_id"],
             "tiene_cv": row["cv_ruta"] is not None,
             "cv_nombre": row["cv_nombre_original"],
             "tipo_nombre": row["tipo_nombre"],
@@ -828,6 +1054,7 @@ def get_compartidos_con(usuario_id, empresa=None):
             "estado": row["candidato_estado"],
             "notas": row["candidato_notas"],
             "telefono": row["candidato_telefono"],
+            "email": row["candidato_email"],
             "puesto_solicitado": row["candidato_puesto"],
             "test_resultado": datos.get("RESULTADO"),
         })
@@ -854,7 +1081,9 @@ def get_compartidos_por(username, empresa=None):
                r.id AS respuesta_id, r.datos_json, r.hoja, r.cv_ruta, r.cv_nombre_original,
                t.nombre AS tipo_nombre, t.clave AS tipo_clave,
                cand.estado AS candidato_estado, cand.notas AS candidato_notas,
-               cand.telefono AS candidato_telefono, cand.puesto_solicitado AS candidato_puesto
+               cand.telefono AS candidato_telefono, cand.email AS candidato_email,
+               cand.puesto_solicitado AS candidato_puesto,
+               cand.vacante_id AS candidato_vacante_id
         FROM informe_compartidos c
         JOIN informe_respuestas r ON r.id = c.respuesta_id
         JOIN informe_tipos t ON t.id = r.tipo_id
@@ -876,6 +1105,7 @@ def get_compartidos_por(username, empresa=None):
             "respuesta_id": row["respuesta_id"],
             "datos": datos,
             "hoja": row["hoja"],
+            "vacante_id": row["candidato_vacante_id"],
             "tiene_cv": row["cv_ruta"] is not None,
             "cv_nombre": row["cv_nombre_original"],
             "tipo_nombre": row["tipo_nombre"],
@@ -884,6 +1114,7 @@ def get_compartidos_por(username, empresa=None):
             "estado": row["candidato_estado"],
             "notas": row["candidato_notas"],
             "telefono": row["candidato_telefono"],
+            "email": row["candidato_email"],
             "puesto_solicitado": row["candidato_puesto"],
             "test_resultado": datos.get("RESULTADO"),
         })

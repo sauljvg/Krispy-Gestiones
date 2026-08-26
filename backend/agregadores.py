@@ -4,6 +4,7 @@ El scraper corre en un portátil aparte (necesita un navegador real, headed
 para Uber Eats — ver scraper_agregadores/ en la raíz del repo) y llama a la
 API en vivo (POST /api/agregadores/chequeo) con cada resultado; aquí solo se
 guarda y se sirve. Nada de esto toca Selenium ni el scraper de Reseñas."""
+import json
 import math
 import os
 import re
@@ -164,9 +165,70 @@ def ensure_tables():
         )
     """)
 
+    # El relleno automático entre vértices se quitó (ver agregadores.js,
+    # 10/08) porque no había forma fiable de distinguir un hueco real de uno
+    # con contaminación de otra sucursal -- pero el usuario SÍ puede verlo a
+    # ojo en el mapa ("estos dos dots verdes tienen un hueco entre medias, y
+    # sé que en realidad está todo cubierto"). Esta tabla guarda esa decisión
+    # manual: un puente entre dos puntos concretos (por lat/lng, no por
+    # direccion_id -- los vértices del borde ya calculados no siempre tienen
+    # una fila de dirección real detrás, ver resultado_punto/agregadores_limites,
+    # y el usuario también quiere poder unir esos, no solo los dots del grid),
+    # por tienda y agregador, para que el polígono conecte esos dos puntos en
+    # línea recta sin dejar que un vértice intermedio más corto cree un
+    # hueco/pico.
+    cols_uniones = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_uniones)")}
+    if cols_uniones and "lat_a" not in cols_uniones:
+        # Esquema viejo (solo direccion_id, NOT NULL) de la primera versión
+        # de esta tabla -- se creó en esta misma sesión con un único registro
+        # de prueba, seguro recrearla con el esquema nuevo.
+        conn.execute("DROP TABLE agregadores_uniones")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agregadores_uniones (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tienda TEXT NOT NULL,
+            agregador TEXT NOT NULL,
+            lat_a REAL NOT NULL,
+            lng_a REAL NOT NULL,
+            lat_b REAL NOT NULL,
+            lng_b REAL NOT NULL,
+            direccion_id_a INTEGER,
+            direccion_id_b INTEGER,
+            creado_en TEXT NOT NULL
+        )
+    """)
+
+    # "Pincel": zona pintada a mano por el usuario (varios puntos formando un
+    # área, no solo dos) que se fusiona (turf.union en el frontend) con el
+    # polígono calculado -- para huecos DENTRO del polígono que "unir puntos"
+    # (un puente recto entre dos puntos del borde) no puede resolver, porque
+    # el hueco no está en el borde sino en medio de la figura (pedido
+    # explícito del usuario 10/08: "hay unas zonas que debemos poder rellenar
+    # dentro del mismo polígono").
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agregadores_rellenos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tienda TEXT NOT NULL,
+            agregador TEXT NOT NULL,
+            puntos TEXT NOT NULL,
+            creado_en TEXT NOT NULL
+        )
+    """)
+
+    # total_planeado: cuántos chequeos individuales (tienda x agregador x
+    # dirección) va a hacer la pasada en curso -- el scheduler lo calcula al
+    # empezar (ver scheduler.py) y lo manda aquí para que el dashboard pueda
+    # mostrar un progreso real ("22/66") en vez de solo "activo/inactivo".
     cols_sesiones = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_sesiones)")}
     if "total_planeado" not in cols_sesiones:
         conn.execute("ALTER TABLE agregadores_sesiones ADD COLUMN total_planeado INTEGER")
+    if "tienda_actual" not in cols_sesiones:
+        # Qué tienda está recorriendo el daemon AHORA MISMO dentro de la
+        # pasada en curso -- el scheduler la va actualizando según avanza el
+        # bucle por TIENDAS_SCHEDULER (ver scheduler.py), para un contador
+        # en vivo en el dashboard (solo visible para el admin, pedido
+        # explícito del usuario 10/08).
+        conn.execute("ALTER TABLE agregadores_sesiones ADD COLUMN tienda_actual TEXT")
     conn.commit()
     conn.close()
 
@@ -613,6 +675,24 @@ def guardar_limite(
     }
 
 
+def mover_limite(tienda: str, agregador: str, angulo_grados: float, lat: float, lng: float) -> dict | None:
+    """Reajusta a mano un vértice de límite ya guardado, arrastrándolo en el
+    mapa -- recalcula limite_km (distancia real al nuevo punto) y limpia la
+    nota/dirección vieja (direccion_text vuelve a None; el frontend ya hace
+    reverse geocoding perezoso al abrir el popup si falta, ver
+    agrDibujarPoligonoLimite). No cambia angulo_grados -- se sigue tratando
+    como el mismo vértice, solo con una posición corregida a mano (pedido
+    explícito del usuario 10/08: "no quiero quitarlos quiero moverlos")."""
+    if tienda not in TIENDAS:
+        return None
+    info = TIENDAS[tienda]
+    limite_km, _ = _distancia_y_angulo(info["lat"], info["lng"], lat, lng)
+    return guardar_limite(
+        tienda, agregador, angulo_grados, round(limite_km, 3), "ajustado a mano en el mapa",
+        lat=lat, lng=lng, direccion_text=None,
+    )
+
+
 def eliminar_limite(tienda: str, agregador: str, angulo_grados: float) -> bool:
     angulo_guardar = int(round(angulo_grados))
     conn = get_connection()
@@ -620,6 +700,94 @@ def eliminar_limite(tienda: str, agregador: str, angulo_grados: float) -> bool:
         "DELETE FROM agregadores_limites WHERE tienda=? AND agregador=? AND angulo_grados=?",
         (tienda, agregador, angulo_guardar),
     )
+    conn.commit()
+    conn.close()
+    return cur.rowcount > 0
+
+
+def crear_union(
+    tienda: str, agregador: str, lat_a: float, lng_a: float, lat_b: float, lng_b: float,
+    direccion_id_a: int | None = None, direccion_id_b: int | None = None,
+) -> dict:
+    """Puente manual entre dos puntos (lat/lng, no direccion_id -- ver
+    agregadores_uniones en init_db). El usuario decide a ojo que el hueco
+    entre esos dos puntos está cubierto, en vez de que un algoritmo
+    automático lo adivine mal."""
+    conn = get_connection()
+    creado_en = datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        """INSERT INTO agregadores_uniones
+           (tienda, agregador, lat_a, lng_a, lat_b, lng_b, direccion_id_a, direccion_id_b, creado_en)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (tienda, agregador, lat_a, lng_a, lat_b, lng_b, direccion_id_a, direccion_id_b, creado_en),
+    )
+    conn.commit()
+    union_id = cur.lastrowid
+    conn.close()
+    return {
+        "id": union_id, "tienda": tienda, "agregador": agregador,
+        "lat_a": lat_a, "lng_a": lng_a, "lat_b": lat_b, "lng_b": lng_b,
+        "direccion_id_a": direccion_id_a, "direccion_id_b": direccion_id_b, "creado_en": creado_en,
+    }
+
+
+def get_uniones(tienda: str, agregador: str = None) -> list[dict]:
+    conn = get_connection()
+    if agregador:
+        filas = conn.execute(
+            "SELECT * FROM agregadores_uniones WHERE tienda=? AND agregador=?", (tienda, agregador)
+        ).fetchall()
+    else:
+        filas = conn.execute("SELECT * FROM agregadores_uniones WHERE tienda=?", (tienda,)).fetchall()
+    conn.close()
+    return [dict(f) for f in filas]
+
+
+def eliminar_union(union_id: int) -> bool:
+    conn = get_connection()
+    cur = conn.execute("DELETE FROM agregadores_uniones WHERE id=?", (union_id,))
+    conn.commit()
+    conn.close()
+    return cur.rowcount > 0
+
+
+def crear_relleno(tienda: str, agregador: str, puntos: list[list[float]]) -> dict:
+    """Zona pintada a mano (pincel, ver agregadores_rellenos en init_db):
+    lista de [lat, lng] que el frontend fusiona (turf.union) con el polígono
+    calculado, para huecos DENTRO de la figura que un puente recto entre dos
+    puntos del borde no puede resolver."""
+    conn = get_connection()
+    creado_en = datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        "INSERT INTO agregadores_rellenos (tienda, agregador, puntos, creado_en) VALUES (?, ?, ?, ?)",
+        (tienda, agregador, json.dumps(puntos), creado_en),
+    )
+    conn.commit()
+    relleno_id = cur.lastrowid
+    conn.close()
+    return {"id": relleno_id, "tienda": tienda, "agregador": agregador, "puntos": puntos, "creado_en": creado_en}
+
+
+def get_rellenos(tienda: str, agregador: str = None) -> list[dict]:
+    conn = get_connection()
+    if agregador:
+        filas = conn.execute(
+            "SELECT * FROM agregadores_rellenos WHERE tienda=? AND agregador=?", (tienda, agregador)
+        ).fetchall()
+    else:
+        filas = conn.execute("SELECT * FROM agregadores_rellenos WHERE tienda=?", (tienda,)).fetchall()
+    conn.close()
+    resultado = []
+    for f in filas:
+        d = dict(f)
+        d["puntos"] = json.loads(d["puntos"])
+        resultado.append(d)
+    return resultado
+
+
+def eliminar_relleno(relleno_id: int) -> bool:
+    conn = get_connection()
+    cur = conn.execute("DELETE FROM agregadores_rellenos WHERE id=?", (relleno_id,))
     conn.commit()
     conn.close()
     return cur.rowcount > 0
@@ -1261,6 +1429,13 @@ def iniciar_sesion(modo: str, total_planeado: int | None = None) -> int:
     return sesion_id
 
 
+def actualizar_tienda_actual(sesion_id: int, tienda: str) -> None:
+    conn = get_connection()
+    conn.execute("UPDATE agregadores_sesiones SET tienda_actual=? WHERE id=?", (tienda, sesion_id))
+    conn.commit()
+    conn.close()
+
+
 def cerrar_sesiones_huerfanas() -> int:
     conn = get_connection()
     cur = conn.execute(
@@ -1509,6 +1684,7 @@ def get_estado():
             "en_curso": en_curso,
             "progreso_hechos": hechos,
             "progreso_total": fila["total_planeado"] if en_curso else None,
+            "tienda_actual": fila["tienda_actual"] if en_curso else None,
         }
 
     resultado = {

@@ -13,11 +13,61 @@
     }
   })();
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260728a">
+<link rel="stylesheet" href="css/styles.css?v=20260823c">
 <style>
   .compartidos-wrap { max-width: 900px; margin: 0 auto; padding: 0 0 60px; }
+  /* Vista "Lista + CV" (ver candidatos-vista en compartidos.js) -- imita la
+     vista combinada de InfoJobs: la lista de candidatos a la izquierda y la
+     ficha abierta fija a la derecha, para poder ir clicando uno tras otro
+     sin perder el sitio en la lista. .hero-banner/.reclu-candidatos-wrap/
+     #form-wrap/#compartidos-list son hijos directos de .compartidos-wrap
+     (ver el HTML más abajo), así que grid-template-areas los reordena sin
+     tener que mover nada en el DOM ni tocar el hueco de #form-wrap fuera de
+     reclu-candidatos-wrap (lo sigue usando quien solo tiene acceso a
+     Compartidos, ver el comentario junto a #form-wrap). Vacantes queda
+     dentro de la misma columna de lista en vez de tener su propia área --
+     es un compromiso a propósito para no reestructurar el HTML compartido. */
+  .compartidos-wrap.vista-combinada {
+    max-width: 1400px;
+    display: grid;
+    grid-template-columns: minmax(300px, 420px) 1fr;
+    grid-template-areas: "hero hero" "lista ficha" "compartidos compartidos";
+    column-gap: 24px;
+  }
+  .compartidos-wrap.vista-combinada > .hero-banner { grid-area: hero; }
+  .compartidos-wrap.vista-combinada > .reclu-candidatos-wrap { grid-area: lista; min-width: 0; }
+  .compartidos-wrap.vista-combinada > #form-wrap {
+    grid-area: ficha; min-width: 0;
+    position: sticky; top: 12px; align-self: start;
+    max-height: calc(100vh - 24px); overflow-y: auto;
+  }
+  .compartidos-wrap.vista-combinada > #compartidos-list { grid-area: compartidos; }
+  /* Quien no tiene el módulo completo (.reclu-candidatos-wrap se queda con
+     [hidden]) no tiene nada que ocupe el área "lista" -- para esa gente
+     #compartidos-list pasa a ocupar esa columna en vez de la fila entera de
+     abajo, así "Lista + CV" también les queda con la lista a la izquierda y
+     la ficha fija a la derecha (ver modo-restringido en loadCompartidos). */
+  .compartidos-wrap.vista-combinada.modo-restringido > #compartidos-list { grid-area: lista; }
+  /* Por debajo de este ancho, la columna "lista" (mínimo 300px) no deja
+     hueco real para la de "ficha" (1fr se queda en 0px) -- el panel de la
+     ficha quedaba invisible del todo en vez de solo apretado. En pantallas
+     estrechas, Lista + CV pasa a un grid de un solo carril con las mismas
+     áreas (hero/lista/ficha/compartidos) apiladas en vertical en vez de en
+     dos columnas -- las reglas grid-area de arriba siguen aplicando igual,
+     solo cambia dónde caen esas áreas. La ficha deja de ir fija al scroll,
+     que en una sola columna no aporta nada. */
+  @media (max-width: 800px) {
+    .compartidos-wrap.vista-combinada {
+      grid-template-columns: 1fr;
+      grid-template-areas: "hero" "lista" "ficha" "compartidos";
+    }
+    .compartidos-wrap.vista-combinada > #form-wrap {
+      position: static; max-height: none; overflow-y: visible;
+    }
+  }
   .reclu-seccion { font-size: 18px; margin: 26px 0 12px; }
   .reclu-seccion:first-child { margin-top: 6px; }
+  .compartidos-seleccion-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
   .tanda { border: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px; background: var(--surface-1); overflow: hidden; }
   .tanda-summary {
     list-style: none; cursor: pointer; padding: 14px 18px;
@@ -31,18 +81,7 @@
   .tanda-fecha { font-weight: 600; font-size: 14px; }
   .tanda-meta { color: var(--text-secondary); font-size: 12px; }
   .tanda-body { padding: 4px 18px 14px; }
-  .candidato-card { background: var(--surface-page); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 12px; }
-  .candidato-card:last-child { margin-bottom: 0; }
-  .candidato-card h3 { margin: 0 0 4px; font-size: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .candidato-meta { color: var(--text-secondary); font-size: 12px; margin-bottom: 12px; }
-  .candidato-datos { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 16px; font-size: 13px; }
-  .candidato-datos .campo-nombre { color: var(--text-muted); font-size: 11px; }
-  .candidato-acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-  .candidato-notas { margin-top: 10px; }
-  .candidato-notas textarea {
-    width: 100%; min-height: 44px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
-    background: var(--surface-1); color: var(--text-primary); font-size: 13px; font-family: inherit; box-sizing: border-box;
-  }
+  .btn-eliminar-grupo { display: block; margin: 0 0 10px; font-size: 12px; color: var(--status-critical); }
 
   .badge-estado { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
   .badge-pendiente { background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-secondary); }
@@ -84,6 +123,8 @@
   .modal-box h3 { margin: 0 0 14px; font-size: 16px; }
   .modal-box select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); margin-bottom: 14px; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .exportar-excel-columnas { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin-bottom: 14px; }
+  .exportar-excel-columnas label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 
   .reclu-candidatos-wrap { margin-bottom: 30px; }
   .candidatos-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
@@ -93,6 +134,12 @@
   }
   .candidatos-toolbar input { flex: 1; min-width: 160px; }
   .candidatos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .vacantes-compartidas-lista { margin-bottom: 10px; }
+  .vacante-compartida-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
+  .vacante-compartida-card h3 { margin: 0 0 4px; font-size: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .vacante-compartida-card .candidatos-grid { margin-top: 10px; margin-bottom: 0; }
+  .btn-exportar-excel-vacante-compartida { margin: 8px 0 0; }
+  .btn-quitar-gerente { background: none; border: none; color: var(--status-critical); cursor: pointer; padding: 0 2px; font-size: 12px; }
   .candidato-mini-card {
     background: var(--surface-page); border: 1px solid var(--border); border-radius: 12px; padding: 14px;
     cursor: pointer; transition: border-color 0.15s;
@@ -101,8 +148,29 @@
   .candidato-mini-card h4 { margin: 0 0 4px; font-size: 14px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .candidato-mini-card p { margin: 2px 0; font-size: 12px; color: var(--text-secondary); }
   .candidato-mini-card.seleccionada { border-color: var(--acento); box-shadow: 0 0 0 2px color-mix(in srgb, var(--acento) 20%, transparent); }
+  .candidato-mini-card.abierta { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 8%, var(--surface-page)); }
   .candidato-mini-card-fila { display: flex; gap: 10px; align-items: flex-start; }
   .candidato-mini-card-info { flex: 1; min-width: 0; }
+  /* Checkbox en su propia columna, más grande y separado del nombre -- para
+     no seleccionar la ficha sin querer al intentar abrirla (era un checkbox
+     pequeño pegado al texto, dentro del propio título). */
+  .candidato-mini-checkbox-col { display: flex; align-items: center; flex-shrink: 0; padding: 2px; }
+  .candidato-mini-checkbox { width: 20px; height: 20px; cursor: pointer; accent-color: var(--acento); }
+  /* Base de candidatos: lista en vez de cuadrícula -- una tarjeta ancha por
+     fila (mismo estilo de tarjeta de siempre) en vez de varias en columnas,
+     para leer de arriba a abajo en vez de saltar entre columnas. */
+  .candidatos-lista { display: flex; flex-direction: column; gap: 10px; }
+  .candidatos-lista .candidato-mini-card-fila { align-items: center; flex-wrap: wrap; }
+  .candidatos-paginacion {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--border);
+  }
+  .candidatos-paginacion select, .candidatos-paginacion input[type="number"] {
+    width: auto; padding: 5px 8px; font-size: 13px;
+  }
+  .candidatos-paginacion input[type="number"] { width: 64px; }
+  .candidatos-paginacion .staff-hint { margin: 0; }
+  .candidatos-paginacion-botones { display: flex; align-items: center; gap: 6px; margin-left: auto; }
   .candidato-mini-foto {
     width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
     background: var(--surface-1); border: 1px solid var(--border);
@@ -111,14 +179,82 @@
     display: flex; align-items: center; justify-content: center;
     font-size: 15px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;
   }
+  .candidato-mini-compartido { color: var(--status-good) !important; font-size: 11px !important; }
+  .aviso-datos-faltantes {
+    background: color-mix(in srgb, var(--status-critical) 12%, var(--surface-1));
+    border: 1px solid color-mix(in srgb, var(--status-critical) 40%, transparent);
+    border-radius: 8px; padding: 8px 12px; font-size: 13px; margin: 0 0 12px;
+  }
+  .respuestas-test-detalle { margin: 0 0 12px; }
+  .respuestas-test-detalle summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+  .respuestas-test-lista { margin-top: 8px; padding: 10px 12px; background: var(--surface-page); border-radius: 8px; max-height: 260px; overflow-y: auto; }
+  .respuestas-test-lista p { margin: 4px 0; font-size: 13px; }
+  .candidato-mini-test-estado { display: block; font-size: 11px; margin: 4px 0 0; }
+  .candidato-mini-test-estado.test-respondido { color: var(--status-good); }
+  .candidato-mini-test-estado.test-pendiente { color: var(--text-secondary); }
+  .candidato-mini-contacto-fila { margin-top: 6px; }
+  .candidato-mini-acciones { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .candidato-mini-contacto-select {
+    font-size: 11px; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-secondary);
+  }
   .candidato-foto-preview-wrap { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
   .candidato-foto-preview { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; border: 1px solid var(--border); }
   .candidato-whatsapp-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; cursor: default; }
   .candidato-whatsapp-row h4 { margin: 0; }
   .candidato-whatsapp-row p { margin: 2px 0 0; }
 
-  .candidato-form { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
-  .candidato-form h3 { margin-top: 0; }
+  /* Selector de vista (Lista/Lista+CV/Tarjetas) como grupo de iconos dividido,
+     estilo InfoJobs -- antes era un <select> con texto, ahora un único
+     contenedor partido en celdas iguales por una línea fina. */
+  .vista-toggle {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    background: var(--surface-page);
+  }
+  .vista-toggle-btn {
+    border: none; background: transparent; color: var(--text-secondary);
+    font-size: 15px; padding: 7px 12px; cursor: pointer; line-height: 1;
+  }
+  .vista-toggle-btn:not(:last-child) { border-right: 1px solid var(--border); }
+  .vista-toggle-btn:hover { background: color-mix(in srgb, var(--acento) 8%, transparent); }
+  .vista-toggle-btn.activo { background: var(--acento); color: #fff; }
+
+  .candidato-form { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; position: relative; }
+  .candidato-form h3 { margin-top: 0; padding-right: 30px; }
+  .btn-cerrar-ficha-x {
+    position: absolute; top: 14px; right: 14px; width: 28px; height: 28px;
+    border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary);
+    border-radius: 50%; font-size: 15px; line-height: 1; cursor: pointer; display: flex;
+    align-items: center; justify-content: center; padding: 0;
+  }
+  .btn-cerrar-ficha-x:hover { border-color: var(--acento); color: var(--text-primary); }
+  /* En vista Lista, la ficha se inserta justo debajo de la tarjeta clicada
+     (ver renderCandidatosGrid en compartidos.js) en vez de quedarse fija al
+     final de la página -- este margen la separa un poco de la fila de
+     encima para que no se pegue a la tarjeta. */
+  .candidatos-lista #form-wrap:not(:empty) { margin-top: -2px; }
+  /* En vista Tarjetas la ficha se inserta igual que en Lista (ver
+     reposicionarFormWrapSiCorresponde en compartidos.js) -- pero el grid de
+     tarjetas reparte sus columnas en celdas de ~260px, así que sin esto la
+     ficha quedaría aplastada en una sola columna en vez de ocupar toda la
+     fila. */
+  .candidatos-grid:not(.candidatos-lista) > #form-wrap { grid-column: 1 / -1; }
+  /* Agrupa CV/foto/compartido/aviso/resultado/respuestas del test con
+     separación uniforme -- sin esto, cada pieza traía su propio margen (o
+     ninguno) y se veían amontonadas sin distinguirse unas de otras. */
+  .ficha-cabecera { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-bottom: 16px; }
+  .ficha-cabecera:empty { display: none; margin-bottom: 0; }
+  .ficha-cabecera > * { margin: 0 !important; }
+  /* El bloque de resultado/respuestas del test solo aparece si el candidato
+     ya respondió -- sin este hueco reservado, la ficha cambiaba de alto
+     según cada candidato (más corta si no había respondido). El alto
+     reservado es el de un candidato con AMBAS líneas (resultado del test +
+     "Respuestas del test" colapsado) medido en el navegador -- así el hueco
+     vacío de quien no respondió queda del mismo tamaño que el de quien sí,
+     en vez de solo un poco más alto que cero. */
+  .ficha-resultado-test-slot { min-height: 148px; }
+  .ficha-cabecera > .aviso-datos-faltantes,
+  .ficha-cabecera > .respuestas-test-detalle { align-self: stretch; }
   .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 14px; margin-bottom: 12px; }
   .form-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
   .form-field input, .form-field select, .form-field textarea {
@@ -127,20 +263,71 @@
   }
   .form-field-full { grid-column: 1 / -1; }
   .form-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  /* Acciones de la ficha de vacante: etiquetas cortas + sin salto de línea
+     para que Guardar/Mensaje/Fusionar/Archivar/Eliminar/Cancelar quepan
+     todas juntas en una sola fila (con scroll horizontal como último
+     recurso si la pantalla es muy estrecha). */
+  .form-actions-compacta { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+  .form-actions-compacta .btn { white-space: nowrap; flex-shrink: 0; }
   .subir-cv-row { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
   .extraccion-aviso { font-size: 12px; padding: 8px 10px; border-radius: 8px; margin-bottom: 12px; }
   .extraccion-aviso.local { background: color-mix(in srgb, var(--status-warning) 18%, transparent); color: #9a6b00; }
-  .extraccion-aviso.gemini { background: color-mix(in srgb, var(--status-good) 14%, transparent); color: var(--status-good); }
   .extra-editor { display: flex; flex-direction: column; gap: 6px; }
   .extra-editor-row { display: flex; gap: 6px; }
   .extra-editor-row input { flex: 1; }
+  .extra-editor-row-largo { align-items: flex-start; }
+  .extra-editor-row-largo textarea { flex: 1; font-family: inherit; font-size: 13px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); }
+  .extra-editor-row-largo .extra-key { flex: 0 0 140px; }
+  .btn-mini {
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+    border-radius: 6px; padding: 3px 7px; font-size: 12px; cursor: pointer; white-space: nowrap;
+  }
+  .btn-mini:hover { border-color: var(--acento); }
+  /* Entradas de Formación/Experiencia -- estilo InfoJobs: una tarjeta por
+     estudio/puesto con sus propios campos, en vez de un único bloque de
+     texto libre (ver historialEditorHTML en compartidos.js). */
+  .historial-entry-row {
+    display: flex; gap: 8px; align-items: flex-start;
+    background: var(--surface-page); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px; margin-bottom: 8px;
+  }
+  .historial-entry-grid {
+    flex: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 6px;
+  }
+  .historial-entry-grid .form-field-full { grid-column: 1 / -1; }
+  .historial-duracion { align-self: center; font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+  /* Secciones desplegables de la ficha (Formación/Experiencia/Otros datos) --
+     mismo estilo que las tandas de Compartidos, para que no se vea toda la
+     información de golpe nada más abrir la ficha. */
+  .ficha-desplegable { border: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px; background: var(--surface-1); overflow: hidden; }
+  .ficha-desplegable summary {
+    list-style: none; cursor: pointer; padding: 12px 16px; font-weight: 600; font-size: 14px;
+    user-select: none; color: var(--text-primary);
+  }
+  .ficha-desplegable summary::-webkit-details-marker { display: none; }
+  .ficha-desplegable summary::before { content: "▸"; color: var(--text-secondary); margin-right: 6px; display: inline-block; transition: transform 0.15s; }
+  .ficha-desplegable[open] summary::before { transform: rotate(90deg); }
+  .ficha-desplegable summary:hover { background: var(--surface-page); }
+  .ficha-desplegable > div, .ficha-desplegable .form-field-full { padding: 0 16px 12px; margin-bottom: 0 !important; }
   .archivos-lista { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px; }
   .archivos-lista a { font-size: 13px; }
   .archivo-item-fila { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .lote-lista { list-style: none; padding: 0; margin: 10px 0; max-height: 260px; overflow-y: auto; font-size: 13px; }
-  .lote-lista li { padding: 4px 0; }
+  .lote-lista li { padding: 4px 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
   .lote-lista .lote-ok { color: var(--status-good); }
   .lote-lista .lote-sin-match { color: var(--text-muted); }
+  .lote-ok-label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .lote-ok-label input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--acento); cursor: pointer; }
+  .lote-ok-n { color: var(--text-muted); font-size: 12px; }
+  .lote-ya-listo {
+    font-size: 11px; font-weight: 600; color: var(--status-good);
+    background: color-mix(in srgb, var(--status-good) 16%, transparent);
+    border-radius: 999px; padding: 1px 8px;
+  }
+  .lote-paginas { margin-left: 8px; font-size: 12px; color: var(--text-secondary); }
+  .lote-paginas input { padding: 2px 4px; border-radius: 5px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); }
+  .lote-saltar-fila { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
+  .lote-saltar-fila input[type="number"] { padding: 3px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); width: 52px; }
 
   .badge-vacante-estado { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
   .badge-abierta { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
@@ -191,6 +378,7 @@
 
     <div class="reclu-candidatos-wrap" id="reclu-candidatos-wrap" hidden>
       <div id="campana-whatsapp-wrap"></div>
+      <div id="campana-email-wrap"></div>
 
       <h2 class="reclu-seccion">Vacantes</h2>
       <p class="staff-hint">Agrupa candidatos bajo una solicitud de reclutamiento concreta (puesto + centro) para hacer seguimiento de cuánto lleva abierta.</p>
@@ -201,6 +389,9 @@
           <option value="cubierta">Cubiertas</option>
           <option value="cancelada">Canceladas</option>
         </select>
+        <label class="staff-hint" style="display:flex; align-items:center; gap:6px;">
+          <input type="checkbox" id="vacantes-ver-archivadas"> Ver archivadas
+        </label>
         <button id="btn-nueva-vacante" class="btn btn-primary" type="button">＋ Nueva vacante</button>
       </div>
       <div id="vacantes-grid" class="candidatos-grid"></div>
@@ -214,11 +405,29 @@
           <option value="">Todos los candidatos</option>
           <option value="sin_vacante">Sin vacante asignada</option>
         </select>
-        <button id="btn-modo-seleccion" class="btn btn-ghost" type="button">☑ Selección múltiple</button>
+        <select id="candidatos-filtro-apto" title="Filtrar por resultado del test">
+          <option value="">Todos</option>
+          <option value="apto">Solo aptos</option>
+          <option value="no_apto">Solo no aptos</option>
+          <option value="sin_test">Sin responder test</option>
+        </select>
+        <select id="candidatos-orden" title="Ordenar por">
+          <option value="">Más recientes</option>
+          <option value="nombre_asc">Nombre (A-Z)</option>
+          <option value="nombre_desc">Nombre (Z-A)</option>
+        </select>
+        <div class="vista-toggle" role="group" aria-label="Cómo ver la lista">
+          <button type="button" class="vista-toggle-btn" data-vista="lista" title="Lista">📃</button>
+          <button type="button" class="vista-toggle-btn" data-vista="combinada" title="Lista + CV">📃➕</button>
+          <button type="button" class="vista-toggle-btn" data-vista="tarjetas" title="Tarjetas">🗂️</button>
+        </div>
         <button id="btn-revincular-tests" class="btn btn-ghost" type="button" title="Busca de nuevo entre las respuestas de test ya enviadas por si alguna coincide con un candidato que no tenía enlace">🔗 Buscar tests ya respondidos</button>
         <button id="btn-adjuntar-lote" class="btn btn-ghost" type="button" title="Para un PDF con varios CVs juntos que ya usaste para crear estas fichas -- adjunta el PDF a cada ficha existente por nombre, sin duplicar a nadie">🗂️ Adjuntar PDF a fichas existentes</button>
+        <button id="btn-reextraer-todos" class="btn btn-ghost" type="button" title="Vuelve a leer el CV ya guardado de los candidatos que coinciden con el filtro actual (búsqueda, vacante, estado...), sin tener que volver a subir nada ni entrar ficha a ficha">🔁 Reextraer CV filtrados</button>
+        <button id="btn-recordatorio-pendientes" class="btn btn-ghost" type="button" title="Abre la campaña de WhatsApp ya rellena solo con quienes tienen un test pendiente de responder">🔔 Recordatorio a pendientes</button>
         <button id="btn-nuevo-candidato" class="btn btn-primary" type="button">＋ Nuevo candidato</button>
       </div>
+      <p id="candidatos-contador-filtro" class="staff-hint"></p>
       <div id="adjuntar-lote-wrap"></div>
       <div id="candidatos-seleccion-bar" class="candidatos-seleccion-bar" hidden>
         <span id="candidatos-seleccion-contador" class="staff-hint"></span>
@@ -232,12 +441,22 @@
           <option value="descartado">Descartado</option>
         </select>
         <button id="btn-compartir-seleccionados" class="btn btn-ghost" type="button">Compartir con...</button>
+        <button id="btn-asignar-vacante-seleccionados" class="btn btn-ghost" type="button">Asignar a solicitud...</button>
+        <button id="btn-exportar-excel-seleccionados" class="btn btn-ghost" type="button">📊 Exportar a Excel...</button>
+        <button id="btn-descargar-pdfs-seleccionados" class="btn btn-ghost" type="button">📥 Descargar PDFs...</button>
         <button id="btn-whatsapp-seleccionados" class="btn btn-ghost btn-whatsapp" type="button" hidden></button>
         <button id="btn-mailto-seleccionados" class="btn btn-ghost btn-mailto" type="button" hidden></button>
       </div>
-      <div id="candidatos-grid" class="candidatos-grid"></div>
-      <div id="form-wrap"></div>
+      <div id="candidatos-grid" class="candidatos-grid candidatos-lista"></div>
+      <div id="candidatos-paginacion" class="candidatos-paginacion"></div>
     </div>
+
+    <!-- Fuera de reclu-candidatos-wrap a propósito: quien no tiene el
+         módulo completo (un gerente al que solo se le compartió una
+         vacante o unos candidatos) también necesita poder abrir la ficha
+         completa desde "Compartidos", y ese wrap permanece oculto para
+         ellos. -->
+    <div id="form-wrap"></div>
 
     <div id="compartidos-list"></div>
   </div>
@@ -254,9 +473,69 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="asignar-vacante-modal">
+  <div class="modal-box">
+    <h3>Asignar a solicitud...</h3>
+    <select id="asignar-vacante-select"></select>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="btn-asignar-vacante-cancelar">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btn-asignar-vacante-confirmar">Asignar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="exportar-excel-modal">
+  <div class="modal-box">
+    <h3>Exportar a Excel</h3>
+    <p class="staff-hint" style="margin-top:-6px;">Elige qué datos incluir de los candidatos seleccionados.</p>
+    <div id="exportar-excel-columnas" class="exportar-excel-columnas"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="btn-exportar-excel-cancelar">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btn-exportar-excel-confirmar">Descargar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="cambiar-destinatario-modal">
+  <div class="modal-box">
+    <h3>Cambiar destinatario...</h3>
+    <p class="staff-hint" style="margin-top:-6px;">Se moverán los candidatos seleccionados a la persona que elijas aquí, todos agrupados en una sola tanda (aunque vinieran de tandas o destinatarios distintos).</p>
+    <select id="cambiar-destinatario-select"></select>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="btn-cambiar-destinatario-cancelar">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btn-cambiar-destinatario-confirmar">Cambiar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="fusionar-vacante-modal">
+  <div class="modal-box">
+    <h3>Fusionar con otra solicitud...</h3>
+    <select id="fusionar-vacante-select"></select>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="btn-fusionar-vacante-cancelar">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btn-fusionar-vacante-confirmar">Fusionar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="compartir-vacante-modal">
+  <div class="modal-box">
+    <h3>Añadir responsable de la solicitud...</h3>
+    <select id="compartir-vacante-select"></select>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="btn-compartir-vacante-cancelar">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btn-compartir-vacante-confirmar">Añadir</button>
+    </div>
+  </div>
+</div>
+
 <script src="js/theme.js?v=20260724a"></script>
-<script src="js/auth-common.js?v=20260724a"></script>
-<script src="js/topbar-menu.js?v=20260727a"></script>
-<script src="js/compartidos.js?v=20260728d"></script>
+<script src="js/dialogs.js?v=20260818a"></script>
+<script src="js/icons.js?v=20260824a"></script>
+<script src="js/auth-common.js?v=20260824a"></script>
+<script src="js/topbar-menu.js?v=20260821a"></script>
+<script src="js/common.js?v=20260823a"></script>
+<script src="js/compartidos.js?v=20260825e"></script>
 </body>
 </html>

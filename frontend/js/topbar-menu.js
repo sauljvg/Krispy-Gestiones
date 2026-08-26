@@ -26,23 +26,17 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
-// Notificación de "hay respuestas nuevas de Test" junto al menú hamburguesa
-// — solo para quien tiene el módulo Test, así que se comprueba el usuario
-// aquí en vez de depender de que cada página avise (topbar-menu.js se carga
-// en todas por igual). Si falla el fetch (sin acceso, 401, etc.) no se
-// muestra nada; no es un error visible para el usuario.
+// Una sola campanita para las dos fuentes de notificaciones -- antes cada
+// una tenía su propio icono junto al menú hamburguesa (respuestas nuevas de
+// Test por un lado, avisos puntuales de trabajos en segundo plano como el
+// relleno de CVs por otro), lo que dejaba dos campanas casi idénticas una
+// al lado de la otra. Se combinan en un único botón/panel: el contador
+// suma los dos totales, y el panel desplegable muestra ambas secciones
+// (solo la(s) que tengan algo). Si ninguna de las dos fuentes tiene nada
+// que mostrar (o fallan los fetch, p.ej. sin acceso), no se crea nada.
 document.addEventListener("DOMContentLoaded", async () => {
   const wrap = document.querySelector(".hamburger-wrap");
   if (!wrap) return;
-  let data;
-  try {
-    const res = await fetch(`${window.location.origin}/api/encuestas/notificaciones`);
-    if (!res.ok) return;
-    data = await res.json();
-  } catch {
-    return;
-  }
-  if (!data || data.total === 0) return;
 
   const escapeHTML = (str) => {
     const div = document.createElement("div");
@@ -50,31 +44,79 @@ document.addEventListener("DOMContentLoaded", async () => {
     return div.innerHTML;
   };
 
+  const formatFecha = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso.replace(" ", "T") + "Z");
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  };
+
+  async function fetchJSON(url) {
+    try {
+      const res = await fetch(`${window.location.origin}${url}`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  const [datosTests, datosAvisos] = await Promise.all([
+    fetchJSON("/api/encuestas/notificaciones"),
+    fetchJSON("/api/notificaciones"),
+  ]);
+
+  const tests = (datosTests && datosTests.tests) || [];
+  const avisos = (datosAvisos && datosAvisos.notificaciones) || [];
+  const total = (datosTests?.total || 0) + (datosAvisos?.total || 0);
+  if (tests.length === 0 && avisos.length === 0) return;
+
+  const seccionTests = tests.length
+    ? `<p class="notif-tests-titulo">Respuestas nuevas</p>
+       <ul class="notif-tests-lista">
+         ${tests
+           .map((t) => `<li><a href="/tests.html">${escapeHTML(t.titulo)}<span class="notif-tests-n">${t.nuevas}</span></a></li>`)
+           .join("")}
+       </ul>`
+    : "";
+  const seccionAvisos = avisos.length
+    ? `<p class="notif-tests-titulo">Avisos</p>
+       <ul class="notif-tests-lista">
+         ${avisos
+           .map(
+             (n) => `<li><a href="${escapeHTML(n.url || "#")}" class="notif-aviso-item ${n.vista_en ? "" : "notif-aviso-no-vista"}">
+               <span>${escapeHTML(n.mensaje)}</span><span class="notif-aviso-fecha">${formatFecha(n.creada_en)}</span>
+             </a></li>`
+           )
+           .join("")}
+       </ul>`
+    : "";
+
   const badgeWrap = document.createElement("div");
   badgeWrap.className = "notif-badge-wrap";
   badgeWrap.innerHTML = `
-    <button type="button" id="btn-notif-tests" class="btn btn-ghost notif-badge-btn" aria-label="Respuestas nuevas de Test" aria-haspopup="true" aria-expanded="false">
-      🔔<span class="notif-badge-count">${data.total}</span>
+    <button type="button" id="btn-notif" class="btn btn-ghost notif-badge-btn" aria-label="Notificaciones" aria-haspopup="true" aria-expanded="false">
+      🔔${total > 0 ? `<span class="notif-badge-count">${total}</span>` : ""}
     </button>
-    <div id="notif-tests-panel" class="notif-tests-panel" hidden>
-      <p class="notif-tests-titulo">Respuestas nuevas</p>
-      <ul class="notif-tests-lista">
-        ${data.tests
-          .map((t) => `<li><a href="/tests.html">${escapeHTML(t.titulo)}<span class="notif-tests-n">${t.nuevas}</span></a></li>`)
-          .join("")}
-      </ul>
+    <div id="notif-panel" class="notif-tests-panel" hidden>
+      ${seccionTests}
+      ${seccionAvisos}
     </div>`;
   wrap.parentElement.insertBefore(badgeWrap, wrap);
 
-  const notifBtn = badgeWrap.querySelector("#btn-notif-tests");
-  const notifPanel = badgeWrap.querySelector("#notif-tests-panel");
+  const notifBtn = badgeWrap.querySelector("#btn-notif");
+  const notifPanel = badgeWrap.querySelector("#notif-panel");
   notifBtn.addEventListener("click", async (e) => {
     e.stopPropagation();
     notifPanel.hidden = !notifPanel.hidden;
     notifBtn.setAttribute("aria-expanded", String(!notifPanel.hidden));
     if (!notifPanel.hidden) {
       notifBtn.querySelector(".notif-badge-count")?.remove();
-      await fetch(`${window.location.origin}/api/encuestas/notificaciones/marcar-vistas`, { method: "POST" });
+      notifPanel.querySelectorAll(".notif-aviso-no-vista").forEach((a) => a.classList.remove("notif-aviso-no-vista"));
+      await Promise.all([
+        fetch(`${window.location.origin}/api/encuestas/notificaciones/marcar-vistas`, { method: "POST" }),
+        fetch(`${window.location.origin}/api/notificaciones/marcar-vistas`, { method: "POST" }),
+      ]);
     }
   });
   notifPanel.addEventListener("click", (e) => e.stopPropagation());
@@ -84,6 +126,88 @@ document.addEventListener("DOMContentLoaded", async () => {
       notifBtn.setAttribute("aria-expanded", "false");
     }
   });
+});
+
+// Indicador de "trabajos de IA en curso" -- relleno de CVs en segundo plano
+// (ver _progreso_lotes / /candidatos/lotes-en-progreso en
+// reclutamiento_routes.py). Mismo patrón visual que las campanitas de
+// arriba (icono + globo de conteo + panel desplegable) en vez de una barra
+// a todo lo ancho, para que quede junto al resto de iconos del topbar. Se
+// crea siempre (oculto si no hay nada activo) porque un lote puede empezar
+// mientras el usuario ya está mirando esta pantalla.
+document.addEventListener("DOMContentLoaded", async () => {
+  // Solo tiene sentido en Reclutamiento -- en el resto de páginas no hay
+  // nada que esté rellenando con IA en segundo plano.
+  if (!window.location.pathname.endsWith("compartidos.html")) return;
+
+  const wrap = document.querySelector(".hamburger-wrap");
+  if (!wrap) return;
+
+  const escapeHTML = (str) => {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  };
+
+  const formatEta = (segundos) => {
+    if (!segundos) return "";
+    if (segundos < 60) return ` · ${segundos} s`;
+    return ` · ~${Math.round(segundos / 60)} min`;
+  };
+
+  const badgeWrap = document.createElement("div");
+  badgeWrap.className = "notif-badge-wrap";
+  badgeWrap.hidden = true;
+  badgeWrap.innerHTML = `
+    <button type="button" id="btn-lotes-progreso" class="btn btn-ghost notif-badge-btn" aria-label="Relleno de CVs con IA en curso" aria-haspopup="true" aria-expanded="false">
+      🤖<span class="notif-badge-count"></span>
+    </button>
+    <div id="lotes-progreso-panel" class="notif-tests-panel" hidden>
+      <p class="notif-tests-titulo">Relleno de CVs con IA en curso</p>
+      <ul id="lotes-progreso-lista" class="notif-tests-lista"></ul>
+    </div>`;
+  wrap.parentElement.insertBefore(badgeWrap, wrap);
+
+  const btn = badgeWrap.querySelector("#btn-lotes-progreso");
+  const panel = badgeWrap.querySelector("#lotes-progreso-panel");
+  const lista = badgeWrap.querySelector("#lotes-progreso-lista");
+  const contador = badgeWrap.querySelector(".notif-badge-count");
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    panel.hidden = !panel.hidden;
+    btn.setAttribute("aria-expanded", String(!panel.hidden));
+  });
+  panel.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", () => {
+    if (!panel.hidden) {
+      panel.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  async function actualizar() {
+    let lotes;
+    try {
+      const res = await fetch(`${window.location.origin}/api/reclutamiento/candidatos/lotes-en-progreso`);
+      if (!res.ok) return;
+      lotes = await res.json();
+    } catch {
+      return;
+    }
+    if (!lotes || lotes.length === 0) {
+      badgeWrap.hidden = true;
+      return;
+    }
+    badgeWrap.hidden = false;
+    contador.textContent = String(lotes.length);
+    lista.innerHTML = lotes
+      .map((l) => `<li>🤖 ${escapeHTML(l.titulo)}: ${l.procesados}/${l.total}${formatEta(l.eta_segundos)}</li>`)
+      .join("");
+  }
+
+  await actualizar();
+  setInterval(actualizar, 8000);
 });
 
 // Indicador de "quién está en línea ahora mismo" — solo se activa para el
@@ -274,8 +398,8 @@ document.addEventListener("DOMContentLoaded", () => {
   panel.querySelector(".david-cerrar").addEventListener("click", () => {
     panel.hidden = true;
   });
-  panel.querySelector(".david-vaciar").addEventListener("click", () => {
-    if (!confirm("¿Vaciar toda la conversación con David?")) return;
+  panel.querySelector(".david-vaciar").addEventListener("click", async () => {
+    if (!(await pedirConfirmacion("¿Vaciar toda la conversación con David?"))) return;
     historial = [];
     sessionStorage.removeItem(STORAGE_KEY);
     reconstruirMensajes();

@@ -12,6 +12,7 @@ class SalidaIn(BaseModel):
     centro: str
     nombre: str
     fecha_baja: str
+    motivo: str
     email: str | None = None
 
 
@@ -22,6 +23,10 @@ class MatchIn(BaseModel):
 
 class SalidaEmailIn(BaseModel):
     email: str
+
+
+class SalidaMotivoIn(BaseModel):
+    motivo: str
 
 
 class MotivoIn(BaseModel):
@@ -103,10 +108,12 @@ def evolucion_route(oleada_id: int, centro: str | None = None, _user: dict = Dep
 
 @router.post("/{oleada_id}/salidas")
 def crear_salida_route(oleada_id: int, body: SalidaIn, _user: dict = Depends(require_entrevistas_oleada)):
-    if not body.centro.strip() or not body.nombre.strip() or not body.fecha_baja.strip():
-        raise HTTPException(status_code=400, detail="Centro, nombre y fecha de baja son obligatorios")
+    if not body.centro.strip() or not body.nombre.strip() or not body.fecha_baja.strip() or not body.motivo.strip():
+        raise HTTPException(status_code=400, detail="Centro, nombre, fecha de baja y motivo son obligatorios")
     try:
-        entrevistas_module.add_salida(oleada_id, body.centro.strip(), body.nombre.strip(), body.fecha_baja.strip(), body.email)
+        entrevistas_module.add_salida(
+            oleada_id, body.centro.strip(), body.nombre.strip(), body.fecha_baja.strip(), body.motivo.strip(), body.email
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True}
@@ -122,6 +129,15 @@ def borrar_salida_route(oleada_id: int, salida_id: int, _user: dict = Depends(re
 def actualizar_salida_email_route(oleada_id: int, salida_id: int, body: SalidaEmailIn, _user: dict = Depends(require_entrevistas_oleada)):
     try:
         entrevistas_module.update_salida_email(salida_id, body.email)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
+@router.patch("/{oleada_id}/salidas/{salida_id}/motivo")
+def actualizar_salida_motivo_route(oleada_id: int, salida_id: int, body: SalidaMotivoIn, _user: dict = Depends(require_entrevistas_oleada)):
+    try:
+        entrevistas_module.update_salida_motivo(salida_id, body.motivo)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True}

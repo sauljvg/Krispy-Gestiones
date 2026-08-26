@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 import auth as auth_module
 import clima as clima_module
+import evaluaciones360 as eval360_module
 import informes as informes_module
 from db import get_connection
 
@@ -167,21 +168,33 @@ def list_modulos(_admin: dict = Depends(require_admin)):
     return [{"value": k, "label": v} for k, v in auth_module.MODULOS.items()]
 
 
+MODULOS_360 = {"evaluaciones360", "saona_evaluaciones360"}
+
+
 @router.get("/users")
 def list_users(_admin: dict = Depends(require_admin)):
+    """Ajustes -> Usuarios es la lista de quienes usan el portal en general.
+    Las cuentas creadas desde Evaluaciones 360 exclusivamente para responder
+    ahí (rol colaborador, único módulo evaluaciones360/saona_evaluaciones360)
+    se gestionan desde la pestaña Accesos de 360 y no aparecen aquí -- si a
+    esa cuenta se le da algún otro módulo, deja de ser "exclusiva" y pasa a
+    verse también en Ajustes."""
     conn = get_connection()
     rows = conn.execute("SELECT id, username, pin, nombre, rol, creado FROM usuarios ORDER BY id").fetchall()
     conn.close()
-    return [
-        {
+    resultado = []
+    for r in rows:
+        modulos = list(auth_module.MODULOS) if r["rol"] == "admin" else auth_module.get_modulos_permitidos(r["id"])
+        if r["rol"] != "admin" and modulos and set(modulos) <= MODULOS_360:
+            continue
+        resultado.append({
             **dict(r),
             "tiendas": auth_module.get_tiendas_permitidas(r["id"]),
-            "modulos": list(auth_module.MODULOS) if r["rol"] == "admin" else auth_module.get_modulos_permitidos(r["id"]),
+            "modulos": modulos,
             "tipos_informes": informes_module.get_tipos_permitidos(r["id"]),
             "clima_centros": clima_module.get_centros_permitidos(r["id"]),
-        }
-        for r in rows
-    ]
+        })
+    return resultado
 
 
 @router.post("/users")
@@ -302,8 +315,33 @@ def reset_pin_route(user_id: int, _admin: dict = Depends(require_admin)):
 def delete_user_route(user_id: int, admin: dict = Depends(require_admin)):
     if user_id == admin["id"]:
         raise HTTPException(status_code=400, detail="No puedes borrar tu propio usuario")
+    auth_module.eliminar_usuario(user_id)
+    # Espejo con Evaluaciones 360: si esta cuenta tenía una persona vinculada
+    # en el organigrama, se desactiva y se desvincula (no se borra la
+    # persona de verdad, arrastraría respuestas de evaluaciones ya hechas).
+    eval360_module.desvincular_personas_de_usuario(user_id)
+    return {"ok": True}
+
+
+class UpdateUserBody(BaseModel):
+    nombre: str | None = None
+    username: str | None = None
+
+
+@router.patch("/users/{user_id}")
+def update_user_route(user_id: int, body: UpdateUserBody, _admin: dict = Depends(require_admin)):
     conn = get_connection()
-    conn.execute("DELETE FROM usuarios WHERE id = ?", (user_id,))
-    conn.commit()
+    row = conn.execute("SELECT id FROM usuarios WHERE id = ?", (user_id,)).fetchone()
     conn.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    nombre = body.nombre.strip() if body.nombre else None
+    username = body.username.strip() if body.username else None
+    error = auth_module.actualizar_usuario(user_id, nombre=nombre, username=username)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    # Espejo con Evaluaciones 360: si renombran a alguien desde Ajustes, se
+    # refleja en su(s) persona(s) espejo del organigrama.
+    if nombre:
+        eval360_module.sincronizar_nombre_a_personas(user_id, nombre)
     return {"ok": True}
