@@ -95,10 +95,13 @@ async def obtener_limites(tienda: str, agregador: str) -> list[dict]:
             return await resp.json()
 
 
-async def eliminar_direccion(direccion_id: int):
+async def eliminar_direccion(direccion_id: int, agregador: str | None = None):
+    """Sin `agregador`, desactiva el punto globalmente (los tres agregadores). Con
+    `agregador`, solo para ese agregador -- ver chequear_tienda."""
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direccion/{direccion_id}"
+    params = {"agregador": agregador} if agregador else {}
     async with aiohttp.ClientSession() as session:
-        async with session.delete(url, headers=_headers(), timeout=15) as resp:
+        async with session.delete(url, params=params, headers=_headers(), timeout=15) as resp:
             resp.raise_for_status()
 
 
@@ -246,6 +249,19 @@ async def limpiar_direcciones_sin_numero(aplicar: bool = False) -> dict:
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direcciones/limpiar-sin-numero"
     async with aiohttp.ClientSession() as session:
         async with session.post(url, params={"aplicar": str(aplicar).lower()}, headers=_headers(), timeout=120) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+
+async def adelgazar_direcciones(agregador: str, aplicar: bool = False, umbral_m: float = 500) -> dict:
+    """Entre puntos cercanos (<umbral_m) con el mismo estado confirmado para
+    `agregador`, deja uno solo (desactivado SOLO para ese agregador, no
+    globalmente) -- ver backend/agregadores.py::adelgazar_por_estado.
+    aplicar=False solo devuelve el plan, no escribe nada."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direcciones/adelgazar"
+    params = {"agregador": agregador, "aplicar": str(aplicar).lower(), "umbral_m": umbral_m}
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, params=params, headers=_headers(), timeout=120) as resp:
             resp.raise_for_status()
             return await resp.json()
 

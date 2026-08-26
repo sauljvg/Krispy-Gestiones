@@ -517,6 +517,18 @@ def limpiar_direcciones_sin_numero_route(aplicar: bool = False):
     return agregadores_module.direcciones_sin_numero(aplicar=aplicar)
 
 
+@router.post("/admin/direcciones/adelgazar", dependencies=[Depends(require_api_key)])
+def adelgazar_direcciones_route(agregador: str, aplicar: bool = False, umbral_m: float = 500):
+    """Entre puntos cercanos (<umbral_m) con el MISMO estado confirmado
+    (disponible/no_disponible) para `agregador`, deja uno solo -- desactiva el resto
+    SOLO para este agregador (no globalmente: el estado puede diferir entre
+    agregadores en el mismo punto). Si un cluster tiene estados distintos no se toca
+    nada (es una frontera real de cobertura). aplicar=false (por defecto) solo
+    devuelve el plan -- pensado para reducir el volumen de una futura "vuelta
+    completa" que re-verifique todo periódicamente."""
+    return agregadores_module.adelgazar_por_estado(agregador, umbral_km=umbral_m / 1000, aplicar=aplicar)
+
+
 class LimiteIn(BaseModel):
     tienda: str
     agregador: str
@@ -696,11 +708,17 @@ def admin_desactivar_busqueda_limite_route(tienda: str | None = None):
 
 
 @router.delete("/admin/direccion/{direccion_id}", dependencies=[Depends(require_api_key)])
-def admin_eliminar_direccion_route(direccion_id: int):
+def admin_eliminar_direccion_route(direccion_id: int, agregador: str | None = None):
     """Igual que eliminar_direccion_route pero con API key -- para que el
     script de búsqueda de límite pueda dar de baja los puntos del anillo de
-    1km (ya sabemos que ahí siempre hay cobertura, no aportan nada)."""
-    if not agregadores_module.eliminar_direccion(direccion_id):
+    1km (ya sabemos que ahí siempre hay cobertura, no aportan nada).
+
+    `agregador`, si se pasa, desactiva el punto SOLO para ese agregador (ver
+    main.py::chequear_tienda -- cuando se reutiliza un chequeo cercano en vez de
+    scrapear, este punto pasa a considerarse el mismo sitio que el reutilizado
+    para ESE agregador; sin `agregador` desactiva el punto globalmente, para los
+    tres)."""
+    if not agregadores_module.eliminar_direccion(direccion_id, agregador):
         raise HTTPException(status_code=404, detail="Dirección no encontrada")
     return {"ok": True}
 

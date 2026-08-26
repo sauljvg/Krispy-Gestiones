@@ -661,6 +661,97 @@ def deduplicar_direcciones(umbral_km: float = UMBRAL_DUPLICADO_KM, aplicar: bool
     }
 
 
+def adelgazar_por_estado(agregador: str, umbral_km: float = 0.5, aplicar: bool = False) -> dict:
+    """Reduce el volumen de una futura "vuelta completa" (re-verificar TODO
+    periódicamente, no solo lo que falta -- ver ESTADO_PROYECTO.md 26/08): entre
+    puntos cercanos (<umbral_km) que ya tienen el MISMO estado confirmado
+    (disponible/no_disponible) para ESTE agregador, se queda uno solo -- el resto se
+    desactiva, pero SOLO para este agregador (agregadores_direcciones_estado), no
+    globalmente, porque el estado puede diferir entre agregadores en el mismo punto.
+
+    Si un cluster tiene estados DISTINTOS (algún disponible junto a algún no
+    disponible) no se toca NADA de ese cluster -- es una frontera real de cobertura
+    (justo lo que el usuario quiere poder ver: "en qué zonas nos apagan la zona de
+    entrega"), no ruido a limpiar.
+
+    Solo considera puntos con un chequeo real (sin error) ya hecho -- los "sin
+    datos" no tienen estado que comparar, se dejan intactos para su propio flujo
+    normal. aplicar=False (por defecto) no escribe nada, solo el plan."""
+    conn = get_connection()
+    try:
+        inactivos_previos = {
+            row["direccion_id"]
+            for row in conn.execute(
+                "SELECT direccion_id FROM agregadores_direcciones_estado WHERE agregador=? AND activo=0",
+                (agregador,),
+            ).fetchall()
+        }
+        puntos = [
+            dict(fila)
+            for fila in conn.execute("SELECT * FROM agregadores_direcciones WHERE activo=1").fetchall()
+            if fila["id"] not in inactivos_previos
+        ]
+
+        ids = [p["id"] for p in puntos]
+        estados = {}
+        if ids:
+            marcadores = ",".join("?" * len(ids))
+            filas = conn.execute(
+                f"""SELECT c.direccion_id, c.disponible FROM agregadores_chequeos c
+                    WHERE c.agregador=? AND c.error_texto IS NULL AND c.direccion_id IN ({marcadores})
+                    AND c.timestamp = (
+                        SELECT MAX(c2.timestamp) FROM agregadores_chequeos c2
+                        WHERE c2.direccion_id=c.direccion_id AND c2.agregador=?
+                    )""",
+                (agregador, *ids, agregador),
+            ).fetchall()
+            estados = {fila["direccion_id"]: bool(fila["disponible"]) for fila in filas}
+
+        con_estado = [p for p in puntos if p["id"] in estados]
+        clusters = _agrupar_por_proximidad(con_estado, umbral_km)
+
+        plan = []
+        for cluster in clusters:
+            if len(cluster) < 2:
+                continue
+            valores = {estados[p["id"]] for p in cluster}
+            if len(valores) > 1:
+                continue  # frontera real -- no se toca ningún punto de este cluster
+            ganador = min(
+                cluster,
+                key=lambda p: (0 if _tienda_mas_cercana(p["lat"], p["lng"]) == p["tienda"] else 1, p["id"]),
+            )
+            perdedores = [p for p in cluster if p["id"] != ganador["id"]]
+            plan.append({
+                "estado": "disponible" if estados[ganador["id"]] else "no_disponible",
+                "ganador": {"id": ganador["id"], "tienda": ganador["tienda"], "direccion_text": ganador["direccion_text"]},
+                "perdedores": [
+                    {"id": p["id"], "tienda": p["tienda"], "direccion_text": p["direccion_text"]} for p in perdedores
+                ],
+            })
+
+        if aplicar:
+            for grupo in plan:
+                for perdedor in grupo["perdedores"]:
+                    conn.execute(
+                        """INSERT INTO agregadores_direcciones_estado (direccion_id, agregador, activo)
+                           VALUES (?, ?, 0)
+                           ON CONFLICT(direccion_id, agregador) DO UPDATE SET activo=0""",
+                        (perdedor["id"], agregador),
+                    )
+            conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "agregador": agregador,
+        "aplicado": aplicar,
+        "grupos": len(plan),
+        "puntos_a_desactivar": sum(len(g["perdedores"]) for g in plan),
+        "detalle": plan,
+    }
+
+
 def direcciones_sin_numero(aplicar: bool = False) -> dict:
     """Direcciones activas de las 6 tiendas cuyo texto NO tiene un número de portal
     real (ver _direccion_valida) -- geocoding que, al no encontrar un punto exacto,
