@@ -508,9 +508,6 @@ def _tienda_mas_cercana(lat: float, lng: float) -> str:
 # umbral decide tanto el resumen deduplicado como la fusión real de duplicados.
 UMBRAL_DUPLICADO_KM = 0.1
 
-_cache_resumen_deduplicado = {"timestamp": 0.0, "datos": None}
-_CACHE_RESUMEN_DEDUPLICADO_TTL_SEG = 120
-
 
 def _agrupar_por_proximidad(puntos: list[dict], umbral_km: float = UMBRAL_DUPLICADO_KM) -> list[list[dict]]:
     """Agrupa direcciones (con lat/lng) en clusters de "mismo sitio real".
@@ -545,16 +542,13 @@ def resumen_cobertura_deduplicada() -> dict:
     """Como el conteo normal de vistos/faltan por tienda, pero agrupando primero los
     puntos que son el mismo sitio real repetido en varias tiendas -- para que "cuántas
     direcciones hay vistas/faltan" refleje sitios únicos, no filas infladas por el
-    solape de grids entre tiendas vecinas. Cacheado 120s: recorrer TODAS las
-    direcciones activas de las 6 tiendas es O(n²) (agrupación por proximidad), no
-    interesa recalcularlo en cada refresco del mini dashboard local."""
-    ahora = time.monotonic()
-    if (
-        _cache_resumen_deduplicado["datos"] is not None
-        and (ahora - _cache_resumen_deduplicado["timestamp"]) < _CACHE_RESUMEN_DEDUPLICADO_TTL_SEG
-    ):
-        return _cache_resumen_deduplicado["datos"]
+    solape de grids entre tiendas vecinas.
 
+    Sin caché (se quitó 26/08): con el scraper corriendo en vivo, una foto de hasta
+    120s desincronizaba este número respecto al desglose bruto por tienda (que sí se
+    calcula fresco en cada carga) -- confundía más de lo que ahorraba. Tras la
+    fusión/limpieza de direcciones del 26/08 el total activo bajó a menos de 1000
+    puntos, así que recalcularlo en cada llamada ya no pesa lo que pesaba antes."""
     conn = get_connection()
     try:
         puntos = [dict(fila) for fila in conn.execute("SELECT * FROM agregadores_direcciones WHERE activo=1").fetchall()]
@@ -586,8 +580,6 @@ def resumen_cobertura_deduplicada() -> dict:
     finally:
         conn.close()
 
-    _cache_resumen_deduplicado["datos"] = resultado
-    _cache_resumen_deduplicado["timestamp"] = ahora
     return resultado
 
 
@@ -637,7 +629,6 @@ def deduplicar_direcciones(umbral_km: float = UMBRAL_DUPLICADO_KM, aplicar: bool
                     )
                     conn.execute("UPDATE agregadores_direcciones SET activo=0 WHERE id=?", (perdedor["id"],))
             conn.commit()
-            _cache_resumen_deduplicado["datos"] = None
     finally:
         conn.close()
 
@@ -673,7 +664,6 @@ def direcciones_sin_numero(aplicar: bool = False) -> dict:
             for punto in plan:
                 conn.execute("UPDATE agregadores_direcciones SET activo=0 WHERE id=?", (punto["id"],))
             conn.commit()
-            _cache_resumen_deduplicado["datos"] = None
     finally:
         conn.close()
 
