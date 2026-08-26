@@ -513,6 +513,31 @@ def panel_resumen_deduplicado_route():
     return agregadores_module.resumen_cobertura_deduplicada()
 
 
+@router.post("/admin/rondas/iniciar", dependencies=[Depends(require_api_key)])
+def admin_iniciar_ronda_route(agregador: str, total_objetivo: int):
+    """Llamado por cada worker de revalidar_completo.py al arrancar (los N en
+    paralelo, sin coordinarse entre sí) -- ver agregadores_module.iniciar_ronda,
+    idempotente: si ya hay una ronda activa para este agregador, la devuelve tal
+    cual en vez de duplicarla."""
+    return agregadores_module.iniciar_ronda(agregador, total_objetivo)
+
+
+@router.post("/admin/rondas/finalizar", dependencies=[Depends(require_api_key)])
+def admin_finalizar_ronda_route(agregador: str):
+    """Llamado por cada worker de revalidar_completo.py al terminar -- ver
+    agregadores_module.finalizar_ronda, idempotente."""
+    agregadores_module.finalizar_ronda(agregador)
+    return {"ok": True}
+
+
+@router.get("/panel/rondas-actuales", dependencies=[Depends(require_admin)])
+def panel_rondas_actuales_route():
+    """Progreso en vivo de una vuelta completa (revalidar_completo.py) por
+    agregador, si hay alguna en curso -- para el panel "Dashboard del scraper" en
+    agregadores.html. Con sesión de staff (rol admin), no X-API-Key."""
+    return agregadores_module.get_rondas_actuales()
+
+
 @router.post("/admin/direcciones/deduplicar", dependencies=[Depends(require_api_key)])
 def deduplicar_direcciones_route(aplicar: bool = False, umbral_m: float = 100):
     """Encuentra (y si aplicar=true, fusiona) direcciones activas que son el mismo

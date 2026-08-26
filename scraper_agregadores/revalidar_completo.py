@@ -63,6 +63,16 @@ async def main(agregador: str, worker_index: int, worker_count: int):
         worker_index, worker_count, agregador, len(asignados), len(puntos),
     )
 
+    try:
+        # Todos los workers llaman a esto -- idempotente del lado del backend (ver
+        # backend/agregadores.py::iniciar_ronda), así que no hace falta coordinarse
+        # entre sí ni que solo lo haga el worker 0. Da el total REAL (len(puntos),
+        # antes de repartir entre workers) para que el "Dashboard del scraper" pueda
+        # mostrar progreso en vivo (hechos/faltan) de esta vuelta completa.
+        await api_client.iniciar_ronda(agregador, len(puntos))
+    except Exception as exc:
+        logger.warning("No se pudo avisar del inicio de ronda (sigue igual): %r", exc)
+
     for i, direccion in enumerate(asignados):
         try:
             # permitir_reuso=False: nunca reutiliza, siempre scrapea de verdad -- es una
@@ -77,6 +87,15 @@ async def main(agregador: str, worker_index: int, worker_count: int):
             await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
 
     logger.info("Worker %d/%d (%s) terminado.", worker_index, worker_count, agregador)
+
+    try:
+        # Idempotente igual que iniciar_ronda -- el primer worker en terminar cierra
+        # la ronda, los demás son no-ops. Si un worker se cae a mitad y nunca llega
+        # aquí, la ronda se queda "activa" para siempre en el dashboard -- aceptable
+        # para una prueba puntual (no es un problema de datos, solo visual).
+        await api_client.finalizar_ronda(agregador)
+    except Exception as exc:
+        logger.warning("No se pudo avisar del fin de ronda (sigue igual): %r", exc)
 
 
 if __name__ == "__main__":

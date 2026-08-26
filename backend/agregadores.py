@@ -229,6 +229,26 @@ def ensure_tables():
         # en vivo en el dashboard (solo visible para el admin, pedido
         # explícito del usuario 10/08).
         conn.execute("ALTER TABLE agregadores_sesiones ADD COLUMN tienda_actual TEXT")
+
+    # Vuelta completa REAL (ver scraper_agregadores/revalidar_completo.py): revalida
+    # cada punto activo de un agregador con varios workers en paralelo (20+), a
+    # diferencia de agregadores_sesiones (pensada para UN daemon lineal). No hace
+    # falta que cada worker reporte su propio avance -- "hechos" se calcula del lado
+    # del backend contando agregadores_chequeos posteriores a iniciada_en (ver
+    # get_ronda_actual), así que ningún worker necesita saber lo que hacen los demás.
+    # iniciar_ronda/finalizar_ronda son idempotentes a propósito: los 20 workers de
+    # un mismo agregador llaman a las dos al arrancar/terminar sin coordinarse entre
+    # sí (el primero en llegar gana, el resto son no-ops), pedido explícito del
+    # usuario 26/08 para ver progreso en vivo en el dashboard integrado.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agregadores_rondas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agregador TEXT NOT NULL,
+            iniciada_en TEXT NOT NULL,
+            total_objetivo INTEGER NOT NULL,
+            finalizada_en TEXT
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -602,6 +622,84 @@ def resumen_cobertura_deduplicada() -> dict:
         conn.close()
 
     return resultado
+
+
+def iniciar_ronda(agregador: str, total_objetivo: int) -> dict:
+    """Marca el inicio de una vuelta completa REAL (ver
+    scraper_agregadores/revalidar_completo.py) para poder mostrar progreso en vivo en
+    el dashboard integrado (panel_resumen_estados_route). Idempotente a propósito:
+    los N workers en paralelo de esa vuelta llaman a esto al arrancar sin
+    coordinarse entre sí -- si ya hay una ronda activa (sin finalizar) para este
+    agregador, la devuelve tal cual en vez de crear otra; el primero en llegar crea
+    la fila, el resto la encuentran ya creada."""
+    conn = get_connection()
+    try:
+        fila = conn.execute(
+            "SELECT id, iniciada_en, total_objetivo FROM agregadores_rondas "
+            "WHERE agregador=? AND finalizada_en IS NULL ORDER BY id DESC LIMIT 1",
+            (agregador,),
+        ).fetchone()
+        if fila:
+            return dict(fila)
+        ahora = datetime.now(timezone.utc).isoformat()
+        cur = conn.execute(
+            "INSERT INTO agregadores_rondas (agregador, iniciada_en, total_objetivo) VALUES (?, ?, ?)",
+            (agregador, ahora, total_objetivo),
+        )
+        conn.commit()
+        return {"id": cur.lastrowid, "iniciada_en": ahora, "total_objetivo": total_objetivo}
+    finally:
+        conn.close()
+
+
+def finalizar_ronda(agregador: str) -> None:
+    """Idempotente igual que iniciar_ronda -- el UPDATE con WHERE finalizada_en IS
+    NULL no hace nada si otro worker ya la cerró antes."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE agregadores_rondas SET finalizada_en=? WHERE agregador=? AND finalizada_en IS NULL",
+            (datetime.now(timezone.utc).isoformat(), agregador),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_rondas_actuales() -> dict:
+    """Para el panel 'Dashboard del scraper': por agregador, si hay una vuelta
+    completa en curso ahora mismo, cuánto lleva. "hechos" se calcula contando
+    agregadores_chequeos reales con timestamp posterior a iniciada_en -- ningún
+    worker necesita reportar su propio avance, así que da igual cuántos corran en
+    paralelo. Si la ronda se relanzó a mitad (worker-count distinto, etc.) tiene su
+    propio iniciada_en más reciente, así que "hechos" no arrastra chequeos de un
+    intento anterior abandonado."""
+    conn = get_connection()
+    try:
+        resultado = {}
+        for agregador in AGREGADORES:
+            fila = conn.execute(
+                "SELECT id, iniciada_en, total_objetivo FROM agregadores_rondas "
+                "WHERE agregador=? AND finalizada_en IS NULL ORDER BY id DESC LIMIT 1",
+                (agregador,),
+            ).fetchone()
+            if not fila:
+                resultado[agregador] = None
+                continue
+            hechos = conn.execute(
+                "SELECT COUNT(DISTINCT direccion_id) FROM agregadores_chequeos "
+                "WHERE agregador=? AND timestamp >= ?",
+                (agregador, fila["iniciada_en"]),
+            ).fetchone()[0]
+            resultado[agregador] = {
+                "iniciada_en": fila["iniciada_en"],
+                "total_objetivo": fila["total_objetivo"],
+                "hechos": hechos,
+                "faltan": max(fila["total_objetivo"] - hechos, 0),
+            }
+        return resultado
+    finally:
+        conn.close()
 
 
 def deduplicar_direcciones(umbral_km: float = UMBRAL_DUPLICADO_KM, aplicar: bool = False) -> dict:

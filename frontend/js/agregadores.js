@@ -2470,13 +2470,38 @@ async function agrCargarEstado() {
 const AGR_CATEGORIAS_ESTADO = ["disponible", "no_disponible", "error", "sin_datos"];
 const AGR_CATEGORIA_LABEL = { disponible: "Disponibles", no_disponible: "No disponibles", error: "Error", sin_datos: "Sin datos" };
 
+let agrDashboardScraperIntervalo = null;
+
 function agrAbrirDashboardScraper() {
   document.getElementById("agr-scraper-overlay").classList.add("visible");
   agrCargarDashboardScraper();
+  // Refresco cada 15s mientras el panel esté abierto -- para ver avanzar en vivo
+  // "hechos/faltan" de una vuelta completa (revalidar_completo.py) sin tener que
+  // cerrar y volver a abrir. Se para al cerrar (agrCerrarDashboardScraper) para no
+  // seguir pidiendo datos de fondo sin necesidad.
+  if (agrDashboardScraperIntervalo) clearInterval(agrDashboardScraperIntervalo);
+  agrDashboardScraperIntervalo = setInterval(agrCargarDashboardScraper, 15000);
 }
 
 function agrCerrarDashboardScraper() {
   document.getElementById("agr-scraper-overlay").classList.remove("visible");
+  if (agrDashboardScraperIntervalo) {
+    clearInterval(agrDashboardScraperIntervalo);
+    agrDashboardScraperIntervalo = null;
+  }
+}
+
+function agrRondaHtml(agregador, ronda) {
+  const nombre = AGR_NOMBRE_AGREGADOR[agregador];
+  if (!ronda) {
+    return `<div class="agr-scraper-desglose" style="margin-bottom:6px;"><b>${nombre}</b>: sin vuelta completa en curso</div>`;
+  }
+  const pct = ronda.total_objetivo > 0 ? Math.round((ronda.hechos / ronda.total_objetivo) * 100) : 0;
+  const inicio = new Date(ronda.iniciada_en).toLocaleTimeString("es-ES", { timeZone: "Europe/Madrid" });
+  return `<div style="margin-bottom:10px;">
+    <b>${nombre}</b>: ${ronda.hechos}/${ronda.total_objetivo} hechos (${pct}%) · faltan ${ronda.faltan} · empezó a las ${inicio}
+    <div class="agr-card-barra"><span style="width:${pct}%; background:${AGR_COLOR_MARCA[agregador]};"></span></div>
+  </div>`;
 }
 
 function agrCeldaEstadoHtml(conteos) {
@@ -2489,13 +2514,15 @@ async function agrCargarDashboardScraper() {
   const contenido = document.getElementById("agr-scraper-contenido");
   const actualizado = document.getElementById("agr-scraper-actualizado");
   try {
-    const [resEstados, resDedup] = await Promise.all([
+    const [resEstados, resDedup, resRondas] = await Promise.all([
       fetch(`${AGR_API}/panel/resumen-estados`, { credentials: "include" }),
       fetch(`${AGR_API}/panel/resumen-deduplicado`, { credentials: "include" }),
+      fetch(`${AGR_API}/panel/rondas-actuales`, { credentials: "include" }),
     ]);
-    if (!resEstados.ok || !resDedup.ok) throw new Error("fetch falló");
+    if (!resEstados.ok || !resDedup.ok || !resRondas.ok) throw new Error("fetch falló");
     const estados = await resEstados.json();
     const dedup = await resDedup.json();
+    const rondas = await resRondas.json();
 
     const agregadores = Object.keys(AGR_NOMBRE_AGREGADOR);
     const tiendas = Object.keys(estados).filter((t) => agrCentrosPorTienda[t]);
@@ -2527,7 +2554,11 @@ async function agrCargarDashboardScraper() {
       </td>`;
     }).join("");
 
+    const seccionRondas = agregadores.map((a) => agrRondaHtml(a, rondas[a])).join("");
+
     contenido.innerHTML = `
+      <h4 class="agr-scraper-titulo-seccion">Vuelta completa en curso</h4>
+      ${seccionRondas}
       <h4 class="agr-scraper-titulo-seccion">Cobertura real (deduplicada entre tiendas)</h4>
       <p class="agr-drill-nota">Cuenta sitios reales únicos, no filas -- los grids de tiendas vecinas se solapan geográficamente, así que el mismo sitio puede tener una fila por tienda.</p>
       <div class="agr-scraper-tabla-wrap">

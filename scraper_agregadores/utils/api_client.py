@@ -263,6 +263,24 @@ async def adelgazar_direcciones(agregador: str, aplicar: bool = False, umbral_m:
     return await _solicitar("POST", url, params=params, headers=_headers(), timeout=120)
 
 
+async def iniciar_ronda(agregador: str, total_objetivo: int) -> dict:
+    """Avisa al backend de que una vuelta completa (revalidar_completo.py) empieza
+    para `agregador`, con `total_objetivo` puntos -- para que el "Dashboard del
+    scraper" en agregadores.html pueda mostrar progreso en vivo. Idempotente del
+    lado del backend: llamarla desde cada worker en paralelo sin coordinarse entre
+    sí es seguro (ver backend/agregadores.py::iniciar_ronda)."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/rondas/iniciar"
+    params = {"agregador": agregador, "total_objetivo": total_objetivo}
+    return await _solicitar("POST", url, params=params, headers=_headers(), timeout=15)
+
+
+async def finalizar_ronda(agregador: str):
+    """Ver iniciar_ronda -- idempotente igual, cada worker la llama al terminar sin
+    coordinarse con los demás."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/rondas/finalizar"
+    await _solicitar("POST", url, params={"agregador": agregador}, headers=_headers(), timeout=15, parse_json=False)
+
+
 async def actualizar_tienda_actual(sesion_id: int, tienda: str):
     if config.MODO_LOCAL or sesion_id == -1:
         return
