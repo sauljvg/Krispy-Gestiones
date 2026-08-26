@@ -499,14 +499,17 @@ def _tienda_mas_cercana(lat: float, lng: float) -> str:
     return mejor_tienda
 
 
-# Umbral único para "¿es esto el mismo sitio real?" -- el mismo que ya usa
-# buscar_chequeo_cercano para reutilizar chequeos entre tiendas (ver esa función más
-# abajo), muy por debajo de los 500m de precisión que usa buscar_limite_cobertura.py
-# para su propia búsqueda binaria. Los grids de tiendas vecinas se solapan
-# geográficamente (confirmado: 114 pares de puntos <150m entre tiendas distintas para
-# las 6 tiendas actuales, algunos literalmente la misma dirección repetida) -- este
-# umbral decide tanto el resumen deduplicado como la fusión real de duplicados.
-UMBRAL_DUPLICADO_KM = 0.1
+# Umbral único para "¿es esto el mismo sitio real?" -- decide el resumen
+# deduplicado, la fusión de duplicados existentes Y (get_o_crear_direcciones) si
+# vale la pena crear un punto nuevo o ya hay uno cerca. Subido de 100m a 200m el
+# 26/08 tras revisar el resultado a mano: a 100m se quedaban fuera pares que a
+# simple vista en el mapa eran claramente el mismo sitio. Distinto (más amplio) que
+# los 100m de buscar_chequeo_cercano a propósito -- ese umbral decide si REUTILIZAR
+# un chequeo ya hecho en vez de scrapear, más conservador porque un falso positivo
+# ahí da un dato incorrecto; este decide si dos filas representan el mismo sitio,
+# donde ya se revisó a mano que 200m no mezcla sitios distintos (ver
+# _agrupar_por_proximidad, que además ya no encadena transitivamente).
+UMBRAL_DUPLICADO_KM = 0.2
 
 
 def _agrupar_por_proximidad(puntos: list[dict], umbral_km: float = UMBRAL_DUPLICADO_KM) -> list[list[dict]]:
@@ -1038,6 +1041,22 @@ def get_o_crear_direcciones(
 
                 lat_dest, lng_dest = _mover_punto(info["lat"], info["lng"], angulo, radio)
                 lat_dest, lng_dest, direccion_text = _punto_geocodificado_valido(lat_dest, lng_dest)
+
+                # Antes de crear un punto nuevo: ¿alguna tienda (esta u otra) ya tiene
+                # un punto activo a <UMBRAL_DUPLICADO_KM de aquí? Sin esto, tiendas
+                # vecinas con grids solapados (o geocoding que colapsa en la misma
+                # calle) siguen naciendo duplicados nuevos sin parar, incluso después
+                # de fusionar los que ya existían (confirmado en vivo 26/08: 8
+                # duplicados nuevos en unas horas de scraper corriendo tras la
+                # limpieza). Si ya hay uno cerca, este hueco del grid se salta -- ese
+                # sitio real ya está representado por el otro punto.
+                cercano = conn.execute("SELECT lat, lng FROM agregadores_direcciones WHERE activo=1").fetchall()
+                if any(
+                    _distancia_y_angulo(fila["lat"], fila["lng"], lat_dest, lng_dest)[0] < UMBRAL_DUPLICADO_KM
+                    for fila in cercano
+                ):
+                    continue
+
                 try:
                     cur = conn.execute(
                         """INSERT INTO agregadores_direcciones
