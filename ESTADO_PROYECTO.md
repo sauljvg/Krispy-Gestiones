@@ -206,6 +206,34 @@ todos resueltos conservando ambos lados. Si otra máquina (como la de trabajo)
 también está desactualizada, esperar conflictos parecidos al hacer `git pull`
 — revisar con calma, no forzar.
 
+### 6. "0 faltan" en la API pero el mapa real muestra "Sin datos" (26/08/2026)
+
+Descubierto al priorizar Uber Eats: el scraper (`solo_sin_datos=True`,
+`get_o_crear_direcciones`) usa `_cobertura_confirmada_por_limite` para saltarse
+puntos que caen DENTRO del polígono de cobertura ya confirmado -- los da por
+"ya sabemos la respuesta" sin comprobarlos uno por uno (decisión deliberada de
+antes de esta sesión, commit "Un punto sin datos dentro del límite ya
+confirmado no cuenta como frontera", pensada para no repetir miles de
+chequeos redundantes). Por eso el scraper decía "0 faltan" en Uber Eats
+mientras el mapa real de cobertura (`Mapa de cobertura` del dashboard, capa
+Uber Eats) seguía marcando **251 puntos como "Sin datos"** -- nunca tuvieron
+un chequeo propio, solo la suposición del polígono.
+
+**Pendiente de decidir con el usuario**: si desactivar esa suposición para
+Uber Eats (comprobar esos 251 uno por uno de verdad) o dejarla como está.
+No tocado todavía.
+
+De paso esta sesión:
+- `config.AGREGADORES` reordenado a `["ubereats", "glovo", "justeat"]`
+  (antes `["justeat", "glovo", "ubereats"]`) -- pedido explícito del usuario
+  para priorizar Uber Eats en el reparto de workers (`scheduler.py` reparte
+  en este mismo orden, agregador-major).
+- Al reiniciar el daemon (`detener_daemon.bat`) se borraron de paso las
+  tareas de Task Scheduler `AgregadoresScraperLogon`/`AgregadoresScraperDiario`
+  en ESTA máquina (el script las quita a propósito en una parada manual, ver
+  sección 1 más arriba) -- el acceso directo de la carpeta de Inicio sigue
+  siendo el único autoarranque activo aquí ahora mismo.
+
 ## Para la próxima conversación
 
 - Trabajar directamente sobre `Escritorio/Krispy-Gestiones/` — ya está al
