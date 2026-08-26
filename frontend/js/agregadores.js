@@ -70,9 +70,15 @@ let agrTransicionesLimpiadasHasta = localStorage.getItem(AGR_TRANSICIONES_LIMPIA
 // El amarillo pálido de Glovo (#ffc244) también se perdía DIRECTAMENTE contra
 // el propio mapa base (zonas residenciales de OpenStreetMap se pintan en un
 // tono crema muy parecido) -- el polígono de Glovo era casi invisible incluso
-// sin chocar con otro agregador. Se oscurece a un dorado más fuerte que sigue
-// leyéndose como "amarillo/Glovo" pero contrasta con el fondo del mapa.
-const AGR_COLOR_MARCA = { justeat: "#e8590c", glovo: "#c99a00", ubereats: "#06c167" };
+// sin chocar con otro agregador. Se oscureció a un dorado (#c99a00) para
+// contrastar, pero eso lo acercaba demasiado al naranja de JustEat, difíciles
+// de diferenciar de un vistazo (pedido explícito del usuario 26/08: "amarillo
+// pollito" -- un amarillo vivo, claramente distinto del naranja). Los dots
+// llevan borde negro (ver .agr-marker-dot span en agregadores.html), así que
+// no deberían perder legibilidad como los polígonos de antes; si el polígono
+// de Glovo vuelve a perderse contra el mapa, hace falta separar el color de
+// dots del de polígonos en vez de compartir esta misma constante.
+const AGR_COLOR_MARCA = { justeat: "#e8590c", glovo: "#ffd500", ubereats: "#06c167" };
 const AGR_NOMBRE_AGREGADOR = { justeat: "JustEat", glovo: "Glovo", ubereats: "Uber Eats" };
 let agrMostrarCorrectos = false;
 
