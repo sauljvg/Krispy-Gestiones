@@ -674,13 +674,18 @@ def iniciar_ronda(agregador: str, total_objetivo: int, worker_count: int, inicia
         conn.close()
 
 
-def finalizar_ronda(agregador: str, finalizada_en: str | None = None) -> None:
+def finalizar_ronda(agregador: str, finalizada_en: str | None = None, forzar: bool = False) -> None:
     """Cada worker llama a esto UNA vez al terminar, sin coordinarse con los demás --
     suma 1 a workers_finalizados y solo marca la ronda como realmente terminada
     (finalizada_en) cuando ese contador alcanza worker_count. Antes "el primero en
     llegar cerraba la ronda para todos" -- bug real confirmado en vivo 26/08: Uber
     Eats se quedó "completado" al 58% en el dashboard porque el worker más rápido
     terminó mucho antes que los otros 19, que seguían trabajando.
+
+    `forzar=True`: cierra la ronda YA, sin esperar al contador -- para cuando se
+    para una pasada a mano a mitad (ver Glovo 26/08, dos veces en la misma sesión
+    por su tasa de fallos) y los workers restantes se matan de golpe, así que nunca
+    van a llamar a esto ellos mismos para completar el contador.
 
     `finalizada_en`: ver nota de iniciada_en en iniciar_ronda, mismo uso puntual para
     reconstruir una vuelta ya terminada del todo."""
@@ -696,7 +701,7 @@ def finalizar_ronda(agregador: str, finalizada_en: str | None = None) -> None:
             "WHERE agregador=? AND finalizada_en IS NULL ORDER BY id DESC LIMIT 1",
             (agregador,),
         ).fetchone()
-        if fila and fila["worker_count"] and fila["workers_finalizados"] >= fila["worker_count"]:
+        if fila and (forzar or (fila["worker_count"] and fila["workers_finalizados"] >= fila["worker_count"])):
             conn.execute(
                 "UPDATE agregadores_rondas SET finalizada_en=? WHERE id=?",
                 (finalizada_en or datetime.now(timezone.utc).isoformat(), fila["id"]),

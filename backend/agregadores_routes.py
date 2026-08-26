@@ -526,11 +526,12 @@ def admin_iniciar_ronda_route(agregador: str, total_objetivo: int, worker_count:
 
 
 @router.post("/admin/rondas/finalizar", dependencies=[Depends(require_api_key)])
-def admin_finalizar_ronda_route(agregador: str, finalizada_en: str | None = None):
+def admin_finalizar_ronda_route(agregador: str, finalizada_en: str | None = None, forzar: bool = False):
     """Llamado por cada worker de revalidar_completo.py al terminar -- ver
     agregadores_module.finalizar_ronda, idempotente. `finalizada_en`: ver nota de
-    iniciada_en en la ruta de arriba."""
-    agregadores_module.finalizar_ronda(agregador, finalizada_en)
+    iniciada_en en la ruta de arriba. `forzar=true`: cierra ya sin esperar a que
+    todos los workers hayan llamado -- para cuando se para una pasada a mano."""
+    agregadores_module.finalizar_ronda(agregador, finalizada_en, forzar)
     return {"ok": True}
 
 
