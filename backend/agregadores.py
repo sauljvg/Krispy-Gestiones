@@ -556,12 +556,30 @@ def resumen_cobertura_deduplicada() -> dict:
 
         resultado = {}
         for agregador in AGREGADORES:
-            vistos = 0
+            # Un punto puede estar globalmente activo (agregadores_direcciones.activo)
+            # pero desactivado solo para ESTE agregador (agregadores_direcciones_estado)
+            # -- sin filtrar esto, "total" salía distinto (más alto) que la suma del
+            # desglose bruto por tienda, que sí aplica este filtro (ver
+            # get_o_crear_direcciones). Un cluster sin ningún punto elegible para este
+            # agregador no cuenta ni como visto ni como faltante para él.
+            inactivos_agregador = {
+                row["direccion_id"]
+                for row in conn.execute(
+                    "SELECT direccion_id FROM agregadores_direcciones_estado WHERE agregador=? AND activo=0",
+                    (agregador,),
+                ).fetchall()
+            }
+
+            total = vistos = 0
             faltan_direcciones = []
             for cluster in clusters:
+                elegibles = [p for p in cluster if p["id"] not in inactivos_agregador]
+                if not elegibles:
+                    continue
+                total += 1
                 tiene_dato = False
-                for tienda in {p["tienda"] for p in cluster}:
-                    puntos_tienda = [p for p in cluster if p["tienda"] == tienda]
+                for tienda in {p["tienda"] for p in elegibles}:
+                    puntos_tienda = [p for p in elegibles if p["tienda"] == tienda]
                     con_datos = _con_datos_reales(conn, puntos_tienda, agregador)
                     con_datos |= _cobertura_confirmada_por_limite(conn, tienda, agregador, puntos_tienda)
                     if con_datos:
@@ -570,11 +588,11 @@ def resumen_cobertura_deduplicada() -> dict:
                 if tiene_dato:
                     vistos += 1
                 else:
-                    faltan_direcciones.append(cluster[0]["direccion_text"])
+                    faltan_direcciones.append(elegibles[0]["direccion_text"])
             resultado[agregador] = {
-                "total": len(clusters),
+                "total": total,
                 "vistos": vistos,
-                "faltan": len(clusters) - vistos,
+                "faltan": total - vistos,
                 "faltan_direcciones": sorted(faltan_direcciones),
             }
     finally:
