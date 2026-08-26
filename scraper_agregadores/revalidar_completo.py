@@ -20,7 +20,7 @@ import asyncio
 import logging
 
 import config
-from main import chequear_tienda
+from main import SCRAPERS, chequear_tienda
 from scrapers.ubereats import UberEatsScraper
 from utils import api_client
 from utils.ventana import calcular_posicion_ventana
@@ -40,7 +40,16 @@ async def _puntos_todos(agregador: str) -> list[dict]:
     return puntos
 
 
-async def main(agregador: str, worker_index: int, worker_count: int):
+async def main(agregador: str, worker_index: int, worker_count: int, permitir_imagenes: bool = False):
+    if permitir_imagenes:
+        # Prueba puntual 26/08: comprobar si bloquear imágenes/media es lo que
+        # dispara la página de error genérica de Glovo bajo carga ("Oh, no! It
+        # looks like there's a problem") -- hipótesis del usuario, sin confirmar.
+        # Solo para este proceso (atributo de CLASE, pero cada worker es su propio
+        # proceso Python aparte, así que no se pisa entre workers).
+        SCRAPERS[agregador].bloquear_recursos = False
+        logger.info("Worker %d/%d (%s): imágenes/media SIN bloquear (prueba puntual)", worker_index, worker_count, agregador)
+
     if worker_count > 1:
         # Escalonar el arranque: sin esto, N workers lanzados a la vez disparan N
         # peticiones GET casi simultáneas en _puntos_todos() -- confirmado en vivo
@@ -137,5 +146,9 @@ if __name__ == "__main__":
     parser.add_argument("--agregador", required=True, choices=["justeat", "glovo", "ubereats"])
     parser.add_argument("--worker-index", type=int, default=0)
     parser.add_argument("--worker-count", type=int, default=1)
+    parser.add_argument(
+        "--permitir-imagenes", action="store_true",
+        help="Prueba puntual: no bloquear imágenes/media (por defecto SÍ se bloquean) -- para comparar tasa de fallos.",
+    )
     args = parser.parse_args()
-    asyncio.run(main(args.agregador, args.worker_index, args.worker_count))
+    asyncio.run(main(args.agregador, args.worker_index, args.worker_count, args.permitir_imagenes))
