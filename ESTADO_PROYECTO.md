@@ -257,9 +257,22 @@ De paso esta sesión:
   reemplazar el flujo de Takeout.
 - **Scraper de agregadores (ver sección de arriba, 26/08)**: en la máquina de
   trabajo, hacer `git pull` primero (puede pedir resolver conflictos si ese
-  clon también estaba desactualizado). Decidir qué mecanismo de autoarranque
-  se queda (Task Scheduler `setup_tarea_programada.ps1` vs el acceso directo
-  en la carpeta de Inicio que se añadió esta sesión) y quitar el otro. Para
-  ver el mini dashboard local en esa máquina: `venv/Scripts/python
-  status_server.py` dentro de `scraper_agregadores/`, abre en
-  `localhost:8787`.
+  clon también estaba desactualizado). El autoarranque (Task Scheduler y el
+  acceso directo de Inicio) se quitó del todo esta sesión -- ver más abajo,
+  ya no hay que decidir nada ahí. Para ver el mini dashboard local en esa
+  máquina: `venv/Scripts/python status_server.py` dentro de
+  `scraper_agregadores/`, abre en `localhost:8787` (o el nuevo botón
+  "Dashboard del scraper" en `agregadores.html`, solo admin, no necesita
+  levantar nada aparte).
+- **IMPORTANTE -- Glovo bloqueó la IP de la oficina/casa (confirmado 26/08)**:
+  tras varias pasadas con 20/15/10 workers, todas con ~29% de fallos
+  idénticos (página "Oh, no! It looks like there's a problem" de Glovo, en
+  inglés, captura guardada en cada fallo desde hoy), el usuario probó a mano
+  con datos móviles (sin WiFi) -- Glovo carga bien. Con el WiFi de la
+  oficina -- el mismo "Oh, no!" incluso en un navegador normal, sin scraper
+  de por medio. Es un bloqueo de IP del lado de Glovo, no un problema de
+  concurrencia/código/imágenes (se descartaron las tres cosas con pruebas
+  reales antes de encontrar esto). NO relanzar Glovo desde esta IP hasta que
+  se levante el bloqueo (tiempo desconocido) o se use otra red/IP -- seguir
+  insistiendo solo prolonga el bloqueo. JustEat y Uber Eats no muestran este
+  problema por ahora, pero vigilar por si les pasa lo mismo con el tiempo.
