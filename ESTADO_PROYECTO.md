@@ -233,6 +233,14 @@ De paso esta sesión:
   en ESTA máquina (el script las quita a propósito en una parada manual, ver
   sección 1 más arriba) -- el acceso directo de la carpeta de Inicio sigue
   siendo el único autoarranque activo aquí ahora mismo.
+- **26/08, más tarde**: decisión explícita del usuario -- se quita también
+  el acceso directo de la carpeta de Inicio y se para el daemon de 24/7 en
+  esta máquina. El flujo pasó a ser vueltas completas manuales con
+  `revalidar_completo.py` (20 workers por agregador, JustEat → Glovo →
+  Uber Eats en secuencia, un orquestador .ps1 detached encadena los tres) en
+  vez del daemon continuo -- por ahora NO hay ningún autoarranque activo del
+  scraper en esta máquina. Si se quiere retomar el daemon 24/7 más adelante,
+  hay que volver a crear el acceso directo o la tarea programada a mano.
 
 ## Para la próxima conversación
 
