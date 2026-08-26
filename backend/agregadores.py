@@ -1017,7 +1017,8 @@ def _priorizar_sin_datos(conn, resultado: list[dict], agregador: str) -> list[di
 
 
 def get_o_crear_direcciones(
-    tienda: str, radios_km=None, agregador: str | None = None, solo_sin_datos: bool = False
+    tienda: str, radios_km=None, agregador: str | None = None, solo_sin_datos: bool = False,
+    ignorar_poligono: bool = False,
 ) -> list[dict]:
     if tienda not in TIENDAS:
         return []
@@ -1106,7 +1107,12 @@ def get_o_crear_direcciones(
 
         if agregador and solo_sin_datos:
             con_datos = _con_datos_reales(conn, resultado, agregador)
-            con_datos |= _cobertura_confirmada_por_limite(conn, tienda, agregador, resultado)
+            # ignorar_poligono=True: pasada puntual que quiere comprobar cada punto de
+            # verdad, sin dar por buenos los que caen dentro del polígono de cobertura
+            # ya confirmado -- ver revalidar_ubereats_sin_poligono.py. La regla normal
+            # (con el polígono) se queda intacta para el scheduler de siempre.
+            if not ignorar_poligono:
+                con_datos |= _cobertura_confirmada_por_limite(conn, tienda, agregador, resultado)
             resultado = [r for r in resultado if r["id"] not in con_datos]
         elif agregador:
             resultado = _priorizar_sin_datos(conn, resultado, agregador)

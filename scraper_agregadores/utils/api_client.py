@@ -102,7 +102,8 @@ async def eliminar_direccion(direccion_id: int):
 
 
 async def obtener_direcciones(
-    tienda: str, cercano: bool = False, agregador: str = None, solo_sin_datos: bool = False
+    tienda: str, cercano: bool = False, agregador: str = None, solo_sin_datos: bool = False,
+    ignorar_poligono: bool = False,
 ) -> list[dict]:
     """`agregador`, si se pasa, hace que el backend devuelva primero los
     puntos que ese agregador todavía no ha comprobado nunca de verdad (ver
@@ -110,13 +111,19 @@ async def obtener_direcciones(
     se corta a medias cubre puntos nuevos antes que repetir los de siempre.
 
     `solo_sin_datos=True` va más allá: solo devuelve esos puntos, para la
-    pasada previa "cubrir huecos en todas las tiendas" del scheduler."""
+    pasada previa "cubrir huecos en todas las tiendas" del scheduler.
+
+    `ignorar_poligono=True`: no da por buenos los puntos dentro del polígono
+    de cobertura ya confirmado -- para una pasada puntual que quiera
+    comprobar cada punto de verdad (ver revalidar_ubereats_sin_poligono.py)."""
     url = f"{config.KG_API_BASE_URL}/api/agregadores/direcciones/{tienda}"
     params = {"cercano": str(cercano).lower()}
     if agregador:
         params["agregador"] = agregador
     if solo_sin_datos:
         params["solo_sin_datos"] = "true"
+    if ignorar_poligono:
+        params["ignorar_poligono"] = "true"
     async with aiohttp.ClientSession() as session:
         async with session.get(url, params=params, headers=_headers(), timeout=60) as resp:
             resp.raise_for_status()

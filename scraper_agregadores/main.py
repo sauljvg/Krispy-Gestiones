@@ -27,10 +27,19 @@ async def chequear_tienda(
     max_direcciones: int = None,
     delay_seg: int = 0,
     solo_sin_datos: bool = False,
+    direcciones_override: list = None,
 ):
-    direcciones = await api_client.obtener_direcciones(
-        tienda, cercano=cercano, agregador=agregador_nombre, solo_sin_datos=solo_sin_datos
-    )
+    """direcciones_override: si se pasa, se usa esta lista tal cual en vez de pedirle
+    una nueva a la API (cercano/solo_sin_datos se ignoran en ese caso) -- para pasadas
+    puntuales que ya eligieron ellas mismas qué direcciones tocan (ver
+    revalidar_ubereats_sin_poligono.py, que reparte direcciones individuales entre
+    varios workers en vez de tiendas enteras)."""
+    if direcciones_override is not None:
+        direcciones = direcciones_override
+    else:
+        direcciones = await api_client.obtener_direcciones(
+            tienda, cercano=cercano, agregador=agregador_nombre, solo_sin_datos=solo_sin_datos
+        )
     if max_direcciones:
         direcciones = direcciones[:max_direcciones]
 

@@ -219,7 +219,8 @@ def transiciones_route(
 
 @router.get("/direcciones/{tienda}", dependencies=[Depends(require_api_key)])
 def direcciones_route(
-    tienda: str, cercano: bool = False, agregador: str | None = None, solo_sin_datos: bool = False
+    tienda: str, cercano: bool = False, agregador: str | None = None, solo_sin_datos: bool = False,
+    ignorar_poligono: bool = False,
 ):
     """El scraper llama esto al empezar una pasada: genera (si hace falta)
     y geocodifica el grid server-side, así el geocoding se cachea una única
@@ -227,9 +228,12 @@ def direcciones_route(
 
     `agregador`, si se manda, prioriza los puntos que ese agregador nunca ha
     comprobado de verdad. `solo_sin_datos=True` va más allá y devuelve SOLO
-    esos -- ver get_o_crear_direcciones."""
+    esos -- ver get_o_crear_direcciones. `ignorar_poligono=True` hace que
+    "sin datos" no dé por buenos los puntos dentro del polígono de cobertura
+    ya confirmado (ver _cobertura_confirmada_por_limite) -- para una pasada
+    puntual que quiera comprobar cada punto de verdad, sin esa suposición."""
     radios = agregadores_module.GRID_RADIOS_CERCANO_KM if cercano else agregadores_module.GRID_RADIOS_KM
-    return agregadores_module.get_o_crear_direcciones(tienda, radios, agregador, solo_sin_datos)
+    return agregadores_module.get_o_crear_direcciones(tienda, radios, agregador, solo_sin_datos, ignorar_poligono)
 
 
 @router.post("/direcciones/reparar", dependencies=[Depends(require_api_key)])
