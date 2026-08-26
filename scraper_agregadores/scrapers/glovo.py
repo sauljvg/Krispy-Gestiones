@@ -5,21 +5,26 @@ from scrapers.base import BaseAggregatorScraper, ResultadoChequeo
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://glovoapp.com"
+# URL con localización fija a Madrid en español -- antes se usaba la raíz
+# (https://glovoapp.com), que según sesión/geolocalización del navegador
+# devolvía la interfaz en inglés (pedido explícito del usuario 26/08: usar
+# la web en español). Todas las tiendas están en Madrid (config.TIENDAS_SCHEDULER),
+# así que fijar la ciudad en la URL no pierde cobertura.
+URL_INICIO = "https://glovoapp.com/es/es/madrid"
 
-SEL_COOKIE_DENY = 'button:has-text("Deny")'
+SEL_COOKIE_DENY = 'button:has-text("Denegar")'
 
 SEL_ADDRESS_CHANGE_BUTTON = 'button[class*="AddressPicker_addressButton"]'
 # El input inicial (home) es readonly: al pulsarlo abre un panel con el input real editable.
-SEL_ADDRESS_OPENER = 'input[placeholder="What'"'"'s your address?"]:visible'
+SEL_ADDRESS_OPENER = 'input[placeholder="¿Cuál es tu dirección?"]:visible'
 SEL_ADDRESS_EDITABLE_INPUT = 'input[data-testid="address-book-search-input"]'
 SEL_ADDRESS_SUGGESTION = 'div[class*="ListItem_pintxo-list-item"]'
 
-SEL_PLACE_TYPE_OTHER = 'button:has-text("Other")'
-SEL_CONFIRM_BUTTON = 'button:has-text("Confirm")'
+SEL_PLACE_TYPE_OTHER = 'button:has-text("Otro")'
+SEL_CONFIRM_BUTTON = 'button:has-text("Confirmar")'
 
-SEL_SEARCH_INPUT = 'input[placeholder="What can we get you?"]'
-SEL_SEARCH_BUTTON = 'button:has-text("Search")'
+SEL_SEARCH_INPUT = 'input[placeholder="¿Qué necesitas?"]'
+SEL_SEARCH_BUTTON = 'button:has-text("Buscar")'
 SEL_STORE_CARD = 'a[class*="StoreTile_wrapper"]'
 
 SEL_STORE_ETA_TEXT = '[class*="StoreEta_text"]'
@@ -29,10 +34,10 @@ MARCA_BUSQUEDA = "Krispy Kreme"
 
 class GlovoScraper(BaseAggregatorScraper):
     nombre_agregador = "glovo"
-    url_base = BASE_URL
+    url_base = URL_INICIO
 
     async def _verificar(self, page, tienda_nombre: str, direccion: str) -> ResultadoChequeo:
-        await page.goto(BASE_URL, wait_until="domcontentloaded")
+        await page.goto(URL_INICIO, wait_until="domcontentloaded")
         await self._comprobar_challenge(page)
 
         await self._aceptar_cookies(page)

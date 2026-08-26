@@ -286,7 +286,32 @@ De paso esta sesión:
   desde la oficina. NO relanzar Glovo con muchos workers seguidos desde la
   misma IP/red -- seguir insistiendo solo prolonga el bloqueo. JustEat y
   Uber Eats no muestran este problema por ahora, pero vigilar por si les
-  pasa lo mismo con el tiempo. Pendiente: adaptar el scraper a la web de
-  Glovo en español (`https://glovoapp.com/es/es/madrid`, pedido explícito
-  del usuario 26/08) -- requiere traducir los selectores de texto en inglés
-  del archivo a sus equivalentes en español antes de poder lanzarlo así.
+  pasa lo mismo con el tiempo.
+- **26/08, cierre de sesión -- selectores en español YA adaptados, pero
+  concurrencia baja NO arregla el bloqueo**: `scrapers/glovo.py` se cambió
+  para usar `https://glovoapp.com/es/es/madrid` (pedido explícito del
+  usuario) con todos los selectores de texto traducidos (verificado a mano
+  paso a paso en un navegador real: "Denegar", "¿Cuál es tu dirección?",
+  "Otro", "Confirmar", "¿Qué necesitas?", "Buscar" -- las clases CSS/
+  data-testid no cambian con el idioma). Sin commitear -- pendiente probar
+  en limpio (ver más abajo). Aparte, se probó reducir de 20 a **8 workers**
+  (con el código en inglés de siempre, para no mezclar dos cambios a la
+  vez): **empeoró, no mejoró** -- 47% de fallo (78 hechos / 70 fallos) tras
+  148 de 488 puntos en ~29 min, y la tasa de fallo iba SUBIENDO con el
+  tiempo (38% a los 13 min → 47% a los 27 min), no bajando. Se cortó a mano
+  (`paremos por hoy`) antes de completar la vuelta. Conclusión: **no es un
+  problema de cuántos workers a la vez** (ya se descartó 20/15/10/8, todos
+  con fallo alto), sino de volumen/tiempo acumulado insistiendo desde la
+  misma IP -- cuanto más se insiste, peor, sea cual sea la concurrencia.
+  Un test manual de UN solo punto con la web en español, mientras los 8
+  workers en inglés corrían a la vez, también falló 4/4 -- pero no es dato
+  limpio (había 9 sesiones de Glovo simultáneas desde la misma IP en ese
+  momento, no 1), así que la validación de los selectores en español sigue
+  pendiente de una prueba real sin solape con ningún otro test de Glovo.
+  **Para la próxima sesión**: (1) probar el flujo en español con un único
+  punto, sin ningún otro proceso de Glovo corriendo a la vez, para
+  confirmar que los selectores traducidos funcionan de verdad; (2)
+  plantearse si vale la pena seguir insistiendo desde esta IP/red en
+  absoluto, o si hace falta otra estrategia (esperar más tiempo sin tocar
+  Glovo en absoluto, red distinta, etc.) antes de intentar la vuelta
+  completa de Glovo otra vez.
