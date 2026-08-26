@@ -69,7 +69,7 @@ async def main(agregador: str, worker_index: int, worker_count: int):
         # entre sí ni que solo lo haga el worker 0. Da el total REAL (len(puntos),
         # antes de repartir entre workers) para que el "Dashboard del scraper" pueda
         # mostrar progreso en vivo (hechos/faltan) de esta vuelta completa.
-        await api_client.iniciar_ronda(agregador, len(puntos))
+        await api_client.iniciar_ronda(agregador, len(puntos), worker_count)
     except Exception as exc:
         logger.warning("No se pudo avisar del inicio de ronda (sigue igual): %r", exc)
 

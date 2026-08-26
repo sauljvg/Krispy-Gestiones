@@ -249,6 +249,18 @@ def ensure_tables():
             finalizada_en TEXT
         )
     """)
+    cols_rondas = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_rondas)")}
+    if "worker_count" not in cols_rondas:
+        # BUG confirmado en vivo 26/08: "el primero en llegar gana" en finalizar_ronda
+        # significaba que el PRIMER worker en terminar (los N no tardan lo mismo --
+        # reparto desigual, direcciones más lentas, reintentos) cerraba la ronda para
+        # los 19 restantes, que seguían trabajando -- el dashboard se quedaba
+        # congelado mostrando "completado" con una fracción del total real (visto:
+        # Uber Eats "completado" al 58% mientras los demás workers seguían). Ahora
+        # finalizar_ronda cuenta cuántos workers han terminado de verdad y solo cierra
+        # la ronda cuando TODOS lo han hecho.
+        conn.execute("ALTER TABLE agregadores_rondas ADD COLUMN worker_count INTEGER")
+        conn.execute("ALTER TABLE agregadores_rondas ADD COLUMN workers_finalizados INTEGER NOT NULL DEFAULT 0")
     conn.commit()
     conn.close()
 
@@ -624,7 +636,7 @@ def resumen_cobertura_deduplicada() -> dict:
     return resultado
 
 
-def iniciar_ronda(agregador: str, total_objetivo: int, iniciada_en: str | None = None) -> dict:
+def iniciar_ronda(agregador: str, total_objetivo: int, worker_count: int, iniciada_en: str | None = None) -> dict:
     """Marca el inicio de una vuelta completa REAL (ver
     scraper_agregadores/revalidar_completo.py) para poder mostrar progreso en vivo en
     el dashboard integrado (panel_resumen_estados_route). Idempotente a propósito:
@@ -633,6 +645,10 @@ def iniciar_ronda(agregador: str, total_objetivo: int, iniciada_en: str | None =
     agregador, la devuelve tal cual en vez de crear otra; el primero en llegar crea
     la fila, el resto la encuentran ya creada.
 
+    `worker_count`: cuántos workers en total va a tener esta ronda -- necesario para
+    que finalizar_ronda sepa cuándo TODOS han terminado de verdad (ver ahí, bug
+    confirmado en vivo 26/08 con la versión anterior que cerraba al primero).
+
     `iniciada_en`: normalmente None (usa la hora actual) -- solo se pasa a mano para
     reconstruir en el dashboard una vuelta que ya corrió y terminó ANTES de que este
     reporte existiera (ver JustEat 26/08, primera vuelta con 20 workers que ya
@@ -640,7 +656,7 @@ def iniciar_ronda(agregador: str, total_objetivo: int, iniciada_en: str | None =
     conn = get_connection()
     try:
         fila = conn.execute(
-            "SELECT id, iniciada_en, total_objetivo FROM agregadores_rondas "
+            "SELECT id, iniciada_en, total_objetivo, worker_count FROM agregadores_rondas "
             "WHERE agregador=? AND finalizada_en IS NULL ORDER BY id DESC LIMIT 1",
             (agregador,),
         ).fetchone()
@@ -648,26 +664,43 @@ def iniciar_ronda(agregador: str, total_objetivo: int, iniciada_en: str | None =
             return dict(fila)
         momento = iniciada_en or datetime.now(timezone.utc).isoformat()
         cur = conn.execute(
-            "INSERT INTO agregadores_rondas (agregador, iniciada_en, total_objetivo) VALUES (?, ?, ?)",
-            (agregador, momento, total_objetivo),
+            "INSERT INTO agregadores_rondas (agregador, iniciada_en, total_objetivo, worker_count, workers_finalizados) "
+            "VALUES (?, ?, ?, ?, 0)",
+            (agregador, momento, total_objetivo, worker_count),
         )
         conn.commit()
-        return {"id": cur.lastrowid, "iniciada_en": momento, "total_objetivo": total_objetivo}
+        return {"id": cur.lastrowid, "iniciada_en": momento, "total_objetivo": total_objetivo, "worker_count": worker_count}
     finally:
         conn.close()
 
 
 def finalizar_ronda(agregador: str, finalizada_en: str | None = None) -> None:
-    """Idempotente igual que iniciar_ronda -- el UPDATE con WHERE finalizada_en IS
-    NULL no hace nada si otro worker ya la cerró antes. `finalizada_en`: ver nota de
-    iniciada_en en iniciar_ronda, mismo uso puntual para reconstruir una vuelta ya
-    terminada."""
+    """Cada worker llama a esto UNA vez al terminar, sin coordinarse con los demás --
+    suma 1 a workers_finalizados y solo marca la ronda como realmente terminada
+    (finalizada_en) cuando ese contador alcanza worker_count. Antes "el primero en
+    llegar cerraba la ronda para todos" -- bug real confirmado en vivo 26/08: Uber
+    Eats se quedó "completado" al 58% en el dashboard porque el worker más rápido
+    terminó mucho antes que los otros 19, que seguían trabajando.
+
+    `finalizada_en`: ver nota de iniciada_en en iniciar_ronda, mismo uso puntual para
+    reconstruir una vuelta ya terminada del todo."""
     conn = get_connection()
     try:
         conn.execute(
-            "UPDATE agregadores_rondas SET finalizada_en=? WHERE agregador=? AND finalizada_en IS NULL",
-            (finalizada_en or datetime.now(timezone.utc).isoformat(), agregador),
+            "UPDATE agregadores_rondas SET workers_finalizados = workers_finalizados + 1 "
+            "WHERE agregador=? AND finalizada_en IS NULL",
+            (agregador,),
         )
+        fila = conn.execute(
+            "SELECT id, worker_count, workers_finalizados FROM agregadores_rondas "
+            "WHERE agregador=? AND finalizada_en IS NULL ORDER BY id DESC LIMIT 1",
+            (agregador,),
+        ).fetchone()
+        if fila and fila["worker_count"] and fila["workers_finalizados"] >= fila["worker_count"]:
+            conn.execute(
+                "UPDATE agregadores_rondas SET finalizada_en=? WHERE id=?",
+                (finalizada_en or datetime.now(timezone.utc).isoformat(), fila["id"]),
+            )
         conn.commit()
     finally:
         conn.close()

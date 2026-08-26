@@ -263,14 +263,18 @@ async def adelgazar_direcciones(agregador: str, aplicar: bool = False, umbral_m:
     return await _solicitar("POST", url, params=params, headers=_headers(), timeout=120)
 
 
-async def iniciar_ronda(agregador: str, total_objetivo: int) -> dict:
+async def iniciar_ronda(agregador: str, total_objetivo: int, worker_count: int) -> dict:
     """Avisa al backend de que una vuelta completa (revalidar_completo.py) empieza
-    para `agregador`, con `total_objetivo` puntos -- para que el "Dashboard del
-    scraper" en agregadores.html pueda mostrar progreso en vivo. Idempotente del
-    lado del backend: llamarla desde cada worker en paralelo sin coordinarse entre
-    sí es seguro (ver backend/agregadores.py::iniciar_ronda)."""
+    para `agregador`, con `total_objetivo` puntos repartidos entre `worker_count`
+    workers -- para que el "Dashboard del scraper" en agregadores.html pueda mostrar
+    progreso en vivo. Idempotente del lado del backend: llamarla desde cada worker en
+    paralelo sin coordinarse entre sí es seguro (ver
+    backend/agregadores.py::iniciar_ronda). `worker_count` es necesario para que
+    finalizar_ronda sepa cuándo han terminado TODOS, no solo el primero (bug
+    confirmado en vivo 26/08: Uber Eats se quedaba "completado" con el worker más
+    rápido, mientras los otros 19 seguían trabajando)."""
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/rondas/iniciar"
-    params = {"agregador": agregador, "total_objetivo": total_objetivo}
+    params = {"agregador": agregador, "total_objetivo": total_objetivo, "worker_count": worker_count}
     return await _solicitar("POST", url, params=params, headers=_headers(), timeout=15)
 
 
