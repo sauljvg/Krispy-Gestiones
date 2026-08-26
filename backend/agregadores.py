@@ -1610,24 +1610,39 @@ def get_mapa_datos(tienda: str):
     }
 
 
-def get_resumen_estados(tienda: str) -> dict:
+def get_resumen_estados_todas() -> dict:
     """Igual que la leyenda del mapa (ver AGR_LEYENDA_AGREGADOR/agrCategoriaDireccion
-    en frontend/js/agregadores.js), pero agregado en conteos por agregador en vez de
-    una fila por dirección -- para el mini dashboard local de status_server.py, que
-    solo necesita los totales, no cada dirección. Un punto desactivado para un
-    agregador concreto (inactivo_para) se salta igual que en el mapa: ese agregador
-    ya no lo cuenta en ninguna categoría, ni siquiera "sin_datos"."""
-    datos = get_mapa_datos(tienda)
-    conteos = {a: {"disponible": 0, "no_disponible": 0, "error": 0, "sin_datos": 0} for a in AGREGADORES}
+    y, sobre todo, _tiendaVisual en agrCargarMapa -- frontend/js/agregadores.js),
+    pero agregado en conteos por tienda+agregador en vez de una fila por dirección --
+    para el mini dashboard local de status_server.py.
+
+    Agrupa por la TIENDA MÁS CERCANA de verdad (_tienda_mas_cercana), no por la
+    columna `tienda` guardada en la fila -- el mapa reasigna cada punto así mismo
+    (un punto guardado bajo "caleido" pero geográficamente más cerca de "princesa"
+    se cuenta como de Princesa en el mapa). Sin este reajuste, el dashboard y el
+    mapa daban números distintos para la misma tienda aunque leyeran la misma base
+    de datos (confirmado por el usuario 26/08: "los dots no coinciden con el
+    dashboard").
+
+    Un punto desactivado para un agregador concreto (inactivo_para) se salta igual
+    que en el mapa: ese agregador ya no lo cuenta en ninguna categoría, ni siquiera
+    "sin_datos". Un punto borrado del todo (activo=0) ya ni aparece -- get_mapa_datos
+    solo lee filas activas, así que un borrado en producción se refleja aquí en la
+    siguiente petición, sin caché de por medio."""
+    datos = get_mapa_datos_todas()
+    resultado = {t: {a: {"disponible": 0, "no_disponible": 0, "error": 0, "sin_datos": 0} for a in AGREGADORES} for t in TIENDAS}
     for d in datos["direcciones"]:
+        tienda_visual = _tienda_mas_cercana(d["lat"], d["lng"]) if d.get("lat") is not None and d.get("lng") is not None else d["tienda"]
+        if tienda_visual not in resultado:
+            continue
         inactivo_para = d.get("inactivo_para") or []
         for a in AGREGADORES:
             if a in inactivo_para:
                 continue
             info = (d.get("detalle") or {}).get(a)
             categoria = info["estado"] if info else "sin_datos"
-            conteos[a][categoria] = conteos[a].get(categoria, 0) + 1
-    return {"tienda": tienda, "agregadores": conteos}
+            resultado[tienda_visual][a][categoria] = resultado[tienda_visual][a].get(categoria, 0) + 1
+    return resultado
 
 
 def get_mapa_datos_todas():

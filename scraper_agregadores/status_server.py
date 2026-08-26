@@ -58,13 +58,14 @@ CATEGORIA_LABEL = {
 }
 
 
-async def _resumen_tienda(tienda: str) -> dict:
-    """Mismas categorías que la leyenda del mapa (ver AGR_LEYENDA_AGREGADOR en
-    frontend/js/agregadores.js) -- disponible/no_disponible/error/sin_datos por
-    agregador, en vez de solo "vistos/faltan" (pedido explícito del usuario 26/08:
-    reflejar exactamente lo que se ve en el mapa)."""
-    datos = await api_client.resumen_estados(tienda)
-    return {"tienda": tienda, "agregadores": datos["agregadores"]}
+async def _resumen_todas_tiendas() -> list[dict]:
+    """Mismas categorías Y la misma reasignación a "tienda más cercana" que usa el
+    mapa (ver get_resumen_estados_todas en backend/agregadores.py) --
+    disponible/no_disponible/error/sin_datos por tienda+agregador, en vez de solo
+    "vistos/faltan" (pedido explícito del usuario 26/08: reflejar exactamente lo
+    que se ve en el mapa, incluida la reasignación por proximidad real)."""
+    datos = await api_client.resumen_estados_todas()
+    return [{"tienda": t, "agregadores": datos[t]} for t in config.TIENDAS_SCHEDULER if t in datos]
 
 
 def _celda_html(conteos: dict) -> str:
@@ -90,7 +91,7 @@ async def _resumen_dedup_seguro() -> dict | None:
 
 async def handle(request):
     resumenes, dedup = await asyncio.gather(
-        asyncio.gather(*(_resumen_tienda(t) for t in config.TIENDAS_SCHEDULER)),
+        _resumen_todas_tiendas(),
         _resumen_dedup_seguro(),
     )
     workers = _workers_activos()

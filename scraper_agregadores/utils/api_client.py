@@ -201,11 +201,14 @@ async def resumen_cobertura_deduplicada() -> dict:
             return await resp.json()
 
 
-async def resumen_estados(tienda: str) -> dict:
-    """Conteos por agregador (disponible/no_disponible/error/sin_datos), las mismas
-    categorías que la leyenda del mapa -- ver
-    backend/agregadores.py::get_resumen_estados. Usado por status_server.py."""
-    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/resumen-estados/{tienda}"
+async def resumen_estados_todas() -> dict:
+    """Conteos por tienda+agregador (disponible/no_disponible/error/sin_datos), las
+    mismas categorías Y la misma reasignación a "tienda más cercana" que usa el mapa
+    -- ver backend/agregadores.py::get_resumen_estados_todas. Usado por
+    status_server.py. Trae las 6 tiendas de una vez (una sola llamada, no una por
+    tienda) porque agrupar por tienda-más-cercana necesita ver todos los puntos a
+    la vez."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/resumen-estados"
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=_headers(), timeout=30) as resp:
             resp.raise_for_status()
