@@ -41,6 +41,10 @@ async def _puntos_pendientes() -> list[dict]:
 
 async def main(worker_index: int, worker_count: int):
     if worker_count > 1:
+        # Escalonar el arranque -- ver misma nota en revalidar_completo.py (confirmado
+        # en vivo 26/08: ráfaga de peticiones simultáneas al lanzar tumbó Railway con 502).
+        await asyncio.sleep(worker_index * 0.5)
+
         # Rejilla compartida con daemon.py/buscar_limite_cobertura.py -- evita que las
         # ventanas visibles de Uber Eats de varios workers queden apiladas. Con más de
         # 8 workers los slots se reparten (módulo 8, ver utils/ventana.py).

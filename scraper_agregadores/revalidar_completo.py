@@ -41,6 +41,14 @@ async def _puntos_todos(agregador: str) -> list[dict]:
 
 
 async def main(agregador: str, worker_index: int, worker_count: int):
+    if worker_count > 1:
+        # Escalonar el arranque: sin esto, N workers lanzados a la vez disparan N
+        # peticiones GET casi simultáneas en _puntos_todos() -- confirmado en vivo
+        # 26/08 que una ráfaga de ~360 peticiones (60 workers x 6 tiendas) tumbó la
+        # única réplica de Railway con 502 en cadena. 0.5s de separación por worker
+        # reparte esa ráfaga en el tiempo sin alargar la pasada de forma notable.
+        await asyncio.sleep(worker_index * 0.5)
+
     if agregador == "ubereats" and worker_count > 1:
         # Rejilla de ventanas visibles (módulo 8, ver utils/ventana.py) -- solo
         # importa para Uber Eats, JustEat/Glovo corren headless.

@@ -19,7 +19,14 @@ if exist "%~dp0.env" (
 for /f "delims=" %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "STAMP=%%T"
 
 set /a "ULTIMO=%WORKERS%-1"
-for /L %%i in (0,1,%ULTIMO%) do call :lanzar_worker %%i
+for /L %%i in (0,1,%ULTIMO%) do (
+    call :lanzar_worker %%i
+    rem Pequeña pausa entre lanzamientos -- evita que todos los workers pidan su
+    rem lista de direcciones a la vez contra Railway (una sola réplica, ver 502
+    rem en vivo 26/08 con 60 workers a la vez). "ping -n 3" ~ 2s sin depender de
+    rem Start-Sleep de PowerShell (más lento de arrancar).
+    ping -n 3 127.0.0.1 >nul
+)
 
 endlocal
 exit /b 0

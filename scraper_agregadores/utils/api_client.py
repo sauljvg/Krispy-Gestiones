@@ -3,6 +3,7 @@
 El scraper corre en un portátil aparte y no tiene sesión de usuario (no hay navegador de
 por medio) — se autentica con una API key fija en vez de cookie, solo válida para estos
 endpoints (ver require_api_key en el backend)."""
+import asyncio
 import logging
 
 import aiohttp
@@ -11,9 +12,49 @@ import config
 
 logger = logging.getLogger(__name__)
 
+# 502/503/504: errores transitorios del servidor (Railway con una sola réplica en modo
+# sleep) -- confirmado en vivo 26/08: una ráfaga de arranque (~360 peticiones a la vez
+# con 60 workers) satura la réplica y devuelve 502, que antes tumbaba el proceso entero
+# al no reintentarse (raise_for_status sin red de seguridad). Espera exponencial: 1s,
+# 2s, 4s entre los 3 intentos.
+_ESTADOS_REINTENTABLES = {502, 503, 504}
+_REINTENTOS_DEFECTO = 3
+
 
 def _headers():
     return {"X-API-Key": config.KG_API_KEY, "Content-Type": "application/json"}
+
+
+async def _solicitar(metodo: str, url: str, *, parse_json: bool = True, reintentos: int = _REINTENTOS_DEFECTO, **kwargs):
+    """Envoltorio de session.request con reintento en errores transitorios (502/503/504
+    o fallo de conexión/timeout). Devuelve el JSON de la respuesta (o None si
+    parse_json=False o el cuerpo viene vacío)."""
+    espera = 1
+    for intento in range(1, reintentos + 1):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.request(metodo, url, **kwargs) as resp:
+                    if resp.status in _ESTADOS_REINTENTABLES and intento < reintentos:
+                        logger.warning(
+                            "  %s %s -> %d, reintento %d/%d en %ds",
+                            metodo, url, resp.status, intento, reintentos, espera,
+                        )
+                        await asyncio.sleep(espera)
+                        espera *= 2
+                        continue
+                    resp.raise_for_status()
+                    if not parse_json or resp.content_length == 0:
+                        return None
+                    return await resp.json()
+        except (aiohttp.ClientConnectionError, asyncio.TimeoutError) as exc:
+            if intento < reintentos:
+                logger.warning(
+                    "  %s %s -> %r, reintento %d/%d en %ds", metodo, url, exc, intento, reintentos, espera,
+                )
+                await asyncio.sleep(espera)
+                espera *= 2
+                continue
+            raise
 
 
 async def crear_direccion_calculada(tienda: str, distancia_km: float, angulo_grados: float) -> dict:
@@ -26,10 +67,7 @@ async def crear_direccion_calculada(tienda: str, distancia_km: float, angulo_gra
     # una dirección válida -- con red lenta eso solo ya se acerca a 30s.
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direcciones/calculada"
     body = {"tienda": tienda, "distancia_km": distancia_km, "angulo_grados": angulo_grados}
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=body, headers=_headers(), timeout=90) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+    return await _solicitar("POST", url, json=body, headers=_headers(), timeout=90)
 
 
 async def reasignar_punto_otra_tienda(tienda: str, lat: float, lng: float, direccion_text: str | None) -> dict:
@@ -40,10 +78,7 @@ async def reasignar_punto_otra_tienda(tienda: str, lat: float, lng: float, direc
     próximo guardado."""
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direcciones/reasignada"
     body = {"tienda": tienda, "lat": lat, "lng": lng, "direccion_text": direccion_text}
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=body, headers=_headers(), timeout=30) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+    return await _solicitar("POST", url, json=body, headers=_headers(), timeout=30)
 
 
 async def buscar_chequeo_cercano(lat: float, lng: float, agregador: str, radio_m: float = 100) -> dict | None:
@@ -55,10 +90,7 @@ async def buscar_chequeo_cercano(lat: float, lng: float, agregador: str, radio_m
     por defecto)."""
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/chequeo-cercano"
     params = {"lat": lat, "lng": lng, "agregador": agregador, "radio_m": radio_m}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params, headers=_headers(), timeout=15) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+    return await _solicitar("GET", url, params=params, headers=_headers(), timeout=15)
 
 
 async def guardar_limite(
@@ -78,9 +110,7 @@ async def guardar_limite(
         "tienda": tienda, "agregador": agregador, "angulo_grados": angulo_grados, "limite_km": limite_km, "nota": nota,
         "lat": lat, "lng": lng, "direccion_text": direccion_text,
     }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=body, headers=_headers(), timeout=15) as resp:
-            resp.raise_for_status()
+    await _solicitar("POST", url, json=body, headers=_headers(), timeout=15, parse_json=False)
 
 
 async def obtener_limites(tienda: str, agregador: str) -> list[dict]:
@@ -89,10 +119,7 @@ async def obtener_limites(tienda: str, agregador: str) -> list[dict]:
     rehacerlos desde cero cada vez (confirmado en vivo 08/08: cada relanzamiento
     por un fix repetía 0° de parquesur entero, sin avanzar nunca al resto)."""
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/limites/{tienda}"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, params={"agregador": agregador}, headers=_headers(), timeout=15) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+    return await _solicitar("GET", url, params={"agregador": agregador}, headers=_headers(), timeout=15)
 
 
 async def eliminar_direccion(direccion_id: int, agregador: str | None = None):
@@ -100,9 +127,7 @@ async def eliminar_direccion(direccion_id: int, agregador: str | None = None):
     `agregador`, solo para ese agregador -- ver chequear_tienda."""
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direccion/{direccion_id}"
     params = {"agregador": agregador} if agregador else {}
-    async with aiohttp.ClientSession() as session:
-        async with session.delete(url, params=params, headers=_headers(), timeout=15) as resp:
-            resp.raise_for_status()
+    await _solicitar("DELETE", url, params=params, headers=_headers(), timeout=15, parse_json=False)
 
 
 async def obtener_direcciones(
@@ -128,10 +153,7 @@ async def obtener_direcciones(
         params["solo_sin_datos"] = "true"
     if ignorar_poligono:
         params["ignorar_poligono"] = "true"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params, headers=_headers(), timeout=60) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+    return await _solicitar("GET", url, params=params, headers=_headers(), timeout=60)
 
 
 async def enviar_chequeo(data: dict) -> dict:
@@ -143,10 +165,7 @@ async def enviar_chequeo(data: dict) -> dict:
         return {"chequeo_id": -1, "transicion": False}
 
     url = f"{config.KG_API_BASE_URL}/api/agregadores/chequeo"
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=data, headers=_headers(), timeout=30) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+    return await _solicitar("POST", url, json=data, headers=_headers(), timeout=30)
 
 
 async def subir_captura(chequeo_id: int, ruta_local: str):
@@ -163,11 +182,9 @@ async def subir_captura(chequeo_id: int, ruta_local: str):
             contenido = f.read()
         form = aiohttp.FormData()
         form.add_field("archivo", contenido, filename="captura.png", content_type="image/png")
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url, data=form, headers={"X-API-Key": config.KG_API_KEY}, timeout=30
-            ) as resp:
-                resp.raise_for_status()
+        await _solicitar(
+            "POST", url, data=form, headers={"X-API-Key": config.KG_API_KEY}, timeout=30, parse_json=False
+        )
     except Exception as exc:
         logger.error("No se pudo subir la captura de transición (chequeo %s): %s", chequeo_id, exc)
 
@@ -179,11 +196,8 @@ async def iniciar_sesion(modo: str, total_planeado: int | None = None) -> int:
 
     url = f"{config.KG_API_BASE_URL}/api/agregadores/sesiones"
     body = {"modo": modo, "total_planeado": total_planeado}
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=body, headers=_headers(), timeout=15) as resp:
-            resp.raise_for_status()
-            data = await resp.json()
-            return data["id"]
+    data = await _solicitar("POST", url, json=body, headers=_headers(), timeout=15)
+    return data["id"]
 
 
 async def cerrar_sesion(sesion_id: int, estado: str, exitosos: int, fallidos: int):
@@ -196,9 +210,7 @@ async def cerrar_sesion(sesion_id: int, estado: str, exitosos: int, fallidos: in
 
     url = f"{config.KG_API_BASE_URL}/api/agregadores/sesiones/{sesion_id}"
     body = {"estado": estado, "chequeos_exitosos": exitosos, "chequeos_fallidos": fallidos}
-    async with aiohttp.ClientSession() as session:
-        async with session.put(url, json=body, headers=_headers(), timeout=15) as resp:
-            resp.raise_for_status()
+    await _solicitar("PUT", url, json=body, headers=_headers(), timeout=15, parse_json=False)
 
 
 async def resumen_cobertura_deduplicada() -> dict:
@@ -206,10 +218,7 @@ async def resumen_cobertura_deduplicada() -> dict:
     proximidad entre TODAS las tiendas), no filas -- ver
     backend/agregadores.py::resumen_cobertura_deduplicada. Usado por status_server.py."""
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direcciones/resumen-deduplicado"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=_headers(), timeout=30) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+    return await _solicitar("GET", url, headers=_headers(), timeout=30)
 
 
 async def resumen_estados_todas() -> dict:
@@ -220,10 +229,7 @@ async def resumen_estados_todas() -> dict:
     tienda) porque agrupar por tienda-más-cercana necesita ver todos los puntos a
     la vez."""
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/resumen-estados"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=_headers(), timeout=30) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+    return await _solicitar("GET", url, headers=_headers(), timeout=30)
 
 
 async def deduplicar_direcciones(aplicar: bool = False, umbral_m: float = 100) -> dict:
@@ -233,12 +239,9 @@ async def deduplicar_direcciones(aplicar: bool = False, umbral_m: float = 100) -
     plan, no escribe nada. umbral_m: radio en metros para considerar "el mismo sitio"
     (default 100, igual que backend/agregadores.py::UMBRAL_DUPLICADO_KM)."""
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direcciones/deduplicar"
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
-            url, params={"aplicar": str(aplicar).lower(), "umbral_m": umbral_m}, headers=_headers(), timeout=120
-        ) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+    return await _solicitar(
+        "POST", url, params={"aplicar": str(aplicar).lower(), "umbral_m": umbral_m}, headers=_headers(), timeout=120
+    )
 
 
 async def limpiar_direcciones_sin_numero(aplicar: bool = False) -> dict:
@@ -247,10 +250,7 @@ async def limpiar_direcciones_sin_numero(aplicar: bool = False) -> dict:
     backend/agregadores.py::direcciones_sin_numero. aplicar=False solo devuelve el
     plan, no escribe nada."""
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direcciones/limpiar-sin-numero"
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, params={"aplicar": str(aplicar).lower()}, headers=_headers(), timeout=120) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+    return await _solicitar("POST", url, params={"aplicar": str(aplicar).lower()}, headers=_headers(), timeout=120)
 
 
 async def adelgazar_direcciones(agregador: str, aplicar: bool = False, umbral_m: float = 500) -> dict:
@@ -260,10 +260,7 @@ async def adelgazar_direcciones(agregador: str, aplicar: bool = False, umbral_m:
     aplicar=False solo devuelve el plan, no escribe nada."""
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direcciones/adelgazar"
     params = {"agregador": agregador, "aplicar": str(aplicar).lower(), "umbral_m": umbral_m}
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, params=params, headers=_headers(), timeout=120) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+    return await _solicitar("POST", url, params=params, headers=_headers(), timeout=120)
 
 
 async def actualizar_tienda_actual(sesion_id: int, tienda: str):
@@ -271,9 +268,7 @@ async def actualizar_tienda_actual(sesion_id: int, tienda: str):
         return
     url = f"{config.KG_API_BASE_URL}/api/agregadores/sesiones/{sesion_id}/tienda-actual"
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.put(url, json={"tienda": tienda}, headers=_headers(), timeout=15) as resp:
-                resp.raise_for_status()
+        await _solicitar("PUT", url, json={"tienda": tienda}, headers=_headers(), timeout=15, parse_json=False, reintentos=1)
     except Exception as exc:
         # Contador informativo para el dashboard -- si falla no debe tumbar
         # la pasada real de chequeos.
@@ -288,8 +283,6 @@ async def registrar_alerta(tipo: str, mensaje: str, tienda: str = None, agregado
     url = f"{config.KG_API_BASE_URL}/api/agregadores/alertas"
     body = {"tipo": tipo, "mensaje": mensaje, "tienda": tienda, "agregador": agregador}
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=body, headers=_headers(), timeout=15) as resp:
-                resp.raise_for_status()
+        await _solicitar("POST", url, json=body, headers=_headers(), timeout=15, parse_json=False, reintentos=1)
     except Exception as exc:
         logger.error("No se pudo registrar la alerta en KG: %s", exc)
