@@ -454,6 +454,22 @@ def chequeo_cercano_route(lat: float, lng: float, agregador: str):
     return agregadores_module.buscar_chequeo_cercano(lat, lng, agregador)
 
 
+@router.get("/admin/direcciones/resumen-deduplicado", dependencies=[Depends(require_api_key)])
+def resumen_deduplicado_route():
+    """Vistos/faltan por agregador contando sitios reales únicos, no filas -- los
+    grids de tiendas vecinas se solapan geográficamente, así que el mismo sitio real
+    puede tener una fila por tienda (ver agregadores_module.UMBRAL_DUPLICADO_KM)."""
+    return agregadores_module.resumen_cobertura_deduplicada()
+
+
+@router.post("/admin/direcciones/deduplicar", dependencies=[Depends(require_api_key)])
+def deduplicar_direcciones_route(aplicar: bool = False):
+    """Encuentra (y si aplicar=true, fusiona) direcciones activas que son el mismo
+    sitio real repetido en varias tiendas. aplicar=false (por defecto) solo devuelve
+    el plan de fusión sin escribir nada -- para revisar antes de aplicar de verdad."""
+    return agregadores_module.deduplicar_direcciones(aplicar=aplicar)
+
+
 class LimiteIn(BaseModel):
     tienda: str
     agregador: str

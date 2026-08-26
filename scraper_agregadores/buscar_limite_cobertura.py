@@ -15,6 +15,7 @@ import config
 from scrapers.glovo import GlovoScraper
 from scrapers.justeat import JustEatScraper
 from scrapers.ubereats import UberEatsScraper
+from scrapers.base import MARCADOR_TIENDA_NO_CONFIRMADA
 from utils import api_client
 from utils.ventana import calcular_posicion_ventana
 
@@ -156,13 +157,7 @@ async def resultado_punto(scraper, tienda, punto, agregador, avisos: list) -> st
     return await chequear_punto(scraper, tienda, punto["id"], punto["direccion_text"], agregador)
 
 
-# Frase EXACTA (idéntica en glovo.py, justeat.py y ubereats.py) que se lanza
-# cuando la búsqueda de la tienda se completó de verdad (sin challenge, sin
-# fallo de red) pero Krispy Kreme sencillamente no salió en los resultados.
-# Confirmado a mano por el usuario 09/08 (comprobación manual real en Uber
-# Eats): esto NO es un fallo técnico nuestro -- es una búsqueda válida que
-# no encontró la tienda, exactamente la misma señal que "no disponible".
-MARCADOR_TIENDA_NO_CONFIRMADA = "tienda no confirmada en resultados de búsqueda"
+# Centralizada en scrapers/base.py (usada también por main.py::chequear_tienda ahora).
 
 
 async def chequear_punto(scraper, tienda, direccion_id, direccion_text, agregador) -> str:

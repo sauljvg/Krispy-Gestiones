@@ -190,6 +190,29 @@ async def cerrar_sesion(sesion_id: int, estado: str, exitosos: int, fallidos: in
             resp.raise_for_status()
 
 
+async def resumen_cobertura_deduplicada() -> dict:
+    """Vistos/faltan por agregador contando sitios reales únicos (agrupados por
+    proximidad entre TODAS las tiendas), no filas -- ver
+    backend/agregadores.py::resumen_cobertura_deduplicada. Usado por status_server.py."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direcciones/resumen-deduplicado"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=_headers(), timeout=30) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+
+async def deduplicar_direcciones(aplicar: bool = False) -> dict:
+    """Encuentra (y si aplicar=True, fusiona) direcciones activas que son el mismo
+    sitio real repetido en varias tiendas -- ver
+    backend/agregadores.py::deduplicar_direcciones. aplicar=False solo devuelve el
+    plan, no escribe nada."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direcciones/deduplicar"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, params={"aplicar": str(aplicar).lower()}, headers=_headers(), timeout=120) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+
 async def registrar_alerta(tipo: str, mensaje: str, tienda: str = None, agregador: str = None):
     if config.MODO_LOCAL:
         logger.info("[MODO_LOCAL] alerta no registrada en KG: [%s] %s", tipo, mensaje)

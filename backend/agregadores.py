@@ -437,6 +437,160 @@ def _tienda_mas_cercana(lat: float, lng: float) -> str:
     return mejor_tienda
 
 
+# Umbral único para "¿es esto el mismo sitio real?" -- el mismo que ya usa
+# buscar_chequeo_cercano para reutilizar chequeos entre tiendas (ver esa función más
+# abajo), muy por debajo de los 500m de precisión que usa buscar_limite_cobertura.py
+# para su propia búsqueda binaria. Los grids de tiendas vecinas se solapan
+# geográficamente (confirmado: 114 pares de puntos <150m entre tiendas distintas para
+# las 6 tiendas actuales, algunos literalmente la misma dirección repetida) -- este
+# umbral decide tanto el resumen deduplicado como la fusión real de duplicados.
+UMBRAL_DUPLICADO_KM = 0.1
+
+_cache_resumen_deduplicado = {"timestamp": 0.0, "datos": None}
+_CACHE_RESUMEN_DEDUPLICADO_TTL_SEG = 120
+
+
+def _agrupar_por_proximidad(puntos: list[dict], umbral_km: float = UMBRAL_DUPLICADO_KM) -> list[list[dict]]:
+    """Agrupa direcciones (con lat/lng) en clusters de "mismo sitio real" -- cierre
+    transitivo vía union-find sobre pares a <umbral_km, no solo comparación par a par
+    (si A-B y B-C están cerca, A/B/C acaban en el mismo cluster aunque A-C por sí
+    solos no lo estuvieran)."""
+    n = len(puntos)
+    padre = list(range(n))
+
+    def raiz(i):
+        while padre[i] != i:
+            padre[i] = padre[padre[i]]
+            i = padre[i]
+        return i
+
+    def unir(i, j):
+        ri, rj = raiz(i), raiz(j)
+        if ri != rj:
+            padre[ri] = rj
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            distancia, _ = _distancia_y_angulo(
+                puntos[i]["lat"], puntos[i]["lng"], puntos[j]["lat"], puntos[j]["lng"]
+            )
+            if distancia < umbral_km:
+                unir(i, j)
+
+    clusters: dict[int, list[dict]] = {}
+    for i, punto in enumerate(puntos):
+        clusters.setdefault(raiz(i), []).append(punto)
+    return list(clusters.values())
+
+
+def resumen_cobertura_deduplicada() -> dict:
+    """Como el conteo normal de vistos/faltan por tienda, pero agrupando primero los
+    puntos que son el mismo sitio real repetido en varias tiendas -- para que "cuántas
+    direcciones hay vistas/faltan" refleje sitios únicos, no filas infladas por el
+    solape de grids entre tiendas vecinas. Cacheado 120s: recorrer TODAS las
+    direcciones activas de las 6 tiendas es O(n²) (agrupación por proximidad), no
+    interesa recalcularlo en cada refresco del mini dashboard local."""
+    ahora = time.monotonic()
+    if (
+        _cache_resumen_deduplicado["datos"] is not None
+        and (ahora - _cache_resumen_deduplicado["timestamp"]) < _CACHE_RESUMEN_DEDUPLICADO_TTL_SEG
+    ):
+        return _cache_resumen_deduplicado["datos"]
+
+    conn = get_connection()
+    try:
+        puntos = [dict(fila) for fila in conn.execute("SELECT * FROM agregadores_direcciones WHERE activo=1").fetchall()]
+        clusters = _agrupar_por_proximidad(puntos)
+
+        resultado = {}
+        for agregador in AGREGADORES:
+            vistos = 0
+            faltan_direcciones = []
+            for cluster in clusters:
+                tiene_dato = False
+                for tienda in {p["tienda"] for p in cluster}:
+                    puntos_tienda = [p for p in cluster if p["tienda"] == tienda]
+                    con_datos = _con_datos_reales(conn, puntos_tienda, agregador)
+                    con_datos |= _cobertura_confirmada_por_limite(conn, tienda, agregador, puntos_tienda)
+                    if con_datos:
+                        tiene_dato = True
+                        break
+                if tiene_dato:
+                    vistos += 1
+                else:
+                    faltan_direcciones.append(cluster[0]["direccion_text"])
+            resultado[agregador] = {
+                "total": len(clusters),
+                "vistos": vistos,
+                "faltan": len(clusters) - vistos,
+                "faltan_direcciones": sorted(faltan_direcciones),
+            }
+    finally:
+        conn.close()
+
+    _cache_resumen_deduplicado["datos"] = resultado
+    _cache_resumen_deduplicado["timestamp"] = ahora
+    return resultado
+
+
+def deduplicar_direcciones(umbral_km: float = UMBRAL_DUPLICADO_KM, aplicar: bool = False) -> dict:
+    """Encuentra grupos de direcciones activas que son el mismo sitio real (ver
+    _agrupar_por_proximidad) y, si aplicar=True, los fusiona: el "ganador" de cada
+    grupo es el punto cuya PROPIA tienda es la que _tienda_mas_cercana() de verdad
+    devuelve para sus coordenadas (desempate: id más bajo); el resto se desactivan
+    (activo=0, igual que eliminar_direccion) tras re-apuntar su historial de
+    agregadores_chequeos al ganador -- si no se re-apuntara, buscar_chequeo_cercano
+    dejaría de ver ese historial (exige d.activo=1 en su JOIN) y se perdería el
+    beneficio de no tener que re-scrapear ese sitio.
+
+    aplicar=False (por defecto) no escribe nada, solo devuelve el plan para revisar."""
+    conn = get_connection()
+    try:
+        puntos = [dict(fila) for fila in conn.execute("SELECT * FROM agregadores_direcciones WHERE activo=1").fetchall()]
+        clusters = _agrupar_por_proximidad(puntos, umbral_km)
+
+        plan = []
+        for cluster in clusters:
+            if len(cluster) < 2:
+                continue
+            ganador = min(
+                cluster,
+                key=lambda p: (0 if _tienda_mas_cercana(p["lat"], p["lng"]) == p["tienda"] else 1, p["id"]),
+            )
+            perdedores = [p for p in cluster if p["id"] != ganador["id"]]
+            plan.append({
+                "ganador": {"id": ganador["id"], "tienda": ganador["tienda"], "direccion_text": ganador["direccion_text"]},
+                "perdedores": [
+                    {"id": p["id"], "tienda": p["tienda"], "direccion_text": p["direccion_text"]} for p in perdedores
+                ],
+            })
+
+        if aplicar:
+            # Mismo efecto que eliminar_direccion() sobre cada perdedor, pero en la
+            # MISMA conexión/transacción que el re-apuntado de chequeos -- así las dos
+            # cosas quedan atómicas por grupo en vez de arriesgarse a un perdedor
+            # desactivado sin que su historial haya llegado a re-apuntarse.
+            for grupo in plan:
+                ganador_id = grupo["ganador"]["id"]
+                for perdedor in grupo["perdedores"]:
+                    conn.execute(
+                        "UPDATE agregadores_chequeos SET direccion_id=? WHERE direccion_id=?",
+                        (ganador_id, perdedor["id"]),
+                    )
+                    conn.execute("UPDATE agregadores_direcciones SET activo=0 WHERE id=?", (perdedor["id"],))
+            conn.commit()
+            _cache_resumen_deduplicado["datos"] = None
+    finally:
+        conn.close()
+
+    return {
+        "aplicado": aplicar,
+        "grupos_con_duplicados": len(plan),
+        "puntos_a_desactivar": sum(len(g["perdedores"]) for g in plan),
+        "detalle": plan,
+    }
+
+
 def guardar_limite(
     tienda: str, agregador: str, angulo_grados: float, limite_km: float | None, nota: str | None,
     lat: float | None = None, lng: float | None = None, direccion_text: str | None = None,

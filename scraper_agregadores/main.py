@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 import config
+from scrapers.base import MARCADOR_TIENDA_NO_CONFIRMADA
 from scrapers.glovo import GlovoScraper
 from scrapers.justeat import JustEatScraper
 from scrapers.ubereats import UberEatsScraper
@@ -53,8 +54,56 @@ async def chequear_tienda(
         texto = direccion["direccion_text"]
         consulta = texto
 
+        # Antes de scrapear de verdad: ¿ya hay un chequeo real reciente de este
+        # agregador a <100m de este punto, de CUALQUIER tienda? Los grids de tiendas
+        # vecinas se solapan (confirmado: 114 pares de puntos a <150m entre tiendas
+        # distintas, algunos literalmente la misma dirección) -- sin esto se scrapea
+        # el mismo sitio real varias veces solo porque cada tienda tiene su propia
+        # fila para él. buscar_limite_cobertura.py ya hace exactamente esto
+        # (buscar_chequeo_cercano); aquí se reutiliza la misma función para que el
+        # daemon normal también se beneficie.
+        try:
+            reuso = await api_client.buscar_chequeo_cercano(direccion["lat"], direccion["lng"], agregador_nombre)
+        except Exception as exc:
+            reuso = None
+            logger.warning("  no se pudo consultar reuso de chequeo cercano: %r", exc)
+
+        if reuso is not None:
+            logger.info(
+                "  [%s/%s] @ %s reutilizado de '%s' (%s) -- sin scrape real",
+                tienda, agregador_nombre, texto, reuso["tienda_origen"],
+                "disponible" if reuso["disponible"] else "no_disponible",
+            )
+            try:
+                await api_client.enviar_chequeo(
+                    {
+                        "tienda": tienda,
+                        "agregador": agregador_nombre,
+                        "direccion_id": direccion["id"],
+                        "disponible": reuso["disponible"],
+                    }
+                )
+            except Exception as exc:
+                logger.warning("  no se pudo subir el chequeo reutilizado a KG: %r", exc)
+            fallos_consecutivos = 0
+            continue  # sin scrape real -> también se salta la pausa anti-bot de este punto
+
         logger.info("Chequeando %s / %s @ %s", tienda, agregador_nombre, texto)
         resultado = await scraper.verificar_disponibilidad(tienda, consulta)
+
+        # verificar_disponibilidad ya reintentó varias veces internamente (ver
+        # scrapers/base.py) antes de darse por vencida -- si SIGUE fallando siempre
+        # con "tienda no confirmada", no es un fallo técnico que vaya a arreglarse
+        # solo: es una búsqueda válida que no encontró la tienda (misma señal que "no
+        # disponible", confirmado a mano por el usuario 09/08 -- ver
+        # buscar_limite_cobertura.py, que ya trataba esto así en SU propio flujo).
+        # Sin esto, un punto así se queda con error_texto para siempre y
+        # _con_datos_reales nunca lo cuenta como "visto" -- cada pasada (cada 10-60
+        # min) lo reintenta desde cero sin avanzar nunca.
+        if resultado.error_texto and MARCADOR_TIENDA_NO_CONFIRMADA in resultado.error_texto:
+            logger.info("  [%s/%s] @ %s: tienda no confirmada de forma persistente -- se acepta como no_disponible real", tienda, agregador_nombre, texto)
+            resultado.disponible = False
+            resultado.error_texto = None
 
         respuesta = await api_client.enviar_chequeo(
             {

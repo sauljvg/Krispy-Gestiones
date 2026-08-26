@@ -87,6 +87,17 @@ class ChallengeDetectedError(Exception):
     """El sitio ha mostrado un challenge anti-bot (Cloudflare u otro WAF)."""
 
 
+# Frase EXACTA que lanzan glovo.py/justeat.py/ubereats.py (con su propio prefijo
+# "<agregador>: ") cuando la búsqueda de la tienda se completó de verdad (sin
+# challenge, sin fallo de red) pero Krispy Kreme sencillamente no salió en los
+# resultados. Confirmado a mano por el usuario 09/08: esto NO es un fallo técnico --
+# es una búsqueda válida que no encontró la tienda, la misma señal que "no
+# disponible". Centralizada aquí (antes solo vivía en buscar_limite_cobertura.py) para
+# que main.py/chequear_tienda pueda tratarla igual en el flujo normal del daemon, no
+# solo en la búsqueda de límite.
+MARCADOR_TIENDA_NO_CONFIRMADA = "tienda no confirmada en resultados de búsqueda"
+
+
 @dataclass
 class ResultadoChequeo:
     disponible: bool
