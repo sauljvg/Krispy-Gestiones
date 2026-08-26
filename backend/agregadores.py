@@ -732,17 +732,24 @@ def get_rondas_actuales() -> dict:
                 resultado[agregador] = None
                 continue
             if fila["finalizada_en"]:
-                hechos = conn.execute(
-                    "SELECT COUNT(DISTINCT direccion_id) FROM agregadores_chequeos "
-                    "WHERE agregador=? AND timestamp >= ? AND timestamp <= ?",
-                    (agregador, fila["iniciada_en"], fila["finalizada_en"]),
-                ).fetchone()[0]
+                condicion = "AND timestamp <= ?"
+                parametros = (agregador, fila["iniciada_en"], fila["finalizada_en"])
             else:
-                hechos = conn.execute(
-                    "SELECT COUNT(DISTINCT direccion_id) FROM agregadores_chequeos "
-                    "WHERE agregador=? AND timestamp >= ?",
-                    (agregador, fila["iniciada_en"]),
-                ).fetchone()[0]
+                condicion = ""
+                parametros = (agregador, fila["iniciada_en"])
+            hechos = conn.execute(
+                f"SELECT COUNT(DISTINCT direccion_id) FROM agregadores_chequeos "
+                f"WHERE agregador=? AND timestamp >= ? {condicion}",
+                parametros,
+            ).fetchone()[0]
+            # Desglose por tienda de ESTA ronda concreta (no del histórico total) --
+            # pedido explícito del usuario 26/08: quería ver "de cuáles está viendo"
+            # mientras avanza, no solo un número agregado.
+            filas_tienda = conn.execute(
+                f"SELECT tienda, COUNT(DISTINCT direccion_id) AS n FROM agregadores_chequeos "
+                f"WHERE agregador=? AND timestamp >= ? {condicion} GROUP BY tienda",
+                parametros,
+            ).fetchall()
             resultado[agregador] = {
                 "iniciada_en": fila["iniciada_en"],
                 "finalizada_en": fila["finalizada_en"],
@@ -750,6 +757,7 @@ def get_rondas_actuales() -> dict:
                 "total_objetivo": fila["total_objetivo"],
                 "hechos": hechos,
                 "faltan": max(fila["total_objetivo"] - hechos, 0),
+                "por_tienda": {f["tienda"]: f["n"] for f in filas_tienda},
             }
         return resultado
     finally:

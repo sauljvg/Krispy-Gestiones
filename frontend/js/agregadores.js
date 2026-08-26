@@ -2505,9 +2505,13 @@ function agrRondaHtml(agregador, ronda) {
       <b>${nombre}</b>: ✅ completado -- ${ronda.hechos}/${ronda.total_objetivo} (${pct}%) · de ${inicio} a ${fin} (${duracionMin} min)
     </div>`;
   }
+  const porTienda = Object.entries(ronda.por_tienda || {})
+    .map(([t, n]) => `${agrCentrosPorTienda[t]?.nombre || t}: ${n}`)
+    .join(" · ");
   return `<div style="margin-bottom:10px;">
     <b>${nombre}</b>: ${ronda.hechos}/${ronda.total_objetivo} hechos (${pct}%) · faltan ${ronda.faltan} · empezó a las ${inicio}
     <div class="agr-card-barra"><span style="width:${pct}%; background:${AGR_COLOR_MARCA[agregador]};"></span></div>
+    ${porTienda ? `<div class="agr-scraper-desglose" style="margin-top:4px;">${porTienda}</div>` : ""}
   </div>`;
 }
 
@@ -2565,9 +2569,10 @@ async function agrCargarDashboardScraper() {
 
     contenido.innerHTML = `
       <h4 class="agr-scraper-titulo-seccion">Vuelta completa en curso</h4>
+      <p class="agr-drill-nota">Solo cuenta lo revalidado DESDE que empezó esta pasada -- si un sitio ya tenía dato de antes (aunque sea viejo), no cuenta aquí como "hecho" hasta que se vuelva a comprobar de verdad en esta ronda.</p>
       ${seccionRondas}
       <h4 class="agr-scraper-titulo-seccion">Cobertura real (deduplicada entre tiendas)</h4>
-      <p class="agr-drill-nota">Cuenta sitios reales únicos, no filas -- los grids de tiendas vecinas se solapan geográficamente, así que el mismo sitio puede tener una fila por tienda.</p>
+      <p class="agr-drill-nota">Esto es distinto de la sección de arriba: cuenta si un sitio tiene dato ALGUNA VEZ (aunque sea de hace días), no si se ha revalidado en la ronda actual -- por eso puede estar al 100% con la vuelta completa recién empezada. Cuenta sitios reales únicos, no filas -- los grids de tiendas vecinas se solapan geográficamente, así que el mismo sitio puede tener una fila por tienda.</p>
       <div class="agr-scraper-tabla-wrap">
         <table class="agr-scraper-tabla">
           <thead><tr><th></th>${cabeceras}</tr></thead>
