@@ -624,14 +624,19 @@ def resumen_cobertura_deduplicada() -> dict:
     return resultado
 
 
-def iniciar_ronda(agregador: str, total_objetivo: int) -> dict:
+def iniciar_ronda(agregador: str, total_objetivo: int, iniciada_en: str | None = None) -> dict:
     """Marca el inicio de una vuelta completa REAL (ver
     scraper_agregadores/revalidar_completo.py) para poder mostrar progreso en vivo en
     el dashboard integrado (panel_resumen_estados_route). Idempotente a propósito:
     los N workers en paralelo de esa vuelta llaman a esto al arrancar sin
     coordinarse entre sí -- si ya hay una ronda activa (sin finalizar) para este
     agregador, la devuelve tal cual en vez de crear otra; el primero en llegar crea
-    la fila, el resto la encuentran ya creada."""
+    la fila, el resto la encuentran ya creada.
+
+    `iniciada_en`: normalmente None (usa la hora actual) -- solo se pasa a mano para
+    reconstruir en el dashboard una vuelta que ya corrió y terminó ANTES de que este
+    reporte existiera (ver JustEat 26/08, primera vuelta con 20 workers que ya
+    había acabado cuando se añadió esto). No la usan los workers normales."""
     conn = get_connection()
     try:
         fila = conn.execute(
@@ -641,25 +646,27 @@ def iniciar_ronda(agregador: str, total_objetivo: int) -> dict:
         ).fetchone()
         if fila:
             return dict(fila)
-        ahora = datetime.now(timezone.utc).isoformat()
+        momento = iniciada_en or datetime.now(timezone.utc).isoformat()
         cur = conn.execute(
             "INSERT INTO agregadores_rondas (agregador, iniciada_en, total_objetivo) VALUES (?, ?, ?)",
-            (agregador, ahora, total_objetivo),
+            (agregador, momento, total_objetivo),
         )
         conn.commit()
-        return {"id": cur.lastrowid, "iniciada_en": ahora, "total_objetivo": total_objetivo}
+        return {"id": cur.lastrowid, "iniciada_en": momento, "total_objetivo": total_objetivo}
     finally:
         conn.close()
 
 
-def finalizar_ronda(agregador: str) -> None:
+def finalizar_ronda(agregador: str, finalizada_en: str | None = None) -> None:
     """Idempotente igual que iniciar_ronda -- el UPDATE con WHERE finalizada_en IS
-    NULL no hace nada si otro worker ya la cerró antes."""
+    NULL no hace nada si otro worker ya la cerró antes. `finalizada_en`: ver nota de
+    iniciada_en en iniciar_ronda, mismo uso puntual para reconstruir una vuelta ya
+    terminada."""
     conn = get_connection()
     try:
         conn.execute(
             "UPDATE agregadores_rondas SET finalizada_en=? WHERE agregador=? AND finalizada_en IS NULL",
-            (datetime.now(timezone.utc).isoformat(), agregador),
+            (finalizada_en or datetime.now(timezone.utc).isoformat(), agregador),
         )
         conn.commit()
     finally:

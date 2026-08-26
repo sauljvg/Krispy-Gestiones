@@ -514,19 +514,21 @@ def panel_resumen_deduplicado_route():
 
 
 @router.post("/admin/rondas/iniciar", dependencies=[Depends(require_api_key)])
-def admin_iniciar_ronda_route(agregador: str, total_objetivo: int):
+def admin_iniciar_ronda_route(agregador: str, total_objetivo: int, iniciada_en: str | None = None):
     """Llamado por cada worker de revalidar_completo.py al arrancar (los N en
     paralelo, sin coordinarse entre sí) -- ver agregadores_module.iniciar_ronda,
     idempotente: si ya hay una ronda activa para este agregador, la devuelve tal
-    cual en vez de duplicarla."""
-    return agregadores_module.iniciar_ronda(agregador, total_objetivo)
+    cual en vez de duplicarla. `iniciada_en` (ISO, opcional): solo para reconstruir
+    a mano una vuelta que ya terminó antes de que este reporte existiera."""
+    return agregadores_module.iniciar_ronda(agregador, total_objetivo, iniciada_en)
 
 
 @router.post("/admin/rondas/finalizar", dependencies=[Depends(require_api_key)])
-def admin_finalizar_ronda_route(agregador: str):
+def admin_finalizar_ronda_route(agregador: str, finalizada_en: str | None = None):
     """Llamado por cada worker de revalidar_completo.py al terminar -- ver
-    agregadores_module.finalizar_ronda, idempotente."""
-    agregadores_module.finalizar_ronda(agregador)
+    agregadores_module.finalizar_ronda, idempotente. `finalizada_en`: ver nota de
+    iniciada_en en la ruta de arriba."""
+    agregadores_module.finalizar_ronda(agregador, finalizada_en)
     return {"ok": True}
 
 
