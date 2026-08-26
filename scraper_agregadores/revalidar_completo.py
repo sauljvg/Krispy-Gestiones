@@ -73,6 +73,7 @@ async def main(agregador: str, worker_index: int, worker_count: int):
     except Exception as exc:
         logger.warning("No se pudo avisar del inicio de ronda (sigue igual): %r", exc)
 
+    fallidos = []
     for i, direccion in enumerate(asignados):
         try:
             # permitir_reuso=False: nunca reutiliza, siempre scrapea de verdad -- es una
@@ -82,9 +83,42 @@ async def main(agregador: str, worker_index: int, worker_count: int):
                 direccion["tienda"], agregador, direcciones_override=[direccion], permitir_reuso=False
             )
         except Exception as exc:
-            logger.error("Fallo revalidando %s: %r", direccion.get("direccion_text"), exc)
+            # No se descarta sin más -- si esto fue un fallo de CONEXIÓN a nuestro
+            # propio backend (confirmado en vivo 26/08: ClientConnectorError por
+            # saturación de sockets con muchos workers a la vez, agotó hasta los
+            # reintentos de api_client._solicitar), el punto queda sin dato para
+            # siempre si no se reintenta -- se encola para un segundo/tercer intento
+            # al final de la pasada, cuando ya haya menos contención.
+            logger.error("Fallo revalidando %s (se reintentará al final): %r", direccion.get("direccion_text"), exc)
+            fallidos.append(direccion)
         if i < len(asignados) - 1:
             await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
+
+    intentos_extra = 0
+    while fallidos and intentos_extra < 3:
+        intentos_extra += 1
+        logger.info(
+            "Worker %d/%d (%s): reintentando %d punto(s) que fallaron del todo (intento extra %d/3)",
+            worker_index, worker_count, agregador, len(fallidos), intentos_extra,
+        )
+        siguen_fallando = []
+        for direccion in fallidos:
+            try:
+                await chequear_tienda(
+                    direccion["tienda"], agregador, direcciones_override=[direccion], permitir_reuso=False
+                )
+            except Exception as exc:
+                logger.error("Sigue fallando %s (intento extra %d/3): %r", direccion.get("direccion_text"), intentos_extra, exc)
+                siguen_fallando.append(direccion)
+            await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
+        fallidos = siguen_fallando
+
+    if fallidos:
+        logger.error(
+            "Worker %d/%d (%s): %d punto(s) NUNCA se pudieron subir tras 3 reintentos extra: %s",
+            worker_index, worker_count, agregador, len(fallidos),
+            [d.get("direccion_text") for d in fallidos],
+        )
 
     logger.info("Worker %d/%d (%s) terminado.", worker_index, worker_count, agregador)
 

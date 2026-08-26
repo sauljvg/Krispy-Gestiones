@@ -118,7 +118,22 @@ class GlovoScraper(BaseAggregatorScraper):
 
         if not abrio_panel:
             abridor = page.locator(SEL_ADDRESS_OPENER).first
-            await abridor.click(force=True)
+            try:
+                await abridor.click(force=True)
+            except Exception:
+                # Ni el botón de cambiar dirección ni este input inicial aparecieron --
+                # la home de Glovo no cargó el layout esperado en absoluto (visto en
+                # vivo 26/08: ~29% de fallos en una vuelta completa con 20 workers a la
+                # vez). Captura ambas cosas ANTES de relanzar -- si no se guarda aquí,
+                # se pierde: el reintento siguiente abre una page/browser nuevos.
+                ruta = await self.screenshot_on_error(page, "sin_campo_direccion")
+                ruta_html = await self.guardar_html_debug(page, "sin_campo_direccion")
+                logger.warning(
+                    "glovo: no aparece ni el botón de cambiar dirección ni el campo inicial de "
+                    "dirección -- captura: %s -- html: %s",
+                    ruta, ruta_html,
+                )
+                raise
 
         campo = page.locator(SEL_ADDRESS_EDITABLE_INPUT).first
         await campo.wait_for(state="visible", timeout=10000)
