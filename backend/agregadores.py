@@ -667,32 +667,46 @@ def finalizar_ronda(agregador: str) -> None:
 
 
 def get_rondas_actuales() -> dict:
-    """Para el panel 'Dashboard del scraper': por agregador, si hay una vuelta
-    completa en curso ahora mismo, cuánto lleva. "hechos" se calcula contando
-    agregadores_chequeos reales con timestamp posterior a iniciada_en -- ningún
-    worker necesita reportar su propio avance, así que da igual cuántos corran en
-    paralelo. Si la ronda se relanzó a mitad (worker-count distinto, etc.) tiene su
-    propio iniciada_en más reciente, así que "hechos" no arrastra chequeos de un
-    intento anterior abandonado."""
+    """Para el panel 'Dashboard del scraper': por agregador, la ÚLTIMA vuelta
+    completa (en curso o ya terminada), para que al terminar diga "completado" en
+    vez de volver a "sin vuelta en curso" como si nunca hubiera pasado nada (pedido
+    explícito del usuario 26/08 -- confundía con "nunca se lanzó"). "hechos" se
+    calcula contando agregadores_chequeos reales con timestamp posterior a
+    iniciada_en -- ningún worker necesita reportar su propio avance, así que da
+    igual cuántos corran en paralelo. Si la ronda se relanzó a mitad (worker-count
+    distinto, etc.) tiene su propio iniciada_en más reciente, así que "hechos" no
+    arrastra chequeos de un intento anterior abandonado. Para una ronda YA
+    terminada, el conteo se acota también por arriba (<= finalizada_en) -- si no,
+    el daemon normal (24/7) seguiría sumando chequeos de fondo a una foto que
+    debería quedar fija en el momento en que la ronda terminó."""
     conn = get_connection()
     try:
         resultado = {}
         for agregador in AGREGADORES:
             fila = conn.execute(
-                "SELECT id, iniciada_en, total_objetivo FROM agregadores_rondas "
-                "WHERE agregador=? AND finalizada_en IS NULL ORDER BY id DESC LIMIT 1",
+                "SELECT id, iniciada_en, total_objetivo, finalizada_en FROM agregadores_rondas "
+                "WHERE agregador=? ORDER BY id DESC LIMIT 1",
                 (agregador,),
             ).fetchone()
             if not fila:
                 resultado[agregador] = None
                 continue
-            hechos = conn.execute(
-                "SELECT COUNT(DISTINCT direccion_id) FROM agregadores_chequeos "
-                "WHERE agregador=? AND timestamp >= ?",
-                (agregador, fila["iniciada_en"]),
-            ).fetchone()[0]
+            if fila["finalizada_en"]:
+                hechos = conn.execute(
+                    "SELECT COUNT(DISTINCT direccion_id) FROM agregadores_chequeos "
+                    "WHERE agregador=? AND timestamp >= ? AND timestamp <= ?",
+                    (agregador, fila["iniciada_en"], fila["finalizada_en"]),
+                ).fetchone()[0]
+            else:
+                hechos = conn.execute(
+                    "SELECT COUNT(DISTINCT direccion_id) FROM agregadores_chequeos "
+                    "WHERE agregador=? AND timestamp >= ?",
+                    (agregador, fila["iniciada_en"]),
+                ).fetchone()[0]
             resultado[agregador] = {
                 "iniciada_en": fila["iniciada_en"],
+                "finalizada_en": fila["finalizada_en"],
+                "en_curso": fila["finalizada_en"] is None,
                 "total_objetivo": fila["total_objetivo"],
                 "hechos": hechos,
                 "faltan": max(fila["total_objetivo"] - hechos, 0),

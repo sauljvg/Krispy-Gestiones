@@ -2494,10 +2494,17 @@ function agrCerrarDashboardScraper() {
 function agrRondaHtml(agregador, ronda) {
   const nombre = AGR_NOMBRE_AGREGADOR[agregador];
   if (!ronda) {
-    return `<div class="agr-scraper-desglose" style="margin-bottom:6px;"><b>${nombre}</b>: sin vuelta completa en curso</div>`;
+    return `<div class="agr-scraper-desglose" style="margin-bottom:6px;"><b>${nombre}</b>: nunca se ha lanzado una vuelta completa</div>`;
   }
   const pct = ronda.total_objetivo > 0 ? Math.round((ronda.hechos / ronda.total_objetivo) * 100) : 0;
   const inicio = new Date(ronda.iniciada_en).toLocaleTimeString("es-ES", { timeZone: "Europe/Madrid" });
+  if (!ronda.en_curso) {
+    const fin = new Date(ronda.finalizada_en).toLocaleTimeString("es-ES", { timeZone: "Europe/Madrid" });
+    const duracionMin = Math.max(1, Math.round((new Date(ronda.finalizada_en) - new Date(ronda.iniciada_en)) / 60000));
+    return `<div class="agr-scraper-desglose" style="margin-bottom:6px;">
+      <b>${nombre}</b>: ✅ completado -- ${ronda.hechos}/${ronda.total_objetivo} (${pct}%) · de ${inicio} a ${fin} (${duracionMin} min)
+    </div>`;
+  }
   return `<div style="margin-bottom:10px;">
     <b>${nombre}</b>: ${ronda.hechos}/${ronda.total_objetivo} hechos (${pct}%) · faltan ${ronda.faltan} · empezó a las ${inicio}
     <div class="agr-card-barra"><span style="width:${pct}%; background:${AGR_COLOR_MARCA[agregador]};"></span></div>
