@@ -832,6 +832,8 @@ def estado_route(_user: dict = Depends(require_agregadores)):
 def reporte_diario_route(
     tienda: str | None = None,
     fecha: str | None = Query(default=None),
+    desde: str | None = Query(default=None, description="ISO, opcional -- filtro exacto de fecha+hora, tiene prioridad sobre `fecha`"),
+    hasta: str | None = Query(default=None, description="ISO, opcional -- ver `desde`"),
     resets: str | None = Query(
         default=None,
         description='JSON {"agregador": "iso_timestamp"} -- recalcula ese agregador solo '
@@ -840,17 +842,25 @@ def reporte_diario_route(
     ),
     _user: dict = Depends(require_agregadores),
 ):
-    if fecha:
+    # desde/hasta (fecha+hora exacta, no solo el día entero) -- pedido explícito del
+    # usuario 26/08: quería poder buscar "qué pasó tal día entre estas horas", no solo
+    # un día completo. Sin ellos, se mantiene el comportamiento de siempre (día entero).
+    if desde and hasta:
+        rango_desde = datetime.fromisoformat(desde)
+        rango_hasta = datetime.fromisoformat(hasta)
+    elif fecha:
         dia = datetime.strptime(fecha, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        rango_desde, rango_hasta = dia, dia + timedelta(days=1)
     else:
         dia = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        rango_desde, rango_hasta = dia, dia + timedelta(days=1)
     resets_dict = None
     if resets:
         try:
             resets_dict = json.loads(resets)
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="resets debe ser JSON válido")
-    return agregadores_module.get_reporte(tienda, dia, dia + timedelta(days=1), resets_dict)
+    return agregadores_module.get_reporte(tienda, rango_desde, rango_hasta, resets_dict)
 
 
 @router.get("/reportes/semanal")

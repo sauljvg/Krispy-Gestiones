@@ -41,7 +41,6 @@
     color: var(--text-secondary); font-size: 12px; font-weight: 600; vertical-align: middle;
   }
   #agr-map { height: 70vh; min-height: 480px; border-radius: 8px; overflow: hidden; }
-  #agr-map-9am { height: 60vh; min-height: 400px; border-radius: 8px; overflow: hidden; filter: grayscale(0.15); }
 
   .agr-filtro-agregador { display: flex; gap: 6px; flex-wrap: wrap; }
   .agr-filtro-btn {
@@ -89,13 +88,6 @@
   .agr-leyenda-item:hover { background: var(--surface-page); }
   .agr-leyenda-item.oculto { opacity: 0.4; text-decoration: line-through; }
   .agr-leyenda-n { color: var(--text-muted); font-weight: 700; }
-
-  .agr-guia-angulo-label {
-    background: transparent; border: none; pointer-events: none;
-    font-size: 11px; font-weight: 700; color: #444;
-    text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff;
-    text-align: center; white-space: nowrap;
-  }
 
   .agr-marker-dot { background: transparent; border: none; }
   .agr-marker-dot span {
@@ -184,6 +176,7 @@
   .agr-resumen-nota { font-size: 0.72rem; color: var(--text-muted); margin: -6px 0 12px; line-height: 1.4; }
   .agr-toggle-nuevos { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--text-muted); margin: 4px 0; cursor: pointer; user-select: none; }
   .agr-toggle-nuevos input { cursor: pointer; }
+  .agr-toggle-nuevos select { padding: 3px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 0.78rem; cursor: pointer; }
 
   #agr-resumen-titulo { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   #agr-resumen-titulo h2 { margin: 0; }
@@ -284,6 +277,9 @@
       <button type="button" id="agr-btn-dashboard-scraper" class="btn btn-ghost" hidden onclick="agrAbrirDashboardScraper()">📊 Dashboard del scraper</button>
       <span class="agr-tiendas-mapa-label">Tiendas:</span>
       <div id="agr-tiendas-mapa-chips" class="agr-tiendas-mapa-chips"></div>
+      <span id="agr-actualizado" style="color:var(--text-muted); font-size:12px;"></span>
+    </div>
+    <div class="agr-toolbar">
       <button type="button" id="agr-btn-anadir" class="btn btn-ghost" onclick="agrToggleModoAnadir()">➕ Añadir punto</button>
       <button type="button" id="agr-btn-unir" class="btn btn-ghost" onclick="agrToggleModoUnir()">🔗 Unir puntos</button>
       <button type="button" id="agr-btn-pincel" class="btn btn-ghost" onclick="agrToggleModoPincel()">🖌️ Pincel: rellenar hueco</button>
@@ -291,7 +287,6 @@
         <button type="button" class="btn btn-primario" style="font-size:12px;padding:4px 10px;" onclick="agrPincelTerminar()">✅ Rellenar (<span id="agr-pincel-n">0</span> puntos)</button>
         <button type="button" class="btn btn-ghost" style="font-size:12px;padding:4px 10px;" onclick="agrPincelCancelar()">✕ Cancelar</button>
       </span>
-      <span id="agr-actualizado" style="color:var(--text-muted); font-size:12px;"></span>
     </div>
 
     <div class="agr-panel agr-panel-mapa">
@@ -305,12 +300,12 @@
         </div>
       </div>
       <label class="agr-toggle-nuevos">
-        <input type="checkbox" id="agr-solo-nuevos" onchange="agrToggleSoloNuevos()">
-        Solo dots nuevos desde que active esto (oculta los puntos ya existentes, no afecta a los manuales)
-      </label>
-      <label class="agr-toggle-nuevos">
-        <input type="checkbox" id="agr-solo-manuales" onchange="agrToggleSoloManuales()">
-        Solo dots manuales (los que has añadido tú a mano)
+        Mostrar:
+        <select id="agr-filtro-dots" onchange="agrCambiarFiltroDots()">
+          <option value="">Todos los dots</option>
+          <option value="nuevos">Solo nuevos desde que active esto</option>
+          <option value="manuales">Solo manuales (los que has añadido tú a mano)</option>
+        </select>
       </label>
       <label class="agr-toggle-nuevos">
         <input type="checkbox" id="agr-mostrar-poligono" checked onchange="agrToggleMostrarPoligono()">
@@ -320,21 +315,9 @@
         <input type="checkbox" id="agr-mostrar-union" onchange="agrToggleMostrarUnion()">
         Mostrar cobertura combinada (unión de todas las tiendas visibles, por agregador)
       </label>
-      <label class="agr-toggle-nuevos">
-        <input type="checkbox" id="agr-mostrar-compas" onchange="agrToggleCompas()">
-        Mostrar compás de ángulos (líneas cada 15° desde la tienda, para ubicar huecos al añadir puntos -- solo con una tienda seleccionada)
-      </label>
       <p class="agr-resumen-nota" id="agr-cobertura-nota"></p>
       <div id="agr-map"></div>
       <div id="agr-leyenda" class="agr-leyenda"></div>
-    </div>
-
-    <div class="agr-panel agr-panel-mapa" id="agr-panel-9am" hidden>
-      <div class="agr-panel-mapa-header">
-        <h2>Mapa a las 9:00 (referencia, algoritmo de antes de los cambios de hoy)</h2>
-      </div>
-      <p class="agr-resumen-nota">Mismos datos en vivo, pero calculados con el algoritmo del polígono tal como estaba a las 9:00 (sin filtro de tienda más cercana, tolerancia de 3°, sin corregir el hueco de "no disponible"). Solo para comparar visualmente -- de solo lectura, no se puede editar aquí.</p>
-      <div id="agr-map-9am"></div>
     </div>
 
     <div class="agr-bottom-grid">
@@ -371,7 +354,7 @@
       <div>
         <div class="agr-panel">
           <div id="agr-resumen-titulo">
-            <h2>Resumen (24h)</h2>
+            <h2 id="agr-resumen-titulo-texto">Resumen (24h)</h2>
             <div class="agr-borrar-wrap">
               <button type="button" id="agr-btn-borrar-stats" class="agr-icon-btn" title="Ocultar tarjetas del resumen (solo en este navegador)" aria-label="Ocultar tarjetas del resumen" onclick="agrToggleMenuBorrar(event)">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
@@ -442,6 +425,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260821a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/agregadores.js?v=20260826f"></script>
+<script src="js/agregadores.js?v=20260826g"></script>
 </body>
 </html>

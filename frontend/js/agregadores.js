@@ -3,7 +3,6 @@ const AGR_TODAS = "__todas__";
 let agrTiendaActual = null;
 let agrIntervalo = null;
 let agrMap = null;
-let agrMap9am = null; // mapa de referencia de solo lectura, algoritmo del polígono tal como estaba a las 9:00 (ver agrDibujarPoligono9am) -- solo visible para saul
 let agrDireccionMarkers = [];
 let agrMarkersPorId = {};
 let agrTiendaMarkers = []; // iconos de tienda en el mapa -- se limpian y recrean en cada render para no acumularse ahora que agrMap ya no se destruye/recrea cada 30s
@@ -161,9 +160,24 @@ const AGR_SOLO_MANUALES_KEY = "agr_solo_manuales";
 function agrSoloManualesActivo() {
   return localStorage.getItem(AGR_SOLO_MANUALES_KEY) === "1";
 }
-function agrToggleSoloManuales() {
-  const activo = document.getElementById("agr-solo-manuales")?.checked;
-  localStorage.setItem(AGR_SOLO_MANUALES_KEY, activo ? "1" : "0");
+
+// "Solo nuevos" y "solo manuales" eran dos checkboxes aparte que hacían casi
+// lo mismo (filtrar qué dots se ven) -- unificados en un único selector
+// (pedido explícito del usuario 26/08), mutuamente excluyentes.
+function agrCambiarFiltroDots() {
+  const valor = document.getElementById("agr-filtro-dots")?.value || "";
+  localStorage.setItem(AGR_SOLO_MANUALES_KEY, valor === "manuales" ? "1" : "0");
+  if (agrTiendaActual) {
+    if (valor === "nuevos") {
+      const maxId = agrDireccionMarkers.reduce(
+        (max, m) => (m._agrDir && m._agrDir.origen !== "manual" ? Math.max(max, m._agrDir.id || 0) : max),
+        0
+      );
+      localStorage.setItem(agrSoloNuevosKey(agrTiendaActual), String(maxId));
+    } else {
+      localStorage.removeItem(agrSoloNuevosKey(agrTiendaActual));
+    }
+  }
   agrActualizarMarcadores();
   agrActualizarLeyenda();
   agrRecalcularContador();
@@ -197,15 +211,6 @@ function agrInitMap(lat, lng) {
     if (!agrModoAnadir) return;
     agrAnadirPunto(e.latlng.lat, e.latlng.lng);
   });
-  return true;
-}
-
-function agrInitMap9am(lat, lng) {
-  if (agrMap9am) return false;
-  agrMap9am = L.map("agr-map-9am").setView([lat, lng], 12);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "&copy; OpenStreetMap",
-  }).addTo(agrMap9am);
   return true;
 }
 
@@ -661,7 +666,6 @@ function agrWireFiltroAgregador() {
       agrActualizarMarcadores();
       agrRecalcularContador();
       agrActualizarPoligonoLimite();
-      agrActualizarPoligono9am(true); // el filtro cambió -- reencuadrar (ver agrActualizarPoligono9am)
     });
   });
 
@@ -833,67 +837,6 @@ function agrTiendaMasCercana(lat, lng) {
     if (mejorDist == null || d < mejorDist) { mejor = slug; mejorDist = d; }
   });
   return mejor;
-}
-
-let agrLineasGuiaAngulo = []; // líneas "compás" (cada 15°, con etiqueta) que salen del centro de la tienda mientras se está en modo añadir -- calcular a mano a qué ángulo cae un hueco en el mapa es poco práctico (pedido explícito del usuario 09/08), esto lo hace visual: solo hay que mirar entre qué dos líneas cae el hueco y hacer clic ahí.
-const AGR_GUIA_ANGULO_PASO = 15;
-const AGR_GUIA_ANGULO_RADIO_KM = 9; // cubre incluso el punto más lejano que prueba la búsqueda de límite (DISTANCIAS_EXPANSION llega a 9km)
-
-function agrLimpiarGuiasAngulo() {
-  agrLineasGuiaAngulo.forEach((l) => agrMap && agrMap.removeLayer(l));
-  agrLineasGuiaAngulo = [];
-}
-
-const AGR_MOSTRAR_COMPAS_KEY = "agr_mostrar_compas_angulo";
-
-function agrMostrarCompasActivo() {
-  return localStorage.getItem(AGR_MOSTRAR_COMPAS_KEY) === "1";
-}
-
-function agrToggleCompas() {
-  const activo = document.getElementById("agr-mostrar-compas")?.checked;
-  localStorage.setItem(AGR_MOSTRAR_COMPAS_KEY, activo ? "1" : "0");
-  agrActualizarGuiasAngulo();
-}
-
-function agrActualizarGuiasAngulo() {
-  const checkbox = document.getElementById("agr-mostrar-compas");
-  if (checkbox) checkbox.checked = agrMostrarCompasActivo();
-  if (agrMostrarCompasActivo()) agrDibujarGuiasAngulo();
-  else agrLimpiarGuiasAngulo();
-}
-
-function agrDibujarGuiasAngulo() {
-  agrLimpiarGuiasAngulo();
-  if (!agrMap || !agrMostrarCompasActivo()) return;
-  // Un compás por cada tienda visible en el mapa ahora mismo -- con la
-  // asignación al punto "más cercano" en vista con varias tiendas (ver
-  // agrTiendaMasCercana), el caso más útil es justo comparar dos tiendas
-  // vecinas a la vez (ej. Princesa/Caleido), así que restringir el compás a
-  // una sola tienda seleccionada dejaba sin líneas guía justo ese caso
-  // (confirmado en vivo 09/08). Con 3+ tiendas a la vez se puede ver
-  // recargado, pero es una elección del usuario al activar el checkbox.
-  Object.values(agrCentrosPorTienda).forEach((centro) => {
-    for (let angulo = 0; angulo < 360; angulo += AGR_GUIA_ANGULO_PASO) {
-      const destino = agrMoverPunto(centro.lat, centro.lng, angulo, AGR_GUIA_ANGULO_RADIO_KM);
-      agrLineasGuiaAngulo.push(
-        L.polyline([[centro.lat, centro.lng], destino], {
-          // Más oscuro/visible que antes (pedido explícito del usuario
-          // 09/08: se perdía en el mapa) pero fino y punteado -- para no
-          // confundirse con el polígono de límite (línea gruesa sólida del
-          // color del agregador) ni con el contorno de la unión (gruesa,
-          // #1a1a1a, guiones largos "6 4").
-          color: "#333", weight: 1.5, opacity: 0.75, dashArray: "2 6", interactive: false,
-        }).addTo(agrMap)
-      );
-      agrLineasGuiaAngulo.push(
-        L.marker(destino, {
-          icon: L.divIcon({ className: "agr-guia-angulo-label", html: `${angulo}°`, iconSize: [34, 14], iconAnchor: [17, 7] }),
-          interactive: false,
-        }).addTo(agrMap)
-      );
-    }
-  });
 }
 
 function agrLimpiarMapa() {
@@ -1078,16 +1021,17 @@ function agrActualizarChipsTiendasMapa() {
 async function agrCargarMapa() {
   if (!agrTiendaActual || !agrMapaTiendasSeleccionadas || agrMapaTiendasSeleccionadas.size === 0) return;
 
-  // Bug confirmado en vivo 08/08: la casilla siempre arranca DESMARCADA al
-  // recargar la página (no hay código que la marque), pero el filtro en sí
-  // vive en localStorage y SÍ sobrevive a la recarga -- si se activó una vez
-  // para esta tienda y nunca se desmarcó a mano antes de recargar, el filtro
-  // seguía activo ocultando TODOS los puntos, con la casilla mintiendo que
-  // estaba apagado. Se sincroniza la casilla con el estado real al cargar.
-  const checkboxSoloNuevos = document.getElementById("agr-solo-nuevos");
-  if (checkboxSoloNuevos) checkboxSoloNuevos.checked = agrSoloNuevosBaseline() != null;
-  const checkboxSoloManuales = document.getElementById("agr-solo-manuales");
-  if (checkboxSoloManuales) checkboxSoloManuales.checked = agrSoloManualesActivo();
+  // Bug confirmado en vivo 08/08: el control siempre arrancaba en "Todos" al
+  // recargar la página (no había código que lo marcase), pero el filtro en
+  // sí vive en localStorage y SÍ sobrevive a la recarga -- si se activó una
+  // vez para esta tienda y nunca se quitó a mano antes de recargar, el
+  // filtro seguía activo ocultando TODOS los puntos, con el selector
+  // mintiendo que estaba en "Todos". Se sincroniza con el estado real al
+  // cargar.
+  const selectFiltroDots = document.getElementById("agr-filtro-dots");
+  if (selectFiltroDots) {
+    selectFiltroDots.value = agrSoloManualesActivo() ? "manuales" : (agrSoloNuevosBaseline() != null ? "nuevos" : "");
+  }
 
   // Siempre se pide el dato de las 6 tiendas y se filtra en el cliente a las
   // chips activas -- así "Princesa y Caleido" o "todas menos una" es solo
@@ -1134,8 +1078,6 @@ async function agrCargarMapa() {
   agrUltimaSeleccionMapa = seleccionClave;
   agrRenderMapaTodas(filtrado, ajustarVista);
   await agrActualizarPoligonoLimite();
-  agrActualizarGuiasAngulo();
-  agrActualizarPoligono9am(ajustarVista);
 }
 
 function agrLimpiarTabla() {
@@ -1181,13 +1123,22 @@ function agrAplicarFiltroFecha() {
   const hasta = new Date(`${fecha}T${horaHasta}:59`).toISOString();
   agrFiltroFechaActivo = { desde, hasta };
   document.getElementById("agr-filtro-fecha-activo").textContent = `Mostrando ${fecha} de ${horaDesde} a ${horaHasta}`;
+  agrActualizarTituloResumen();
   agrCargarTabla();
+  agrCargarResumen();
 }
 
 function agrQuitarFiltroFecha() {
   agrFiltroFechaActivo = null;
   document.getElementById("agr-filtro-fecha-activo").textContent = "";
+  agrActualizarTituloResumen();
   agrCargarTabla();
+  agrCargarResumen();
+}
+
+function agrActualizarTituloResumen() {
+  const titulo = document.getElementById("agr-resumen-titulo-texto");
+  if (titulo) titulo.textContent = agrFiltroFechaActivo ? "Resumen (periodo filtrado)" : "Resumen (24h)";
 }
 
 async function agrCargarTabla() {
@@ -1245,7 +1196,8 @@ function agrRenderCards(reporte) {
   const cont = document.getElementById("agr-cards");
   const entradas = Object.entries(reporte.agregadores).filter(([nombre]) => !agrTarjetasOcultas.has(nombre));
   if (entradas.length === 0) {
-    const motivo = Object.keys(reporte.agregadores).length === 0 ? "Sin chequeos en 24h." : "Todas las tarjetas están ocultas -- usa el icono 🗑 para volver a mostrarlas.";
+    const periodo = agrFiltroFechaActivo ? "en ese periodo" : "en 24h";
+    const motivo = Object.keys(reporte.agregadores).length === 0 ? `Sin chequeos ${periodo}.` : "Todas las tarjetas están ocultas -- usa el icono 🗑 para volver a mostrarlas.";
     cont.innerHTML = `<p style="color:var(--text-muted);font-size:0.85rem;grid-column:1/-1;">${motivo}</p>`;
     return;
   }
@@ -1386,6 +1338,14 @@ async function agrCargarResumen() {
   const params = new URLSearchParams();
   if (agrTiendaActual !== AGR_TODAS) params.set("tienda", agrTiendaActual);
   if (Object.keys(agrReinicios).length > 0) params.set("resets", JSON.stringify(agrReinicios));
+  // El filtro de fecha/hora de "Últimos chequeos" también manda aquí -- el usuario
+  // quiere buscar por un scrap concreto y ver de un vistazo cuántos fallos hubo,
+  // disponible/no disponible, no solo la lista cruda de filas (pedido explícito
+  // 26/08). Mismo periodo para las dos secciones, un único filtro.
+  if (agrFiltroFechaActivo) {
+    params.set("desde", agrFiltroFechaActivo.desde);
+    params.set("hasta", agrFiltroFechaActivo.hasta);
+  }
   const url = `${AGR_API}/reportes/diario${params.toString() ? "?" + params.toString() : ""}`;
   const res = await fetch(url, { credentials: "include" });
   const reporte = await res.json();
@@ -1611,30 +1571,6 @@ function agrSoloNuevosBaseline() {
   return v == null ? null : parseInt(v, 10);
 }
 
-function agrToggleSoloNuevos() {
-  const activo = document.getElementById("agr-solo-nuevos")?.checked;
-  if (!agrTiendaActual) return;
-  if (activo) {
-    // El máximo id ya cargado en el mapa ahora mismo -- todo lo que se cree
-    // a partir de aquí tendrá un id mayor. Se excluyen los manuales del
-    // cálculo: sus ids son de una tanda aparte y normalmente más alta (se
-    // añaden después, a mano), así que si se contasen aquí, el baseline
-    // quedaría por encima de TODOS los ids de grid/límite -- el filtro
-    // acabaría ocultándolos todos y "solo nuevos" pasaría a comportarse
-    // exactamente igual que "solo manuales" (confirmado por el usuario
-    // 09/08: los dos primeros checkboxes hacían lo mismo).
-    const maxId = agrDireccionMarkers.reduce(
-      (max, m) => (m._agrDir && m._agrDir.origen !== "manual" ? Math.max(max, m._agrDir.id || 0) : max),
-      0
-    );
-    localStorage.setItem(agrSoloNuevosKey(agrTiendaActual), String(maxId));
-  } else {
-    localStorage.removeItem(agrSoloNuevosKey(agrTiendaActual));
-  }
-  agrActualizarMarcadores();
-  agrRecalcularContador();
-}
-
 // Mostrar/ocultar el polígono de límite real (y sus puntos de vértice) --
 // preferencia general, no por tienda (a diferencia de "solo nuevos"), y
 // activada por defecto si nunca se ha tocado.
@@ -1777,158 +1713,6 @@ function agrCruceConBorde(a, b, bearingDeg) {
   const s = (dirX * a[1] - dirY * a[0]) / D;
   if (t < 0 || s < -0.01 || s > 1.01) return null;
   return t;
-}
-
-// Algoritmo del polígono TAL COMO ESTABA a las 9:00 de hoy (commit 2b396c3,
-// antes de cualquiera de los cambios de hoy: sin filtro de tienda más
-// cercana, tolerancia de 3° -- no 0.5° --, y "puntosCercanos" solo ignoraba
-// un no_disponible cercano a un vértice medido en vez de encogerlo). Copia
-// deliberada, no una llamada a la versión actual: es justo el "antes" que el
-// usuario quiere ver al lado del "después" para comparar (pedido explícito
-// del usuario 10/08, tras preguntar por volver a la versión de las 9am).
-// Solo calcula los vértices (lat/lng) -- el mapa de referencia los pinta
-// como polígono + puntos simples, de solo lectura, sin popups ni arrastre.
-function agrCalcularPoligono9am(limites, centro, direccionesTienda) {
-  if (!limites || limites.length === 0) return null;
-  const agregador = limites[0].agregador;
-  const base = [...limites]
-    .filter((l) => agrRadioDeLimite(l) != null)
-    .map((l) => {
-      const radio = Math.max(agrRadioDeLimite(l), 0.05);
-      const latlngReal = l.lat != null && l.lng != null ? [l.lat, l.lng] : null;
-      const latlng = latlngReal || agrMoverPunto(centro.lat, centro.lng, l.angulo_grados, radio);
-      return { radio, latlng, bearingReal: agrAnguloDesde(centro, latlng), local: agrProyeccionLocal(centro, latlng) };
-    })
-    .sort((a, b) => a.bearingReal - b.bearingReal);
-
-  const TOLERANCIA_ANGULO_GRADOS = 3;
-  const puntosLejanos = [];
-  (direccionesTienda || [])
-    .filter((d) => (d.detalle || {})[agregador]?.estado === "disponible" && d.lat != null && d.lng != null && d.distancia_km != null)
-    .forEach((d) => {
-      const latlng = [d.lat, d.lng];
-      const bearing = agrAnguloDesde(centro, latlng);
-      const vecino = base.find((b) => {
-        const diff = Math.abs(b.bearingReal - bearing);
-        return Math.min(diff, 360 - diff) < TOLERANCIA_ANGULO_GRADOS;
-      });
-      if (vecino) {
-        if (d.distancia_km > vecino.radio) {
-          vecino.radio = d.distancia_km;
-          vecino.latlng = latlng;
-          vecino.bearingReal = bearing;
-          vecino.local = agrProyeccionLocal(centro, latlng);
-        }
-        return;
-      }
-      if (base.length < 2) return;
-      let borde = null;
-      for (let i = 0; i < base.length; i++) {
-        const a = base[i], b = base[(i + 1) % base.length];
-        let a0 = a.bearingReal, a1 = b.bearingReal;
-        if (a1 <= a0) a1 += 360;
-        let ang = bearing;
-        if (ang < a0) ang += 360;
-        if (ang >= a0 && ang <= a1) { borde = [a, b]; break; }
-      }
-      if (!borde) return;
-      const cruce = agrCruceConBorde(borde[0].local, borde[1].local, bearing);
-      if (cruce == null || d.distancia_km > cruce + 0.05) {
-        puntosLejanos.push({ radio: d.distancia_km, latlng, bearingReal: bearing });
-      }
-    });
-
-  const puntosCercanos = [];
-  (direccionesTienda || [])
-    .filter((d) => (d.detalle || {})[agregador]?.estado === "no_disponible" && d.lat != null && d.lng != null && d.distancia_km != null)
-    .forEach((d) => {
-      if (base.length < 2) return;
-      const latlng = [d.lat, d.lng];
-      const bearing = agrAnguloDesde(centro, latlng);
-      const yaMuestreado = base.some((b) => {
-        const diff = Math.abs(b.bearingReal - bearing);
-        return Math.min(diff, 360 - diff) < TOLERANCIA_ANGULO_GRADOS;
-      });
-      if (yaMuestreado) return;
-      let borde = null;
-      for (let i = 0; i < base.length; i++) {
-        const a = base[i], b = base[(i + 1) % base.length];
-        let a0 = a.bearingReal, a1 = b.bearingReal;
-        if (a1 <= a0) a1 += 360;
-        let ang = bearing;
-        if (ang < a0) ang += 360;
-        if (ang >= a0 && ang <= a1) { borde = [a, b]; break; }
-      }
-      if (!borde) return;
-      const cruce = agrCruceConBorde(borde[0].local, borde[1].local, bearing);
-      if (cruce != null && d.distancia_km < cruce - 0.05) {
-        puntosCercanos.push({ radio: d.distancia_km, latlng, bearingReal: bearing });
-      }
-    });
-
-  const ordenados = [...base, ...puntosLejanos, ...puntosCercanos].sort((a, b) => a.bearingReal - b.bearingReal);
-  if (ordenados.length === 0) return null;
-  return { n: ordenados.length, latlngs: ordenados.map((p) => p.latlng) };
-}
-
-let agrPoligono9amLayers = [];
-
-function agrLimpiarPoligono9am() {
-  agrPoligono9amLayers.forEach((l) => agrMap9am && agrMap9am.removeLayer(l));
-  agrPoligono9amLayers = [];
-}
-
-async function agrActualizarPoligono9am(ajustarVista) {
-  // Visible para cualquiera con acceso al módulo "agregadores" (ya
-  // comprobado al cargar la página, ver DOMContentLoaded) -- no solo saul,
-  // pedido explícito del usuario 10/08.
-  if (!agrUsuarioActual) return;
-  const panel = document.getElementById("agr-panel-9am");
-  if (panel) panel.hidden = false;
-  if (!agrTiendaCentro && Object.keys(agrCentrosPorTienda).length === 0) return;
-  const lat0 = agrTiendaCentro ? agrTiendaCentro.lat : Object.values(agrCentrosPorTienda).reduce((s, t) => s + t.lat, 0) / Object.keys(agrCentrosPorTienda).length;
-  const lng0 = agrTiendaCentro ? agrTiendaCentro.lng : Object.values(agrCentrosPorTienda).reduce((s, t) => s + t.lng, 0) / Object.keys(agrCentrosPorTienda).length;
-  // Igual que el mapa principal: reencuadra solo cuando cambian de verdad
-  // las tiendas/agregador seleccionados (o es la primera vez), para no
-  // pisar el zoom/pan a mano cada 30s -- pero SÍ hace falta reencuadrar al
-  // cambiar de "Parque Sur" a "Todas", si no, el mapa se queda centrado en
-  // una sola tienda aunque ahora calcule las 6 (pedido explícito del
-  // usuario 10/08: "puedo ver el de todo Madrid?").
-  const esMapaNuevo = agrInitMap9am(lat0, lng0);
-  if (!agrMap9am) return;
-  agrLimpiarPoligono9am();
-
-  const tiendas = Object.keys(agrCentrosPorTienda);
-  const porTienda = await Promise.all(
-    tiendas.map((tienda) => fetch(`${AGR_API}/limites/${tienda}`, { credentials: "include" }).then((r) => (r.ok ? r.json() : [])))
-  );
-  tiendas.forEach((tienda, i) => {
-    const centro = agrCentrosPorTienda[tienda] || agrTiendaCentro;
-    if (!centro) return;
-    const limites = porTienda[i];
-    const direccionesTienda = agrDireccionesPorTienda[tienda];
-    const agregadoresAMostrar = agrFiltroAgregador ? [agrFiltroAgregador] : Object.keys(AGR_NOMBRE_AGREGADOR);
-    agregadoresAMostrar.forEach((nombre) => {
-      const limitesAgregador = limites.filter((l) => l.agregador === nombre);
-      const resultado = agrCalcularPoligono9am(limitesAgregador, centro, direccionesTienda);
-      if (!resultado || resultado.latlngs.length < 3) return;
-      const color = AGR_COLOR_MARCA[nombre] || "#888";
-      const poligono = L.polygon(resultado.latlngs, { color, weight: 2, opacity: 0.9, fillColor: color, fillOpacity: 0.2 }).addTo(agrMap9am);
-      agrPoligono9amLayers.push(poligono);
-      resultado.latlngs.forEach((ll) => {
-        const punto = L.circleMarker(ll, { radius: 4, color: "#1a1a1a", weight: 1, fillColor: color, fillOpacity: 1 }).addTo(agrMap9am);
-        agrPoligono9amLayers.push(punto);
-      });
-    });
-  });
-
-  if (esMapaNuevo || ajustarVista) {
-    if (agrPoligono9amLayers.length > 0) {
-      agrMap9am.fitBounds(L.featureGroup(agrPoligono9amLayers).getBounds(), { padding: [20, 20] });
-    } else if (tiendas.length > 1) {
-      agrMap9am.fitBounds(L.latLngBounds(tiendas.map((t) => [agrCentrosPorTienda[t].lat, agrCentrosPorTienda[t].lng])), { padding: [40, 40] });
-    }
-  }
 }
 
 function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uniones, rellenos) {
