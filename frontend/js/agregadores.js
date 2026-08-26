@@ -224,7 +224,33 @@ function agrEsTiendaMasCercana(centro, lat, lng) {
 }
 
 function agrIconoDireccion(dir) {
-  const color = AGR_COLOR_CATEGORIA[agrCategoriaDireccion(dir)] || "#898781";
+  const categoria = agrCategoriaDireccion(dir);
+  // Vista "Todos" con disponibilidad mixta ("algunos"): en vez de un amarillo
+  // genérico, el círculo se reparte en franjas del color de MARCA de cada
+  // agregador que sí tiene disponible ahí (pedido explícito del usuario 26/08:
+  // "si está uber y glovo se pinta mitad verde mitad amarillo"). Con uno solo
+  // disponible sale sólido de su color; con los tres disponibles ya cae en la
+  // categoría "todos" (verde sólido, sin cambios -- "si están los 3 pues es un
+  // verde completamente"). Solo aplica en "Todos": con un agregador filtrado ya
+  // solo hay un color posible (el suyo), no tiene sentido partir el círculo.
+  if (!agrFiltroAgregador && categoria === "algunos") {
+    const disponibles = Object.entries(dir.detalle || {})
+      .filter(([, info]) => info.estado === "disponible")
+      .map(([nombre]) => AGR_COLOR_MARCA[nombre] || "#0ca30c");
+    if (disponibles.length > 0) {
+      const paso = 100 / disponibles.length;
+      const franjas = disponibles
+        .map((color, i) => `${color} ${(i * paso).toFixed(2)}% ${((i + 1) * paso).toFixed(2)}%`)
+        .join(", ");
+      return L.divIcon({
+        className: "agr-marker-dot",
+        html: `<span style="background:conic-gradient(${franjas});"></span>`,
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
+      });
+    }
+  }
+  const color = AGR_COLOR_CATEGORIA[categoria] || "#898781";
   return L.divIcon({
     className: "agr-marker-dot",
     html: `<span style="background:${color}"></span>`,
