@@ -140,6 +140,12 @@ class BaseAggregatorScraper:
     # Setup del usuario (08/08): pantalla principal 1920x1080 a la izquierda (x=0),
     # segunda pantalla 1920x1080 a la derecha (x=1920) -- ahí quiere la ventana visible,
     # junto a la ventana de Claude, en vez de tapando la pantalla principal.
+    # Valor por defecto para un único proceso. Cuando corren varios procesos en
+    # paralelo (ver --ventana-slot en buscar_limite_cobertura.py), cada uno pisa
+    # estos dos atributos de clase con una celda distinta de una rejilla en el
+    # segundo monitor -- si todos usaran el mismo punto, sus ventanas de Uber Eats
+    # quedarían apiladas exactamente encima unas de otras y un challenge real solo
+    # sería visible/resoluble en la que quedara arriba del todo.
     posicion_ventana_visible: str = "1930,40"
     tamano_ventana_visible: str = "900,1000"
 

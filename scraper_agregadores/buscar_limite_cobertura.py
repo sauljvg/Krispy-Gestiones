@@ -16,6 +16,7 @@ from scrapers.glovo import GlovoScraper
 from scrapers.justeat import JustEatScraper
 from scrapers.ubereats import UberEatsScraper
 from utils import api_client
+from utils.ventana import calcular_posicion_ventana
 
 logging.basicConfig(
     level=logging.INFO,
@@ -365,11 +366,32 @@ async def main():
         "--reintentar-completados", action="store_true",
         help="Rehacer también los ángulos que ya tienen un resultado guardado (por defecto se saltan).",
     )
+    parser.add_argument(
+        "--ventana-slot", type=int, default=None,
+        help="Cuando se corren varios procesos en paralelo (p.ej. una tienda partida en 2 "
+        "sub-procesos), asigna a cada uno una celda distinta (0-5) de una rejilla 3x2 en el "
+        "segundo monitor para que sus ventanas visibles de Uber Eats no queden apiladas en el "
+        "mismo punto -- si dos procesos comparten posición, solo la ventana que quede encima "
+        "es visible/resoluble ante un challenge real.",
+    )
     args = parser.parse_args()
 
     if args.avisar_challenge:
         for scraper_cls in SCRAPERS.values():
             scraper_cls.permitir_resolucion_manual = True
+
+    if args.ventana_slot is not None:
+        # Rejilla compartida con daemon.py (--worker-index) -- ver utils/ventana.py.
+        # OJO: los procesos ya lanzados con la rejilla vieja (3x2, celdas
+        # 640x516) siguen con esas posiciones hasta que terminen -- no hay hueco
+        # libre para 2 ventanas más sin encoger la rejilla entera, así que los
+        # slots 6-7 pueden solaparse visualmente con los slots 4-5 viejos
+        # mientras ambas tandas coexistan. Solo importa si a las dos les toca
+        # un challenge real de Uber Eats a la vez (no visto hasta ahora).
+        posicion, tamano = calcular_posicion_ventana(args.ventana_slot)
+        for scraper_cls in SCRAPERS.values():
+            scraper_cls.posicion_ventana_visible = posicion
+            scraper_cls.tamano_ventana_visible = tamano
 
     resultados = {}
     for agregador in args.agregadores:
@@ -383,12 +405,20 @@ async def main():
         if not args.reintentar_completados:
             try:
                 guardados = await api_client.obtener_limites(args.tienda, agregador)
-                angulos_completados = {round(float(fila["angulo_grados"]), 2) for fila in guardados}
+                # El backend redondea angulo_grados a ENTERO al guardar (ver
+                # guardar_limite/eliminar_limite en agregadores.py), no a 2
+                # decimales -- comparar con round(x, 2) nunca coincidía para
+                # los ángulos fraccionarios de la campaña de 32 (11.25°,
+                # 22.5°...), así que el skip-logic los rehacía enteros en
+                # cada relanzamiento (confirmado en vivo 10/08 con
+                # parquesur/glovo/11.25°). Hay que redondear igual que el
+                # backend en los dos lados de la comparación.
+                angulos_completados = {int(round(float(fila["angulo_grados"]))) for fila in guardados}
             except Exception as exc:
                 logger.warning("No se pudo consultar ángulos ya completados (se procesan todos): %r", exc)
 
         for angulo in args.angulos:
-            if round(float(angulo), 2) in angulos_completados:
+            if int(round(float(angulo))) in angulos_completados:
                 logger.info("[%s/%s/%s°] ya tiene resultado guardado -- se salta", args.tienda, agregador, angulo)
                 continue
 

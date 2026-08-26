@@ -41,6 +41,15 @@ dashboard en tiempo real — por eso el completo no va cada 10 min (una pasada t
 min con las pausas anti-bot; programarlo más seguido dejaría el scraper trabajando casi
 sin parar toda la franja de apertura).
 
+### Varias instancias en paralelo (refuerzo puntual)
+
+Con `SCRAPER_WORKERS=N` en el `.env` de una máquina, `iniciar_daemon.bat` lanza N
+procesos de `daemon.py` en paralelo, repartiéndose el trabajo entre sí por (tienda,
+agregador) -- nunca se pisan ni repiten direcciones que ya tienen dato. Pensado para
+encender un ordenador con más CPU/RAM puntualmente como refuerzo del que corre 24/7
+(que se queda con `SCRAPER_WORKERS` sin definir = 1, comportamiento normal). Ambos
+mandan a la misma API en vivo.
+
 ## Notas anti-bot
 
 - **JustEat**: puede bloquear temporalmente (WAF) tras muchas peticiones seguidas desde la
