@@ -51,28 +51,27 @@ def _workers_activos() -> int:
         return -1  # no se pudo determinar (p.ej. no es Windows o powershell no disponible)
 
 
-async def _resumen_tienda(tienda: str) -> dict:
-    por_agregador = {}
-    for agregador in config.AGREGADORES:
-        total, faltan = await asyncio.gather(
-            api_client.obtener_direcciones(tienda, cercano=False, agregador=agregador),
-            api_client.obtener_direcciones(tienda, cercano=False, agregador=agregador, solo_sin_datos=True),
-        )
-        por_agregador[agregador] = {
-            "total": len(total),
-            "faltan": len(faltan),
-            "vistos": len(total) - len(faltan),
-            "faltan_direcciones": sorted(d["direccion_text"] for d in faltan),
-        }
-    return {"tienda": tienda, "agregadores": por_agregador}
+CATEGORIAS = ["disponible", "no_disponible", "error", "sin_datos"]
+CATEGORIA_LABEL = {
+    "disponible": "Disponibles", "no_disponible": "No disponibles",
+    "error": "Error", "sin_datos": "Sin datos",
+}
 
 
-def _celda_html(info: dict) -> str:
-    lista = "".join(f"<li>{d}</li>" for d in info["faltan_direcciones"]) or "<li>(ninguna)</li>"
-    return (
-        f"<td><b>{info['vistos']}</b>/{info['total']} vistos"
-        f"<details><summary>{info['faltan']} faltan</summary><ul>{lista}</ul></details></td>"
-    )
+async def _resumen_todas_tiendas() -> list[dict]:
+    """Mismas categorías Y la misma reasignación a "tienda más cercana" que usa el
+    mapa (ver get_resumen_estados_todas en backend/agregadores.py) --
+    disponible/no_disponible/error/sin_datos por tienda+agregador, en vez de solo
+    "vistos/faltan" (pedido explícito del usuario 26/08: reflejar exactamente lo
+    que se ve en el mapa, incluida la reasignación por proximidad real)."""
+    datos = await api_client.resumen_estados_todas()
+    return [{"tienda": t, "agregadores": datos[t]} for t in config.TIENDAS_SCHEDULER if t in datos]
+
+
+def _celda_html(conteos: dict) -> str:
+    total = sum(conteos.get(c, 0) for c in CATEGORIAS)
+    detalle = "".join(f"<li>{CATEGORIA_LABEL[c]}: <b>{conteos.get(c, 0)}</b></li>" for c in CATEGORIAS)
+    return f"<td><b>{total}</b> total<ul class='desglose'>{detalle}</ul></td>"
 
 
 def _celda_dedup_html(info: dict) -> str:
@@ -92,26 +91,22 @@ async def _resumen_dedup_seguro() -> dict | None:
 
 async def handle(request):
     resumenes, dedup = await asyncio.gather(
-        asyncio.gather(*(_resumen_tienda(t) for t in config.TIENDAS_SCHEDULER)),
+        _resumen_todas_tiendas(),
         _resumen_dedup_seguro(),
     )
     workers = _workers_activos()
 
-    totales = {a: {"vistos": 0, "faltan": 0, "total": 0} for a in config.AGREGADORES}
+    totales = {a: {c: 0 for c in CATEGORIAS} for a in config.AGREGADORES}
     for r in resumenes:
-        for a, info in r["agregadores"].items():
-            totales[a]["vistos"] += info["vistos"]
-            totales[a]["faltan"] += info["faltan"]
-            totales[a]["total"] += info["total"]
+        for a, conteos in r["agregadores"].items():
+            for c in CATEGORIAS:
+                totales[a][c] += conteos.get(c, 0)
 
     filas = "".join(
         f"<tr><td>{r['tienda']}</td>" + "".join(_celda_html(r["agregadores"][a]) for a in config.AGREGADORES) + "</tr>"
         for r in resumenes
     )
-    fila_totales = "".join(
-        f"<td><b>{totales[a]['vistos']}</b>/{totales[a]['total']} vistos, {totales[a]['faltan']} faltan</td>"
-        for a in config.AGREGADORES
-    )
+    fila_totales = "".join(_celda_html(totales[a]) for a in config.AGREGADORES)
     cabeceras = "".join(f"<th>{a}</th>" for a in config.AGREGADORES)
     texto_workers = str(workers) if workers >= 0 else "no se pudo determinar"
 
@@ -140,6 +135,7 @@ async def handle(request):
   tfoot td {{ font-weight: bold; background: #f5f5f5; }}
   details summary {{ cursor: pointer; color: #a00; }}
   details ul {{ margin: 4px 0 0; padding-left: 1.2rem; max-height: 200px; overflow-y: auto; }}
+  ul.desglose {{ list-style: none; margin: 6px 0 0; padding: 0; font-size: 0.9em; color: #555; }}
 </style></head>
 <body>
   <h1>Estado del scraper de agregadores</h1>

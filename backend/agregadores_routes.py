@@ -480,6 +480,19 @@ def resumen_deduplicado_route():
     return agregadores_module.resumen_cobertura_deduplicada()
 
 
+@router.get("/admin/resumen-estados", dependencies=[Depends(require_api_key)])
+def admin_resumen_estados_route():
+    """Conteos por tienda+agregador (disponible/no_disponible/error/sin_datos),
+    exactamente las mismas categorías Y la misma reasignación a "tienda más
+    cercana" que usa el mapa (ver AGR_LEYENDA_AGREGADOR y _tiendaVisual en
+    frontend/js/agregadores.js) -- para el mini dashboard local del scraper
+    (status_server.py), que quiere ver de un vistazo lo mismo que refleja el mapa
+    sin tener que iniciar sesión de staff. Devuelve las 6 tiendas de una vez
+    (agrupar por tienda-más-cercana necesita ver TODOS los puntos a la vez, no
+    tiene sentido pedirlo tienda por tienda)."""
+    return agregadores_module.get_resumen_estados_todas()
+
+
 @router.post("/admin/direcciones/deduplicar", dependencies=[Depends(require_api_key)])
 def deduplicar_direcciones_route(aplicar: bool = False, umbral_m: float = 100):
     """Encuentra (y si aplicar=true, fusiona) direcciones activas que son el mismo
