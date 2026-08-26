@@ -1042,6 +1042,20 @@ def get_o_crear_direcciones(
                 lat_dest, lng_dest = _mover_punto(info["lat"], info["lng"], angulo, radio)
                 lat_dest, lng_dest, direccion_text = _punto_geocodificado_valido(lat_dest, lng_dest)
 
+                # _punto_geocodificado_valido puede agotar sus reintentos sin
+                # encontrar ningún punto cercano con número de portal, y como
+                # último recurso devuelve el texto plano de Nominatim tal cual
+                # (sin número) -- eso colaba direcciones sin número nuevas
+                # incluso después de la limpieza de las 193 ya existentes
+                # (confirmado en vivo 26/08 por el usuario: "aun hay calles
+                # sin números que sigue scrapeando"). No son destinos de
+                # entrega reales (mismo criterio que direcciones_sin_numero),
+                # así que este hueco del grid se salta sin crear nada -- mejor
+                # un ángulo sin punto que un punto que no representa un sitio
+                # real donde se pueda entregar.
+                if not _direccion_valida(direccion_text):
+                    continue
+
                 # Antes de crear un punto nuevo: ¿alguna tienda (esta u otra) ya tiene
                 # un punto activo a <UMBRAL_DUPLICADO_KM de aquí? Sin esto, tiendas
                 # vecinas con grids solapados (o geocoding que colapsa en la misma

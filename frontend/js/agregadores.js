@@ -566,18 +566,27 @@ function agrActualizarLeyenda() {
   const cont = document.getElementById("agr-leyenda");
   if (!cont) return;
 
-  // Solo respeta "solo dots nuevos" (no las categorías ocultas -- la
-  // leyenda tiene que seguir mostrando el total real de una categoría
-  // aunque esté oculta, si no nunca sabrías cuántos hay para decidir si
-  // mostrarla). Antes contaba TODOS los puntos siempre, así que con "solo
-  // nuevos" activo la leyenda seguía dando el total de siempre mientras el
-  // contador de arriba decía 0 -- números contradictorios en la misma
-  // pantalla (confirmado en vivo 09/08).
+  // Respeta "solo dots nuevos" Y "visible por capa" (no las categorías
+  // ocultas -- la leyenda tiene que seguir mostrando el total real de una
+  // categoría aunque esté oculta, si no nunca sabrías cuántos hay para
+  // decidir si mostrarla). Antes contaba TODOS los puntos siempre, así que
+  // con "solo nuevos" activo la leyenda seguía dando el total de siempre
+  // mientras el contador de arriba decía 0 -- números contradictorios en la
+  // misma pantalla (confirmado en vivo 09/08).
+  //
+  // agrPuntoVisiblePorCapa faltaba aquí: un punto desactivado para ESTE
+  // agregador (inactivo_para) conserva su último chequeo real (p.ej. un
+  // error viejo) en dir.detalle, así que sin este filtro la leyenda seguía
+  // contándolo en su categoría aunque el mapa ya no lo dibuje -- confirmado
+  // en vivo 26/08 con Uber Eats: leyenda decía "19 errores", el mapa solo
+  // mostraba 3 puntos naranjas.
   const conteos = {};
-  agrDireccionMarkers.filter((m) => agrPasaFiltroNuevos(m._agrDir)).forEach((m) => {
-    const cat = agrCategoriaDireccion(m._agrDir);
-    conteos[cat] = (conteos[cat] || 0) + 1;
-  });
+  agrDireccionMarkers
+    .filter((m) => agrPuntoVisiblePorCapa(m._agrDir) && agrPasaFiltroNuevos(m._agrDir))
+    .forEach((m) => {
+      const cat = agrCategoriaDireccion(m._agrDir);
+      conteos[cat] = (conteos[cat] || 0) + 1;
+    });
 
   cont.innerHTML = items
     .map((it) => {
