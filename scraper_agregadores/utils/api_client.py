@@ -201,6 +201,17 @@ async def resumen_cobertura_deduplicada() -> dict:
             return await resp.json()
 
 
+async def resumen_estados(tienda: str) -> dict:
+    """Conteos por agregador (disponible/no_disponible/error/sin_datos), las mismas
+    categorías que la leyenda del mapa -- ver
+    backend/agregadores.py::get_resumen_estados. Usado por status_server.py."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/resumen-estados/{tienda}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=_headers(), timeout=30) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+
 async def deduplicar_direcciones(aplicar: bool = False, umbral_m: float = 100) -> dict:
     """Encuentra (y si aplicar=True, fusiona) direcciones activas que son el mismo
     sitio real repetido en varias tiendas -- ver

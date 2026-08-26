@@ -1610,6 +1610,26 @@ def get_mapa_datos(tienda: str):
     }
 
 
+def get_resumen_estados(tienda: str) -> dict:
+    """Igual que la leyenda del mapa (ver AGR_LEYENDA_AGREGADOR/agrCategoriaDireccion
+    en frontend/js/agregadores.js), pero agregado en conteos por agregador en vez de
+    una fila por dirección -- para el mini dashboard local de status_server.py, que
+    solo necesita los totales, no cada dirección. Un punto desactivado para un
+    agregador concreto (inactivo_para) se salta igual que en el mapa: ese agregador
+    ya no lo cuenta en ninguna categoría, ni siquiera "sin_datos"."""
+    datos = get_mapa_datos(tienda)
+    conteos = {a: {"disponible": 0, "no_disponible": 0, "error": 0, "sin_datos": 0} for a in AGREGADORES}
+    for d in datos["direcciones"]:
+        inactivo_para = d.get("inactivo_para") or []
+        for a in AGREGADORES:
+            if a in inactivo_para:
+                continue
+            info = (d.get("detalle") or {}).get(a)
+            categoria = info["estado"] if info else "sin_datos"
+            conteos[a][categoria] = conteos[a].get(categoria, 0) + 1
+    return {"tienda": tienda, "agregadores": conteos}
+
+
 def get_mapa_datos_todas():
     tiendas = []
     direcciones = []

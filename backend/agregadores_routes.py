@@ -476,6 +476,16 @@ def resumen_deduplicado_route():
     return agregadores_module.resumen_cobertura_deduplicada()
 
 
+@router.get("/admin/resumen-estados/{tienda}", dependencies=[Depends(require_api_key)])
+def admin_resumen_estados_route(tienda: str):
+    """Conteos por agregador (disponible/no_disponible/error/sin_datos), exactamente
+    las mismas categorías que la leyenda del mapa (ver AGR_LEYENDA_AGREGADOR en
+    frontend/js/agregadores.js) -- para el mini dashboard local del scraper
+    (status_server.py), que quiere ver de un vistazo lo mismo que refleja el mapa
+    sin tener que iniciar sesión de staff."""
+    return agregadores_module.get_resumen_estados(tienda)
+
+
 @router.post("/admin/direcciones/deduplicar", dependencies=[Depends(require_api_key)])
 def deduplicar_direcciones_route(aplicar: bool = False, umbral_m: float = 100):
     """Encuentra (y si aplicar=true, fusiona) direcciones activas que son el mismo
