@@ -477,11 +477,24 @@ def resumen_deduplicado_route():
 
 
 @router.post("/admin/direcciones/deduplicar", dependencies=[Depends(require_api_key)])
-def deduplicar_direcciones_route(aplicar: bool = False):
+def deduplicar_direcciones_route(aplicar: bool = False, umbral_m: float = 100):
     """Encuentra (y si aplicar=true, fusiona) direcciones activas que son el mismo
     sitio real repetido en varias tiendas. aplicar=false (por defecto) solo devuelve
-    el plan de fusión sin escribir nada -- para revisar antes de aplicar de verdad."""
-    return agregadores_module.deduplicar_direcciones(aplicar=aplicar)
+    el plan de fusión sin escribir nada -- para revisar antes de aplicar de verdad.
+    umbral_m (metros, default 100 -- igual que agregadores_module.UMBRAL_DUPLICADO_KM)
+    para poder probar un radio distinto antes de decidir si cambiar el umbral por
+    defecto de verdad."""
+    return agregadores_module.deduplicar_direcciones(umbral_km=umbral_m / 1000, aplicar=aplicar)
+
+
+@router.post("/admin/direcciones/limpiar-sin-numero", dependencies=[Depends(require_api_key)])
+def limpiar_direcciones_sin_numero_route(aplicar: bool = False):
+    """Desactiva direcciones activas sin número de portal real (ver
+    agregadores_module._direccion_valida) que ningún agregador haya confirmado con
+    datos reales -- geocoding que colapsó en el nombre genérico de una calle/zona sin
+    poder afinar más (la causa de los clusters más grandes de duplicados, ver
+    /admin/direcciones/deduplicar). aplicar=false (por defecto) solo devuelve el plan."""
+    return agregadores_module.direcciones_sin_numero(aplicar=aplicar)
 
 
 class LimiteIn(BaseModel):

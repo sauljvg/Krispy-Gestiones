@@ -201,12 +201,27 @@ async def resumen_cobertura_deduplicada() -> dict:
             return await resp.json()
 
 
-async def deduplicar_direcciones(aplicar: bool = False) -> dict:
+async def deduplicar_direcciones(aplicar: bool = False, umbral_m: float = 100) -> dict:
     """Encuentra (y si aplicar=True, fusiona) direcciones activas que son el mismo
     sitio real repetido en varias tiendas -- ver
     backend/agregadores.py::deduplicar_direcciones. aplicar=False solo devuelve el
-    plan, no escribe nada."""
+    plan, no escribe nada. umbral_m: radio en metros para considerar "el mismo sitio"
+    (default 100, igual que backend/agregadores.py::UMBRAL_DUPLICADO_KM)."""
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direcciones/deduplicar"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            url, params={"aplicar": str(aplicar).lower(), "umbral_m": umbral_m}, headers=_headers(), timeout=120
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+
+async def limpiar_direcciones_sin_numero(aplicar: bool = False) -> dict:
+    """Desactiva direcciones activas sin número de portal real que ningún agregador
+    haya confirmado con datos reales -- ver
+    backend/agregadores.py::direcciones_sin_numero. aplicar=False solo devuelve el
+    plan, no escribe nada."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/direcciones/limpiar-sin-numero"
     async with aiohttp.ClientSession() as session:
         async with session.post(url, params={"aplicar": str(aplicar).lower()}, headers=_headers(), timeout=120) as resp:
             resp.raise_for_status()

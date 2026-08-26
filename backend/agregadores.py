@@ -653,6 +653,53 @@ def deduplicar_direcciones(umbral_km: float = UMBRAL_DUPLICADO_KM, aplicar: bool
     }
 
 
+def direcciones_sin_numero(aplicar: bool = False) -> dict:
+    """Direcciones activas de las 6 tiendas cuyo texto NO tiene un número de portal
+    real (ver _direccion_valida) -- geocoding que, al no encontrar un punto exacto,
+    colapsó en el nombre genérico de una calle/zona sin poder afinar más (confirmado:
+    la causa de los clusters más grandes en deduplicar_direcciones -- p.ej. 19 puntos
+    distintos de granplaza2 todos geocodificados a "Calle de los Geólogos" sin
+    número). Sin número de portal no son direcciones de entrega reales.
+
+    Solo se desactivan las que NINGÚN agregador haya confirmado con un dato real
+    (chequeo sin error, o cobertura confirmada por el límite ya medido) -- si algún
+    agregador sí dio una respuesta real ahí pese a la falta de número, ese dato sigue
+    siendo válido y el punto se conserva.
+
+    aplicar=False (por defecto) no escribe nada, solo devuelve el plan para revisar."""
+    conn = get_connection()
+    try:
+        puntos = [dict(fila) for fila in conn.execute("SELECT * FROM agregadores_direcciones WHERE activo=1").fetchall()]
+        candidatos = [p for p in puntos if not _direccion_valida(p["direccion_text"])]
+
+        plan = []
+        for punto in candidatos:
+            tiene_dato = False
+            for agregador in AGREGADORES:
+                con_datos = _con_datos_reales(conn, [punto], agregador)
+                con_datos |= _cobertura_confirmada_por_limite(conn, punto["tienda"], agregador, [punto])
+                if con_datos:
+                    tiene_dato = True
+                    break
+            if not tiene_dato:
+                plan.append({"id": punto["id"], "tienda": punto["tienda"], "direccion_text": punto["direccion_text"]})
+
+        if aplicar:
+            for punto in plan:
+                conn.execute("UPDATE agregadores_direcciones SET activo=0 WHERE id=?", (punto["id"],))
+            conn.commit()
+            _cache_resumen_deduplicado["datos"] = None
+    finally:
+        conn.close()
+
+    return {
+        "aplicado": aplicar,
+        "candidatos_sin_numero": len(candidatos),
+        "a_desactivar": len(plan),
+        "detalle": plan,
+    }
+
+
 def guardar_limite(
     tienda: str, agregador: str, angulo_grados: float, limite_km: float | None, nota: str | None,
     lat: float | None = None, lng: float | None = None, direccion_text: str | None = None,
