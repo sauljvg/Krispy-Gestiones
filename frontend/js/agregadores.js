@@ -143,50 +143,10 @@ function agrCategoriaDireccion(dir) {
   return "algunos";
 }
 
-function agrPasaFiltroNuevos(dir) {
-  // "Solo nuevos" filtra por ID (antes/después de activar el checkbox) --
-  // pero un dot manual no es "viejo" solo porque se añadiese antes de
-  // activar el filtro: es una categoría aparte (origen=manual) que no
-  // depende de la existencia de los dots de grid/límite y debe convivir
-  // con ellos siempre, se active o no "solo nuevos" (pedido explícito del
-  // usuario 09/08: antes "solo nuevos" ocultaba también los manuales viejos).
-  const baseline = agrSoloNuevosBaseline();
-  if (baseline != null && dir.origen !== "manual" && (dir.id || 0) <= baseline) return false;
-  if (agrSoloManualesActivo() && dir.origen !== "manual") return false;
-  return true;
-}
-
-const AGR_SOLO_MANUALES_KEY = "agr_solo_manuales";
-function agrSoloManualesActivo() {
-  return localStorage.getItem(AGR_SOLO_MANUALES_KEY) === "1";
-}
-
-// "Solo nuevos" y "solo manuales" eran dos checkboxes aparte que hacían casi
-// lo mismo (filtrar qué dots se ven) -- unificados en un único selector
-// (pedido explícito del usuario 26/08), mutuamente excluyentes.
-function agrCambiarFiltroDots() {
-  const valor = document.getElementById("agr-filtro-dots")?.value || "";
-  localStorage.setItem(AGR_SOLO_MANUALES_KEY, valor === "manuales" ? "1" : "0");
-  if (agrTiendaActual) {
-    if (valor === "nuevos") {
-      const maxId = agrDireccionMarkers.reduce(
-        (max, m) => (m._agrDir && m._agrDir.origen !== "manual" ? Math.max(max, m._agrDir.id || 0) : max),
-        0
-      );
-      localStorage.setItem(agrSoloNuevosKey(agrTiendaActual), String(maxId));
-    } else {
-      localStorage.removeItem(agrSoloNuevosKey(agrTiendaActual));
-    }
-  }
-  agrActualizarMarcadores();
-  agrActualizarLeyenda();
-  agrRecalcularContador();
-}
-
 function agrMarcadorVisible(dir) {
   if (!agrPuntoVisiblePorCapa(dir)) return false;
   if (agrEstadosOcultos.has(agrCategoriaDireccion(dir))) return false;
-  return agrPasaFiltroNuevos(dir);
+  return true;
 }
 
 function agrInitMap(lat, lng) {
@@ -619,7 +579,7 @@ function agrActualizarLeyenda() {
   // mostraba 3 puntos naranjas.
   const conteos = {};
   agrDireccionMarkers
-    .filter((m) => agrPuntoVisiblePorCapa(m._agrDir) && agrPasaFiltroNuevos(m._agrDir))
+    .filter((m) => agrPuntoVisiblePorCapa(m._agrDir))
     .forEach((m) => {
       const cat = agrCategoriaDireccion(m._agrDir);
       conteos[cat] = (conteos[cat] || 0) + 1;
@@ -1020,18 +980,6 @@ function agrActualizarChipsTiendasMapa() {
 
 async function agrCargarMapa() {
   if (!agrTiendaActual || !agrMapaTiendasSeleccionadas || agrMapaTiendasSeleccionadas.size === 0) return;
-
-  // Bug confirmado en vivo 08/08: el control siempre arrancaba en "Todos" al
-  // recargar la página (no había código que lo marcase), pero el filtro en
-  // sí vive en localStorage y SÍ sobrevive a la recarga -- si se activó una
-  // vez para esta tienda y nunca se quitó a mano antes de recargar, el
-  // filtro seguía activo ocultando TODOS los puntos, con el selector
-  // mintiendo que estaba en "Todos". Se sincroniza con el estado real al
-  // cargar.
-  const selectFiltroDots = document.getElementById("agr-filtro-dots");
-  if (selectFiltroDots) {
-    selectFiltroDots.value = agrSoloManualesActivo() ? "manuales" : (agrSoloNuevosBaseline() != null ? "nuevos" : "");
-  }
 
   // Siempre se pide el dato de las 6 tiendas y se filtra en el cliente a las
   // chips activas -- así "Princesa y Caleido" o "todas menos una" es solo
@@ -1554,22 +1502,6 @@ async function agrCargarTransiciones() {
 
 let agrPoligonoLayers = []; // polígono(s) de límite real + sus puntos de vértice, sobre agrMap
 let agrUnionLayers = []; // contorno(s) de la unión de cobertura (turf.union), uno por agregador cuando "mostrar cobertura combinada" está activo
-
-// "Solo dots nuevos": guarda el id más alto ya visto al activar el filtro,
-// así el mapa solo dibuja los puntos del grid creados DESPUÉS de ese
-// momento -- para ver en vivo dónde va cayendo la búsqueda de límite de
-// cobertura sin el ruido de todo el grid ya existente. Por tienda, en
-// localStorage, para que sobreviva a los refrescos automáticos (cada 30s)
-// y a recargar la página.
-function agrSoloNuevosKey(tienda) {
-  return `agr_solo_nuevos_baseline_${tienda}`;
-}
-
-function agrSoloNuevosBaseline() {
-  if (!agrTiendaActual) return null;
-  const v = localStorage.getItem(agrSoloNuevosKey(agrTiendaActual));
-  return v == null ? null : parseInt(v, 10);
-}
 
 // Mostrar/ocultar el polígono de límite real (y sus puntos de vértice) --
 // preferencia general, no por tienda (a diferencia de "solo nuevos"), y

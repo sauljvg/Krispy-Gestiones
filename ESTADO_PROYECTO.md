@@ -264,15 +264,29 @@ De paso esta sesión:
   `scraper_agregadores/`, abre en `localhost:8787` (o el nuevo botón
   "Dashboard del scraper" en `agregadores.html`, solo admin, no necesita
   levantar nada aparte).
-- **IMPORTANTE -- Glovo bloqueó la IP de la oficina/casa (confirmado 26/08)**:
-  tras varias pasadas con 20/15/10 workers, todas con ~29% de fallos
-  idénticos (página "Oh, no! It looks like there's a problem" de Glovo, en
-  inglés, captura guardada en cada fallo desde hoy), el usuario probó a mano
-  con datos móviles (sin WiFi) -- Glovo carga bien. Con el WiFi de la
-  oficina -- el mismo "Oh, no!" incluso en un navegador normal, sin scraper
-  de por medio. Es un bloqueo de IP del lado de Glovo, no un problema de
-  concurrencia/código/imágenes (se descartaron las tres cosas con pruebas
-  reales antes de encontrar esto). NO relanzar Glovo desde esta IP hasta que
-  se levante el bloqueo (tiempo desconocido) o se use otra red/IP -- seguir
-  insistiendo solo prolonga el bloqueo. JustEat y Uber Eats no muestran este
-  problema por ahora, pero vigilar por si les pasa lo mismo con el tiempo.
+- **IMPORTANTE -- Glovo, bloqueo/limitación del lado de Glovo (actualizado
+  26/08)**: tras varias pasadas con 20/15/10 workers, todas con ~29-31% de
+  fallos idénticos (página "Oh, no! It looks like there's a problem" de
+  Glovo, en inglés, captura guardada en cada fallo desde hoy), el usuario
+  probó a mano con datos móviles (sin WiFi) -- Glovo carga bien. Con el
+  WiFi de la oficina -- el mismo "Oh, no!" incluso en un navegador normal,
+  sin scraper de por medio. Se descartaron antes con pruebas reales:
+  concurrencia (20→15→10 workers, mismo % de fallo), bloqueo de
+  imágenes/media (`--permitir-imagenes`, sin diferencia), y fingerprint de
+  Chromium headless (test con `--visible`, ventana genuinamente visible
+  igual que Uber Eats, 20 workers: 45 hechos / 20 fallos, mismo ~31% que en
+  headless -- **no hay diferencia, se descarta headless como causa**;
+  vuelto a headless, que es lo que sigue usando Glovo por defecto).
+  Además, probando manualmente desde un navegador en la nube (IP de
+  Anthropic, no la de la oficina) también salió el mismo "Oh, no!" de forma
+  intermitente (a veces recargar lo arregla, a veces no) -- así que no es
+  solo un bloqueo fijo de la IP de la oficina, sino algo más parecido a un
+  límite de volumen/tasa o patrón de tráfico que Glovo dispara bastante en
+  general. El usuario confirmó 26/08 que activando NordVPN sí carga bien
+  desde la oficina. NO relanzar Glovo con muchos workers seguidos desde la
+  misma IP/red -- seguir insistiendo solo prolonga el bloqueo. JustEat y
+  Uber Eats no muestran este problema por ahora, pero vigilar por si les
+  pasa lo mismo con el tiempo. Pendiente: adaptar el scraper a la web de
+  Glovo en español (`https://glovoapp.com/es/es/madrid`, pedido explícito
+  del usuario 26/08) -- requiere traducir los selectores de texto en inglés
+  del archivo a sus equivalentes en español antes de poder lanzarlo así.

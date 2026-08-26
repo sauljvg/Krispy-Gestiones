@@ -21,7 +21,6 @@ import logging
 
 import config
 from main import SCRAPERS, chequear_tienda
-from scrapers.ubereats import UberEatsScraper
 from utils import api_client
 from utils.ventana import calcular_posicion_ventana
 
@@ -40,7 +39,10 @@ async def _puntos_todos(agregador: str) -> list[dict]:
     return puntos
 
 
-async def main(agregador: str, worker_index: int, worker_count: int, permitir_imagenes: bool = False):
+async def main(
+    agregador: str, worker_index: int, worker_count: int,
+    permitir_imagenes: bool = False, visible: bool = False,
+):
     if permitir_imagenes:
         # Prueba puntual 26/08: comprobar si bloquear imágenes/media es lo que
         # dispara la página de error genérica de Glovo bajo carga ("Oh, no! It
@@ -50,6 +52,19 @@ async def main(agregador: str, worker_index: int, worker_count: int, permitir_im
         SCRAPERS[agregador].bloquear_recursos = False
         logger.info("Worker %d/%d (%s): imágenes/media SIN bloquear (prueba puntual)", worker_index, worker_count, agregador)
 
+    if visible:
+        # Prueba puntual 26/08: correr Glovo con ventana genuinamente visible, igual
+        # que Uber Eats (que SÍ la necesita por Cloudflare) -- por si el bloqueo/
+        # limitación de Glovo bajo carga también está fijándose en la señal de
+        # "headless" (navigator.webdriver, fingerprint de Chromium sin cabeza, etc.),
+        # no solo en volumen de peticiones. mantener_visible=True es necesario
+        # además de iniciar_headless=False -- confirmado en vivo 08/08 con Uber Eats
+        # que "no headless" con ventana fuera de pantalla seguía detectándose casi
+        # siempre (ver comentario en scrapers/base.py).
+        SCRAPERS[agregador].iniciar_headless = False
+        SCRAPERS[agregador].mantener_visible = True
+        logger.info("Worker %d/%d (%s): ventana visible (prueba puntual, como Uber Eats)", worker_index, worker_count, agregador)
+
     if worker_count > 1:
         # Escalonar el arranque: sin esto, N workers lanzados a la vez disparan N
         # peticiones GET casi simultáneas en _puntos_todos() -- confirmado en vivo
@@ -58,12 +73,14 @@ async def main(agregador: str, worker_index: int, worker_count: int, permitir_im
         # reparte esa ráfaga en el tiempo sin alargar la pasada de forma notable.
         await asyncio.sleep(worker_index * 0.5)
 
-    if agregador == "ubereats" and worker_count > 1:
-        # Rejilla de ventanas visibles (módulo 8, ver utils/ventana.py) -- solo
-        # importa para Uber Eats, JustEat/Glovo corren headless.
+    if (agregador == "ubereats" or visible) and worker_count > 1:
+        # Rejilla de ventanas visibles (módulo 8, ver utils/ventana.py) -- de normal
+        # solo importa para Uber Eats (JustEat/Glovo corren headless), pero con
+        # --visible cualquier agregador necesita la misma rejilla para no apilar
+        # las ventanas todas en el mismo sitio.
         posicion, tamano = calcular_posicion_ventana(worker_index)
-        UberEatsScraper.posicion_ventana_visible = posicion
-        UberEatsScraper.tamano_ventana_visible = tamano
+        SCRAPERS[agregador].posicion_ventana_visible = posicion
+        SCRAPERS[agregador].tamano_ventana_visible = tamano
 
     puntos = await _puntos_todos(agregador)
     asignados = [p for i, p in enumerate(puntos) if i % worker_count == worker_index]
@@ -150,5 +167,9 @@ if __name__ == "__main__":
         "--permitir-imagenes", action="store_true",
         help="Prueba puntual: no bloquear imágenes/media (por defecto SÍ se bloquean) -- para comparar tasa de fallos.",
     )
+    parser.add_argument(
+        "--visible", action="store_true",
+        help="Prueba puntual: correr con ventana genuinamente visible, igual que Uber Eats (por defecto JustEat/Glovo corren headless).",
+    )
     args = parser.parse_args()
-    asyncio.run(main(args.agregador, args.worker_index, args.worker_count, args.permitir_imagenes))
+    asyncio.run(main(args.agregador, args.worker_index, args.worker_count, args.permitir_imagenes, args.visible))
