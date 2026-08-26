@@ -57,7 +57,13 @@ async def main(worker_index: int, worker_count: int):
 
     for i, direccion in enumerate(asignados):
         try:
-            await chequear_tienda(direccion["tienda"], "ubereats", direcciones_override=[direccion])
+            # radio_reuso_m=400 (no los 100m normales): estos puntos ya están dentro
+            # del polígono de cobertura confirmado, así que un dato real algo más
+            # lejos sigue siendo representativo -- pedido explícito del usuario 26/08
+            # para esta pasada puntual en concreto.
+            await chequear_tienda(
+                direccion["tienda"], "ubereats", direcciones_override=[direccion], radio_reuso_m=400
+            )
         except Exception as exc:
             logger.error("Fallo revalidando %s: %r", direccion.get("direccion_text"), exc)
         if i < len(asignados) - 1:

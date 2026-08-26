@@ -28,12 +28,18 @@ async def chequear_tienda(
     delay_seg: int = 0,
     solo_sin_datos: bool = False,
     direcciones_override: list = None,
+    radio_reuso_m: float = 100,
 ):
     """direcciones_override: si se pasa, se usa esta lista tal cual en vez de pedirle
     una nueva a la API (cercano/solo_sin_datos se ignoran en ese caso) -- para pasadas
     puntuales que ya eligieron ellas mismas qué direcciones tocan (ver
     revalidar_ubereats_sin_poligono.py, que reparte direcciones individuales entre
-    varios workers en vez de tiendas enteras)."""
+    varios workers en vez de tiendas enteras).
+
+    radio_reuso_m: radio para reutilizar un chequeo cercano en vez de scrapear (100m
+    por defecto). Más amplio (p.ej. 400m) tiene sentido dentro de una zona cuyo
+    polígono de cobertura ya está confirmado -- un dato algo más lejos sigue siendo
+    representativo ahí."""
     if direcciones_override is not None:
         direcciones = direcciones_override
     else:
@@ -72,7 +78,9 @@ async def chequear_tienda(
         # (buscar_chequeo_cercano); aquí se reutiliza la misma función para que el
         # daemon normal también se beneficie.
         try:
-            reuso = await api_client.buscar_chequeo_cercano(direccion["lat"], direccion["lng"], agregador_nombre)
+            reuso = await api_client.buscar_chequeo_cercano(
+                direccion["lat"], direccion["lng"], agregador_nombre, radio_m=radio_reuso_m
+            )
         except Exception as exc:
             reuso = None
             logger.warning("  no se pudo consultar reuso de chequeo cercano: %r", exc)

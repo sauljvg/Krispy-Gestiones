@@ -464,12 +464,15 @@ def crear_direccion_reasignada_route(body: DireccionReasignadaIn):
 
 
 @router.get("/admin/chequeo-cercano", dependencies=[Depends(require_api_key)])
-def chequeo_cercano_route(lat: float, lng: float, agregador: str):
-    """Para buscar_limite_cobertura.py: busca un chequeo real ya hecho (de
-    cualquier tienda) muy cerca de este punto para poder reutilizarlo en
-    vez de repetir el mismo scrape -- evita que tiendas vecinas con zonas
-    de solape (o rondas sucesivas) vuelvan a probar la misma dirección."""
-    return agregadores_module.buscar_chequeo_cercano(lat, lng, agregador)
+def chequeo_cercano_route(lat: float, lng: float, agregador: str, radio_m: float = 100):
+    """Para buscar_limite_cobertura.py/main.py: busca un chequeo real ya hecho (de
+    cualquier tienda) muy cerca de este punto para poder reutilizarlo en vez de
+    repetir el mismo scrape -- evita que tiendas vecinas con zonas de solape (o
+    rondas sucesivas) vuelvan a probar la misma dirección. radio_m configurable
+    (default 100m) para pasadas puntuales que quieran un radio más amplio (ver
+    revalidar_ubereats_sin_poligono.py, que usa 400m dentro del polígono ya
+    confirmado -- ahí un dato algo más lejos sigue siendo representativo)."""
+    return agregadores_module.buscar_chequeo_cercano(lat, lng, agregador, radio_km=radio_m / 1000)
 
 
 @router.get("/admin/direcciones/resumen-deduplicado", dependencies=[Depends(require_api_key)])
