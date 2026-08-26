@@ -1799,15 +1799,27 @@ def get_tiendas():
     return [{"tienda": k, **v} for k, v in TIENDAS.items()]
 
 
-def get_ultimos(tienda: str, horas: int = 24):
-    desde = (datetime.now(timezone.utc) - timedelta(hours=horas)).isoformat()
+def get_ultimos(tienda: str, horas: int = 24, desde: str | None = None, hasta: str | None = None):
+    """`desde`/`hasta` (ISO, opcionales): filtro explícito por fecha/hora exacta --
+    para buscar qué pasó un día y una franja horaria concretos, en vez de solo "las
+    últimas N horas" (pedido explícito del usuario 26/08). Si no se pasan, se
+    mantiene el comportamiento de siempre (últimas `horas` horas)."""
+    desde_efectivo = desde or (datetime.now(timezone.utc) - timedelta(hours=horas)).isoformat()
     conn = get_connection()
-    filas = conn.execute(
-        """SELECT c.*, d.direccion_text FROM agregadores_chequeos c
-           LEFT JOIN agregadores_direcciones d ON d.id = c.direccion_id
-           WHERE c.tienda=? AND c.timestamp>=? ORDER BY c.timestamp DESC LIMIT 200""",
-        (tienda, desde),
-    ).fetchall()
+    if hasta:
+        filas = conn.execute(
+            """SELECT c.*, d.direccion_text FROM agregadores_chequeos c
+               LEFT JOIN agregadores_direcciones d ON d.id = c.direccion_id
+               WHERE c.tienda=? AND c.timestamp>=? AND c.timestamp<=? ORDER BY c.timestamp DESC LIMIT 200""",
+            (tienda, desde_efectivo, hasta),
+        ).fetchall()
+    else:
+        filas = conn.execute(
+            """SELECT c.*, d.direccion_text FROM agregadores_chequeos c
+               LEFT JOIN agregadores_direcciones d ON d.id = c.direccion_id
+               WHERE c.tienda=? AND c.timestamp>=? ORDER BY c.timestamp DESC LIMIT 200""",
+            (tienda, desde_efectivo),
+        ).fetchall()
     conn.close()
     return [dict(f) for f in filas]
 

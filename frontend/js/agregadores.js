@@ -1167,6 +1167,29 @@ function agrFilaTabla(c) {
   </tr>`;
 }
 
+let agrFiltroFechaActivo = null; // null = últimas 24h (de siempre) -- si no, {desde, hasta} ISO UTC
+
+function agrAplicarFiltroFecha() {
+  const fecha = document.getElementById("agr-filtro-fecha").value;
+  if (!fecha) { mostrarAviso("Elige un día primero."); return; }
+  const horaDesde = document.getElementById("agr-filtro-hora-desde").value || "00:00";
+  const horaHasta = document.getElementById("agr-filtro-hora-hasta").value || "23:59";
+  // new Date("YYYY-MM-DDTHH:MM") se interpreta en la zona horaria del navegador (Madrid,
+  // ya que es donde trabaja el equipo) -- toISOString() lo pasa a UTC para el backend,
+  // que guarda todos los timestamps en UTC.
+  const desde = new Date(`${fecha}T${horaDesde}:00`).toISOString();
+  const hasta = new Date(`${fecha}T${horaHasta}:59`).toISOString();
+  agrFiltroFechaActivo = { desde, hasta };
+  document.getElementById("agr-filtro-fecha-activo").textContent = `Mostrando ${fecha} de ${horaDesde} a ${horaHasta}`;
+  agrCargarTabla();
+}
+
+function agrQuitarFiltroFecha() {
+  agrFiltroFechaActivo = null;
+  document.getElementById("agr-filtro-fecha-activo").textContent = "";
+  agrCargarTabla();
+}
+
 async function agrCargarTabla() {
   const tbody = document.querySelector("#agr-tabla tbody");
   const contador = document.getElementById("agr-tabla-contador");
@@ -1177,10 +1200,15 @@ async function agrCargarTabla() {
     toggle.hidden = true;
     return;
   }
-  const res = await fetch(`${AGR_API}/ultimos?tienda=${agrTiendaActual}&horas=24`, { credentials: "include" });
+  const url = agrFiltroFechaActivo
+    ? `${AGR_API}/ultimos?tienda=${agrTiendaActual}&desde=${encodeURIComponent(agrFiltroFechaActivo.desde)}&hasta=${encodeURIComponent(agrFiltroFechaActivo.hasta)}`
+    : `${AGR_API}/ultimos?tienda=${agrTiendaActual}&horas=24`;
+  const res = await fetch(url, { credentials: "include" });
   let chequeos = await res.json();
   const totalSinLimpiar = chequeos.length;
-  if (agrTablaLimpiadaHasta) {
+  // El filtro de "limpiado" (ocultar lo ya visto) es para el uso normal de vigilar
+  // las últimas 24h -- no tiene sentido al bucear en una fecha concreta del pasado.
+  if (agrTablaLimpiadaHasta && !agrFiltroFechaActivo) {
     chequeos = chequeos.filter((c) => c.timestamp > agrTablaLimpiadaHasta);
   }
   const incorrectos = chequeos.filter((c) => c.error_texto);
@@ -1190,9 +1218,10 @@ async function agrCargarTabla() {
   contador.textContent = `(${incorrectos.length} con fallo técnico / ${correctos.length} correctos${notaLimpiados})`;
 
   if (incorrectos.length === 0) {
+    const periodo = agrFiltroFechaActivo ? "en ese periodo" : "en 24h";
     const motivo = totalSinLimpiar > 0 && chequeos.length === 0
       ? "Sin chequeos nuevos desde que limpiaste."
-      : "Sin fallos técnicos en 24h. Todos los chequeos se completaron correctamente.";
+      : `Sin fallos técnicos ${periodo}. Todos los chequeos se completaron correctamente.`;
     tbody.innerHTML = `<tr><td colspan="6" style="color:var(--text-muted);">${motivo}</td></tr>`;
   } else {
     tbody.innerHTML = incorrectos.slice(0, 30).map(agrFilaTabla).join("");

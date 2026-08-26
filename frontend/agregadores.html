@@ -211,6 +211,8 @@
   .agr-card-reinicio { color: var(--status-warning); }
 
   #agr-tabla-titulo { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .agr-tabla-filtro { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); margin: 8px 0; }
+  .agr-tabla-filtro input[type="date"], .agr-tabla-filtro input[type="time"] { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 12px; }
   #agr-tabla-toggle { font-size: 0.72rem; background: none; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; color: var(--text-secondary); cursor: pointer; }
   #agr-tabla-toggle:hover { background: var(--surface-page); }
   #agr-tabla-scroll { max-height: 520px; overflow-y: auto; overflow-x: auto; }
@@ -349,6 +351,14 @@
             </button>
           </div>
         </div>
+        <div id="agr-tabla-filtro" class="agr-tabla-filtro">
+          <label>Día: <input type="date" id="agr-filtro-fecha"></label>
+          <label>Desde: <input type="time" id="agr-filtro-hora-desde" value="00:00"></label>
+          <label>Hasta: <input type="time" id="agr-filtro-hora-hasta" value="23:59"></label>
+          <button type="button" class="btn btn-ghost" style="font-size:12px;padding:4px 10px;" onclick="agrAplicarFiltroFecha()">Filtrar</button>
+          <button type="button" class="btn btn-ghost" style="font-size:12px;padding:4px 10px;" onclick="agrQuitarFiltroFecha()">Últimas 24h</button>
+          <span id="agr-filtro-fecha-activo" style="font-size:12px;color:var(--text-muted);"></span>
+        </div>
         <div id="agr-tabla-scroll">
           <table id="agr-tabla">
             <thead>
@@ -432,6 +442,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260821a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/agregadores.js?v=20260826e"></script>
+<script src="js/agregadores.js?v=20260826f"></script>
 </body>
 </html>

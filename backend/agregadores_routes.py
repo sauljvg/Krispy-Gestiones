@@ -786,8 +786,11 @@ def tiendas_route(_user: dict = Depends(require_agregadores)):
 
 
 @router.get("/ultimos")
-def ultimos_route(tienda: str, horas: int = 24, _user: dict = Depends(require_agregadores)):
-    return agregadores_module.get_ultimos(tienda, horas)
+def ultimos_route(
+    tienda: str, horas: int = 24, desde: str | None = None, hasta: str | None = None,
+    _user: dict = Depends(require_agregadores),
+):
+    return agregadores_module.get_ultimos(tienda, horas, desde, hasta)
 
 
 @router.get("/mapa-datos")
