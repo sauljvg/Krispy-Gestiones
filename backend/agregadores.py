@@ -513,36 +513,32 @@ _CACHE_RESUMEN_DEDUPLICADO_TTL_SEG = 120
 
 
 def _agrupar_por_proximidad(puntos: list[dict], umbral_km: float = UMBRAL_DUPLICADO_KM) -> list[list[dict]]:
-    """Agrupa direcciones (con lat/lng) en clusters de "mismo sitio real" -- cierre
-    transitivo vía union-find sobre pares a <umbral_km, no solo comparación par a par
-    (si A-B y B-C están cerca, A/B/C acaban en el mismo cluster aunque A-C por sí
-    solos no lo estuvieran)."""
-    n = len(puntos)
-    padre = list(range(n))
+    """Agrupa direcciones (con lat/lng) en clusters de "mismo sitio real".
 
-    def raiz(i):
-        while padre[i] != i:
-            padre[i] = padre[padre[i]]
-            i = padre[i]
-        return i
-
-    def unir(i, j):
-        ri, rj = raiz(i), raiz(j)
-        if ri != rj:
-            padre[ri] = rj
-
-    for i in range(n):
-        for j in range(i + 1, n):
-            distancia, _ = _distancia_y_angulo(
-                puntos[i]["lat"], puntos[i]["lng"], puntos[j]["lat"], puntos[j]["lng"]
-            )
+    Cada cluster tiene un punto "ancla" (el primero que entra) -- un punto nuevo se
+    une a un cluster existente solo si está a <umbral_km del ANCLA, no de cualquier
+    otro miembro ya unido. Antes esto era un cierre transitivo (union-find: si A-B y
+    B-C están cerca, A/B/C entraban en el mismo cluster aunque A-C por sí solos no lo
+    estuvieran) -- confirmado en vivo 26/08 con umbral_km=0.2 que eso encadenaba
+    puntos claramente distintos (un cluster de 22 acabó mezclando una autovía M-40,
+    un carril bici y tres números de portal distintos de la misma calle, porque cada
+    eslabón individual estaba <200m del siguiente aunque los extremos de la cadena
+    quedaran mucho más lejos). Con el ancla, ningún miembro puede estar a más de
+    2×umbral_km de otro miembro cualquiera del mismo cluster."""
+    clusters: list[list[dict]] = []
+    for punto in puntos:
+        destino = None
+        for cluster in clusters:
+            ancla = cluster[0]
+            distancia, _ = _distancia_y_angulo(ancla["lat"], ancla["lng"], punto["lat"], punto["lng"])
             if distancia < umbral_km:
-                unir(i, j)
-
-    clusters: dict[int, list[dict]] = {}
-    for i, punto in enumerate(puntos):
-        clusters.setdefault(raiz(i), []).append(punto)
-    return list(clusters.values())
+                destino = cluster
+                break
+        if destino is not None:
+            destino.append(punto)
+        else:
+            clusters.append([punto])
+    return clusters
 
 
 def resumen_cobertura_deduplicada() -> dict:
