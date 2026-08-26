@@ -29,6 +29,7 @@ async def chequear_tienda(
     solo_sin_datos: bool = False,
     direcciones_override: list = None,
     radio_reuso_m: float = 100,
+    permitir_reuso: bool = True,
 ):
     """direcciones_override: si se pasa, se usa esta lista tal cual en vez de pedirle
     una nueva a la API (cercano/solo_sin_datos se ignoran en ese caso) -- para pasadas
@@ -39,7 +40,13 @@ async def chequear_tienda(
     radio_reuso_m: radio para reutilizar un chequeo cercano en vez de scrapear (100m
     por defecto). Más amplio (p.ej. 400m) tiene sentido dentro de una zona cuyo
     polígono de cobertura ya está confirmado -- un dato algo más lejos sigue siendo
-    representativo ahí."""
+    representativo ahí.
+
+    permitir_reuso: False fuerza un scrape real siempre, sin ni siquiera consultar
+    buscar_chequeo_cercano. radio_reuso_m=0 NO basta para esto -- si el propio punto
+    ya tiene un chequeo previo, se encuentra a sí mismo a 0m de distancia y "reutiliza"
+    su propio dato viejo igualmente (confirmado en vivo 26/08 con
+    revalidar_completo.py). Necesario para una prueba de carga real."""
     if direcciones_override is not None:
         direcciones = direcciones_override
     else:
@@ -77,13 +84,15 @@ async def chequear_tienda(
         # fila para él. buscar_limite_cobertura.py ya hace exactamente esto
         # (buscar_chequeo_cercano); aquí se reutiliza la misma función para que el
         # daemon normal también se beneficie.
-        try:
-            reuso = await api_client.buscar_chequeo_cercano(
-                direccion["lat"], direccion["lng"], agregador_nombre, radio_m=radio_reuso_m
-            )
-        except Exception as exc:
-            reuso = None
-            logger.warning("  no se pudo consultar reuso de chequeo cercano: %r", exc)
+        reuso = None
+        if permitir_reuso:
+            try:
+                reuso = await api_client.buscar_chequeo_cercano(
+                    direccion["lat"], direccion["lng"], agregador_nombre, radio_m=radio_reuso_m
+                )
+            except Exception as exc:
+                reuso = None
+                logger.warning("  no se pudo consultar reuso de chequeo cercano: %r", exc)
 
         if reuso is not None:
             logger.info(

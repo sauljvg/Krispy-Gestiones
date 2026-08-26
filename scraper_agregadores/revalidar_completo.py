@@ -57,10 +57,11 @@ async def main(agregador: str, worker_index: int, worker_count: int):
 
     for i, direccion in enumerate(asignados):
         try:
-            # radio_reuso_m=0: nunca reutiliza, siempre scrapea de verdad -- es una
-            # prueba de carga real, no queremos que se copien datos ya conocidos.
+            # permitir_reuso=False: nunca reutiliza, siempre scrapea de verdad -- es una
+            # prueba de carga real. radio_reuso_m=0 NO basta (el punto se encuentra a sí
+            # mismo a 0m si ya tenía chequeo, confirmado en vivo 26/08).
             await chequear_tienda(
-                direccion["tienda"], agregador, direcciones_override=[direccion], radio_reuso_m=0
+                direccion["tienda"], agregador, direcciones_override=[direccion], permitir_reuso=False
             )
         except Exception as exc:
             logger.error("Fallo revalidando %s: %r", direccion.get("direccion_text"), exc)
