@@ -2236,7 +2236,7 @@ function agrCerrarDashboardScraper() {
   }
 }
 
-function agrRondaHtml(agregador, ronda) {
+function agrRondaHtml(agregador, ronda, estados) {
   const nombre = AGR_NOMBRE_AGREGADOR[agregador];
   if (!ronda) {
     return `<div class="agr-scraper-desglose" style="margin-bottom:6px;"><b>${nombre}</b>: nunca se ha lanzado una vuelta completa</div>`;
@@ -2253,10 +2253,37 @@ function agrRondaHtml(agregador, ronda) {
   const porTienda = Object.entries(ronda.por_tienda || {})
     .map(([t, n]) => `${agrCentrosPorTienda[t]?.nombre || t}: ${n}`)
     .join(" · ");
+  // Faltan por tienda (pedido explícito del usuario 27/08: "no sé de qué tiendas
+  // son los que faltan") -- total activo de esa tienda (suma de las 4 categorías
+  // de /panel/resumen-estados, ya se pide de todas formas para la tabla de abajo)
+  // menos lo ya hecho en ESTA ronda (ronda.por_tienda). Aproximado a propósito:
+  // resumen-estados agrupa por la tienda VISUAL más cercana (con reasignación en
+  // los solapes entre tiendas vecinas) mientras que ronda.por_tienda usa la tienda
+  // "dueña" original de cada punto -- en el solape (~114 pares conocidos) pueden
+  // no coincidir exactamente. Vale para saber POR DÓNDE le queda al scraper, no
+  // como cifra exacta de auditoría.
+  let faltanPorTienda = "";
+  if (estados) {
+    const filas = Object.keys(estados)
+      .filter((t) => agrCentrosPorTienda[t])
+      .map((t) => {
+        const totalTienda = AGR_CATEGORIAS_ESTADO.reduce((s, c) => s + (estados[t]?.[agregador]?.[c] || 0), 0);
+        const hechoTienda = (ronda.por_tienda || {})[t] || 0;
+        return { t, faltan: Math.max(0, totalTienda - hechoTienda) };
+      })
+      .filter((f) => f.faltan > 0)
+      .sort((a, b) => b.faltan - a.faltan)
+      .map((f) => `${agrCentrosPorTienda[f.t]?.nombre || f.t}: ${f.faltan}`)
+      .join(" · ");
+    if (filas) {
+      faltanPorTienda = `<div class="agr-scraper-desglose" style="margin-top:2px;">Faltan por tienda (aprox.): ${filas}</div>`;
+    }
+  }
   return `<div style="margin-bottom:10px;">
     <b>${nombre}</b>: ${ronda.hechos}/${ronda.total_objetivo} hechos (${pct}%) · faltan ${ronda.faltan} · empezó a las ${inicio}
     <div class="agr-card-barra"><span style="width:${pct}%; background:${AGR_COLOR_MARCA[agregador]};"></span></div>
     ${porTienda ? `<div class="agr-scraper-desglose" style="margin-top:4px;">${porTienda}</div>` : ""}
+    ${faltanPorTienda}
   </div>`;
 }
 
@@ -2310,7 +2337,7 @@ async function agrCargarDashboardScraper() {
       </td>`;
     }).join("");
 
-    const seccionRondas = agregadores.map((a) => agrRondaHtml(a, rondas[a])).join("");
+    const seccionRondas = agregadores.map((a) => agrRondaHtml(a, rondas[a], estados)).join("");
 
     contenido.innerHTML = `
       <h4 class="agr-scraper-titulo-seccion">Vuelta completa en curso</h4>
