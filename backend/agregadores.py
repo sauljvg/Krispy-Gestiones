@@ -241,6 +241,16 @@ def ensure_tables():
     # un mismo agregador llaman a las dos al arrancar/terminar sin coordinarse entre
     # sí (el primero en llegar gana, el resto son no-ops), pedido explícito del
     # usuario 26/08 para ver progreso en vivo en el dashboard integrado.
+    # Config runtime simple (clave/valor) -- de momento solo "capturas_pausadas",
+    # para poder parar/reanudar la toma de capturas (disco local + Drive) al
+    # instante desde un endpoint, sin redeploy (pedido explícito del usuario
+    # 27/08: "paralizamos la toma de capturas y el envio al drive").
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agregadores_config (
+            clave TEXT PRIMARY KEY,
+            valor TEXT NOT NULL
+        )
+    """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS agregadores_rondas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1603,7 +1613,27 @@ def _carpeta_ronda_para(agregador: str, timestamp: str) -> str:
     return f"Sin ronda {agregador} {momento.strftime('%d/%m/%y')}"
 
 
-def guardar_captura_chequeo(chequeo_id: int, contenido: bytes) -> str:
+def capturas_pausadas() -> bool:
+    conn = get_connection()
+    fila = conn.execute(
+        "SELECT valor FROM agregadores_config WHERE clave='capturas_pausadas'"
+    ).fetchone()
+    conn.close()
+    return bool(fila and fila["valor"] == "1")
+
+
+def set_capturas_pausadas(pausado: bool) -> None:
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO agregadores_config (clave, valor) VALUES ('capturas_pausadas', ?) "
+        "ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor",
+        ("1" if pausado else "0",),
+    )
+    conn.commit()
+    conn.close()
+
+
+def guardar_captura_chequeo(chequeo_id: int, contenido: bytes) -> str | None:
     """El scraper sube la captura de CADA chequeo (no solo transiciones) --
     con miles de chequeos al día esto se comía el volumen de Railway (500MB,
     llegó a 276.6MB solo en capturas el 26/08), así que ahora se sube a la
@@ -1611,7 +1641,14 @@ def guardar_captura_chequeo(chequeo_id: int, contenido: bytes) -> str:
     una subcarpeta por ronda, y solo cae al disco local como fallback si
     Drive no está configurado o falla la subida (pedido explícito del
     usuario 26/08: "esas capturas podemos enviarlas a un google drive y que
-    se guarden allí?")."""
+    se guarden allí?").
+
+    Si `capturas_pausadas()` es True, no guarda NADA (ni disco ni Drive) y
+    deja url_captura sin tocar (queda NULL) -- interruptor global pedido
+    explícito del usuario 27/08 para parar la toma de capturas al instante,
+    sin depender de qué máquina esté corriendo el scraper."""
+    if capturas_pausadas():
+        return None
     conn = get_connection()
     fila = conn.execute(
         "SELECT agregador, timestamp FROM agregadores_chequeos WHERE id=?", (chequeo_id,)
@@ -1631,6 +1668,38 @@ def guardar_captura_chequeo(chequeo_id: int, contenido: bytes) -> str:
     conn.commit()
     conn.close()
     return referencia
+
+
+def borrar_todas_las_capturas() -> dict:
+    """Borra TODO -- disco local + Drive (a la papelera, no permanente) +
+    limpia url_captura de todos los chequeos. Pedido explícito del usuario
+    27/08: "Borra todas las capturas ahora, y paralizamos la toma de
+    capturas y el envio al drive". No pausa nada por sí sola -- usar
+    set_capturas_pausadas(True) aparte para eso."""
+    locales_borrados = 0
+    if os.path.isdir(CAPTURAS_DIR):
+        for nombre in os.listdir(CAPTURAS_DIR):
+            ruta = os.path.join(CAPTURAS_DIR, nombre)
+            try:
+                if os.path.isfile(ruta):
+                    os.remove(ruta)
+                    locales_borrados += 1
+            except OSError:
+                pass
+
+    resultado_drive = drive_client.borrar_todo_lo_de_la_carpeta_raiz()
+
+    conn = get_connection()
+    cur = conn.execute("UPDATE agregadores_chequeos SET url_captura=NULL WHERE url_captura IS NOT NULL")
+    filas_limpiadas = cur.rowcount
+    conn.commit()
+    conn.close()
+
+    return {
+        "locales_borrados": locales_borrados,
+        "drive": resultado_drive,
+        "filas_bd_limpiadas": filas_limpiadas,
+    }
 
 
 def get_captura_bytes(chequeo_id: int) -> bytes | None:

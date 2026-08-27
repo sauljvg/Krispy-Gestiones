@@ -200,6 +200,30 @@ def ver_captura_route(chequeo_id: int, _user: dict = Depends(require_agregadores
     return Response(content=contenido, media_type="image/png")
 
 
+@router.post("/admin/capturas/pausar", dependencies=[Depends(require_api_key)])
+def pausar_capturas_route(pausado: bool = True):
+    """Interruptor global: con pausado=true, guardar_captura_chequeo no
+    guarda NADA (ni disco ni Drive) hasta que se llame de nuevo con
+    pausado=false. No hace falta redeploy -- efecto inmediato en la próxima
+    captura que llegue, sea cual sea la máquina que esté scrapeando."""
+    agregadores_module.set_capturas_pausadas(pausado)
+    return {"capturas_pausadas": pausado}
+
+
+@router.get("/admin/capturas/pausadas", dependencies=[Depends(require_api_key)])
+def get_capturas_pausadas_route():
+    return {"capturas_pausadas": agregadores_module.capturas_pausadas()}
+
+
+@router.post("/admin/capturas/borrar-todo", dependencies=[Depends(require_api_key)])
+def borrar_todas_las_capturas_route():
+    """Borra TODO: disco local + Drive (a la papelera, no permanente) +
+    limpia url_captura de todos los chequeos. No pausa la toma de capturas
+    por sí solo -- llamar también a /admin/capturas/pausar si se quiere
+    parar de guardar nuevas."""
+    return agregadores_module.borrar_todas_las_capturas()
+
+
 @router.get("/admin/capturas/edad-locales", dependencies=[Depends(require_api_key)])
 def edad_capturas_locales_route(dias_umbral: int = 7):
     """Cuántas capturas locales (aún sin migrar a Drive) tienen más de
