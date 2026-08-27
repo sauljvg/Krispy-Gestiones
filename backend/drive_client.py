@@ -17,34 +17,46 @@ puesto (dev local, tests, etc.).
 Scope drive.file (no drive completo): la cuenta de servicio solo necesita
 acceso a los archivos que ELLA MISMA crea -- todas las capturas, viejas
 (migradas) y nuevas, se suben a través de esta misma cuenta, así que nunca
-hace falta el scope amplio "drive" (acceso a todo el Drive del usuario)."""
+hace falta el scope amplio "drive" (acceso a todo el Drive del usuario).
+
+Cliente por HILO, no un singleton global: FastAPI ejecuta cada endpoint
+`def` (no `async def`) en un hilo del threadpool de Starlette -- con varios
+chequeos/capturas llegando a la vez (varios workers del scraper en paralelo),
+varios hilos llamaban al MISMO objeto httplib2.Http/SSL de golpe.
+`googleapiclient`/`httplib2` NO son thread-safe, y eso corrompió memoria del
+proceso entero ("double free or corruption", tumbó el servidor completo --
+confirmado en vivo 27/08, no solo capturas rotas: TODO el backend caído).
+`threading.local()` le da a cada hilo su propia conexión, sin compartir nada
+mutable entre ellos."""
 import io
 import json
 import os
+import threading
 
 _SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
 FOLDER_ID = os.environ.get("GOOGLE_DRIVE_CAPTURAS_FOLDER_ID")
 
-_servicio = None
-_intentado = False
+_local = threading.local()
 
 # nombre de carpeta -> file id, para no buscar/crear la misma carpeta de ronda
 # en cada captura -- con miles de capturas por ronda, sin esta caché cada
 # subida haría una llamada extra de "files.list" solo para encontrar la
-# carpeta que ya se creó hace 2 capturas.
+# carpeta que ya se creó hace 2 capturas. Un dict compartido entre hilos para
+# LEER es seguro en CPython (el GIL protege operaciones simples de dict), pero
+# la sección "no existe -> crearla" sí necesita el lock de abajo para que dos
+# hilos no creen la misma carpeta duplicada a la vez.
 _carpetas_cache: dict[str, str] = {}
+_carpetas_lock = threading.Lock()
 
 
 def _get_servicio():
-    """Construye el cliente de Drive una sola vez por proceso (crear el
-    objeto de credenciales/servicio en cada request sería trabajo de más sin
-    ningún beneficio -- las credenciales de cuenta de servicio no expiran ni
-    cambian en caliente)."""
-    global _servicio, _intentado
-    if _servicio is not None or _intentado:
-        return _servicio
-    _intentado = True
+    """Construye (o reutiliza) el cliente de Drive de ESTE hilo -- nunca se
+    comparte entre hilos, ver nota de arriba sobre por qué."""
+    if getattr(_local, "intentado", False):
+        return getattr(_local, "servicio", None)
+    _local.intentado = True
+    _local.servicio = None
     creds_json = os.environ.get("GOOGLE_DRIVE_SA_JSON")
     if not creds_json or not FOLDER_ID:
         return None
@@ -54,11 +66,11 @@ def _get_servicio():
 
         info = json.loads(creds_json)
         credenciales = service_account.Credentials.from_service_account_info(info, scopes=_SCOPES)
-        _servicio = build("drive", "v3", credentials=credenciales, cache_discovery=False)
+        _local.servicio = build("drive", "v3", credentials=credenciales, cache_discovery=False)
     except Exception as e:
         print(f"[drive_client] No se pudo inicializar Google Drive: {e!r}", flush=True)
-        _servicio = None
-    return _servicio
+        _local.servicio = None
+    return _local.servicio
 
 
 def disponible() -> bool:
@@ -77,30 +89,37 @@ def _get_or_create_subcarpeta(nombre: str) -> str | None:
     servicio = _get_servicio()
     if not servicio:
         return None
-    try:
-        nombre_escapado = nombre.replace("'", "\\'")
-        query = (
-            f"name = '{nombre_escapado}' and mimeType = 'application/vnd.google-apps.folder' "
-            f"and '{FOLDER_ID}' in parents and trashed = false"
-        )
-        resultado = servicio.files().list(
-            q=query, spaces="drive", fields="files(id)",
-            supportsAllDrives=True, includeItemsFromAllDrives=True,
-        ).execute()
-        encontradas = resultado.get("files", [])
-        if encontradas:
-            carpeta_id = encontradas[0]["id"]
-        else:
-            carpeta = servicio.files().create(
-                body={"name": nombre, "mimeType": "application/vnd.google-apps.folder", "parents": [FOLDER_ID]},
-                fields="id", supportsAllDrives=True,
+    # Sin este lock, dos hilos que fallan la caché a la vez para la MISMA
+    # ronda podrían crear dos carpetas duplicadas con el mismo nombre --
+    # serializa solo esta sección (no las subidas de archivos en sí, que
+    # cada hilo hace con su propio cliente de _get_servicio()).
+    with _carpetas_lock:
+        if nombre in _carpetas_cache:  # otro hilo ya la creó mientras esperábamos el lock
+            return _carpetas_cache[nombre]
+        try:
+            nombre_escapado = nombre.replace("'", "\\'")
+            query = (
+                f"name = '{nombre_escapado}' and mimeType = 'application/vnd.google-apps.folder' "
+                f"and '{FOLDER_ID}' in parents and trashed = false"
+            )
+            resultado = servicio.files().list(
+                q=query, spaces="drive", fields="files(id)",
+                supportsAllDrives=True, includeItemsFromAllDrives=True,
             ).execute()
-            carpeta_id = carpeta["id"]
-        _carpetas_cache[nombre] = carpeta_id
-        return carpeta_id
-    except Exception as e:
-        print(f"[drive_client] Fallo creando/buscando la carpeta '{nombre}': {e!r}", flush=True)
-        return None
+            encontradas = resultado.get("files", [])
+            if encontradas:
+                carpeta_id = encontradas[0]["id"]
+            else:
+                carpeta = servicio.files().create(
+                    body={"name": nombre, "mimeType": "application/vnd.google-apps.folder", "parents": [FOLDER_ID]},
+                    fields="id", supportsAllDrives=True,
+                ).execute()
+                carpeta_id = carpeta["id"]
+            _carpetas_cache[nombre] = carpeta_id
+            return carpeta_id
+        except Exception as e:
+            print(f"[drive_client] Fallo creando/buscando la carpeta '{nombre}': {e!r}", flush=True)
+            return None
 
 
 def subir_captura(nombre: str, contenido: bytes, carpeta_ronda: str | None = None) -> str | None:
