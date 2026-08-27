@@ -2236,6 +2236,16 @@ function agrCerrarDashboardScraper() {
   }
 }
 
+// Disponible/no disponible/error de ESTA ronda -- arranca en 0 con cada vuelta
+// nueva (pedido explícito del usuario 27/08), distinto del desglose bruto
+// histórico que se ve en "Por tienda" cuando no hay ronda. Sin "sin datos": estar
+// contado aquí YA significa que se comprobó en esta ronda.
+const AGR_CATEGORIAS_RONDA = ["disponible", "no_disponible", "error"];
+
+function agrDesgloseHtml(desglose, categorias = AGR_CATEGORIAS_RONDA) {
+  return categorias.map((c) => `${AGR_CATEGORIA_LABEL[c]}: <b>${desglose?.[c] || 0}</b>`).join(" · ");
+}
+
 function agrRondaHtml(agregador, ronda) {
   const nombre = AGR_NOMBRE_AGREGADOR[agregador];
   if (!ronda) {
@@ -2243,11 +2253,13 @@ function agrRondaHtml(agregador, ronda) {
   }
   const pct = ronda.total_objetivo > 0 ? Math.round((ronda.hechos / ronda.total_objetivo) * 100) : 0;
   const inicio = new Date(ronda.iniciada_en).toLocaleTimeString("es-ES", { timeZone: "Europe/Madrid" });
+  const desglose = agrDesgloseHtml(ronda.desglose);
   if (!ronda.en_curso) {
     const fin = new Date(ronda.finalizada_en).toLocaleTimeString("es-ES", { timeZone: "Europe/Madrid" });
     const duracionMin = Math.max(1, Math.round((new Date(ronda.finalizada_en) - new Date(ronda.iniciada_en)) / 60000));
     return `<div class="agr-scraper-desglose" style="margin-bottom:6px;">
       <b>${nombre}</b>: ✅ completado -- ${ronda.hechos}/${ronda.total_objetivo} (${pct}%) · de ${inicio} a ${fin} (${duracionMin} min)
+      <div class="agr-scraper-desglose" style="margin-top:2px;">${desglose}</div>
     </div>`;
   }
   // Desglose por tienda (aquí y en "faltan") vive en la tabla "Por tienda" de abajo
@@ -2255,16 +2267,21 @@ function agrRondaHtml(agregador, ronda) {
   return `<div style="margin-bottom:10px;">
     <b>${nombre}</b>: ${ronda.hechos}/${ronda.total_objetivo} hechos (${pct}%) · faltan ${ronda.faltan} · empezó a las ${inicio}
     <div class="agr-card-barra"><span style="width:${pct}%; background:${AGR_COLOR_MARCA[agregador]};"></span></div>
+    <div class="agr-scraper-desglose" style="margin-top:4px;">${desglose}</div>
   </div>`;
 }
 
-// hechoRonda (opcional): puntos de esta tienda ya cubiertos en la vuelta en curso de
-// este agregador (ronda.por_tienda[tienda]) -- se antepone como "X/Y" al total bruto
-// cuando hay una ronda en curso/reciente para ese agregador; si no, se muestra solo
-// el total bruto como antes.
-function agrCeldaEstadoHtml(conteos, hechoRonda) {
-  const total = AGR_CATEGORIAS_ESTADO.reduce((s, c) => s + (conteos?.[c] || 0), 0);
-  const detalle = AGR_CATEGORIAS_ESTADO.map((c) => `${AGR_CATEGORIA_LABEL[c]}: <b>${conteos?.[c] || 0}</b>`).join(" · ");
+// conteosBruto: histórico completo de esta tienda/agregador (de /panel/resumen-estados)
+// -- SIEMPRE se usa para el total de "X/Y" (el tamaño real del grid no cambia con
+// la ronda). hechoRonda (opcional): puntos ya cubiertos en la vuelta en curso, para
+// el "X/" delante. desgloseRonda (opcional): si hay ronda para este agregador, el
+// detalle de abajo (Disponible/No disponible/Error) es el de ESTA ronda (arranca en
+// 0 cada vuelta nueva, pedido explícito del usuario 27/08) en vez del histórico.
+function agrCeldaEstadoHtml(conteosBruto, hechoRonda, desgloseRonda) {
+  const total = AGR_CATEGORIAS_ESTADO.reduce((s, c) => s + (conteosBruto?.[c] || 0), 0);
+  const detalle = desgloseRonda
+    ? agrDesgloseHtml(desgloseRonda)
+    : agrDesgloseHtml(conteosBruto, AGR_CATEGORIAS_ESTADO);
   const cabecera = hechoRonda != null ? `<b>${hechoRonda}</b>/${total}` : `<b>${total}</b> total`;
   return `<td>${cabecera}<div class="agr-scraper-desglose">${detalle}</div></td>`;
 }
@@ -2287,14 +2304,20 @@ async function agrCargarDashboardScraper() {
 
     const totales = {};
     const totalesHechoRonda = {};
+    const totalesDesgloseRonda = {};
     agregadores.forEach((a) => {
       totales[a] = { disponible: 0, no_disponible: 0, error: 0, sin_datos: 0 };
       totalesHechoRonda[a] = rondas[a] ? 0 : null;
+      totalesDesgloseRonda[a] = rondas[a] ? { disponible: 0, no_disponible: 0, error: 0 } : null;
     });
     tiendas.forEach((t) => {
       agregadores.forEach((a) => {
         AGR_CATEGORIAS_ESTADO.forEach((c) => { totales[a][c] += estados[t]?.[a]?.[c] || 0; });
-        if (rondas[a]) totalesHechoRonda[a] += (rondas[a].por_tienda || {})[t] || 0;
+        if (rondas[a]) {
+          totalesHechoRonda[a] += (rondas[a].por_tienda || {})[t] || 0;
+          const d = (rondas[a].por_tienda_desglose || {})[t];
+          if (d) AGR_CATEGORIAS_RONDA.forEach((c) => { totalesDesgloseRonda[a][c] += d[c] || 0; });
+        }
       });
     });
 
@@ -2302,11 +2325,12 @@ async function agrCargarDashboardScraper() {
       const nombre = agrCentrosPorTienda[t]?.nombre || t;
       const celdas = agregadores.map((a) => {
         const hechoRonda = rondas[a] ? ((rondas[a].por_tienda || {})[t] || 0) : null;
-        return agrCeldaEstadoHtml(estados[t]?.[a], hechoRonda);
+        const desgloseRonda = rondas[a] ? (rondas[a].por_tienda_desglose || {})[t] : null;
+        return agrCeldaEstadoHtml(estados[t]?.[a], hechoRonda, desgloseRonda);
       }).join("");
       return `<tr><td>${nombre}</td>${celdas}</tr>`;
     }).join("");
-    const filaTotales = agregadores.map((a) => agrCeldaEstadoHtml(totales[a], totalesHechoRonda[a])).join("");
+    const filaTotales = agregadores.map((a) => agrCeldaEstadoHtml(totales[a], totalesHechoRonda[a], totalesDesgloseRonda[a])).join("");
 
     // "Total único": mismo hechos/total_objetivo de la sección de arriba, en tabla
     // para comparar los 3 agregadores de un vistazo -- ya viene deduplicado (cada
