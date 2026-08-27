@@ -1724,6 +1724,39 @@ def migrar_capturas_a_drive(limite: int | None = None) -> dict:
     return {"migradas": migradas, "fallidas": fallidas, "bytes_liberados": bytes_liberados}
 
 
+def edad_capturas_locales(dias_umbral: int = 7) -> dict:
+    """Cuántas capturas locales (aún sin migrar a Drive) tienen más de
+    `dias_umbral` días -- por mtime del archivo (se escribe una sola vez al
+    guardar la captura, así que coincide con el momento del chequeo). Pedido
+    explícito del usuario 27/08: "de esas imágenes hay algunas que sean de
+    más de 1 semana?"."""
+    if not os.path.isdir(CAPTURAS_DIR):
+        return {"total": 0, "mas_viejas_que_umbral": 0, "bytes_mas_viejas": 0, "dias_umbral": dias_umbral}
+    limite = time.time() - dias_umbral * 86400
+    total = mas_viejas = 0
+    bytes_mas_viejas = 0
+    mas_vieja_dias = 0.0
+    for nombre in os.listdir(CAPTURAS_DIR):
+        ruta = os.path.join(CAPTURAS_DIR, nombre)
+        if not os.path.isfile(ruta):
+            continue
+        total += 1
+        mtime = os.path.getmtime(ruta)
+        edad_dias = (time.time() - mtime) / 86400
+        if edad_dias > mas_vieja_dias:
+            mas_vieja_dias = edad_dias
+        if mtime < limite:
+            mas_viejas += 1
+            bytes_mas_viejas += os.path.getsize(ruta)
+    return {
+        "total": total,
+        "mas_viejas_que_umbral": mas_viejas,
+        "mb_mas_viejas": round(bytes_mas_viejas / 1024 / 1024, 1),
+        "dias_umbral": dias_umbral,
+        "captura_mas_vieja_dias": round(mas_vieja_dias, 1),
+    }
+
+
 def estado_migracion_capturas() -> dict:
     conn = get_connection()
     total = conn.execute(
