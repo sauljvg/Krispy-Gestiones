@@ -17,7 +17,14 @@ logger = logging.getLogger(__name__)
 # con 60 workers) satura la réplica y devuelve 502, que antes tumbaba el proceso entero
 # al no reintentarse (raise_for_status sin red de seguridad). Espera exponencial: 1s,
 # 2s, 4s entre los 3 intentos.
-_ESTADOS_REINTENTABLES = {502, 503, 504}
+#
+# 500 añadido 27/08: el "disk I/O error" de SQLite bajo carga (ver backend/db.py)
+# devuelve 500, no 502/503/504 -- sin esto ni se intentaba una segunda vez aunque el
+# problema fuera intermitente (confirmado en vivo: la tasa de error de Railway
+# oscilaba entre 0% y 100% en el mismo minuto varias veces). No hay riesgo real de
+# duplicar el chequeo: un 500 aquí es la escritura fallando del todo, no una escritura
+# que sí ocurrió pero cuya respuesta se perdió.
+_ESTADOS_REINTENTABLES = {500, 502, 503, 504}
 _REINTENTOS_DEFECTO = 3
 
 
@@ -168,6 +175,22 @@ async def enviar_chequeo(data: dict) -> dict:
     return await _solicitar("POST", url, json=data, headers=_headers(), timeout=30)
 
 
+async def enviar_chequeos_batch(items: list[dict]) -> list[dict]:
+    """Como enviar_chequeo pero para varios a la vez -- UN solo POST, UN solo
+    commit del lado del backend (ver agregadores_routes.py::recibir_chequeos_batch).
+    Pedido explícito del usuario 27/08 tras confirmar en vivo que subir de uno en
+    uno con 20+ workers a la vez saturaba la escritura de SQLite (p50 de latencia
+    >10s, CPU/memoria normales -- no era falta de recursos). Devuelve la lista de
+    resultados en el mismo orden que `items`."""
+    if config.MODO_LOCAL:
+        logger.info("[MODO_LOCAL] lote de %d chequeo(s) no enviado a KG", len(items))
+        return [{"direccion_id": d.get("direccion_id"), "chequeo_id": -1, "transicion": False} for d in items]
+
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/chequeos/batch"
+    respuesta = await _solicitar("POST", url, json={"items": items}, headers=_headers(), timeout=30)
+    return respuesta["resultados"]
+
+
 async def subir_captura(chequeo_id: int, ruta_local: str):
     """Solo se llama cuando /chequeo respondió transicion=true -- sube la
     captura que el scraper ya tenía guardada en local (ver base.py) para que
@@ -276,6 +299,16 @@ async def iniciar_ronda(agregador: str, total_objetivo: int, worker_count: int) 
     url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/rondas/iniciar"
     params = {"agregador": agregador, "total_objetivo": total_objetivo, "worker_count": worker_count}
     return await _solicitar("POST", url, params=params, headers=_headers(), timeout=15)
+
+
+async def ronda_hechos_ids(agregador: str) -> list[int]:
+    """IDs de dirección que la ronda EN CURSO de este agregador ya cubrió --
+    para que un worker relanzado tras un corte reanude en vez de volver a
+    scrapear desde cero (ver backend/agregadores.py::direcciones_hechas_en_ronda).
+    [] si no hay ronda en curso (nada que reanudar, se scrapea todo normal)."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/rondas/hechos-ids"
+    respuesta = await _solicitar("GET", url, params={"agregador": agregador}, headers=_headers(), timeout=15)
+    return (respuesta or {}).get("direccion_ids", [])
 
 
 async def finalizar_ronda(agregador: str):

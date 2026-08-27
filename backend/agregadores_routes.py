@@ -43,6 +43,10 @@ class ChequeoIn(BaseModel):
     timestamp: str | None = None
 
 
+class ChequeoBatchIn(BaseModel):
+    items: list[ChequeoIn]
+
+
 class ChequeoManualIn(BaseModel):
     tienda: str
     agregador: str
@@ -125,6 +129,54 @@ def recibir_chequeo(body: ChequeoIn):
         )
 
     return {"ok": True, "chequeo_id": chequeo_id, "transicion": transicion}
+
+
+@router.post("/chequeos/batch", dependencies=[Depends(require_api_key)])
+def recibir_chequeos_batch(body: ChequeoBatchIn):
+    """Igual que POST /chequeo pero para varios a la vez, en UNA sola conexión y
+    UN solo commit -- pedido explícito del usuario 27/08: con 20+ workers del
+    scraper subiendo de uno en uno, cada punto disparaba su propio commit contra
+    SQLite y la escritura se convirtió en el cuello de botella real bajo carga
+    (confirmado en vivo: p50 de latencia >10s con 23 workers concurrentes, CPU y
+    memoria normales -- no era falta de recursos, era la cola de escrituras).
+    Agrupar N chequeos en un solo commit reduce esa cola N veces sin bajar la
+    concurrencia del scraper (ver agregadores_module.guardar_chequeos_batch).
+
+    Las alertas (fallos consecutivos, transición a no_disponible) se procesan
+    aparte, fuera de esa transacción -- son poco frecuentes (no todos los
+    puntos las disparan) y no vale la pena atarlas al mismo commit."""
+    items_data = [item.model_dump() for item in body.items]
+    resultados = agregadores_module.guardar_chequeos_batch(items_data)
+
+    for item, resultado in zip(body.items, resultados):
+        if item.error_texto:
+            recientes = agregadores_module.get_ultimos(item.tienda, horas=1)
+            mismos_agregador = [
+                c for c in recientes if c["agregador"] == item.agregador
+            ][: agregadores_module.FALLOS_CONSECUTIVOS_ALERTA]
+            if len(mismos_agregador) >= agregadores_module.FALLOS_CONSECUTIVOS_ALERTA and all(
+                c["error_texto"] for c in mismos_agregador
+            ):
+                agregadores_module.registrar_alerta(
+                    tipo="scraper_error",
+                    mensaje=(
+                        f"{item.agregador}: {agregadores_module.FALLOS_CONSECUTIVOS_ALERTA}+ fallos "
+                        f"consecutivos en {item.tienda}. Último: {item.error_texto}"
+                    ),
+                    tienda=item.tienda,
+                    agregador=item.agregador,
+                )
+        if resultado["transicion"]:
+            agregadores_module.registrar_alerta(
+                tipo="paso_a_no_disponible",
+                mensaje=agregadores_module.formatear_alerta_transicion(
+                    item.agregador, item.tienda, item.direccion_id, item.mensaje_bloqueo
+                ),
+                tienda=item.tienda,
+                agregador=item.agregador,
+            )
+
+    return {"ok": True, "resultados": resultados}
 
 
 @router.post("/capturas/{chequeo_id}", dependencies=[Depends(require_api_key)])
@@ -553,6 +605,15 @@ def admin_iniciar_ronda_route(agregador: str, total_objetivo: int, worker_count:
     para reconstruir a mano una vuelta que ya terminó antes de que este reporte
     existiera."""
     return agregadores_module.iniciar_ronda(agregador, total_objetivo, worker_count, iniciada_en)
+
+
+@router.get("/admin/rondas/hechos-ids", dependencies=[Depends(require_api_key)])
+def admin_ronda_hechos_ids_route(agregador: str):
+    """Ver agregadores_module.direcciones_hechas_en_ronda -- llamado por cada
+    worker de revalidar_completo.py al (re)arrancar, para saltarse los puntos
+    que esta ronda YA cubrió en un intento anterior (reanudar tras un corte, en
+    vez de volver a scrapear desde cero)."""
+    return {"direccion_ids": agregadores_module.direcciones_hechas_en_ronda(agregador)}
 
 
 @router.post("/admin/rondas/finalizar", dependencies=[Depends(require_api_key)])
