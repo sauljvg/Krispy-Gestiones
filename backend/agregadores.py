@@ -1491,15 +1491,54 @@ CAPTURAS_DIR = os.path.join(DATA_DIR, "uploads", "agregadores_capturas")
 _PREFIJO_DRIVE = "drive:"
 
 
+def _carpeta_ronda_para(agregador: str, timestamp: str) -> str:
+    """Nombre de la subcarpeta de Drive a la que pertenece un chequeo -- una
+    por ronda (vuelta completa con --worker-count, ver agregadores_rondas),
+    para no dejar miles de capturas sueltas en un único listado (pedido
+    explícito del usuario 27/08: "organizarlas por ronda... para saber de que
+    vuelta fue"). Si el chequeo no cae dentro de ninguna ronda registrada
+    (chequeos del daemon normal 24/7, fuera de una vuelta completa), se
+    agrupa por día en vez de por chequeo suelto."""
+    conn = get_connection()
+    ronda = conn.execute(
+        """SELECT iniciada_en FROM agregadores_rondas
+           WHERE agregador=? AND iniciada_en<=?
+             AND (finalizada_en IS NULL OR finalizada_en>=?)
+           ORDER BY iniciada_en DESC LIMIT 1""",
+        (agregador, timestamp, timestamp),
+    ).fetchone()
+    conn.close()
+    try:
+        if ronda:
+            momento = datetime.fromisoformat(ronda["iniciada_en"])
+        else:
+            momento = datetime.fromisoformat(timestamp)
+        if momento.tzinfo is None:
+            momento = momento.replace(tzinfo=timezone.utc)
+        momento = momento.astimezone(MADRID_TZ)
+    except ValueError:
+        return f"Sin fecha {agregador}"
+    if ronda:
+        return f"Ronda {agregador} {momento.strftime('%d/%m/%y %H:%M')}"
+    return f"Sin ronda {agregador} {momento.strftime('%d/%m/%y')}"
+
+
 def guardar_captura_chequeo(chequeo_id: int, contenido: bytes) -> str:
     """El scraper sube la captura de CADA chequeo (no solo transiciones) --
     con miles de chequeos al día esto se comía el volumen de Railway (500MB,
     llegó a 276.6MB solo en capturas el 26/08), así que ahora se sube a la
-    carpeta compartida de Google Drive (ver drive_client.py) y solo cae al
-    disco local como fallback si Drive no está configurado o falla la subida
-    (pedido explícito del usuario 26/08: "esas capturas podemos enviarlas a
-    un google drive y que se guarden allí?")."""
-    file_id = drive_client.subir_captura(f"{chequeo_id}.png", contenido)
+    carpeta compartida de Google Drive (ver drive_client.py), organizada en
+    una subcarpeta por ronda, y solo cae al disco local como fallback si
+    Drive no está configurado o falla la subida (pedido explícito del
+    usuario 26/08: "esas capturas podemos enviarlas a un google drive y que
+    se guarden allí?")."""
+    conn = get_connection()
+    fila = conn.execute(
+        "SELECT agregador, timestamp FROM agregadores_chequeos WHERE id=?", (chequeo_id,)
+    ).fetchone()
+    conn.close()
+    carpeta_ronda = _carpeta_ronda_para(fila["agregador"], fila["timestamp"]) if fila else None
+    file_id = drive_client.subir_captura(f"{chequeo_id}.png", contenido, carpeta_ronda=carpeta_ronda)
     if file_id:
         referencia = f"{_PREFIJO_DRIVE}{file_id}"
     else:
@@ -1580,9 +1619,13 @@ def migrar_capturas_a_drive(limite: int | None = None) -> dict:
             continue
         chequeo_id = nombre[: -len(".png")]
         try:
+            fila_chequeo = conn.execute(
+                "SELECT agregador, timestamp FROM agregadores_chequeos WHERE id=?", (chequeo_id,)
+            ).fetchone()
+            carpeta_ronda = _carpeta_ronda_para(fila_chequeo["agregador"], fila_chequeo["timestamp"]) if fila_chequeo else None
             with open(ruta, "rb") as f:
                 contenido = f.read()
-            file_id = drive_client.subir_captura(nombre, contenido)
+            file_id = drive_client.subir_captura(nombre, contenido, carpeta_ronda=carpeta_ronda)
             if not file_id:
                 fallidas += 1
                 continue

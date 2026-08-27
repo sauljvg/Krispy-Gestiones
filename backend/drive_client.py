@@ -29,6 +29,12 @@ FOLDER_ID = os.environ.get("GOOGLE_DRIVE_CAPTURAS_FOLDER_ID")
 _servicio = None
 _intentado = False
 
+# nombre de carpeta -> file id, para no buscar/crear la misma carpeta de ronda
+# en cada captura -- con miles de capturas por ronda, sin esta caché cada
+# subida haría una llamada extra de "files.list" solo para encontrar la
+# carpeta que ya se creó hace 2 capturas.
+_carpetas_cache: dict[str, str] = {}
+
 
 def _get_servicio():
     """Construye el cliente de Drive una sola vez por proceso (crear el
@@ -59,19 +65,61 @@ def disponible() -> bool:
     return _get_servicio() is not None
 
 
-def subir_captura(nombre: str, contenido: bytes) -> str | None:
-    """Sube una captura a la carpeta compartida, devuelve el file id de Drive
+def _get_or_create_subcarpeta(nombre: str) -> str | None:
+    """Busca (o crea) una subcarpeta con este nombre directamente dentro de la
+    carpeta raíz compartida -- una por ronda, para no dejar miles de capturas
+    sueltas en un único listado (pedido explícito del usuario 27/08:
+    "organizarlas por ronda... para saber de que vuelta fue"). Cacheada en
+    memoria: con miles de capturas de la misma ronda, sin esto cada subida
+    repetiría la búsqueda."""
+    if nombre in _carpetas_cache:
+        return _carpetas_cache[nombre]
+    servicio = _get_servicio()
+    if not servicio:
+        return None
+    try:
+        nombre_escapado = nombre.replace("'", "\\'")
+        query = (
+            f"name = '{nombre_escapado}' and mimeType = 'application/vnd.google-apps.folder' "
+            f"and '{FOLDER_ID}' in parents and trashed = false"
+        )
+        resultado = servicio.files().list(
+            q=query, spaces="drive", fields="files(id)",
+            supportsAllDrives=True, includeItemsFromAllDrives=True,
+        ).execute()
+        encontradas = resultado.get("files", [])
+        if encontradas:
+            carpeta_id = encontradas[0]["id"]
+        else:
+            carpeta = servicio.files().create(
+                body={"name": nombre, "mimeType": "application/vnd.google-apps.folder", "parents": [FOLDER_ID]},
+                fields="id", supportsAllDrives=True,
+            ).execute()
+            carpeta_id = carpeta["id"]
+        _carpetas_cache[nombre] = carpeta_id
+        return carpeta_id
+    except Exception as e:
+        print(f"[drive_client] Fallo creando/buscando la carpeta '{nombre}': {e!r}", flush=True)
+        return None
+
+
+def subir_captura(nombre: str, contenido: bytes, carpeta_ronda: str | None = None) -> str | None:
+    """Sube una captura a la carpeta compartida (o a la subcarpeta de la ronda
+    correspondiente, si se pasa `carpeta_ronda`), devuelve el file id de Drive
     (o None si Drive no está configurado o falla la subida -- el llamador
     decide el fallback)."""
     servicio = _get_servicio()
     if not servicio:
         return None
+    parent = FOLDER_ID
+    if carpeta_ronda:
+        parent = _get_or_create_subcarpeta(carpeta_ronda) or FOLDER_ID
     try:
         from googleapiclient.http import MediaIoBaseUpload
 
         media = MediaIoBaseUpload(io.BytesIO(contenido), mimetype="image/png", resumable=False)
         archivo = servicio.files().create(
-            body={"name": nombre, "parents": [FOLDER_ID]},
+            body={"name": nombre, "parents": [parent]},
             media_body=media,
             fields="id",
             supportsAllDrives=True,  # el destino es una Unidad compartida, no "Mi unidad"
