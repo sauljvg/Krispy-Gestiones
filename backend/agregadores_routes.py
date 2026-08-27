@@ -4,8 +4,8 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, Response, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 import agregadores as agregadores_module
@@ -130,8 +130,11 @@ def recibir_chequeo(body: ChequeoIn):
 @router.post("/capturas/{chequeo_id}", dependencies=[Depends(require_api_key)])
 async def subir_captura_route(chequeo_id: int, archivo: UploadFile = File(...)):
     """El scraper sube la captura de CADA chequeo (no solo transiciones) --
-    se borran solas a los pocos días (ver agregadores.limpiar_capturas_viejas)
-    en vez de limitar de antemano cuáles se suben."""
+    se suben a Google Drive (ver drive_client.py), con fallback a disco local
+    solo si Drive no está configurado o falla la subida. Las que caen en
+    disco local se borran solas a los pocos días (ver
+    agregadores.limpiar_capturas_viejas) en vez de limitar de antemano
+    cuáles se suben."""
     contenido = await archivo.read()
     agregadores_module.guardar_captura_chequeo(chequeo_id, contenido)
     return {"ok": True}
@@ -139,10 +142,30 @@ async def subir_captura_route(chequeo_id: int, archivo: UploadFile = File(...)):
 
 @router.get("/capturas/{chequeo_id}")
 def ver_captura_route(chequeo_id: int, _user: dict = Depends(require_agregadores)):
-    ruta = agregadores_module.get_ruta_captura(chequeo_id)
-    if not ruta:
+    contenido = agregadores_module.get_captura_bytes(chequeo_id)
+    if not contenido:
         raise HTTPException(status_code=404, detail="Sin captura para este chequeo")
-    return FileResponse(ruta, media_type="image/png")
+    return Response(content=contenido, media_type="image/png")
+
+
+@router.get("/admin/capturas/estado-migracion", dependencies=[Depends(require_api_key)])
+def estado_migracion_capturas_route():
+    """Cuántas capturas ya están en Drive vs. cuántas siguen en el disco
+    local pendientes de migrar (ver migrar_capturas_a_drive) -- para vigilar
+    el progreso de la migración sin tener que esperar a que termine del
+    todo."""
+    return agregadores_module.estado_migracion_capturas()
+
+
+@router.post("/admin/capturas/migrar-a-drive", dependencies=[Depends(require_api_key)])
+def migrar_capturas_a_drive_route(limite: int | None = None):
+    """Sube a Drive las capturas que quedaron en disco local (de antes de
+    activar Drive) y borra el archivo local tras subirlo con éxito. Sin
+    `limite`, procesa TODAS las que haya de una vez -- con miles de archivos
+    puede tardar varios minutos (una llamada HTTP a Drive por archivo), así
+    que conviene pasar un `limite` e ir llamando esto varias veces si el
+    proxy de Railway corta peticiones largas."""
+    return agregadores_module.migrar_capturas_a_drive(limite)
 
 
 @router.get("/admin/chequeos", dependencies=[Depends(require_api_key)])

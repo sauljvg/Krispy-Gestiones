@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 MADRID_TZ = ZoneInfo("Europe/Madrid")
 
+import drive_client
 from db import DATA_DIR, get_connection
 
 # Coordenadas fijas de las tiendas monitoreadas — mismos slugs que
@@ -1221,28 +1222,140 @@ def hubo_transicion_a_no_disponible(direccion_id: int | None, agregador: str) ->
 
 CAPTURAS_DIR = os.path.join(DATA_DIR, "uploads", "agregadores_capturas")
 
+# Prefijo para distinguir "url_captura es un file id de Google Drive" de "es
+# una ruta local en disco" -- ambos formatos conviven en la misma columna
+# mientras dure la migración (ver migrar_capturas_a_drive), así que hace
+# falta poder diferenciarlos sin ambigüedad al leer/borrar.
+_PREFIJO_DRIVE = "drive:"
+
 
 def guardar_captura_chequeo(chequeo_id: int, contenido: bytes) -> str:
-    os.makedirs(CAPTURAS_DIR, exist_ok=True)
-    ruta = os.path.join(CAPTURAS_DIR, f"{chequeo_id}.png")
-    with open(ruta, "wb") as f:
-        f.write(contenido)
+    """El scraper sube la captura de CADA chequeo (no solo transiciones) --
+    con miles de chequeos al día esto se comía el volumen de Railway (500MB,
+    llegó a 276.6MB solo en capturas el 26/08), así que ahora se sube a la
+    carpeta compartida de Google Drive (ver drive_client.py) y solo cae al
+    disco local como fallback si Drive no está configurado o falla la subida
+    (pedido explícito del usuario 26/08: "esas capturas podemos enviarlas a
+    un google drive y que se guarden allí?")."""
+    file_id = drive_client.subir_captura(f"{chequeo_id}.png", contenido)
+    if file_id:
+        referencia = f"{_PREFIJO_DRIVE}{file_id}"
+    else:
+        os.makedirs(CAPTURAS_DIR, exist_ok=True)
+        referencia = os.path.join(CAPTURAS_DIR, f"{chequeo_id}.png")
+        with open(referencia, "wb") as f:
+            f.write(contenido)
     conn = get_connection()
-    conn.execute("UPDATE agregadores_chequeos SET url_captura=? WHERE id=?", (ruta, chequeo_id))
+    conn.execute("UPDATE agregadores_chequeos SET url_captura=? WHERE id=?", (referencia, chequeo_id))
     conn.commit()
     conn.close()
-    return ruta
+    return referencia
 
 
-def get_ruta_captura(chequeo_id: int) -> str | None:
+def get_captura_bytes(chequeo_id: int) -> bytes | None:
+    """Reemplaza a get_ruta_captura (que devolvía una ruta de disco -- ya no
+    vale como concepto único ahora que una captura puede vivir en Drive o en
+    disco local según cuál estaba disponible en el momento de guardarla)."""
     conn = get_connection()
     fila = conn.execute(
         "SELECT url_captura FROM agregadores_chequeos WHERE id=?", (chequeo_id,)
     ).fetchone()
     conn.close()
-    if fila and fila["url_captura"] and os.path.isfile(fila["url_captura"]):
-        return fila["url_captura"]
+    if not fila or not fila["url_captura"]:
+        return None
+    referencia = fila["url_captura"]
+    if referencia.startswith(_PREFIJO_DRIVE):
+        return drive_client.descargar_captura(referencia[len(_PREFIJO_DRIVE):])
+    if os.path.isfile(referencia):
+        with open(referencia, "rb") as f:
+            return f.read()
     return None
+
+
+def _borrar_captura_fisica(referencia: str | None) -> int:
+    """Borra el archivo detrás de una referencia (Drive o disco local),
+    devuelve los bytes liberados (0 si no se pudo determinar/borrar, p.ej.
+    Drive no da el tamaño sin una llamada aparte que no merece la pena aquí
+    -- el propósito de esto es liberar espacio del VOLUMEN LOCAL, que es el
+    que tiene el límite de 500MB; Drive no tiene ese problema)."""
+    if not referencia:
+        return 0
+    if referencia.startswith(_PREFIJO_DRIVE):
+        drive_client.borrar_captura(referencia[len(_PREFIJO_DRIVE):])
+        return 0
+    try:
+        if os.path.isfile(referencia):
+            tamano = os.path.getsize(referencia)
+            os.remove(referencia)
+            return tamano
+    except OSError:
+        pass
+    return 0
+
+
+def migrar_capturas_a_drive(limite: int | None = None) -> dict:
+    """Sube a Drive las capturas que todavía viven en el disco local (de
+    antes de activar Drive, o de un momento en que Drive falló) y borra el
+    archivo local tras subirlo con éxito -- para liberar el volumen sin
+    perder el histórico. `limite` corta la vuelta a los N primeros archivos
+    (pensado para ir llamando esto repetidas veces desde un endpoint sin
+    bloquear el proceso muchísimo tiempo de una sola vez)."""
+    if not drive_client.disponible():
+        return {"migradas": 0, "fallidas": 0, "bytes_liberados": 0, "error": "Google Drive no está configurado"}
+    if not os.path.isdir(CAPTURAS_DIR):
+        return {"migradas": 0, "fallidas": 0, "bytes_liberados": 0}
+
+    nombres = sorted(os.listdir(CAPTURAS_DIR))
+    if limite:
+        nombres = nombres[:limite]
+
+    conn = get_connection()
+    migradas = fallidas = 0
+    bytes_liberados = 0
+    for nombre in nombres:
+        ruta = os.path.join(CAPTURAS_DIR, nombre)
+        if not os.path.isfile(ruta) or not nombre.endswith(".png"):
+            continue
+        chequeo_id = nombre[: -len(".png")]
+        try:
+            with open(ruta, "rb") as f:
+                contenido = f.read()
+            file_id = drive_client.subir_captura(nombre, contenido)
+            if not file_id:
+                fallidas += 1
+                continue
+            conn.execute(
+                "UPDATE agregadores_chequeos SET url_captura=? WHERE id=?",
+                (f"{_PREFIJO_DRIVE}{file_id}", chequeo_id),
+            )
+            conn.commit()
+            bytes_liberados += os.path.getsize(ruta)
+            os.remove(ruta)
+            migradas += 1
+        except Exception as e:
+            fallidas += 1
+            print(f"[agregadores] Fallo migrando captura {nombre} a Drive: {e!r}", flush=True)
+    conn.close()
+    return {"migradas": migradas, "fallidas": fallidas, "bytes_liberados": bytes_liberados}
+
+
+def estado_migracion_capturas() -> dict:
+    conn = get_connection()
+    total = conn.execute(
+        "SELECT COUNT(*) c FROM agregadores_chequeos WHERE url_captura IS NOT NULL"
+    ).fetchone()["c"]
+    en_drive = conn.execute(
+        "SELECT COUNT(*) c FROM agregadores_chequeos WHERE url_captura LIKE ?", (f"{_PREFIJO_DRIVE}%",)
+    ).fetchone()["c"]
+    conn.close()
+    locales = _tamano_dir(CAPTURAS_DIR)
+    return {
+        "drive_configurado": drive_client.disponible(),
+        "total_con_captura": total,
+        "en_drive": en_drive,
+        "locales_pendientes_de_migrar": locales["archivos"],
+        "locales_mb": round(locales["bytes"] / 1024 / 1024, 1),
+    }
 
 
 CAPTURAS_DIAS_A_CONSERVAR = 3
@@ -1315,26 +1428,20 @@ def info_capturas() -> dict:
 
 
 def limpiar_capturas_direcciones_inactivas() -> dict:
-    if not os.path.isdir(CAPTURAS_DIR):
-        return {"borrados": 0, "bytes_liberados": 0}
     conn = get_connection()
     filas = conn.execute(
-        """SELECT c.url_captura FROM agregadores_chequeos c
+        """SELECT c.id, c.url_captura FROM agregadores_chequeos c
            JOIN agregadores_direcciones d ON d.id = c.direccion_id
            WHERE d.activo = 0 AND c.url_captura IS NOT NULL"""
     ).fetchall()
-    conn.close()
     borrados = 0
     bytes_liberados = 0
     for fila in filas:
-        ruta = fila["url_captura"]
-        try:
-            if ruta and os.path.isfile(ruta):
-                bytes_liberados += os.path.getsize(ruta)
-                os.remove(ruta)
-                borrados += 1
-        except OSError:
-            pass
+        bytes_liberados += _borrar_captura_fisica(fila["url_captura"])
+        conn.execute("UPDATE agregadores_chequeos SET url_captura=NULL WHERE id=?", (fila["id"],))
+        borrados += 1
+    conn.commit()
+    conn.close()
     return {"borrados": borrados, "bytes_liberados": bytes_liberados}
 
 
@@ -1368,11 +1475,7 @@ def eliminar_chequeo(chequeo_id: int) -> bool:
     if not fila:
         conn.close()
         return False
-    if fila["url_captura"] and os.path.isfile(fila["url_captura"]):
-        try:
-            os.remove(fila["url_captura"])
-        except OSError:
-            pass
+    _borrar_captura_fisica(fila["url_captura"])
     conn.execute("DELETE FROM agregadores_chequeos WHERE id=?", (chequeo_id,))
     conn.commit()
     conn.close()

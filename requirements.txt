@@ -11,3 +11,5 @@ pdfplumber
 Pillow
 replit
 replit-object-storage
+google-api-python-client
+google-auth
