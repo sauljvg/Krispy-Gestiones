@@ -30,6 +30,7 @@ async def chequear_tienda(
     direcciones_override: list = None,
     radio_reuso_m: float = 100,
     permitir_reuso: bool = True,
+    buffer_subida: list | None = None,
 ) -> list[dict]:
     """direcciones_override: si se pasa, se usa esta lista tal cual en vez de pedirle
     una nueva a la API (cercano/solo_sin_datos se ignoran en ese caso) -- para pasadas
@@ -47,6 +48,16 @@ async def chequear_tienda(
     ya tiene un chequeo previo, se encuentra a sí mismo a 0m de distancia y "reutiliza"
     su propio dato viejo igualmente (confirmado en vivo 26/08 con
     revalidar_completo.py). Necesario para una prueba de carga real.
+
+    buffer_subida: si se pasa una lista (normalmente vacía al principio), los
+    chequeos NO se suben uno a uno -- se acumulan ahí (ver flush_buffer_subida) para
+    que el CALLER decida cuándo subirlos juntos en un solo lote. Pedido explícito
+    del usuario 27/08: con 20+ workers subiendo de uno en uno, cada punto disparaba
+    su propio commit en SQLite y la escritura se convirtió en el cuello de botella
+    real bajo carga (p50 de latencia >10s con CPU/memoria normales -- no era falta
+    de recursos). Por defecto (None) el comportamiento es EXACTAMENTE el de
+    siempre (sube cada punto al momento) -- esto es opt-in, no afecta al daemon
+    normal (scheduler.py) ni a ningún otro uso existente de esta función.
 
     Devuelve una lista con un dict por dirección procesada:
     {"direccion_id", "error_tecnico"} -- error_tecnico=True solo cuando el SCRAPER
@@ -117,11 +128,16 @@ async def chequear_tienda(
                 "direccion_id": direccion["id"],
                 "disponible": reuso["disponible"],
             }
-            try:
-                await api_client.enviar_chequeo(datos_reuso)
-            except Exception as exc:
-                logger.warning("  no se pudo subir el chequeo reutilizado a KG (%r) -- encolado en local", exc)
-                cola_local.encolar(datos_reuso)
+            if buffer_subida is not None:
+                buffer_subida.append(
+                    {"datos": datos_reuso, "url_captura": None, "agregador": agregador_nombre, "texto": texto}
+                )
+            else:
+                try:
+                    await api_client.enviar_chequeo(datos_reuso)
+                except Exception as exc:
+                    logger.warning("  no se pudo subir el chequeo reutilizado a KG (%r) -- encolado en local", exc)
+                    cola_local.encolar(datos_reuso)
             fallos_consecutivos = 0
             resultados_por_punto.append({"direccion_id": direccion["id"], "error_tecnico": False})
             continue  # sin scrape real -> también se salta la pausa anti-bot de este punto
@@ -152,48 +168,62 @@ async def chequear_tienda(
             "mensaje_bloqueo": resultado.mensaje_bloqueo,
             "error_texto": resultado.error_texto,
         }
-        try:
-            respuesta = await api_client.enviar_chequeo(datos_chequeo)
-        except Exception as exc:
-            # El dato YA es real (el scrape en sí funcionó) -- si esto falla es el
-            # BACKEND el que está caído/rechazando (confirmado en vivo 27/08: disk
-            # I/O error de SQLite bajo carga tumbaba la web entera durante ratos
-            # largos). Antes esto se perdía del todo si los 3 reintentos extra de
-            # revalidar_completo.py al FINAL de la pasada coincidían con el
-            # servidor aún caído -- ahora se encola en local y se reenvía después
-            # (ver reenviar_cola.py) sin volver a scrapear nada.
-            logger.error(
-                "  [%s/%s] @ %s: no se pudo subir a KG (%r) -- encolado en local, se reenviará solo",
-                tienda, agregador_nombre, texto, exc,
+        if buffer_subida is not None:
+            # No se sube nada aquí -- se acumula y el CALLER lo sube en lote (ver
+            # flush_buffer_subida). Los fallos de subida y las capturas también se
+            # gestionan ahí, en el momento del flush -- no tiene sentido duplicar
+            # esa lógica aquí.
+            buffer_subida.append(
+                {
+                    "datos": datos_chequeo,
+                    "url_captura": resultado.url_captura,
+                    "agregador": agregador_nombre,
+                    "texto": texto,
+                }
             )
-            cola_local.encolar(datos_chequeo, resultado.url_captura)
-            fallos_consecutivos = 0
-            # error_tecnico=False: el scraper SÍ funcionó, el dato es real -- lo
-            # único que falló fue subirlo, y ya queda encolado para reenviarse solo.
-            # No tiene sentido volver a scrapear esto en una segunda pasada.
-            resultados_por_punto.append({"direccion_id": direccion["id"], "error_tecnico": False})
-            if delay_seg and i < len(direcciones) - 1:
-                await asyncio.sleep(delay_seg)
-            continue
-
-        # Se sube la captura de CADA chequeo, no solo de las transiciones --
-        # confirmado un caso real donde un resultado se dio con confianza
-        # total pero sobre la dirección equivocada (bug de coordenadas en
-        # bruto ya arreglado arriba); sin poder ver la captura desde el
-        # dashboard no había forma de detectarlo.
-        if resultado.url_captura:
-            if respuesta.get("transicion"):
-                logger.warning(
-                    "%s: %s dejó de estar disponible (era disponible en el chequeo anterior) -- subiendo captura",
-                    agregador_nombre,
-                    texto,
-                )
+        else:
             try:
-                await api_client.subir_captura(respuesta["chequeo_id"], resultado.url_captura)
+                respuesta = await api_client.enviar_chequeo(datos_chequeo)
             except Exception as exc:
-                # El chequeo principal ya se subió bien (arriba) -- perder solo la
-                # captura no debe tumbar el punto entero ni perder el dato real.
-                logger.warning("  captura no subida (dato principal sí subió): %r", exc)
+                # El dato YA es real (el scrape en sí funcionó) -- si esto falla es el
+                # BACKEND el que está caído/rechazando (confirmado en vivo 27/08: disk
+                # I/O error de SQLite bajo carga tumbaba la web entera durante ratos
+                # largos). Antes esto se perdía del todo si los 3 reintentos extra de
+                # revalidar_completo.py al FINAL de la pasada coincidían con el
+                # servidor aún caído -- ahora se encola en local y se reenvía después
+                # (ver reenviar_cola.py) sin volver a scrapear nada.
+                logger.error(
+                    "  [%s/%s] @ %s: no se pudo subir a KG (%r) -- encolado en local, se reenviará solo",
+                    tienda, agregador_nombre, texto, exc,
+                )
+                cola_local.encolar(datos_chequeo, resultado.url_captura)
+                fallos_consecutivos = 0
+                # error_tecnico=False: el scraper SÍ funcionó, el dato es real -- lo
+                # único que falló fue subirlo, y ya queda encolado para reenviarse solo.
+                # No tiene sentido volver a scrapear esto en una segunda pasada.
+                resultados_por_punto.append({"direccion_id": direccion["id"], "error_tecnico": False})
+                if delay_seg and i < len(direcciones) - 1:
+                    await asyncio.sleep(delay_seg)
+                continue
+
+            # Se sube la captura de CADA chequeo, no solo de las transiciones --
+            # confirmado un caso real donde un resultado se dio con confianza
+            # total pero sobre la dirección equivocada (bug de coordenadas en
+            # bruto ya arreglado arriba); sin poder ver la captura desde el
+            # dashboard no había forma de detectarlo.
+            if resultado.url_captura:
+                if respuesta.get("transicion"):
+                    logger.warning(
+                        "%s: %s dejó de estar disponible (era disponible en el chequeo anterior) -- subiendo captura",
+                        agregador_nombre,
+                        texto,
+                    )
+                try:
+                    await api_client.subir_captura(respuesta["chequeo_id"], resultado.url_captura)
+                except Exception as exc:
+                    # El chequeo principal ya se subió bien (arriba) -- perder solo la
+                    # captura no debe tumbar el punto entero ni perder el dato real.
+                    logger.warning("  captura no subida (dato principal sí subió): %r", exc)
 
         logger.info("  -> disponible=%s tiempo=%s min", resultado.disponible, resultado.tiempo_entrega_min)
 
@@ -215,6 +245,41 @@ async def chequear_tienda(
             await asyncio.sleep(delay_seg)
 
     return resultados_por_punto
+
+
+async def flush_buffer_subida(buffer_subida: list) -> None:
+    """Sube en UN solo lote (ver api_client.enviar_chequeos_batch) todo lo
+    acumulado por chequear_tienda(..., buffer_subida=...), y vacía la lista in-place.
+    Pensado para llamarse periódicamente (cada N puntos, ver revalidar_completo.py)
+    -- no ocurre solo dentro de chequear_tienda, así el caller decide el ritmo."""
+    if not buffer_subida:
+        return
+
+    items = [b["datos"] for b in buffer_subida]
+    try:
+        resultados = await api_client.enviar_chequeos_batch(items)
+    except Exception as exc:
+        # Mismo tratamiento que un fallo de subida individual -- el dato ya es
+        # real, se encola en local para reenviarse después sin volver a scrapear.
+        logger.error("Fallo subiendo lote de %d chequeo(s) (%r) -- encolados en local", len(buffer_subida), exc)
+        for b in buffer_subida:
+            cola_local.encolar(b["datos"], b["url_captura"])
+        buffer_subida.clear()
+        return
+
+    for b, resultado in zip(buffer_subida, resultados):
+        if b["url_captura"]:
+            if resultado.get("transicion"):
+                logger.warning(
+                    "%s: %s dejó de estar disponible (era disponible en el chequeo anterior) -- subiendo captura",
+                    b["agregador"], b["texto"],
+                )
+            try:
+                await api_client.subir_captura(resultado["chequeo_id"], b["url_captura"])
+            except Exception as exc:
+                logger.warning("  captura no subida (dato principal sí subió): %r", exc)
+
+    buffer_subida.clear()
 
 
 async def main():

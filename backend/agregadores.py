@@ -1497,6 +1497,57 @@ def guardar_chequeo(data: dict) -> int:
     return chequeo_id
 
 
+def guardar_chequeos_batch(items: list[dict]) -> list[dict]:
+    """Como guardar_chequeo, pero para varios chequeos en UNA sola conexión/commit
+    -- ver agregadores_routes.py::recibir_chequeos_batch para el motivo (cuello de
+    botella de escritura en SQLite bajo carga, 27/08). Devuelve una lista paralela
+    de {"direccion_id", "chequeo_id", "transicion"}, mismo orden que `items`.
+
+    La comprobación de transición se hace ANTES de insertar cada fila (dentro del
+    mismo bucle) para que un punto no se compare consigo mismo -- igual que hacía
+    hubo_transicion_a_no_disponible() por separado, pero sin abrir una conexión
+    nueva por punto."""
+    conn = get_connection()
+    try:
+        ahora = datetime.now(timezone.utc).isoformat()
+        resultados = []
+        for data in items:
+            transicion = False
+            if not data.get("error_texto") and not data.get("disponible"):
+                fila = conn.execute(
+                    """SELECT disponible FROM agregadores_chequeos
+                       WHERE direccion_id=? AND agregador=? AND error_texto IS NULL
+                       ORDER BY timestamp DESC LIMIT 1""",
+                    (data.get("direccion_id"), data["agregador"]),
+                ).fetchone()
+                transicion = bool(fila and fila["disponible"])
+
+            cur = conn.execute(
+                """INSERT INTO agregadores_chequeos
+                   (tienda, agregador, direccion_id, timestamp, disponible, tiempo_entrega_min,
+                    mensaje_bloqueo, error_texto, verificado_por)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    data["tienda"],
+                    data["agregador"],
+                    data.get("direccion_id"),
+                    data.get("timestamp") or ahora,
+                    1 if data.get("disponible") else 0,
+                    data.get("tiempo_entrega_min"),
+                    data.get("mensaje_bloqueo"),
+                    data.get("error_texto"),
+                    data.get("verificado_por"),
+                ),
+            )
+            resultados.append(
+                {"direccion_id": data.get("direccion_id"), "chequeo_id": cur.lastrowid, "transicion": transicion}
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return resultados
+
+
 def hubo_transicion_a_no_disponible(direccion_id: int | None, agregador: str) -> bool:
     if direccion_id is None:
         return False

@@ -27,6 +27,15 @@ resuelve solo dándole más tiempo. Distinto de `fallidos` (fallos de CONEXIÓN 
 propio backend, ya poco frecuentes desde que existe la cola local -- ver
 utils/cola_local.py): ese dato ya es real, no hace falta volver a scrapearlo.
 
+Subida por LOTES, no punto a punto (27/08, pedido explícito del usuario tras
+confirmar en vivo que subir de uno en uno con 20+ workers a la vez saturaba la
+escritura de SQLite -- p50 de latencia de la web subió a >10s con CPU/memoria
+normales, no era falta de recursos, era la cola de commits). Cada TAMANO_LOTE
+puntos se suben juntos en un solo POST/commit (ver main.py::flush_buffer_subida).
+Efecto secundario esperado: el progreso "hechos" del dashboard avanza a saltos de
+TAMANO_LOTE en vez de de uno en uno -- aceptable, ya no es tiempo real estricto a
+cambio de no tumbar la web con la carga de escritura.
+
 Uso (un agregador por tanda, varios procesos):
     venv/Scripts/python revalidar_completo.py --agregador ubereats --worker-index 0 --worker-count 20
 """
@@ -35,12 +44,19 @@ import asyncio
 import logging
 
 import config
-from main import SCRAPERS, chequear_tienda
+from main import SCRAPERS, chequear_tienda, flush_buffer_subida
 from utils import api_client
 from utils.ventana import calcular_posicion_ventana
 
 logging.basicConfig(level=config.SCRAPER_LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("revalidar_completo")
+
+# Cuántos chequeos se acumulan antes de subirlos juntos en un solo lote (ver
+# docstring del módulo). 5 es un punto medio: reduce los commits de escritura x5
+# sin dejar el progreso del dashboard demasiado desfasado ni arriesgar mucho
+# trabajo sin subir si el proceso se corta a mitad (como mucho estos 5 se
+# re-scrapean solos al reanudar, ver ronda_hechos_ids).
+TAMANO_LOTE = 5
 
 
 async def _puntos_todos(agregador: str) -> list[dict]:
@@ -127,6 +143,8 @@ async def main(
         f" ({saltados} ya cubiertos por esta ronda -- reanudando)" if saltados else "",
     )
 
+    buffer_subida: list = []
+
     fallidos = []
     fallos_tecnicos = []
     for i, direccion in enumerate(asignados):
@@ -135,7 +153,8 @@ async def main(
             # prueba de carga real. radio_reuso_m=0 NO basta (el punto se encuentra a sí
             # mismo a 0m si ya tenía chequeo, confirmado en vivo 26/08).
             resultados = await chequear_tienda(
-                direccion["tienda"], agregador, direcciones_override=[direccion], permitir_reuso=False
+                direccion["tienda"], agregador, direcciones_override=[direccion], permitir_reuso=False,
+                buffer_subida=buffer_subida,
             )
             if resultados and resultados[0]["error_tecnico"]:
                 fallos_tecnicos.append(direccion)
@@ -149,8 +168,12 @@ async def main(
             # se encola sola dentro de chequear_tienda sin llegar a propagar aquí).
             logger.error("Fallo revalidando %s (se reintentará al final): %r", direccion.get("direccion_text"), exc)
             fallidos.append(direccion)
+        if len(buffer_subida) >= TAMANO_LOTE:
+            await flush_buffer_subida(buffer_subida)
         if i < len(asignados) - 1:
             await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
+
+    await flush_buffer_subida(buffer_subida)  # lo que quede sin llegar a TAMANO_LOTE
 
     intentos_extra = 0
     while fallidos and intentos_extra < 3:
@@ -163,13 +186,15 @@ async def main(
         for direccion in fallidos:
             try:
                 await chequear_tienda(
-                    direccion["tienda"], agregador, direcciones_override=[direccion], permitir_reuso=False
+                    direccion["tienda"], agregador, direcciones_override=[direccion], permitir_reuso=False,
+                    buffer_subida=buffer_subida,
                 )
             except Exception as exc:
                 logger.error("Sigue fallando %s (intento extra %d/3): %r", direccion.get("direccion_text"), intentos_extra, exc)
                 siguen_fallando.append(direccion)
             await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
         fallidos = siguen_fallando
+        await flush_buffer_subida(buffer_subida)
 
     if fallidos:
         logger.error(
@@ -196,7 +221,8 @@ async def main(
         for direccion in fallos_tecnicos:
             try:
                 resultados = await chequear_tienda(
-                    direccion["tienda"], agregador, direcciones_override=[direccion], permitir_reuso=False
+                    direccion["tienda"], agregador, direcciones_override=[direccion], permitir_reuso=False,
+                    buffer_subida=buffer_subida,
                 )
                 if resultados and resultados[0]["error_tecnico"]:
                     siguen_fallando_tecnico.append(direccion)
@@ -210,6 +236,8 @@ async def main(
                 siguen_fallando_tecnico.append(direccion)
             await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
 
+        await flush_buffer_subida(buffer_subida)
+
         if siguen_fallando_tecnico:
             logger.warning(
                 "Worker %d/%d (%s): %d punto(s) siguen con fallo técnico tras la segunda pasada -- "
@@ -222,6 +250,11 @@ async def main(
                 "Worker %d/%d (%s): todos los fallos técnicos se recuperaron en la segunda pasada.",
                 worker_index, worker_count, agregador,
             )
+
+    # Red de seguridad: no debería quedar nada sin subir a estas alturas (cada
+    # bucle ya hace su propio flush), pero por si acaso -- nunca cerrar la ronda
+    # con datos reales todavía en memoria sin subir.
+    await flush_buffer_subida(buffer_subida)
 
     logger.info("Worker %d/%d (%s) terminado.", worker_index, worker_count, agregador)
 

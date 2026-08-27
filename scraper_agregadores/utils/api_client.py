@@ -175,6 +175,22 @@ async def enviar_chequeo(data: dict) -> dict:
     return await _solicitar("POST", url, json=data, headers=_headers(), timeout=30)
 
 
+async def enviar_chequeos_batch(items: list[dict]) -> list[dict]:
+    """Como enviar_chequeo pero para varios a la vez -- UN solo POST, UN solo
+    commit del lado del backend (ver agregadores_routes.py::recibir_chequeos_batch).
+    Pedido explícito del usuario 27/08 tras confirmar en vivo que subir de uno en
+    uno con 20+ workers a la vez saturaba la escritura de SQLite (p50 de latencia
+    >10s, CPU/memoria normales -- no era falta de recursos). Devuelve la lista de
+    resultados en el mismo orden que `items`."""
+    if config.MODO_LOCAL:
+        logger.info("[MODO_LOCAL] lote de %d chequeo(s) no enviado a KG", len(items))
+        return [{"direccion_id": d.get("direccion_id"), "chequeo_id": -1, "transicion": False} for d in items]
+
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/chequeos/batch"
+    respuesta = await _solicitar("POST", url, json={"items": items}, headers=_headers(), timeout=30)
+    return respuesta["resultados"]
+
+
 async def subir_captura(chequeo_id: int, ruta_local: str):
     """Solo se llama cuando /chequeo respondió transicion=true -- sube la
     captura que el scraper ya tenía guardada en local (ver base.py) para que
