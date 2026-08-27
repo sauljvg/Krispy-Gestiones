@@ -42,6 +42,7 @@ Uso (un agregador por tanda, varios procesos):
 import argparse
 import asyncio
 import logging
+import random
 import time
 
 import config
@@ -81,6 +82,18 @@ def _debe_flush(buffer_subida: list, ultimo_flush: float) -> bool:
     if not buffer_subida:
         return False
     return len(buffer_subida) >= TAMANO_LOTE or (time.monotonic() - ultimo_flush) >= FLUSH_INTERVALO_SEG
+
+
+def _delay_con_jitter() -> float:
+    # Antes un delay FIJO (siempre 4s) entre chequeos -- con varios workers
+    # arrancando casi a la vez (0.5s de diferencia, ver más abajo) y el mismo delay
+    # exacto, sus peticiones tienden a mantenerse sincronizadas en el tiempo en vez
+    # de repartirse (27/08, uno de los 3 cambios probados junto al UA/viewport
+    # variable y el backoff largo de PaginaSobrecargadaError). Sesgado hacia arriba
+    # (-1/+2) en vez de simétrico: igual de importante que antes no golpear más
+    # rápido que el mínimo ya validado, la aleatoriedad es lo que importa aquí.
+    base = config.DELAY_ENTRE_CHEQUEOS_SEG
+    return max(1.0, base + random.uniform(-1, 2))
 
 
 async def _puntos_todos(agregador: str) -> list[dict]:
@@ -211,7 +224,7 @@ async def main(
             await flush_buffer_subida(buffer_subida)
             ultimo_flush = time.monotonic()
         if i < len(asignados) - 1:
-            await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
+            await asyncio.sleep(_delay_con_jitter())
 
     await flush_buffer_subida(buffer_subida)  # lo que quede sin llegar a TAMANO_LOTE
 
@@ -232,7 +245,7 @@ async def main(
             except Exception as exc:
                 logger.error("Sigue fallando %s (intento extra %d/3): %r", direccion.get("direccion_text"), intentos_extra, exc)
                 siguen_fallando.append(direccion)
-            await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
+            await asyncio.sleep(_delay_con_jitter())
         fallidos = siguen_fallando
         await flush_buffer_subida(buffer_subida)
 
@@ -277,7 +290,7 @@ async def main(
             if _debe_flush(buffer_subida, ultimo_flush):
                 await flush_buffer_subida(buffer_subida)
                 ultimo_flush = time.monotonic()
-            await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
+            await asyncio.sleep(_delay_con_jitter())
 
         await flush_buffer_subida(buffer_subida)
 
