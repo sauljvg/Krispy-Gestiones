@@ -52,11 +52,15 @@ logging.basicConfig(level=config.SCRAPER_LOG_LEVEL, format="%(asctime)s %(leveln
 logger = logging.getLogger("revalidar_completo")
 
 # Cuántos chequeos se acumulan antes de subirlos juntos en un solo lote (ver
-# docstring del módulo). 5 es un punto medio: reduce los commits de escritura x5
-# sin dejar el progreso del dashboard demasiado desfasado ni arriesgar mucho
-# trabajo sin subir si el proceso se corta a mitad (como mucho estos 5 se
-# re-scrapean solos al reanudar, ver ronda_hechos_ids).
-TAMANO_LOTE = 5
+# docstring del módulo). Subido de 5 a 10 el 27/08 (pedido explícito del
+# usuario, para bajar aún más la carga de escritura sobre Railway) -- no se
+# sube más porque el cuello de botella real de hoy resultó ser el bloqueo del
+# event loop por las capturas a Drive (ya arreglado, ver run_in_threadpool en
+# agregadores_routes.py), no tanto los commits de SQLite en sí; subir más el
+# lote ya no baja mucho más esa carga, pero sí aumenta linealmente cuánto
+# trabajo hay que repetir si un worker se corta a mitad de lote (con 10, como
+# mucho se re-scrapean 10 puntos por worker al reanudar, ver ronda_hechos_ids).
+TAMANO_LOTE = 10
 
 
 async def _puntos_todos(agregador: str) -> list[dict]:
