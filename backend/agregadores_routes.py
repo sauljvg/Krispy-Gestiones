@@ -148,6 +148,13 @@ def ver_captura_route(chequeo_id: int, _user: dict = Depends(require_agregadores
     return Response(content=contenido, media_type="image/png")
 
 
+@router.get("/admin/capturas/edad-locales", dependencies=[Depends(require_api_key)])
+def edad_capturas_locales_route(dias_umbral: int = 7):
+    """Cuántas capturas locales (aún sin migrar a Drive) tienen más de
+    `dias_umbral` días, por mtime del archivo."""
+    return agregadores_module.edad_capturas_locales(dias_umbral)
+
+
 @router.get("/admin/capturas/estado-migracion", dependencies=[Depends(require_api_key)])
 def estado_migracion_capturas_route():
     """Cuántas capturas ya están en Drive vs. cuántas siguen en el disco
