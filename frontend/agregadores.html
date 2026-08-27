@@ -161,7 +161,12 @@
   }
   .agr-drill-copiar:hover { background: var(--surface-page); }
 
-  .agr-scraper-box { max-width: 900px; }
+  /* Pedido explícito del usuario 27/08: que abra a pantalla casi completa, sin
+     tener que hacer scroll para ver el contenido -- antes heredaba
+     max-height:70vh de .agr-drill-box (pensado para los modales pequeños de
+     "faltan"), demasiado poco para las 3 tablas + desglose por ronda que
+     muestra este panel en concreto. */
+  .agr-scraper-box { max-width: 1200px; width: 96vw; max-height: 94vh; }
   #agr-scraper-contenido { overflow-y: auto; }
   .agr-scraper-actualizado { font-size: 0.72rem; color: var(--text-muted); margin: -6px 0 12px; }
   .agr-scraper-tabla-wrap { overflow-x: auto; margin-bottom: 18px; }
