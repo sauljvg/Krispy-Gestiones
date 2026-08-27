@@ -42,6 +42,7 @@ Uso (un agregador por tanda, varios procesos):
 import argparse
 import asyncio
 import logging
+import time
 
 import config
 from main import SCRAPERS, chequear_tienda, flush_buffer_subida
@@ -61,6 +62,25 @@ logger = logging.getLogger("revalidar_completo")
 # trabajo hay que repetir si un worker se corta a mitad de lote (con 10, como
 # mucho se re-scrapean 10 puntos por worker al reanudar, ver ronda_hechos_ids).
 TAMANO_LOTE = 10
+
+# El lote es POR WORKER (cada proceso tiene su propio buffer_subida en memoria --
+# no hay forma barata de compartirlo entre procesos de Windows separados sin memoria
+# compartida/IPC, complejidad que no compensa aquí). Con pocos workers eso no se
+# nota (cada uno acumula 10 rápido), pero con muchos workers y una tasa de fallo
+# alta (confirmado en vivo 27/08 con Glovo a 10 workers: ninguno individualmente
+# llegaba a 10 aciertos en varios minutos) el progreso se ve "congelado" en el
+# dashboard aunque el scraping siga avanzando de verdad. FLUSH_INTERVALO_SEG pone
+# un tope de tiempo además del tope de cantidad -- sube lo que lleve un worker
+# (aunque sean 3, o 1) si ya pasó este tiempo desde su último envío, así el
+# dashboard nunca se queda más de esto sin novedades por worker (pedido explícito
+# del usuario 27/08).
+FLUSH_INTERVALO_SEG = 60
+
+
+def _debe_flush(buffer_subida: list, ultimo_flush: float) -> bool:
+    if not buffer_subida:
+        return False
+    return len(buffer_subida) >= TAMANO_LOTE or (time.monotonic() - ultimo_flush) >= FLUSH_INTERVALO_SEG
 
 
 async def _puntos_todos(agregador: str) -> list[dict]:
@@ -148,6 +168,7 @@ async def main(
     )
 
     buffer_subida: list = []
+    ultimo_flush = time.monotonic()
 
     fallidos = []
     fallos_tecnicos = []
@@ -172,8 +193,9 @@ async def main(
             # se encola sola dentro de chequear_tienda sin llegar a propagar aquí).
             logger.error("Fallo revalidando %s (se reintentará al final): %r", direccion.get("direccion_text"), exc)
             fallidos.append(direccion)
-        if len(buffer_subida) >= TAMANO_LOTE:
+        if _debe_flush(buffer_subida, ultimo_flush):
             await flush_buffer_subida(buffer_subida)
+            ultimo_flush = time.monotonic()
         if i < len(asignados) - 1:
             await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
 
@@ -238,6 +260,9 @@ async def main(
                     direccion.get("direccion_text"), exc,
                 )
                 siguen_fallando_tecnico.append(direccion)
+            if _debe_flush(buffer_subida, ultimo_flush):
+                await flush_buffer_subida(buffer_subida)
+                ultimo_flush = time.monotonic()
             await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
 
         await flush_buffer_subida(buffer_subida)
