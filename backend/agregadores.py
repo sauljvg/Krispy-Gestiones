@@ -675,6 +675,35 @@ def iniciar_ronda(agregador: str, total_objetivo: int, worker_count: int, inicia
         conn.close()
 
 
+def direcciones_hechas_en_ronda(agregador: str) -> list[int]:
+    """IDs de dirección que YA tienen un chequeo real desde que empezó la ronda EN
+    CURSO de este agregador (27/08, pedido explícito del usuario) -- para que un
+    worker de revalidar_completo.py relanzado tras un corte (servidor caído,
+    proceso matado a mano, etc.) no vuelva a scrapear desde cero puntos que esta
+    MISMA ronda ya cubrió, sino que reanude donde lo dejó. Devuelve [] si no hay
+    ninguna ronda en curso para este agregador (nada que reanudar).
+
+    Importante: para que esto funcione de verdad, la ronda vieja NO debe cerrarse
+    a la fuerza (forzar=True) antes de relanzar -- forzar el cierre es para
+    abandonar la ronda del todo, no para reanudarla."""
+    conn = get_connection()
+    try:
+        fila = conn.execute(
+            "SELECT iniciada_en FROM agregadores_rondas WHERE agregador=? AND finalizada_en IS NULL "
+            "ORDER BY id DESC LIMIT 1",
+            (agregador,),
+        ).fetchone()
+        if not fila:
+            return []
+        filas = conn.execute(
+            "SELECT DISTINCT direccion_id FROM agregadores_chequeos WHERE agregador=? AND timestamp >= ?",
+            (agregador, fila["iniciada_en"]),
+        ).fetchall()
+        return [f["direccion_id"] for f in filas]
+    finally:
+        conn.close()
+
+
 def finalizar_ronda(agregador: str, finalizada_en: str | None = None, forzar: bool = False) -> None:
     """Cada worker llama a esto UNA vez al terminar, sin coordinarse con los demás --
     suma 1 a workers_finalizados y solo marca la ronda como realmente terminada

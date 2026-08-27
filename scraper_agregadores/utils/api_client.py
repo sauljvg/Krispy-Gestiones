@@ -285,6 +285,16 @@ async def iniciar_ronda(agregador: str, total_objetivo: int, worker_count: int) 
     return await _solicitar("POST", url, params=params, headers=_headers(), timeout=15)
 
 
+async def ronda_hechos_ids(agregador: str) -> list[int]:
+    """IDs de dirección que la ronda EN CURSO de este agregador ya cubrió --
+    para que un worker relanzado tras un corte reanude en vez de volver a
+    scrapear desde cero (ver backend/agregadores.py::direcciones_hechas_en_ronda).
+    [] si no hay ronda en curso (nada que reanudar, se scrapea todo normal)."""
+    url = f"{config.KG_API_BASE_URL}/api/agregadores/admin/rondas/hechos-ids"
+    respuesta = await _solicitar("GET", url, params={"agregador": agregador}, headers=_headers(), timeout=15)
+    return (respuesta or {}).get("direccion_ids", [])
+
+
 async def finalizar_ronda(agregador: str):
     """Ver iniciar_ronda -- idempotente igual, cada worker la llama al terminar sin
     coordinarse con los demás."""

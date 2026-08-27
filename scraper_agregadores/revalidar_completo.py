@@ -12,6 +12,21 @@ ESTADO_PROYECTO.md 26/08.
 Reparte DIRECCIONES INDIVIDUALES entre los workers (no tiendas enteras -- con solo 6
 tiendas, cualquier worker por encima de 6 se quedaría sin nada que hacer).
 
+Reanudable (27/08, pedido explícito del usuario): si el proceso se corta a mitad
+(servidor caído, matado a mano, etc.) y se relanza con el MISMO agregador antes de
+cerrar la ronda a la fuerza, cada worker se salta los puntos que esta ronda ya cubrió
+-- ver api_client.ronda_hechos_ids. Importante: si quieres reanudar, NO llames a
+POST /admin/rondas/finalizar?forzar=true antes de relanzar -- eso abandona la ronda
+del todo (el próximo relanzamiento empezaría una ronda nueva desde cero).
+
+Los fallos TÉCNICOS de scraper (bloqueo/timeout tras agotar los 3 reintentos internos
+de cada punto, ver scrapers/base.py) se reintentan una SEGUNDA pasada completa (3
+intentos más) al final, después de que el worker termine con el resto de su lista --
+también pedido explícito del usuario 27/08, para ver si un bloqueo puntual de Glovo se
+resuelve solo dándole más tiempo. Distinto de `fallidos` (fallos de CONEXIÓN a nuestro
+propio backend, ya poco frecuentes desde que existe la cola local -- ver
+utils/cola_local.py): ese dato ya es real, no hace falta volver a scrapearlo.
+
 Uso (un agregador por tanda, varios procesos):
     venv/Scripts/python revalidar_completo.py --agregador ubereats --worker-index 0 --worker-count 20
 """
@@ -83,38 +98,55 @@ async def main(
         SCRAPERS[agregador].tamano_ventana_visible = tamano
 
     puntos = await _puntos_todos(agregador)
-    asignados = [p for i, p in enumerate(puntos) if i % worker_count == worker_index]
-    logger.info(
-        "Worker %d/%d (%s): %d puntos de %d totales -- vuelta completa REAL, sin reuso",
-        worker_index, worker_count, agregador, len(asignados), len(puntos),
-    )
+    asignados_totales = [p for i, p in enumerate(puntos) if i % worker_count == worker_index]
 
     try:
         # Todos los workers llaman a esto -- idempotente del lado del backend (ver
         # backend/agregadores.py::iniciar_ronda), así que no hace falta coordinarse
         # entre sí ni que solo lo haga el worker 0. Da el total REAL (len(puntos),
         # antes de repartir entre workers) para que el "Dashboard del scraper" pueda
-        # mostrar progreso en vivo (hechos/faltan) de esta vuelta completa.
+        # mostrar progreso en vivo (hechos/faltan) de esta vuelta completa. Si ya
+        # había una ronda en curso para este agregador (no cerrada a la fuerza),
+        # esto NO crea una nueva -- devuelve la existente tal cual, con su
+        # iniciada_en original, que es justo lo que hace falta para reanudar.
         await api_client.iniciar_ronda(agregador, len(puntos), worker_count)
     except Exception as exc:
         logger.warning("No se pudo avisar del inicio de ronda (sigue igual): %r", exc)
 
+    try:
+        hechos_ids = set(await api_client.ronda_hechos_ids(agregador))
+    except Exception as exc:
+        hechos_ids = set()
+        logger.warning("No se pudo consultar qué puntos ya cubrió esta ronda (se scrapea todo): %r", exc)
+
+    asignados = [p for p in asignados_totales if p["id"] not in hechos_ids]
+    saltados = len(asignados_totales) - len(asignados)
+    logger.info(
+        "Worker %d/%d (%s): %d puntos de %d totales -- vuelta completa REAL, sin reuso%s",
+        worker_index, worker_count, agregador, len(asignados), len(puntos),
+        f" ({saltados} ya cubiertos por esta ronda -- reanudando)" if saltados else "",
+    )
+
     fallidos = []
+    fallos_tecnicos = []
     for i, direccion in enumerate(asignados):
         try:
             # permitir_reuso=False: nunca reutiliza, siempre scrapea de verdad -- es una
             # prueba de carga real. radio_reuso_m=0 NO basta (el punto se encuentra a sí
             # mismo a 0m si ya tenía chequeo, confirmado en vivo 26/08).
-            await chequear_tienda(
+            resultados = await chequear_tienda(
                 direccion["tienda"], agregador, direcciones_override=[direccion], permitir_reuso=False
             )
+            if resultados and resultados[0]["error_tecnico"]:
+                fallos_tecnicos.append(direccion)
         except Exception as exc:
             # No se descarta sin más -- si esto fue un fallo de CONEXIÓN a nuestro
-            # propio backend (confirmado en vivo 26/08: ClientConnectorError por
-            # saturación de sockets con muchos workers a la vez, agotó hasta los
-            # reintentos de api_client._solicitar), el punto queda sin dato para
-            # siempre si no se reintenta -- se encola para un segundo/tercer intento
-            # al final de la pasada, cuando ya haya menos contención.
+            # propio backend, el punto queda sin dato para siempre si no se
+            # reintenta -- se encola para un segundo/tercer intento al final de la
+            # pasada, cuando ya haya menos contención. Cada vez más raro desde que
+            # existe la cola local (ver utils/cola_local.py): esto ahora solo salta
+            # con un fallo de verdad inesperado, no con la caída del backend (esa ya
+            # se encola sola dentro de chequear_tienda sin llegar a propagar aquí).
             logger.error("Fallo revalidando %s (se reintentará al final): %r", direccion.get("direccion_text"), exc)
             fallidos.append(direccion)
         if i < len(asignados) - 1:
@@ -145,6 +177,51 @@ async def main(
             worker_index, worker_count, agregador, len(fallidos),
             [d.get("direccion_text") for d in fallidos],
         )
+
+    # Segunda pasada para los fallos TÉCNICOS de scraper (bloqueo/timeout real,
+    # tras agotar los 3 reintentos internos de scrapers/base.py) -- pedido
+    # explícito del usuario 27/08: dado que la inmensa mayoría de los bloqueos de
+    # Glovo se resuelven solos con un navegador nuevo (confirmado en vivo: 304
+    # reintentos internos sobre 429 puntos, pero solo 20 fallos definitivos),
+    # merece la pena darle a los que sí agotaron sus 3 intentos una SEGUNDA tanda
+    # completa al final, cuando ya ha pasado tiempo y quizás el bloqueo puntual se
+    # disipó. Cada llamada a chequear_tienda ya hace sus propios 3 intentos
+    # internos, así que esto ya es "una segunda pasada de 3 intentos" tal cual.
+    if fallos_tecnicos:
+        logger.info(
+            "Worker %d/%d (%s): %d punto(s) con fallo TÉCNICO de scraper -- segunda pasada completa",
+            worker_index, worker_count, agregador, len(fallos_tecnicos),
+        )
+        siguen_fallando_tecnico = []
+        for direccion in fallos_tecnicos:
+            try:
+                resultados = await chequear_tienda(
+                    direccion["tienda"], agregador, direcciones_override=[direccion], permitir_reuso=False
+                )
+                if resultados and resultados[0]["error_tecnico"]:
+                    siguen_fallando_tecnico.append(direccion)
+                else:
+                    logger.info("  [%s] se recuperó en la segunda pasada", direccion.get("direccion_text"))
+            except Exception as exc:
+                logger.error(
+                    "  [%s] fallo de conexión durante la segunda pasada (se deja para la próxima vuelta): %r",
+                    direccion.get("direccion_text"), exc,
+                )
+                siguen_fallando_tecnico.append(direccion)
+            await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
+
+        if siguen_fallando_tecnico:
+            logger.warning(
+                "Worker %d/%d (%s): %d punto(s) siguen con fallo técnico tras la segunda pasada -- "
+                "se quedan con el último dato real conocido (o sin datos), la próxima vuelta lo reintenta: %s",
+                worker_index, worker_count, agregador, len(siguen_fallando_tecnico),
+                [d.get("direccion_text") for d in siguen_fallando_tecnico],
+            )
+        else:
+            logger.info(
+                "Worker %d/%d (%s): todos los fallos técnicos se recuperaron en la segunda pasada.",
+                worker_index, worker_count, agregador,
+            )
 
     logger.info("Worker %d/%d (%s) terminado.", worker_index, worker_count, agregador)
 

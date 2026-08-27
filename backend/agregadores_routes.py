@@ -548,6 +548,15 @@ def admin_iniciar_ronda_route(agregador: str, total_objetivo: int, worker_count:
     return agregadores_module.iniciar_ronda(agregador, total_objetivo, worker_count, iniciada_en)
 
 
+@router.get("/admin/rondas/hechos-ids", dependencies=[Depends(require_api_key)])
+def admin_ronda_hechos_ids_route(agregador: str):
+    """Ver agregadores_module.direcciones_hechas_en_ronda -- llamado por cada
+    worker de revalidar_completo.py al (re)arrancar, para saltarse los puntos
+    que esta ronda YA cubrió en un intento anterior (reanudar tras un corte, en
+    vez de volver a scrapear desde cero)."""
+    return {"direccion_ids": agregadores_module.direcciones_hechas_en_ronda(agregador)}
+
+
 @router.post("/admin/rondas/finalizar", dependencies=[Depends(require_api_key)])
 def admin_finalizar_ronda_route(agregador: str, finalizada_en: str | None = None, forzar: bool = False):
     """Llamado por cada worker de revalidar_completo.py al terminar -- ver

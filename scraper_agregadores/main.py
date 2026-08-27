@@ -30,7 +30,7 @@ async def chequear_tienda(
     direcciones_override: list = None,
     radio_reuso_m: float = 100,
     permitir_reuso: bool = True,
-):
+) -> list[dict]:
     """direcciones_override: si se pasa, se usa esta lista tal cual en vez de pedirle
     una nueva a la API (cercano/solo_sin_datos se ignoran en ese caso) -- para pasadas
     puntuales que ya eligieron ellas mismas qué direcciones tocan (ver
@@ -46,7 +46,18 @@ async def chequear_tienda(
     buscar_chequeo_cercano. radio_reuso_m=0 NO basta para esto -- si el propio punto
     ya tiene un chequeo previo, se encuentra a sí mismo a 0m de distancia y "reutiliza"
     su propio dato viejo igualmente (confirmado en vivo 26/08 con
-    revalidar_completo.py). Necesario para una prueba de carga real."""
+    revalidar_completo.py). Necesario para una prueba de carga real.
+
+    Devuelve una lista con un dict por dirección procesada:
+    {"direccion_id", "error_tecnico"} -- error_tecnico=True solo cuando el SCRAPER
+    en sí falló de verdad (bloqueo/timeout tras agotar sus reintentos internos, ver
+    scrapers/base.py), no cuando el punto reutilizó un chequeo cercano ni cuando el
+    dato se scrapeó bien pero falló la SUBIDA a KG (eso se encola aparte, ver
+    utils/cola_local.py -- no es un problema del scraper, no tiene sentido volver a
+    scrapear por eso). Pensado para que revalidar_completo.py pueda reintentar en
+    una segunda pasada SOLO los fallos técnicos de verdad (pedido explícito del
+    usuario 27/08)."""
+    resultados_por_punto: list[dict] = []
     if direcciones_override is not None:
         direcciones = direcciones_override
     else:
@@ -112,6 +123,7 @@ async def chequear_tienda(
                 logger.warning("  no se pudo subir el chequeo reutilizado a KG (%r) -- encolado en local", exc)
                 cola_local.encolar(datos_reuso)
             fallos_consecutivos = 0
+            resultados_por_punto.append({"direccion_id": direccion["id"], "error_tecnico": False})
             continue  # sin scrape real -> también se salta la pausa anti-bot de este punto
 
         logger.info("Chequeando %s / %s @ %s", tienda, agregador_nombre, texto)
@@ -156,6 +168,10 @@ async def chequear_tienda(
             )
             cola_local.encolar(datos_chequeo, resultado.url_captura)
             fallos_consecutivos = 0
+            # error_tecnico=False: el scraper SÍ funcionó, el dato es real -- lo
+            # único que falló fue subirlo, y ya queda encolado para reenviarse solo.
+            # No tiene sentido volver a scrapear esto en una segunda pasada.
+            resultados_por_punto.append({"direccion_id": direccion["id"], "error_tecnico": False})
             if delay_seg and i < len(direcciones) - 1:
                 await asyncio.sleep(delay_seg)
             continue
@@ -181,6 +197,15 @@ async def chequear_tienda(
 
         logger.info("  -> disponible=%s tiempo=%s min", resultado.disponible, resultado.tiempo_entrega_min)
 
+        # error_tecnico=True solo si resultado.error_texto sigue puesto AQUÍ -- ya
+        # pasó por la corrección de "tienda no confirmada persistente" de arriba
+        # (esa se limpia a None porque es un no_disponible real, no un fallo). Lo
+        # que quede es un bloqueo/timeout de verdad del scraper (ver
+        # scrapers/base.py: fallo definitivo verificando).
+        resultados_por_punto.append(
+            {"direccion_id": direccion["id"], "error_tecnico": bool(resultado.error_texto)}
+        )
+
         if resultado.error_texto:
             fallos_consecutivos += 1
         else:
@@ -188,6 +213,8 @@ async def chequear_tienda(
 
         if delay_seg and i < len(direcciones) - 1:
             await asyncio.sleep(delay_seg)
+
+    return resultados_por_punto
 
 
 async def main():
