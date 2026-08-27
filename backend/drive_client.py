@@ -178,3 +178,44 @@ def borrar_captura(file_id: str) -> bool:
     except Exception as e:
         print(f"[drive_client] Fallo borrando '{file_id}' de Drive: {e!r}", flush=True)
         return False
+
+
+def borrar_todo_lo_de_la_carpeta_raiz() -> dict:
+    """Mueve a la papelera TODO lo que hay directamente dentro de la carpeta
+    raíz compartida -- tanto las subcarpetas de ronda (que arrastran todo su
+    contenido a la papelera de una vez, sin tener que borrar archivo por
+    archivo) como cualquier captura suelta que quedara en la raíz (de antes
+    de la organización por ronda). Papelera, no borrado permanente
+    (`trashed=True`, no `files().delete()`) -- recuperable ~30 días si hiciera
+    falta, pedido explícito del usuario 27/08: "borra todas las capturas
+    ahora"."""
+    servicio = _get_servicio()
+    if not servicio:
+        return {"elementos_a_papelera": 0, "fallidos": 0, "error": "Drive no configurado"}
+    a_papelera = fallidos = 0
+    page_token = None
+    while True:
+        try:
+            resultado = servicio.files().list(
+                q=f"'{FOLDER_ID}' in parents and trashed = false",
+                spaces="drive", fields="nextPageToken, files(id)",
+                supportsAllDrives=True, includeItemsFromAllDrives=True,
+                pageToken=page_token, pageSize=1000,
+            ).execute()
+        except Exception as e:
+            print(f"[drive_client] Fallo listando la carpeta raíz: {e!r}", flush=True)
+            break
+        for elemento in resultado.get("files", []):
+            try:
+                servicio.files().update(
+                    fileId=elemento["id"], body={"trashed": True}, supportsAllDrives=True
+                ).execute()
+                a_papelera += 1
+            except Exception as e:
+                fallidos += 1
+                print(f"[drive_client] Fallo enviando '{elemento['id']}' a la papelera: {e!r}", flush=True)
+        page_token = resultado.get("nextPageToken")
+        if not page_token:
+            break
+    _carpetas_cache.clear()
+    return {"elementos_a_papelera": a_papelera, "fallidos": fallidos}
