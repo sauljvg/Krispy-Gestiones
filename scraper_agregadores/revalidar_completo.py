@@ -96,7 +96,7 @@ async def _puntos_todos(agregador: str) -> list[dict]:
 
 async def main(
     agregador: str, worker_index: int, worker_count: int,
-    permitir_imagenes: bool = False, visible: bool = False,
+    permitir_imagenes: bool = False, visible: bool = False, proxy_index: int | None = None,
 ):
     if permitir_imagenes:
         # Prueba puntual 26/08: comprobar si bloquear imágenes/media es lo que
@@ -106,6 +106,20 @@ async def main(
         # proceso Python aparte, así que no se pisa entre workers).
         SCRAPERS[agregador].bloquear_recursos = False
         logger.info("Worker %d/%d (%s): imágenes/media SIN bloquear (prueba puntual)", worker_index, worker_count, agregador)
+
+    if proxy_index is not None:
+        # Experimento 27/08 (rotación de IP gratis, ver config.PROXIES): este
+        # worker en concreto sale por un proxy en vez de la IP propia -- pensado
+        # para dejar unos workers con proxy y otros sin él en la MISMA vuelta, y
+        # comparar la tasa de bloqueo entre ambos grupos.
+        if proxy_index >= len(config.PROXIES):
+            logger.error(
+                "Worker %d/%d (%s): --proxy-index %d fuera de rango (solo hay %d proxies en SCRAPER_PROXIES) -- sigue sin proxy",
+                worker_index, worker_count, agregador, proxy_index, len(config.PROXIES),
+            )
+        else:
+            SCRAPERS[agregador].proxy = config.PROXIES[proxy_index]
+            logger.info("Worker %d/%d (%s): usando proxy #%d (%s)", worker_index, worker_count, agregador, proxy_index, config.PROXIES[proxy_index]["server"])
 
     if visible:
         # Prueba puntual 26/08: correr Glovo con ventana genuinamente visible, igual
@@ -310,5 +324,9 @@ if __name__ == "__main__":
         "--visible", action="store_true",
         help="Prueba puntual: correr con ventana genuinamente visible, igual que Uber Eats (por defecto JustEat/Glovo corren headless).",
     )
+    parser.add_argument(
+        "--proxy-index", type=int, default=None,
+        help="Experimento de rotación de IP: índice (0-based) dentro de config.PROXIES (ver SCRAPER_PROXIES en .env) para que ESTE worker salga por ese proxy en vez de la IP propia. Sin esto, sale por la IP propia como siempre.",
+    )
     args = parser.parse_args()
-    asyncio.run(main(args.agregador, args.worker_index, args.worker_count, args.permitir_imagenes, args.visible))
+    asyncio.run(main(args.agregador, args.worker_index, args.worker_count, args.permitir_imagenes, args.visible, args.proxy_index))

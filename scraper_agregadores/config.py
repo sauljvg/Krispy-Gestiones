@@ -73,3 +73,24 @@ KG_API_KEY = os.getenv("KG_API_KEY", "")
 # leyendo el grid de direcciones real (no escribe nada, no hace falta
 # aislarlo). Volver a "False" cuando se confirme que el scraper es estable.
 MODO_LOCAL = os.getenv("SCRAPER_MODO_LOCAL", "False") == "True"
+
+# Proxies opcionales (27/08, experimento gratis de rotación de IP para ver si baja
+# el bloqueo "Oh, no!" de Glovo bajo carga -- ver revalidar_completo.py --proxy-index).
+# Formato en .env: SCRAPER_PROXIES="host1:puerto1:usuario1:pass1,host2:puerto2:usuario2:pass2"
+# (así viene el "Proxy List" de Webshare, un proxy por línea separados por ":").
+# Vacío por defecto -- sin esto configurado, todo sigue igual que siempre (IP propia).
+def _parsear_proxies(raw: str) -> list[dict]:
+    proxies = []
+    for entrada in raw.split(","):
+        entrada = entrada.strip()
+        if not entrada:
+            continue
+        partes = entrada.split(":")
+        if len(partes) != 4:
+            continue
+        host, puerto, usuario, password = partes
+        proxies.append({"server": f"http://{host}:{puerto}", "username": usuario, "password": password})
+    return proxies
+
+
+PROXIES = _parsear_proxies(os.getenv("SCRAPER_PROXIES", ""))

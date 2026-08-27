@@ -167,6 +167,12 @@ class BaseAggregatorScraper:
     # del usuario, sin confirmar todavía. No tocar este default fuera de esa prueba.
     bloquear_recursos: bool = True
 
+    # Proxy opcional (27/08, experimento de rotación de IP -- ver config.PROXIES y
+    # revalidar_completo.py --proxy-index). None = sale por la IP propia, como
+    # siempre. dict con {"server", "username", "password"} = todo el tráfico de
+    # este worker (todas sus peticiones, todos sus reintentos) sale por ese proxy.
+    proxy: dict | None = None
+
     def __init__(self, timeout_seg: int = 30, retry_max: int = 3):
         self.timeout_ms = timeout_seg * 1000
         self.retry_max = retry_max
@@ -262,6 +268,7 @@ class BaseAggregatorScraper:
             browser = await pw.chromium.launch(
                 headless=headless,
                 args=args,
+                proxy=self.proxy,
             )
             try:
                 context = await browser.new_context(
