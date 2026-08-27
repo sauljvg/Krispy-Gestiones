@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 import agregadores as agregadores_module
 import auth as auth_module
@@ -186,9 +187,19 @@ async def subir_captura_route(chequeo_id: int, archivo: UploadFile = File(...)):
     solo si Drive no está configurado o falla la subida. Las que caen en
     disco local se borran solas a los pocos días (ver
     agregadores.limpiar_capturas_viejas) en vez de limitar de antemano
-    cuáles se suben."""
+    cuáles se suben.
+
+    run_in_threadpool (27/08): guardar_captura_chequeo hace una llamada de
+    RED bloqueante de verdad (googleapiclient/httplib2 a Google Drive, nada
+    async) -- llamarla directo aquí dentro bloqueaba el event loop ENTERO del
+    proceso durante toda la subida (1-20+ segundos), congelando TODAS las
+    peticiones de CUALQUIER usuario a la vez, no solo las del scraper.
+    Confirmado en vivo: hasta /js/*.js y /css/*.css (archivos estáticos, sin
+    tocar la base de datos) tardaban 19-22s mientras había capturas subiendo.
+    Con run_in_threadpool la subida corre en un hilo aparte y el event loop
+    sigue atendiendo el resto de peticiones mientras tanto."""
     contenido = await archivo.read()
-    agregadores_module.guardar_captura_chequeo(chequeo_id, contenido)
+    await run_in_threadpool(agregadores_module.guardar_captura_chequeo, chequeo_id, contenido)
     return {"ok": True}
 
 
