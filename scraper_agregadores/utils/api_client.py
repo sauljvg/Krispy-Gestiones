@@ -17,7 +17,14 @@ logger = logging.getLogger(__name__)
 # con 60 workers) satura la réplica y devuelve 502, que antes tumbaba el proceso entero
 # al no reintentarse (raise_for_status sin red de seguridad). Espera exponencial: 1s,
 # 2s, 4s entre los 3 intentos.
-_ESTADOS_REINTENTABLES = {502, 503, 504}
+#
+# 500 añadido 27/08: el "disk I/O error" de SQLite bajo carga (ver backend/db.py)
+# devuelve 500, no 502/503/504 -- sin esto ni se intentaba una segunda vez aunque el
+# problema fuera intermitente (confirmado en vivo: la tasa de error de Railway
+# oscilaba entre 0% y 100% en el mismo minuto varias veces). No hay riesgo real de
+# duplicar el chequeo: un 500 aquí es la escritura fallando del todo, no una escritura
+# que sí ocurrió pero cuya respuesta se perdió.
+_ESTADOS_REINTENTABLES = {500, 502, 503, 504}
 _REINTENTOS_DEFECTO = 3
 
 

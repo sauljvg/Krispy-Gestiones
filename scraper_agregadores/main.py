@@ -8,7 +8,7 @@ from scrapers.base import MARCADOR_TIENDA_NO_CONFIRMADA
 from scrapers.glovo import GlovoScraper
 from scrapers.justeat import JustEatScraper
 from scrapers.ubereats import UberEatsScraper
-from utils import api_client
+from utils import api_client, cola_local
 
 logging.basicConfig(level=config.SCRAPER_LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("main")
@@ -100,17 +100,17 @@ async def chequear_tienda(
                 tienda, agregador_nombre, texto, reuso["tienda_origen"],
                 "disponible" if reuso["disponible"] else "no_disponible",
             )
+            datos_reuso = {
+                "tienda": tienda,
+                "agregador": agregador_nombre,
+                "direccion_id": direccion["id"],
+                "disponible": reuso["disponible"],
+            }
             try:
-                await api_client.enviar_chequeo(
-                    {
-                        "tienda": tienda,
-                        "agregador": agregador_nombre,
-                        "direccion_id": direccion["id"],
-                        "disponible": reuso["disponible"],
-                    }
-                )
+                await api_client.enviar_chequeo(datos_reuso)
             except Exception as exc:
-                logger.warning("  no se pudo subir el chequeo reutilizado a KG: %r", exc)
+                logger.warning("  no se pudo subir el chequeo reutilizado a KG (%r) -- encolado en local", exc)
+                cola_local.encolar(datos_reuso)
             fallos_consecutivos = 0
             continue  # sin scrape real -> también se salta la pausa anti-bot de este punto
 
@@ -131,17 +131,34 @@ async def chequear_tienda(
             resultado.disponible = False
             resultado.error_texto = None
 
-        respuesta = await api_client.enviar_chequeo(
-            {
-                "tienda": tienda,
-                "agregador": agregador_nombre,
-                "direccion_id": direccion["id"],
-                "disponible": resultado.disponible,
-                "tiempo_entrega_min": resultado.tiempo_entrega_min,
-                "mensaje_bloqueo": resultado.mensaje_bloqueo,
-                "error_texto": resultado.error_texto,
-            }
-        )
+        datos_chequeo = {
+            "tienda": tienda,
+            "agregador": agregador_nombre,
+            "direccion_id": direccion["id"],
+            "disponible": resultado.disponible,
+            "tiempo_entrega_min": resultado.tiempo_entrega_min,
+            "mensaje_bloqueo": resultado.mensaje_bloqueo,
+            "error_texto": resultado.error_texto,
+        }
+        try:
+            respuesta = await api_client.enviar_chequeo(datos_chequeo)
+        except Exception as exc:
+            # El dato YA es real (el scrape en sí funcionó) -- si esto falla es el
+            # BACKEND el que está caído/rechazando (confirmado en vivo 27/08: disk
+            # I/O error de SQLite bajo carga tumbaba la web entera durante ratos
+            # largos). Antes esto se perdía del todo si los 3 reintentos extra de
+            # revalidar_completo.py al FINAL de la pasada coincidían con el
+            # servidor aún caído -- ahora se encola en local y se reenvía después
+            # (ver reenviar_cola.py) sin volver a scrapear nada.
+            logger.error(
+                "  [%s/%s] @ %s: no se pudo subir a KG (%r) -- encolado en local, se reenviará solo",
+                tienda, agregador_nombre, texto, exc,
+            )
+            cola_local.encolar(datos_chequeo, resultado.url_captura)
+            fallos_consecutivos = 0
+            if delay_seg and i < len(direcciones) - 1:
+                await asyncio.sleep(delay_seg)
+            continue
 
         # Se sube la captura de CADA chequeo, no solo de las transiciones --
         # confirmado un caso real donde un resultado se dio con confianza
@@ -155,7 +172,12 @@ async def chequear_tienda(
                     agregador_nombre,
                     texto,
                 )
-            await api_client.subir_captura(respuesta["chequeo_id"], resultado.url_captura)
+            try:
+                await api_client.subir_captura(respuesta["chequeo_id"], resultado.url_captura)
+            except Exception as exc:
+                # El chequeo principal ya se subió bien (arriba) -- perder solo la
+                # captura no debe tumbar el punto entero ni perder el dato real.
+                logger.warning("  captura no subida (dato principal sí subió): %r", exc)
 
         logger.info("  -> disponible=%s tiempo=%s min", resultado.disponible, resultado.tiempo_entrega_min)
 
