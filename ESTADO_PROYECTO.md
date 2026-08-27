@@ -370,3 +370,24 @@ De paso esta sesión:
   fallo definitivo contra el 7-8% de sin VPN** -- si de verdad lo arregla
   como sugiere la nota de 26/08, es la solución real, por delante de
   cualquier cosa de las de arriba.
+
+  **Actualización la misma noche del 27/08, con el usuario presente**:
+  probado NordVPN (Madrid) con el scraper de verdad -- a 20 workers dio
+  24.3% de fallo, prácticamente igual que sin VPN a esa misma concurrencia.
+  **Conclusión: la VPN NO soluciona el problema de concurrencia** (contra
+  lo que sugería la nota de 26/08) -- ese hallazgo de ayer probablemente
+  era sobre un bloqueo DISTINTO (posible penalización acumulada por horas/
+  días insistiendo desde la misma IP de oficina, no el "Oh, no!" de
+  sobrecarga por concurrencia que se ve hoy). Después el usuario probó
+  conectando otra IP de Madrid por su cuenta (no NordVPN, otra red) -- con
+  solo 5 workers (el número ya confirmado seguro, 7-8% con la IP de
+  oficina) esa IP dio **41.4% de fallo**, mucho PEOR que la IP habitual a
+  la misma concurrencia. O sea que la IP sí importa, pero no en el sentido
+  de "cualquier IP nueva ayuda" -- hay IPs claramente peores que la de la
+  oficina. **Conclusión operativa final de esta sesión: quedarse con la IP
+  de oficina de siempre + 5 workers (7-8%, ~87 min para los 350 puntos)
+  es la mejor combinación probada hasta ahora.** El objetivo de "toda la
+  vuelta de Glovo en 30 min" que pidió el usuario esta noche NO se
+  consiguió y no parece alcanzable sin aceptar una tasa de fallo mucho más
+  alta -- probado con 4 combinaciones de concurrencia/IP distintas, todas
+  con el mismo techo.
