@@ -230,6 +230,38 @@ def ensure_tables():
         # en vivo en el dashboard (solo visible para el admin, pedido
         # explícito del usuario 10/08).
         conn.execute("ALTER TABLE agregadores_sesiones ADD COLUMN tienda_actual TEXT")
+
+    # Vuelta completa REAL (ver scraper_agregadores/revalidar_completo.py): revalida
+    # cada punto activo de un agregador con varios workers en paralelo (20+), a
+    # diferencia de agregadores_sesiones (pensada para UN daemon lineal). No hace
+    # falta que cada worker reporte su propio avance -- "hechos" se calcula del lado
+    # del backend contando agregadores_chequeos posteriores a iniciada_en (ver
+    # get_ronda_actual), así que ningún worker necesita saber lo que hacen los demás.
+    # iniciar_ronda/finalizar_ronda son idempotentes a propósito: los 20 workers de
+    # un mismo agregador llaman a las dos al arrancar/terminar sin coordinarse entre
+    # sí (el primero en llegar gana, el resto son no-ops), pedido explícito del
+    # usuario 26/08 para ver progreso en vivo en el dashboard integrado.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agregadores_rondas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agregador TEXT NOT NULL,
+            iniciada_en TEXT NOT NULL,
+            total_objetivo INTEGER NOT NULL,
+            finalizada_en TEXT
+        )
+    """)
+    cols_rondas = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_rondas)")}
+    if "worker_count" not in cols_rondas:
+        # BUG confirmado en vivo 26/08: "el primero en llegar gana" en finalizar_ronda
+        # significaba que el PRIMER worker en terminar (los N no tardan lo mismo --
+        # reparto desigual, direcciones más lentas, reintentos) cerraba la ronda para
+        # los 19 restantes, que seguían trabajando -- el dashboard se quedaba
+        # congelado mostrando "completado" con una fracción del total real (visto:
+        # Uber Eats "completado" al 58% mientras los demás workers seguían). Ahora
+        # finalizar_ronda cuenta cuántos workers han terminado de verdad y solo cierra
+        # la ronda cuando TODOS lo han hecho.
+        conn.execute("ALTER TABLE agregadores_rondas ADD COLUMN worker_count INTEGER")
+        conn.execute("ALTER TABLE agregadores_rondas ADD COLUMN workers_finalizados INTEGER NOT NULL DEFAULT 0")
     conn.commit()
     conn.close()
 
@@ -605,6 +637,139 @@ def resumen_cobertura_deduplicada() -> dict:
     return resultado
 
 
+def iniciar_ronda(agregador: str, total_objetivo: int, worker_count: int, iniciada_en: str | None = None) -> dict:
+    """Marca el inicio de una vuelta completa REAL (ver
+    scraper_agregadores/revalidar_completo.py) para poder mostrar progreso en vivo en
+    el dashboard integrado (panel_resumen_estados_route). Idempotente a propósito:
+    los N workers en paralelo de esa vuelta llaman a esto al arrancar sin
+    coordinarse entre sí -- si ya hay una ronda activa (sin finalizar) para este
+    agregador, la devuelve tal cual en vez de crear otra; el primero en llegar crea
+    la fila, el resto la encuentran ya creada.
+
+    `worker_count`: cuántos workers en total va a tener esta ronda -- necesario para
+    que finalizar_ronda sepa cuándo TODOS han terminado de verdad (ver ahí, bug
+    confirmado en vivo 26/08 con la versión anterior que cerraba al primero).
+
+    `iniciada_en`: normalmente None (usa la hora actual) -- solo se pasa a mano para
+    reconstruir en el dashboard una vuelta que ya corrió y terminó ANTES de que este
+    reporte existiera (ver JustEat 26/08, primera vuelta con 20 workers que ya
+    había acabado cuando se añadió esto). No la usan los workers normales."""
+    conn = get_connection()
+    try:
+        fila = conn.execute(
+            "SELECT id, iniciada_en, total_objetivo, worker_count FROM agregadores_rondas "
+            "WHERE agregador=? AND finalizada_en IS NULL ORDER BY id DESC LIMIT 1",
+            (agregador,),
+        ).fetchone()
+        if fila:
+            return dict(fila)
+        momento = iniciada_en or datetime.now(timezone.utc).isoformat()
+        cur = conn.execute(
+            "INSERT INTO agregadores_rondas (agregador, iniciada_en, total_objetivo, worker_count, workers_finalizados) "
+            "VALUES (?, ?, ?, ?, 0)",
+            (agregador, momento, total_objetivo, worker_count),
+        )
+        conn.commit()
+        return {"id": cur.lastrowid, "iniciada_en": momento, "total_objetivo": total_objetivo, "worker_count": worker_count}
+    finally:
+        conn.close()
+
+
+def finalizar_ronda(agregador: str, finalizada_en: str | None = None, forzar: bool = False) -> None:
+    """Cada worker llama a esto UNA vez al terminar, sin coordinarse con los demás --
+    suma 1 a workers_finalizados y solo marca la ronda como realmente terminada
+    (finalizada_en) cuando ese contador alcanza worker_count. Antes "el primero en
+    llegar cerraba la ronda para todos" -- bug real confirmado en vivo 26/08: Uber
+    Eats se quedó "completado" al 58% en el dashboard porque el worker más rápido
+    terminó mucho antes que los otros 19, que seguían trabajando.
+
+    `forzar=True`: cierra la ronda YA, sin esperar al contador -- para cuando se
+    para una pasada a mano a mitad (ver Glovo 26/08, dos veces en la misma sesión
+    por su tasa de fallos) y los workers restantes se matan de golpe, así que nunca
+    van a llamar a esto ellos mismos para completar el contador.
+
+    `finalizada_en`: ver nota de iniciada_en en iniciar_ronda, mismo uso puntual para
+    reconstruir una vuelta ya terminada del todo."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE agregadores_rondas SET workers_finalizados = workers_finalizados + 1 "
+            "WHERE agregador=? AND finalizada_en IS NULL",
+            (agregador,),
+        )
+        fila = conn.execute(
+            "SELECT id, worker_count, workers_finalizados FROM agregadores_rondas "
+            "WHERE agregador=? AND finalizada_en IS NULL ORDER BY id DESC LIMIT 1",
+            (agregador,),
+        ).fetchone()
+        if fila and (forzar or (fila["worker_count"] and fila["workers_finalizados"] >= fila["worker_count"])):
+            conn.execute(
+                "UPDATE agregadores_rondas SET finalizada_en=? WHERE id=?",
+                (finalizada_en or datetime.now(timezone.utc).isoformat(), fila["id"]),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_rondas_actuales() -> dict:
+    """Para el panel 'Dashboard del scraper': por agregador, la ÚLTIMA vuelta
+    completa (en curso o ya terminada), para que al terminar diga "completado" en
+    vez de volver a "sin vuelta en curso" como si nunca hubiera pasado nada (pedido
+    explícito del usuario 26/08 -- confundía con "nunca se lanzó"). "hechos" se
+    calcula contando agregadores_chequeos reales con timestamp posterior a
+    iniciada_en -- ningún worker necesita reportar su propio avance, así que da
+    igual cuántos corran en paralelo. Si la ronda se relanzó a mitad (worker-count
+    distinto, etc.) tiene su propio iniciada_en más reciente, así que "hechos" no
+    arrastra chequeos de un intento anterior abandonado. Para una ronda YA
+    terminada, el conteo se acota también por arriba (<= finalizada_en) -- si no,
+    el daemon normal (24/7) seguiría sumando chequeos de fondo a una foto que
+    debería quedar fija en el momento en que la ronda terminó."""
+    conn = get_connection()
+    try:
+        resultado = {}
+        for agregador in AGREGADORES:
+            fila = conn.execute(
+                "SELECT id, iniciada_en, total_objetivo, finalizada_en FROM agregadores_rondas "
+                "WHERE agregador=? ORDER BY id DESC LIMIT 1",
+                (agregador,),
+            ).fetchone()
+            if not fila:
+                resultado[agregador] = None
+                continue
+            if fila["finalizada_en"]:
+                condicion = "AND timestamp <= ?"
+                parametros = (agregador, fila["iniciada_en"], fila["finalizada_en"])
+            else:
+                condicion = ""
+                parametros = (agregador, fila["iniciada_en"])
+            hechos = conn.execute(
+                f"SELECT COUNT(DISTINCT direccion_id) FROM agregadores_chequeos "
+                f"WHERE agregador=? AND timestamp >= ? {condicion}",
+                parametros,
+            ).fetchone()[0]
+            # Desglose por tienda de ESTA ronda concreta (no del histórico total) --
+            # pedido explícito del usuario 26/08: quería ver "de cuáles está viendo"
+            # mientras avanza, no solo un número agregado.
+            filas_tienda = conn.execute(
+                f"SELECT tienda, COUNT(DISTINCT direccion_id) AS n FROM agregadores_chequeos "
+                f"WHERE agregador=? AND timestamp >= ? {condicion} GROUP BY tienda",
+                parametros,
+            ).fetchall()
+            resultado[agregador] = {
+                "iniciada_en": fila["iniciada_en"],
+                "finalizada_en": fila["finalizada_en"],
+                "en_curso": fila["finalizada_en"] is None,
+                "total_objetivo": fila["total_objetivo"],
+                "hechos": hechos,
+                "faltan": max(fila["total_objetivo"] - hechos, 0),
+                "por_tienda": {f["tienda"]: f["n"] for f in filas_tienda},
+            }
+        return resultado
+    finally:
+        conn.close()
+
+
 def deduplicar_direcciones(umbral_km: float = UMBRAL_DUPLICADO_KM, aplicar: bool = False) -> dict:
     """Encuentra grupos de direcciones activas que son el mismo sitio real (ver
     _agrupar_por_proximidad) y, si aplicar=True, los fusiona: el "ganador" de cada
@@ -657,6 +822,97 @@ def deduplicar_direcciones(umbral_km: float = UMBRAL_DUPLICADO_KM, aplicar: bool
     return {
         "aplicado": aplicar,
         "grupos_con_duplicados": len(plan),
+        "puntos_a_desactivar": sum(len(g["perdedores"]) for g in plan),
+        "detalle": plan,
+    }
+
+
+def adelgazar_por_estado(agregador: str, umbral_km: float = 0.5, aplicar: bool = False) -> dict:
+    """Reduce el volumen de una futura "vuelta completa" (re-verificar TODO
+    periódicamente, no solo lo que falta -- ver ESTADO_PROYECTO.md 26/08): entre
+    puntos cercanos (<umbral_km) que ya tienen el MISMO estado confirmado
+    (disponible/no_disponible) para ESTE agregador, se queda uno solo -- el resto se
+    desactiva, pero SOLO para este agregador (agregadores_direcciones_estado), no
+    globalmente, porque el estado puede diferir entre agregadores en el mismo punto.
+
+    Si un cluster tiene estados DISTINTOS (algún disponible junto a algún no
+    disponible) no se toca NADA de ese cluster -- es una frontera real de cobertura
+    (justo lo que el usuario quiere poder ver: "en qué zonas nos apagan la zona de
+    entrega"), no ruido a limpiar.
+
+    Solo considera puntos con un chequeo real (sin error) ya hecho -- los "sin
+    datos" no tienen estado que comparar, se dejan intactos para su propio flujo
+    normal. aplicar=False (por defecto) no escribe nada, solo el plan."""
+    conn = get_connection()
+    try:
+        inactivos_previos = {
+            row["direccion_id"]
+            for row in conn.execute(
+                "SELECT direccion_id FROM agregadores_direcciones_estado WHERE agregador=? AND activo=0",
+                (agregador,),
+            ).fetchall()
+        }
+        puntos = [
+            dict(fila)
+            for fila in conn.execute("SELECT * FROM agregadores_direcciones WHERE activo=1").fetchall()
+            if fila["id"] not in inactivos_previos
+        ]
+
+        ids = [p["id"] for p in puntos]
+        estados = {}
+        if ids:
+            marcadores = ",".join("?" * len(ids))
+            filas = conn.execute(
+                f"""SELECT c.direccion_id, c.disponible FROM agregadores_chequeos c
+                    WHERE c.agregador=? AND c.error_texto IS NULL AND c.direccion_id IN ({marcadores})
+                    AND c.timestamp = (
+                        SELECT MAX(c2.timestamp) FROM agregadores_chequeos c2
+                        WHERE c2.direccion_id=c.direccion_id AND c2.agregador=?
+                    )""",
+                (agregador, *ids, agregador),
+            ).fetchall()
+            estados = {fila["direccion_id"]: bool(fila["disponible"]) for fila in filas}
+
+        con_estado = [p for p in puntos if p["id"] in estados]
+        clusters = _agrupar_por_proximidad(con_estado, umbral_km)
+
+        plan = []
+        for cluster in clusters:
+            if len(cluster) < 2:
+                continue
+            valores = {estados[p["id"]] for p in cluster}
+            if len(valores) > 1:
+                continue  # frontera real -- no se toca ningún punto de este cluster
+            ganador = min(
+                cluster,
+                key=lambda p: (0 if _tienda_mas_cercana(p["lat"], p["lng"]) == p["tienda"] else 1, p["id"]),
+            )
+            perdedores = [p for p in cluster if p["id"] != ganador["id"]]
+            plan.append({
+                "estado": "disponible" if estados[ganador["id"]] else "no_disponible",
+                "ganador": {"id": ganador["id"], "tienda": ganador["tienda"], "direccion_text": ganador["direccion_text"]},
+                "perdedores": [
+                    {"id": p["id"], "tienda": p["tienda"], "direccion_text": p["direccion_text"]} for p in perdedores
+                ],
+            })
+
+        if aplicar:
+            for grupo in plan:
+                for perdedor in grupo["perdedores"]:
+                    conn.execute(
+                        """INSERT INTO agregadores_direcciones_estado (direccion_id, agregador, activo)
+                           VALUES (?, ?, 0)
+                           ON CONFLICT(direccion_id, agregador) DO UPDATE SET activo=0""",
+                        (perdedor["id"], agregador),
+                    )
+            conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "agregador": agregador,
+        "aplicado": aplicar,
+        "grupos": len(plan),
         "puntos_a_desactivar": sum(len(g["perdedores"]) for g in plan),
         "detalle": plan,
     }
@@ -1018,7 +1274,8 @@ def _priorizar_sin_datos(conn, resultado: list[dict], agregador: str) -> list[di
 
 
 def get_o_crear_direcciones(
-    tienda: str, radios_km=None, agregador: str | None = None, solo_sin_datos: bool = False
+    tienda: str, radios_km=None, agregador: str | None = None, solo_sin_datos: bool = False,
+    ignorar_poligono: bool = False,
 ) -> list[dict]:
     if tienda not in TIENDAS:
         return []
@@ -1121,7 +1378,12 @@ def get_o_crear_direcciones(
 
         if agregador and solo_sin_datos:
             con_datos = _con_datos_reales(conn, resultado, agregador)
-            con_datos |= _cobertura_confirmada_por_limite(conn, tienda, agregador, resultado)
+            # ignorar_poligono=True: pasada puntual que quiere comprobar cada punto de
+            # verdad, sin dar por buenos los que caen dentro del polígono de cobertura
+            # ya confirmado -- ver revalidar_ubereats_sin_poligono.py. La regla normal
+            # (con el polígono) se queda intacta para el scheduler de siempre.
+            if not ignorar_poligono:
+                con_datos |= _cobertura_confirmada_por_limite(conn, tienda, agregador, resultado)
             resultado = [r for r in resultado if r["id"] not in con_datos]
         elif agregador:
             resultado = _priorizar_sin_datos(conn, resultado, agregador)
@@ -1640,15 +1902,27 @@ def get_tiendas():
     return [{"tienda": k, **v} for k, v in TIENDAS.items()]
 
 
-def get_ultimos(tienda: str, horas: int = 24):
-    desde = (datetime.now(timezone.utc) - timedelta(hours=horas)).isoformat()
+def get_ultimos(tienda: str, horas: int = 24, desde: str | None = None, hasta: str | None = None):
+    """`desde`/`hasta` (ISO, opcionales): filtro explícito por fecha/hora exacta --
+    para buscar qué pasó un día y una franja horaria concretos, en vez de solo "las
+    últimas N horas" (pedido explícito del usuario 26/08). Si no se pasan, se
+    mantiene el comportamiento de siempre (últimas `horas` horas)."""
+    desde_efectivo = desde or (datetime.now(timezone.utc) - timedelta(hours=horas)).isoformat()
     conn = get_connection()
-    filas = conn.execute(
-        """SELECT c.*, d.direccion_text FROM agregadores_chequeos c
-           LEFT JOIN agregadores_direcciones d ON d.id = c.direccion_id
-           WHERE c.tienda=? AND c.timestamp>=? ORDER BY c.timestamp DESC LIMIT 200""",
-        (tienda, desde),
-    ).fetchall()
+    if hasta:
+        filas = conn.execute(
+            """SELECT c.*, d.direccion_text FROM agregadores_chequeos c
+               LEFT JOIN agregadores_direcciones d ON d.id = c.direccion_id
+               WHERE c.tienda=? AND c.timestamp>=? AND c.timestamp<=? ORDER BY c.timestamp DESC LIMIT 200""",
+            (tienda, desde_efectivo, hasta),
+        ).fetchall()
+    else:
+        filas = conn.execute(
+            """SELECT c.*, d.direccion_text FROM agregadores_chequeos c
+               LEFT JOIN agregadores_direcciones d ON d.id = c.direccion_id
+               WHERE c.tienda=? AND c.timestamp>=? ORDER BY c.timestamp DESC LIMIT 200""",
+            (tienda, desde_efectivo),
+        ).fetchall()
     conn.close()
     return [dict(f) for f in filas]
 

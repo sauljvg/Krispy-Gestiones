@@ -160,6 +160,13 @@ class BaseAggregatorScraper:
     posicion_ventana_visible: str = "1930,40"
     tamano_ventana_visible: str = "900,1000"
 
+    # True de normal (comportamiento de siempre). Solo se pone a False desde fuera
+    # (ver revalidar_completo.py --permitir-imagenes) para una prueba puntual 26/08:
+    # comprobar si bloquear imágenes es lo que dispara la página de error genérica
+    # de Glovo ("Oh, no! It looks like there's a problem") bajo carga -- hipótesis
+    # del usuario, sin confirmar todavía. No tocar este default fuera de esa prueba.
+    bloquear_recursos: bool = True
+
     def __init__(self, timeout_seg: int = 30, retry_max: int = 3):
         self.timeout_ms = timeout_seg * 1000
         self.retry_max = retry_max
@@ -278,7 +285,7 @@ class BaseAggregatorScraper:
                 # _modo_resolucion_manual, el captcha seguía saliendo con las imágenes
                 # rotas en el primer intento (antes de que _modo_resolucion_manual se
                 # active, que solo pasa en el REINTENTO tras un ChallengeDetectedError).
-                if not self._modo_resolucion_manual and not self.mantener_visible:
+                if self.bloquear_recursos and not self._modo_resolucion_manual and not self.mantener_visible:
                     await context.route("**/*", _bloquear_recursos_pesados)
                 # Estos sitios tienen carruseles/banners promocionales en autoplay. Playwright
                 # espera a que un elemento esté "estable" (que deje de moverse) antes de hacer
@@ -297,6 +304,24 @@ class BaseAggregatorScraper:
                         scroll-behavior: auto !important;
                     }`;
                     document.documentElement.appendChild(estilo);
+
+                    // Glovo pide geolocalización al cargar -- en headless nunca se ve
+                    // (Chromium deniega el prompt sin mostrar nada), pero con ventana
+                    // visible (mantener_visible) sale el globo nativo de permiso de
+                    // Chrome, que Playwright no puede tocar (es UI del navegador, no
+                    // del DOM) y que bloquea la interacción con la página hasta que un
+                    // humano lo cierra (confirmado en vivo 27/08: reintentos por
+                    // timeout esperando el buscador mientras el globo seguía abierto).
+                    // Se sobreescribe la API antes de que cargue nada para que la
+                    // página reciba un PERMISSION_DENIED al instante, igual que pasaría
+                    // en headless -- mismo comportamiento en los dos modos.
+                    if (navigator.geolocation) {
+                      const denegar = (_ok, error) => {
+                        if (error) error({ code: 1, message: 'User denied Geolocation', PERMISSION_DENIED: 1 });
+                      };
+                      navigator.geolocation.getCurrentPosition = denegar;
+                      navigator.geolocation.watchPosition = denegar;
+                    }
                     """
                 )
                 page = await context.new_page()

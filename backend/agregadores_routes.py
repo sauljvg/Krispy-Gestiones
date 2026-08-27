@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 import agregadores as agregadores_module
 import auth as auth_module
-from auth_routes import get_current_user
+from auth_routes import get_current_user, require_admin
 
 router = APIRouter()
 
@@ -242,7 +242,8 @@ def transiciones_route(
 
 @router.get("/direcciones/{tienda}", dependencies=[Depends(require_api_key)])
 def direcciones_route(
-    tienda: str, cercano: bool = False, agregador: str | None = None, solo_sin_datos: bool = False
+    tienda: str, cercano: bool = False, agregador: str | None = None, solo_sin_datos: bool = False,
+    ignorar_poligono: bool = False,
 ):
     """El scraper llama esto al empezar una pasada: genera (si hace falta)
     y geocodifica el grid server-side, así el geocoding se cachea una única
@@ -250,9 +251,12 @@ def direcciones_route(
 
     `agregador`, si se manda, prioriza los puntos que ese agregador nunca ha
     comprobado de verdad. `solo_sin_datos=True` va más allá y devuelve SOLO
-    esos -- ver get_o_crear_direcciones."""
+    esos -- ver get_o_crear_direcciones. `ignorar_poligono=True` hace que
+    "sin datos" no dé por buenos los puntos dentro del polígono de cobertura
+    ya confirmado (ver _cobertura_confirmada_por_limite) -- para una pasada
+    puntual que quiera comprobar cada punto de verdad, sin esa suposición."""
     radios = agregadores_module.GRID_RADIOS_CERCANO_KM if cercano else agregadores_module.GRID_RADIOS_KM
-    return agregadores_module.get_o_crear_direcciones(tienda, radios, agregador, solo_sin_datos)
+    return agregadores_module.get_o_crear_direcciones(tienda, radios, agregador, solo_sin_datos, ignorar_poligono)
 
 
 @router.post("/direcciones/reparar", dependencies=[Depends(require_api_key)])
@@ -483,12 +487,15 @@ def crear_direccion_reasignada_route(body: DireccionReasignadaIn):
 
 
 @router.get("/admin/chequeo-cercano", dependencies=[Depends(require_api_key)])
-def chequeo_cercano_route(lat: float, lng: float, agregador: str):
-    """Para buscar_limite_cobertura.py: busca un chequeo real ya hecho (de
-    cualquier tienda) muy cerca de este punto para poder reutilizarlo en
-    vez de repetir el mismo scrape -- evita que tiendas vecinas con zonas
-    de solape (o rondas sucesivas) vuelvan a probar la misma dirección."""
-    return agregadores_module.buscar_chequeo_cercano(lat, lng, agregador)
+def chequeo_cercano_route(lat: float, lng: float, agregador: str, radio_m: float = 100):
+    """Para buscar_limite_cobertura.py/main.py: busca un chequeo real ya hecho (de
+    cualquier tienda) muy cerca de este punto para poder reutilizarlo en vez de
+    repetir el mismo scrape -- evita que tiendas vecinas con zonas de solape (o
+    rondas sucesivas) vuelvan a probar la misma dirección. radio_m configurable
+    (default 100m) para pasadas puntuales que quieran un radio más amplio (ver
+    revalidar_ubereats_sin_poligono.py, que usa 400m dentro del polígono ya
+    confirmado -- ahí un dato algo más lejos sigue siendo representativo)."""
+    return agregadores_module.buscar_chequeo_cercano(lat, lng, agregador, radio_km=radio_m / 1000)
 
 
 @router.get("/admin/direcciones/resumen-deduplicado", dependencies=[Depends(require_api_key)])
@@ -512,6 +519,53 @@ def admin_resumen_estados_route():
     return agregadores_module.get_resumen_estados_todas()
 
 
+@router.get("/panel/resumen-estados", dependencies=[Depends(require_admin)])
+def panel_resumen_estados_route():
+    """Igual que admin_resumen_estados_route pero con sesión de staff (rol admin) en
+    vez de la X-API-Key del scraper -- para el botón "Ver dashboard del scraper" en
+    agregadores.html. La X-API-Key no debe vivir en el frontend (cualquiera podría
+    extraerla del JS servido al navegador), así que estas dos rutas duplican el
+    gating con require_admin en vez de reusar las /admin/... de arriba."""
+    return agregadores_module.get_resumen_estados_todas()
+
+
+@router.get("/panel/resumen-deduplicado", dependencies=[Depends(require_admin)])
+def panel_resumen_deduplicado_route():
+    """Ver panel_resumen_estados_route -- misma razón para duplicar el endpoint con
+    auth de sesión en vez de X-API-Key."""
+    return agregadores_module.resumen_cobertura_deduplicada()
+
+
+@router.post("/admin/rondas/iniciar", dependencies=[Depends(require_api_key)])
+def admin_iniciar_ronda_route(agregador: str, total_objetivo: int, worker_count: int, iniciada_en: str | None = None):
+    """Llamado por cada worker de revalidar_completo.py al arrancar (los N en
+    paralelo, sin coordinarse entre sí) -- ver agregadores_module.iniciar_ronda,
+    idempotente: si ya hay una ronda activa para este agregador, la devuelve tal
+    cual en vez de duplicarla. `worker_count`: para que finalizar_ronda sepa cuándo
+    han terminado TODOS, no solo el primero. `iniciada_en` (ISO, opcional): solo
+    para reconstruir a mano una vuelta que ya terminó antes de que este reporte
+    existiera."""
+    return agregadores_module.iniciar_ronda(agregador, total_objetivo, worker_count, iniciada_en)
+
+
+@router.post("/admin/rondas/finalizar", dependencies=[Depends(require_api_key)])
+def admin_finalizar_ronda_route(agregador: str, finalizada_en: str | None = None, forzar: bool = False):
+    """Llamado por cada worker de revalidar_completo.py al terminar -- ver
+    agregadores_module.finalizar_ronda, idempotente. `finalizada_en`: ver nota de
+    iniciada_en en la ruta de arriba. `forzar=true`: cierra ya sin esperar a que
+    todos los workers hayan llamado -- para cuando se para una pasada a mano."""
+    agregadores_module.finalizar_ronda(agregador, finalizada_en, forzar)
+    return {"ok": True}
+
+
+@router.get("/panel/rondas-actuales", dependencies=[Depends(require_admin)])
+def panel_rondas_actuales_route():
+    """Progreso en vivo de una vuelta completa (revalidar_completo.py) por
+    agregador, si hay alguna en curso -- para el panel "Dashboard del scraper" en
+    agregadores.html. Con sesión de staff (rol admin), no X-API-Key."""
+    return agregadores_module.get_rondas_actuales()
+
+
 @router.post("/admin/direcciones/deduplicar", dependencies=[Depends(require_api_key)])
 def deduplicar_direcciones_route(aplicar: bool = False, umbral_m: float = 100):
     """Encuentra (y si aplicar=true, fusiona) direcciones activas que son el mismo
@@ -531,6 +585,18 @@ def limpiar_direcciones_sin_numero_route(aplicar: bool = False):
     poder afinar más (la causa de los clusters más grandes de duplicados, ver
     /admin/direcciones/deduplicar). aplicar=false (por defecto) solo devuelve el plan."""
     return agregadores_module.direcciones_sin_numero(aplicar=aplicar)
+
+
+@router.post("/admin/direcciones/adelgazar", dependencies=[Depends(require_api_key)])
+def adelgazar_direcciones_route(agregador: str, aplicar: bool = False, umbral_m: float = 500):
+    """Entre puntos cercanos (<umbral_m) con el MISMO estado confirmado
+    (disponible/no_disponible) para `agregador`, deja uno solo -- desactiva el resto
+    SOLO para este agregador (no globalmente: el estado puede diferir entre
+    agregadores en el mismo punto). Si un cluster tiene estados distintos no se toca
+    nada (es una frontera real de cobertura). aplicar=false (por defecto) solo
+    devuelve el plan -- pensado para reducir el volumen de una futura "vuelta
+    completa" que re-verifique todo periódicamente."""
+    return agregadores_module.adelgazar_por_estado(agregador, umbral_km=umbral_m / 1000, aplicar=aplicar)
 
 
 class LimiteIn(BaseModel):
@@ -712,11 +778,17 @@ def admin_desactivar_busqueda_limite_route(tienda: str | None = None):
 
 
 @router.delete("/admin/direccion/{direccion_id}", dependencies=[Depends(require_api_key)])
-def admin_eliminar_direccion_route(direccion_id: int):
+def admin_eliminar_direccion_route(direccion_id: int, agregador: str | None = None):
     """Igual que eliminar_direccion_route pero con API key -- para que el
     script de búsqueda de límite pueda dar de baja los puntos del anillo de
-    1km (ya sabemos que ahí siempre hay cobertura, no aportan nada)."""
-    if not agregadores_module.eliminar_direccion(direccion_id):
+    1km (ya sabemos que ahí siempre hay cobertura, no aportan nada).
+
+    `agregador`, si se pasa, desactiva el punto SOLO para ese agregador (ver
+    main.py::chequear_tienda -- cuando se reutiliza un chequeo cercano en vez de
+    scrapear, este punto pasa a considerarse el mismo sitio que el reutilizado
+    para ESE agregador; sin `agregador` desactiva el punto globalmente, para los
+    tres)."""
+    if not agregadores_module.eliminar_direccion(direccion_id, agregador):
         raise HTTPException(status_code=404, detail="Dirección no encontrada")
     return {"ok": True}
 
@@ -737,8 +809,11 @@ def tiendas_route(_user: dict = Depends(require_agregadores)):
 
 
 @router.get("/ultimos")
-def ultimos_route(tienda: str, horas: int = 24, _user: dict = Depends(require_agregadores)):
-    return agregadores_module.get_ultimos(tienda, horas)
+def ultimos_route(
+    tienda: str, horas: int = 24, desde: str | None = None, hasta: str | None = None,
+    _user: dict = Depends(require_agregadores),
+):
+    return agregadores_module.get_ultimos(tienda, horas, desde, hasta)
 
 
 @router.get("/mapa-datos")
@@ -780,6 +855,8 @@ def estado_route(_user: dict = Depends(require_agregadores)):
 def reporte_diario_route(
     tienda: str | None = None,
     fecha: str | None = Query(default=None),
+    desde: str | None = Query(default=None, description="ISO, opcional -- filtro exacto de fecha+hora, tiene prioridad sobre `fecha`"),
+    hasta: str | None = Query(default=None, description="ISO, opcional -- ver `desde`"),
     resets: str | None = Query(
         default=None,
         description='JSON {"agregador": "iso_timestamp"} -- recalcula ese agregador solo '
@@ -788,17 +865,25 @@ def reporte_diario_route(
     ),
     _user: dict = Depends(require_agregadores),
 ):
-    if fecha:
+    # desde/hasta (fecha+hora exacta, no solo el día entero) -- pedido explícito del
+    # usuario 26/08: quería poder buscar "qué pasó tal día entre estas horas", no solo
+    # un día completo. Sin ellos, se mantiene el comportamiento de siempre (día entero).
+    if desde and hasta:
+        rango_desde = datetime.fromisoformat(desde)
+        rango_hasta = datetime.fromisoformat(hasta)
+    elif fecha:
         dia = datetime.strptime(fecha, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        rango_desde, rango_hasta = dia, dia + timedelta(days=1)
     else:
         dia = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        rango_desde, rango_hasta = dia, dia + timedelta(days=1)
     resets_dict = None
     if resets:
         try:
             resets_dict = json.loads(resets)
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="resets debe ser JSON válido")
-    return agregadores_module.get_reporte(tienda, dia, dia + timedelta(days=1), resets_dict)
+    return agregadores_module.get_reporte(tienda, rango_desde, rango_hasta, resets_dict)
 
 
 @router.get("/reportes/semanal")

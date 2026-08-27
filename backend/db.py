@@ -1,6 +1,8 @@
 import datetime
 import os
+import queue
 import sqlite3
+import threading
 
 # DATA_DIR: raíz del repo por defecto (comportamiento de siempre, tanto en
 # local como en Replit). En un hosting con disco realmente persistente
@@ -11,20 +13,91 @@ import sqlite3
 DATA_DIR = os.environ.get("DATA_DIR") or os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DB_PATH = os.path.join(DATA_DIR, "krispy_kreme.db")
 
+# Pool de conexiones reutilizables (27/08): antes get_connection() abría una
+# conexión sqlite3 NUEVA en cada llamada -- cientos por minuto bajo carga del
+# scraper de Agregadores (20-25 workers concurrentes). En local eso es barato,
+# pero /data en Railway es un Volume en red, no disco local del contenedor: la
+# negociación de bloqueos + mmap del -wal/-shm que hace SQLite al ABRIR cada
+# conexión nueva en modo WAL es justo lo que falla ahí bajo concurrencia
+# sostenida -- confirmado en vivo dos veces (27/08) con toda la web devolviendo
+# 500 por "sqlite3.OperationalError: disk I/O error" tras 13-50 min de carga
+# del scraper, recuperado ambas veces solo con un redeploy (proceso nuevo,
+# conexiones nuevas). Reutilizar un puñado de conexiones YA abiertas evita
+# repetir esa negociación en cada petición -- se abren como mucho _POOL_SIZE
+# veces por el tiempo de vida del proceso, no una vez por petición.
+#
+# Transparente para las ~360 llamadas ya existentes a get_connection() en todo
+# el backend: siguen recibiendo algo que se comporta exactamente como un
+# sqlite3.Connection (mismo .execute/.commit/.row_factory/etc., vía
+# __getattr__) y que soportan llamar a .close() igual que antes -- solo que
+# ahora .close() devuelve la conexión al pool en vez de cerrarla de verdad. Si
+# el pool está lleno (pico de concurrencia por encima de _POOL_SIZE) o vacío al
+# pedir una, se abre/cierra una de sobra tal cual se hacía antes -- nunca
+# bloquea ni hace esperar a un caller, solo degrada al comportamiento de
+# siempre en los picos.
+_POOL_SIZE = 10
+_pool: "queue.Queue[sqlite3.Connection]" = queue.Queue(maxsize=_POOL_SIZE)
+_wal_configurado = False
+_wal_lock = threading.Lock()
 
-def get_connection():
-    # WAL en vez del modo por defecto (rollback journal): permite lecturas
-    # mientras hay una escritura en curso, en vez de bloquearlas -- sin esto,
-    # una ráfaga de escrituras concurrentes (ej. el scraper de Agregadores
-    # generando muchos puntos a la vez) puede dejar "database is locked"
-    # hasta en peticiones que no tienen nada que ver, como el login. El
-    # busy_timeout (más generoso que el timeout= de connect) hace que SQLite
-    # reintente en vez de fallar de inmediato si aun así hay contención.
-    conn = sqlite3.connect(DB_PATH, timeout=10)
+
+class _ConexionPooled:
+    """Envoltorio fino sobre sqlite3.Connection -- ver comentario del pool
+    arriba. No se usa en ningún sitio como context manager (`with
+    get_connection() as conn`, confirmado 27/08 que no hay ningún caso en todo
+    el backend), así que no hace falta implementar __enter__/__exit__."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+        self._devuelta = False
+
+    def close(self):
+        if self._devuelta:
+            return
+        self._devuelta = True
+        try:
+            _pool.put_nowait(self._conn)
+        except queue.Full:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+
+    def __getattr__(self, nombre):
+        return getattr(self._conn, nombre)
+
+
+def _abrir_conexion_nueva() -> sqlite3.Connection:
+    # check_same_thread=False: una conexión pooled puede crearse en el hilo de
+    # una petición y reutilizarse en otra petición atendida por otro hilo del
+    # threadpool de FastAPI -- seguro aquí porque la cola (_pool) garantiza que
+    # solo un hilo tiene la conexión "prestada" a la vez, nunca dos a la vez.
+    conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    global _wal_configurado
+    with _wal_lock:
+        if not _wal_configurado:
+            # journal_mode es una propiedad PERSISTENTE del archivo .db (queda
+            # fijada tras la primera vez que se activa, sobrevive a
+            # reconexiones) -- no hace falta reemitir esta PRAGMA en cada
+            # conexión nueva, con una vez por proceso basta.
+            conn.execute("PRAGMA journal_mode=WAL")
+            # synchronous=NORMAL es el emparejamiento recomendado con WAL (menos
+            # fsync que el FULL por defecto -- en el peor caso de un corte de luz
+            # se pierde la última transacción, nunca corrompe la base) y reduce
+            # aún más la presión de I/O sobre el volumen en red.
+            conn.execute("PRAGMA synchronous=NORMAL")
+            _wal_configurado = True
     conn.execute("PRAGMA busy_timeout=15000")
     return conn
+
+
+def get_connection():
+    try:
+        conn = _pool.get_nowait()
+    except queue.Empty:
+        conn = _abrir_conexion_nueva()
+    return _ConexionPooled(conn)
 
 
 def dict_rows(cursor):

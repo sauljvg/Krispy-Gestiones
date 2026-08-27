@@ -233,6 +233,14 @@ De paso esta sesión:
   en ESTA máquina (el script las quita a propósito en una parada manual, ver
   sección 1 más arriba) -- el acceso directo de la carpeta de Inicio sigue
   siendo el único autoarranque activo aquí ahora mismo.
+- **26/08, más tarde**: decisión explícita del usuario -- se quita también
+  el acceso directo de la carpeta de Inicio y se para el daemon de 24/7 en
+  esta máquina. El flujo pasó a ser vueltas completas manuales con
+  `revalidar_completo.py` (20 workers por agregador, JustEat → Glovo →
+  Uber Eats en secuencia, un orquestador .ps1 detached encadena los tres) en
+  vez del daemon continuo -- por ahora NO hay ningún autoarranque activo del
+  scraper en esta máquina. Si se quiere retomar el daemon 24/7 más adelante,
+  hay que volver a crear el acceso directo o la tarea programada a mano.
 
 ## Para la próxima conversación
 
@@ -249,9 +257,61 @@ De paso esta sesión:
   reemplazar el flujo de Takeout.
 - **Scraper de agregadores (ver sección de arriba, 26/08)**: en la máquina de
   trabajo, hacer `git pull` primero (puede pedir resolver conflictos si ese
-  clon también estaba desactualizado). Decidir qué mecanismo de autoarranque
-  se queda (Task Scheduler `setup_tarea_programada.ps1` vs el acceso directo
-  en la carpeta de Inicio que se añadió esta sesión) y quitar el otro. Para
-  ver el mini dashboard local en esa máquina: `venv/Scripts/python
-  status_server.py` dentro de `scraper_agregadores/`, abre en
-  `localhost:8787`.
+  clon también estaba desactualizado). El autoarranque (Task Scheduler y el
+  acceso directo de Inicio) se quitó del todo esta sesión -- ver más abajo,
+  ya no hay que decidir nada ahí. Para ver el mini dashboard local en esa
+  máquina: `venv/Scripts/python status_server.py` dentro de
+  `scraper_agregadores/`, abre en `localhost:8787` (o el nuevo botón
+  "Dashboard del scraper" en `agregadores.html`, solo admin, no necesita
+  levantar nada aparte).
+- **IMPORTANTE -- Glovo, bloqueo/limitación del lado de Glovo (actualizado
+  26/08)**: tras varias pasadas con 20/15/10 workers, todas con ~29-31% de
+  fallos idénticos (página "Oh, no! It looks like there's a problem" de
+  Glovo, en inglés, captura guardada en cada fallo desde hoy), el usuario
+  probó a mano con datos móviles (sin WiFi) -- Glovo carga bien. Con el
+  WiFi de la oficina -- el mismo "Oh, no!" incluso en un navegador normal,
+  sin scraper de por medio. Se descartaron antes con pruebas reales:
+  concurrencia (20→15→10 workers, mismo % de fallo), bloqueo de
+  imágenes/media (`--permitir-imagenes`, sin diferencia), y fingerprint de
+  Chromium headless (test con `--visible`, ventana genuinamente visible
+  igual que Uber Eats, 20 workers: 45 hechos / 20 fallos, mismo ~31% que en
+  headless -- **no hay diferencia, se descarta headless como causa**;
+  vuelto a headless, que es lo que sigue usando Glovo por defecto).
+  Además, probando manualmente desde un navegador en la nube (IP de
+  Anthropic, no la de la oficina) también salió el mismo "Oh, no!" de forma
+  intermitente (a veces recargar lo arregla, a veces no) -- así que no es
+  solo un bloqueo fijo de la IP de la oficina, sino algo más parecido a un
+  límite de volumen/tasa o patrón de tráfico que Glovo dispara bastante en
+  general. El usuario confirmó 26/08 que activando NordVPN sí carga bien
+  desde la oficina. NO relanzar Glovo con muchos workers seguidos desde la
+  misma IP/red -- seguir insistiendo solo prolonga el bloqueo. JustEat y
+  Uber Eats no muestran este problema por ahora, pero vigilar por si les
+  pasa lo mismo con el tiempo.
+- **26/08, cierre de sesión -- selectores en español YA adaptados, pero
+  concurrencia baja NO arregla el bloqueo**: `scrapers/glovo.py` se cambió
+  para usar `https://glovoapp.com/es/es/madrid` (pedido explícito del
+  usuario) con todos los selectores de texto traducidos (verificado a mano
+  paso a paso en un navegador real: "Denegar", "¿Cuál es tu dirección?",
+  "Otro", "Confirmar", "¿Qué necesitas?", "Buscar" -- las clases CSS/
+  data-testid no cambian con el idioma). Sin commitear -- pendiente probar
+  en limpio (ver más abajo). Aparte, se probó reducir de 20 a **8 workers**
+  (con el código en inglés de siempre, para no mezclar dos cambios a la
+  vez): **empeoró, no mejoró** -- 47% de fallo (78 hechos / 70 fallos) tras
+  148 de 488 puntos en ~29 min, y la tasa de fallo iba SUBIENDO con el
+  tiempo (38% a los 13 min → 47% a los 27 min), no bajando. Se cortó a mano
+  (`paremos por hoy`) antes de completar la vuelta. Conclusión: **no es un
+  problema de cuántos workers a la vez** (ya se descartó 20/15/10/8, todos
+  con fallo alto), sino de volumen/tiempo acumulado insistiendo desde la
+  misma IP -- cuanto más se insiste, peor, sea cual sea la concurrencia.
+  Un test manual de UN solo punto con la web en español, mientras los 8
+  workers en inglés corrían a la vez, también falló 4/4 -- pero no es dato
+  limpio (había 9 sesiones de Glovo simultáneas desde la misma IP en ese
+  momento, no 1), así que la validación de los selectores en español sigue
+  pendiente de una prueba real sin solape con ningún otro test de Glovo.
+  **Para la próxima sesión**: (1) probar el flujo en español con un único
+  punto, sin ningún otro proceso de Glovo corriendo a la vez, para
+  confirmar que los selectores traducidos funcionan de verdad; (2)
+  plantearse si vale la pena seguir insistiendo desde esta IP/red en
+  absoluto, o si hace falta otra estrategia (esperar más tiempo sin tocar
+  Glovo en absoluto, red distinta, etc.) antes de intentar la vuelta
+  completa de Glovo otra vez.

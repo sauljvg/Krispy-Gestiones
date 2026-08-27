@@ -33,7 +33,13 @@ HORARIOS_CIERRE_TIENDAS = {
 # ventana queda genuinamente visible en el segundo monitor y deja de
 # bloquear (commit 80ee533). Cada chequeo de Uber Eats abre una ventana de
 # Chrome real y visible mientras el daemon corre -- es esperado, no un bug.
-AGREGADORES = ["justeat", "glovo", "ubereats"]
+#
+# Orden con ubereats primero (pedido explícito del usuario 26/08: priorizarlo
+# porque suele acumular más pendientes) -- scheduler.py reparte el trabajo
+# entre workers en este mismo orden (agregador-major, ver _pares_asignados),
+# así que ubereats ocupa los primeros huecos del reparto round-robin y le
+# toca a más workers en paralelo cuando hay varios corriendo a la vez.
+AGREGADORES = ["ubereats", "glovo", "justeat"]
 
 # Dos cadencias (10 min / 60 min) sobre EL MISMO trabajo: cubrir puntos sin
 # datos aún, para seguir empujando el descubrimiento del borde de cobertura
