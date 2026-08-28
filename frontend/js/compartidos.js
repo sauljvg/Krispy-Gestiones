@@ -2722,17 +2722,37 @@ function abrirCampanaWhatsappSeleccionados() {
 // solo mailto: con todos los correos en copia oculta (bcc), a diferencia de
 // WhatsApp -- se probó el envío uno-a-uno (un mailto por candidato, igual
 // que wa.me) y con listas reales (18 candidatos) abrir 18 instancias del
-// cliente de correo de golpe no es manejable. Por eso aquí NO hay
-// {nombre}/{centro}/etc.: con un cuerpo compartido para todos no hay forma
-// de sustituirlos de verdad sin volver a abrir una instancia por persona;
-// solo {enlace} vale, porque es el mismo test para todo el mundo, no un
-// dato propio de cada candidato. La personalización por persona se queda
-// solo en WhatsApp (ver abrirCampanaWhatsapp), donde sí es viable ir
-// enviando uno a uno.
+// cliente de correo de golpe no es manejable. Por eso aquí NO hay {nombre}
+// (varía candidato a candidato, con un cuerpo compartido no hay forma de
+// sustituirlo de verdad sin volver a abrir una instancia por persona) -- la
+// personalización POR PERSONA se queda solo en WhatsApp (ver
+// abrirCampanaWhatsapp), donde sí es viable ir enviando uno a uno.
+//
+// {centro}/{vacante} SÍ funcionan aquí (pedido explícito del usuario 28/08:
+// "me gustaría poder agregar tambien los demas datos como centro o
+// vacante") -- a diferencia de {nombre}, son iguales para TODOS los
+// destinatarios siempre que se hayan elegido candidatos de la MISMA vacante
+// (caso normal: se filtra por vacante y se manda a esa lista). Si el envío
+// mezcla candidatos de vacantes distintas, no hay un valor único que valga
+// para todos -- ver vacanteComunDe(), que en ese caso devuelve null y el
+// aviso en abrirCampanaEmail() lo deja claro antes de escribir el mensaje.
 let campanaEmailCandidatos = [];
 let campanaEmailTestsAbiertos = [];
 let campanaEmailEnlaceTest = "";
 let campanaEmailTestIdSeleccionado = null;
+let campanaEmailVacanteComun = null; // {vacante, centro} si TODOS los candidatos comparten vacante_id, si no null
+
+// Ver nota de arriba (junto a campanaEmailCandidatos): {vacante}/{centro}
+// solo tienen un valor válido si todos los candidatos del envío son de la
+// MISMA vacante -- con vacantes mezcladas no hay un texto único que sirva
+// para todos los destinatarios del mismo mailto:.
+function vacanteComunDe(candidatos) {
+  if (candidatos.length === 0) return null;
+  const primero = candidatos[0].vacante_id;
+  if (primero == null || !candidatos.every((c) => c.vacante_id === primero)) return null;
+  const { vacante, centro } = vacanteTextosDe(candidatos[0]);
+  return vacante ? { vacante, centro } : null;
+}
 
 function asuntoEmailPorDefecto() {
   return EMPRESA === "saona" ? "Proceso de Selección - SAONA" : "Proceso de Selección - Krispy Kreme España";
@@ -2783,12 +2803,26 @@ function onCambiaTestCampanaEmail() {
 function cerrarCampanaEmail() {
   campanaEmailCandidatos = [];
   campanaEmailEnlaceTest = "";
+  campanaEmailVacanteComun = null;
   document.getElementById("campana-email-wrap").innerHTML = "";
 }
 
 function confirmarAbrirEmail() {
   const asunto = document.getElementById("campana-email-asunto").value.trim();
-  const cuerpo = document.getElementById("campana-email-cuerpo").value.replaceAll("{enlace}", campanaEmailEnlaceTest);
+  const cuerpoOriginal = document.getElementById("campana-email-cuerpo").value;
+  // Sin vacante común, {vacante}/{centro} no se sustituyen (ver aviso en
+  // abrirCampanaEmail) -- si el usuario los dejó en el texto de todos modos,
+  // mejor confirmar antes de mandar el placeholder literal a los candidatos
+  // que descubrirlo después de enviado.
+  if (!campanaEmailVacanteComun && (cuerpoOriginal.includes("{vacante}") || cuerpoOriginal.includes("{centro}"))) {
+    if (!confirm('El mensaje usa {vacante} o {centro}, pero los candidatos elegidos no son todos de la misma vacante -- se enviará ese texto TAL CUAL, sin sustituir. ¿Seguro que quieres continuar?')) {
+      return;
+    }
+  }
+  const cuerpo = cuerpoOriginal
+    .replaceAll("{enlace}", campanaEmailEnlaceTest)
+    .replaceAll("{vacante}", campanaEmailVacanteComun?.vacante || "")
+    .replaceAll("{centro}", campanaEmailVacanteComun?.centro || "");
   const destinatarios = campanaEmailCandidatos.map((c) => c.email).join(",");
   window.location.href = `mailto:?bcc=${encodeURIComponent(destinatarios)}&subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
   marcarInvitadoTest(campanaEmailCandidatos.map((c) => c.id), campanaEmailTestIdSeleccionado);
@@ -2808,13 +2842,17 @@ async function abrirCampanaEmail(candidatos) {
   campanaEmailEnlaceTest = "";
   campanaEmailTestIdSeleccionado = null;
   campanaEmailTestsAbiertos = await cargarTestsAbiertosCampana();
+  campanaEmailVacanteComun = vacanteComunDe(conEmail);
   const wrap = document.getElementById("campana-email-wrap");
   wrap.innerHTML = `
     <div class="vacante-form">
       <h3>${ICONO_MAILTO} Enviar email</h3>
       <p class="staff-hint">
         Se abrirá tu cliente de correo con estos ${conEmail.length} destinatario${conEmail.length === 1 ? "" : "s"} en copia oculta (BCC) — revisa/edita el asunto y el cuerpo antes de continuar.
-        ${campanaEmailTestsAbiertos.length ? `Usa <code>{enlace}</code> donde quieras que vaya el enlace del test que elijas abajo.` : ""}
+        ${campanaEmailTestsAbiertos.length ? `Usa <code>{enlace}</code> donde quieras que vaya el enlace del test que elijas abajo. ` : ""}
+        ${campanaEmailVacanteComun
+          ? `Todos son de <b>${escapeHTML(campanaEmailVacanteComun.vacante)}</b> — puedes usar <code>{vacante}</code> y <code>{centro}</code>.`
+          : `Los candidatos elegidos no son todos de la misma vacante, así que <code>{vacante}</code>/<code>{centro}</code> no tienen un valor único para todos — no los uses en el mensaje (se enviarían tal cual, sin sustituir).`}
       </p>
       ${campanaEmailTestSelectHTML()}
       <div class="form-field form-field-full" style="margin-bottom:10px;">
