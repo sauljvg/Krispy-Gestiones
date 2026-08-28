@@ -42,6 +42,8 @@ Uso (un agregador por tanda, varios procesos):
 import argparse
 import asyncio
 import logging
+import random
+import time
 
 import config
 from main import SCRAPERS, chequear_tienda, flush_buffer_subida
@@ -52,11 +54,46 @@ logging.basicConfig(level=config.SCRAPER_LOG_LEVEL, format="%(asctime)s %(leveln
 logger = logging.getLogger("revalidar_completo")
 
 # Cuántos chequeos se acumulan antes de subirlos juntos en un solo lote (ver
-# docstring del módulo). 5 es un punto medio: reduce los commits de escritura x5
-# sin dejar el progreso del dashboard demasiado desfasado ni arriesgar mucho
-# trabajo sin subir si el proceso se corta a mitad (como mucho estos 5 se
-# re-scrapean solos al reanudar, ver ronda_hechos_ids).
-TAMANO_LOTE = 5
+# docstring del módulo). Subido de 5 a 10 el 27/08 (pedido explícito del
+# usuario, para bajar aún más la carga de escritura sobre Railway) -- no se
+# sube más porque el cuello de botella real de hoy resultó ser el bloqueo del
+# event loop por las capturas a Drive (ya arreglado, ver run_in_threadpool en
+# agregadores_routes.py), no tanto los commits de SQLite en sí; subir más el
+# lote ya no baja mucho más esa carga, pero sí aumenta linealmente cuánto
+# trabajo hay que repetir si un worker se corta a mitad de lote (con 10, como
+# mucho se re-scrapean 10 puntos por worker al reanudar, ver ronda_hechos_ids).
+TAMANO_LOTE = 10
+
+# El lote es POR WORKER (cada proceso tiene su propio buffer_subida en memoria --
+# no hay forma barata de compartirlo entre procesos de Windows separados sin memoria
+# compartida/IPC, complejidad que no compensa aquí). Con pocos workers eso no se
+# nota (cada uno acumula 10 rápido), pero con muchos workers y una tasa de fallo
+# alta (confirmado en vivo 27/08 con Glovo a 10 workers: ninguno individualmente
+# llegaba a 10 aciertos en varios minutos) el progreso se ve "congelado" en el
+# dashboard aunque el scraping siga avanzando de verdad. FLUSH_INTERVALO_SEG pone
+# un tope de tiempo además del tope de cantidad -- sube lo que lleve un worker
+# (aunque sean 3, o 1) si ya pasó este tiempo desde su último envío, así el
+# dashboard nunca se queda más de esto sin novedades por worker (pedido explícito
+# del usuario 27/08).
+FLUSH_INTERVALO_SEG = 60
+
+
+def _debe_flush(buffer_subida: list, ultimo_flush: float) -> bool:
+    if not buffer_subida:
+        return False
+    return len(buffer_subida) >= TAMANO_LOTE or (time.monotonic() - ultimo_flush) >= FLUSH_INTERVALO_SEG
+
+
+def _delay_con_jitter() -> float:
+    # Antes un delay FIJO (siempre 4s) entre chequeos -- con varios workers
+    # arrancando casi a la vez (0.5s de diferencia, ver más abajo) y el mismo delay
+    # exacto, sus peticiones tienden a mantenerse sincronizadas en el tiempo en vez
+    # de repartirse (27/08, uno de los 3 cambios probados junto al UA/viewport
+    # variable y el backoff largo de PaginaSobrecargadaError). Sesgado hacia arriba
+    # (-1/+2) en vez de simétrico: igual de importante que antes no golpear más
+    # rápido que el mínimo ya validado, la aleatoriedad es lo que importa aquí.
+    base = config.DELAY_ENTRE_CHEQUEOS_SEG
+    return max(1.0, base + random.uniform(-1, 2))
 
 
 async def _puntos_todos(agregador: str) -> list[dict]:
@@ -72,7 +109,7 @@ async def _puntos_todos(agregador: str) -> list[dict]:
 
 async def main(
     agregador: str, worker_index: int, worker_count: int,
-    permitir_imagenes: bool = False, visible: bool = False,
+    permitir_imagenes: bool = False, visible: bool = False, proxy_index: int | None = None,
 ):
     if permitir_imagenes:
         # Prueba puntual 26/08: comprobar si bloquear imágenes/media es lo que
@@ -82,6 +119,20 @@ async def main(
         # proceso Python aparte, así que no se pisa entre workers).
         SCRAPERS[agregador].bloquear_recursos = False
         logger.info("Worker %d/%d (%s): imágenes/media SIN bloquear (prueba puntual)", worker_index, worker_count, agregador)
+
+    if proxy_index is not None:
+        # Experimento 27/08 (rotación de IP gratis, ver config.PROXIES): este
+        # worker en concreto sale por un proxy en vez de la IP propia -- pensado
+        # para dejar unos workers con proxy y otros sin él en la MISMA vuelta, y
+        # comparar la tasa de bloqueo entre ambos grupos.
+        if proxy_index >= len(config.PROXIES):
+            logger.error(
+                "Worker %d/%d (%s): --proxy-index %d fuera de rango (solo hay %d proxies en SCRAPER_PROXIES) -- sigue sin proxy",
+                worker_index, worker_count, agregador, proxy_index, len(config.PROXIES),
+            )
+        else:
+            SCRAPERS[agregador].proxy = config.PROXIES[proxy_index]
+            logger.info("Worker %d/%d (%s): usando proxy #%d (%s)", worker_index, worker_count, agregador, proxy_index, config.PROXIES[proxy_index]["server"])
 
     if visible:
         # Prueba puntual 26/08: correr Glovo con ventana genuinamente visible, igual
@@ -144,6 +195,7 @@ async def main(
     )
 
     buffer_subida: list = []
+    ultimo_flush = time.monotonic()
 
     fallidos = []
     fallos_tecnicos = []
@@ -168,10 +220,11 @@ async def main(
             # se encola sola dentro de chequear_tienda sin llegar a propagar aquí).
             logger.error("Fallo revalidando %s (se reintentará al final): %r", direccion.get("direccion_text"), exc)
             fallidos.append(direccion)
-        if len(buffer_subida) >= TAMANO_LOTE:
+        if _debe_flush(buffer_subida, ultimo_flush):
             await flush_buffer_subida(buffer_subida)
+            ultimo_flush = time.monotonic()
         if i < len(asignados) - 1:
-            await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
+            await asyncio.sleep(_delay_con_jitter())
 
     await flush_buffer_subida(buffer_subida)  # lo que quede sin llegar a TAMANO_LOTE
 
@@ -192,7 +245,7 @@ async def main(
             except Exception as exc:
                 logger.error("Sigue fallando %s (intento extra %d/3): %r", direccion.get("direccion_text"), intentos_extra, exc)
                 siguen_fallando.append(direccion)
-            await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
+            await asyncio.sleep(_delay_con_jitter())
         fallidos = siguen_fallando
         await flush_buffer_subida(buffer_subida)
 
@@ -234,7 +287,10 @@ async def main(
                     direccion.get("direccion_text"), exc,
                 )
                 siguen_fallando_tecnico.append(direccion)
-            await asyncio.sleep(config.DELAY_ENTRE_CHEQUEOS_SEG)
+            if _debe_flush(buffer_subida, ultimo_flush):
+                await flush_buffer_subida(buffer_subida)
+                ultimo_flush = time.monotonic()
+            await asyncio.sleep(_delay_con_jitter())
 
         await flush_buffer_subida(buffer_subida)
 
@@ -281,5 +337,9 @@ if __name__ == "__main__":
         "--visible", action="store_true",
         help="Prueba puntual: correr con ventana genuinamente visible, igual que Uber Eats (por defecto JustEat/Glovo corren headless).",
     )
+    parser.add_argument(
+        "--proxy-index", type=int, default=None,
+        help="Experimento de rotación de IP: índice (0-based) dentro de config.PROXIES (ver SCRAPER_PROXIES en .env) para que ESTE worker salga por ese proxy en vez de la IP propia. Sin esto, sale por la IP propia como siempre.",
+    )
     args = parser.parse_args()
-    asyncio.run(main(args.agregador, args.worker_index, args.worker_count, args.permitir_imagenes, args.visible))
+    asyncio.run(main(args.agregador, args.worker_index, args.worker_count, args.permitir_imagenes, args.visible, args.proxy_index))

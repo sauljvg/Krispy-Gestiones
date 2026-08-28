@@ -315,3 +315,79 @@ De paso esta sesión:
   absoluto, o si hace falta otra estrategia (esperar más tiempo sin tocar
   Glovo en absoluto, red distinta, etc.) antes de intentar la vuelta
   completa de Glovo otra vez.
+
+- **27/08 -- selectores en español SÍ funcionan, cifra de bloqueo real
+  bastante más baja de lo que sugería 26/08, y confirmado que SÍ importa la
+  concurrencia (contradice la conclusión de 26/08 de más arriba)**: con
+  vueltas completas reales (`revalidar_completo.py`, resumibles) durante
+  toda la tarde/noche del 27/08, la tasa de FALLO DEFINITIVO (agotar los 3
+  intentos internos, no solo un intento suelto) con 5 workers se mantuvo
+  **7.0-8.4% de forma consistente en 3 pasadas distintas repartidas entre
+  las 17:33 y las 20:34** (200, 119 y 211 puntos respectivamente) -- con 10
+  workers subió a **22-29%** en dos pruebas aparte. Como las pruebas de 5
+  workers se repartieron por toda la tarde
+  (incluida hora punta de cena, 20:00+) sin que la tasa se moviera, se
+  descarta que sea solo "hora punta" -- es la concurrencia la que importa
+  de verdad, contradiciendo la conclusión de 26/08 de que "no es problema
+  de cuántos workers a la vez" (esa prueba fue con el código en inglés
+  viejo y datos más ruidosos). **Conclusión operativa: Glovo se queda en 5
+  workers**, no subir.
+  Se probaron 3 mitigaciones adicionales de código (todas ya en
+  `scrapers/base.py`/`scrapers/glovo.py`/`revalidar_completo.py`, activas
+  por defecto, sin flag): UA/viewport variable en vez de fijo siempre,
+  backoff largo (30-60s aleatorios) específico cuando la página devuelve su
+  propio "Oh, no! It looks like there's a problem" (antes se trataba igual
+  que cualquier timeout, con backoff de 2-4s), y jitter en el delay entre
+  chequeos (antes fijo 4s). Con 5 workers, la tasa se quedó en 8.06% (17
+  fallos / 211 puntos) -- prácticamente empatada con el 7.0% de antes de
+  estos cambios, no una mejora clara, pero tampoco empeora, y el detector
+  de "Oh, no!" sí se dispara con frecuencia real (51 veces en 20 min) con
+  la mayoría recuperándose solos tras esperar.
+  También se probó rotación de IP con proxies gratis de Webshare (10
+  datacenter, plan gratuito permanente) -- **empeoró, no mejoró**: 27.5% de
+  fallo con proxy vs 8.4% sin proxy en la misma ventana de tiempo, con los
+  3 proxies probados (Madrid + 2 Londres) dando un resultado parecido entre
+  sí (no es uno malo aislado). Conclusión: son proxies de DATACENTER, el
+  tipo de IP que un sistema anti-bot/rate-limit ya suele tener fichada --
+  no vale la pena repetir con proxies gratis, haría falta un proveedor
+  residencial de pago para tener alguna chance real, sin garantía.
+
+  **HALLAZGO IMPORTANTE relanzado esta noche, casi se pasa por alto**: la
+  nota de 26/08 de arriba dice que el usuario confirmó A MANO que
+  **activando NordVPN el "Oh, no!" desaparece incluso desde un navegador
+  normal, sin scraper de por medio** -- y NordVPN está instalado y con
+  procesos corriendo en esta máquina ahora mismo (`C:\Program
+  Files\NordVPN`, `NordVPN.exe`/`nordvpn-service.exe` activos). Esto es
+  potencialmente MUCHO más efectivo que cualquier ajuste de código de los
+  de arriba, y ya viene confirmado por el propio usuario, no es una
+  hipótesis nueva. NO lo activé/probé con el scraper esta noche (sesión
+  autónoma, 27/08 noche) -- conectar/desconectar una VPN es un cambio de
+  red a nivel de todo el sistema, no solo del scraper, y cae dentro de "no
+  tocar configuración de sistema sin confirmar" aunque el usuario ya diera
+  luz verde a experimentar con el código. **Para la próxima sesión (con el
+  usuario presente o con su confirmación explícita): probar
+  `revalidar_completo.py` con la VPN activa a mano, comparando la tasa de
+  fallo definitivo contra el 7-8% de sin VPN** -- si de verdad lo arregla
+  como sugiere la nota de 26/08, es la solución real, por delante de
+  cualquier cosa de las de arriba.
+
+  **Actualización la misma noche del 27/08, con el usuario presente**:
+  probado NordVPN (Madrid) con el scraper de verdad -- a 20 workers dio
+  24.3% de fallo, prácticamente igual que sin VPN a esa misma concurrencia.
+  **Conclusión: la VPN NO soluciona el problema de concurrencia** (contra
+  lo que sugería la nota de 26/08) -- ese hallazgo de ayer probablemente
+  era sobre un bloqueo DISTINTO (posible penalización acumulada por horas/
+  días insistiendo desde la misma IP de oficina, no el "Oh, no!" de
+  sobrecarga por concurrencia que se ve hoy). Después el usuario probó
+  conectando otra IP de Madrid por su cuenta (no NordVPN, otra red) -- con
+  solo 5 workers (el número ya confirmado seguro, 7-8% con la IP de
+  oficina) esa IP dio **41.4% de fallo**, mucho PEOR que la IP habitual a
+  la misma concurrencia. O sea que la IP sí importa, pero no en el sentido
+  de "cualquier IP nueva ayuda" -- hay IPs claramente peores que la de la
+  oficina. **Conclusión operativa final de esta sesión: quedarse con la IP
+  de oficina de siempre + 5 workers (7-8%, ~87 min para los 350 puntos)
+  es la mejor combinación probada hasta ahora.** El objetivo de "toda la
+  vuelta de Glovo en 30 min" que pidió el usuario esta noche NO se
+  consiguió y no parece alcanzable sin aceptar una tasa de fallo mucho más
+  alta -- probado con 4 combinaciones de concurrencia/IP distintas, todas
+  con el mismo techo.

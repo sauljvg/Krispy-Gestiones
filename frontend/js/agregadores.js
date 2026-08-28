@@ -2236,6 +2236,16 @@ function agrCerrarDashboardScraper() {
   }
 }
 
+// Disponible/no disponible/error de ESTA ronda -- arranca en 0 con cada vuelta
+// nueva (pedido explícito del usuario 27/08), distinto del desglose bruto
+// histórico que se ve en "Por tienda" cuando no hay ronda. Sin "sin datos": estar
+// contado aquí YA significa que se comprobó en esta ronda.
+const AGR_CATEGORIAS_RONDA = ["disponible", "no_disponible", "error"];
+
+function agrDesgloseHtml(desglose, categorias = AGR_CATEGORIAS_RONDA) {
+  return categorias.map((c) => `${AGR_CATEGORIA_LABEL[c]}: <b>${desglose?.[c] || 0}</b>`).join(" · ");
+}
+
 function agrRondaHtml(agregador, ronda) {
   const nombre = AGR_NOMBRE_AGREGADOR[agregador];
   if (!ronda) {
@@ -2243,41 +2253,49 @@ function agrRondaHtml(agregador, ronda) {
   }
   const pct = ronda.total_objetivo > 0 ? Math.round((ronda.hechos / ronda.total_objetivo) * 100) : 0;
   const inicio = new Date(ronda.iniciada_en).toLocaleTimeString("es-ES", { timeZone: "Europe/Madrid" });
+  const desglose = agrDesgloseHtml(ronda.desglose);
   if (!ronda.en_curso) {
     const fin = new Date(ronda.finalizada_en).toLocaleTimeString("es-ES", { timeZone: "Europe/Madrid" });
     const duracionMin = Math.max(1, Math.round((new Date(ronda.finalizada_en) - new Date(ronda.iniciada_en)) / 60000));
     return `<div class="agr-scraper-desglose" style="margin-bottom:6px;">
       <b>${nombre}</b>: ✅ completado -- ${ronda.hechos}/${ronda.total_objetivo} (${pct}%) · de ${inicio} a ${fin} (${duracionMin} min)
+      <div class="agr-scraper-desglose" style="margin-top:2px;">${desglose}</div>
     </div>`;
   }
-  const porTienda = Object.entries(ronda.por_tienda || {})
-    .map(([t, n]) => `${agrCentrosPorTienda[t]?.nombre || t}: ${n}`)
-    .join(" · ");
+  // Desglose por tienda (aquí y en "faltan") vive en la tabla "Por tienda" de abajo
+  // -- no se repite aquí para no duplicar el mismo dato dos veces en el panel.
   return `<div style="margin-bottom:10px;">
     <b>${nombre}</b>: ${ronda.hechos}/${ronda.total_objetivo} hechos (${pct}%) · faltan ${ronda.faltan} · empezó a las ${inicio}
     <div class="agr-card-barra"><span style="width:${pct}%; background:${AGR_COLOR_MARCA[agregador]};"></span></div>
-    ${porTienda ? `<div class="agr-scraper-desglose" style="margin-top:4px;">${porTienda}</div>` : ""}
+    <div class="agr-scraper-desglose" style="margin-top:4px;">${desglose}</div>
   </div>`;
 }
 
-function agrCeldaEstadoHtml(conteos) {
-  const total = AGR_CATEGORIAS_ESTADO.reduce((s, c) => s + (conteos?.[c] || 0), 0);
-  const detalle = AGR_CATEGORIAS_ESTADO.map((c) => `${AGR_CATEGORIA_LABEL[c]}: <b>${conteos?.[c] || 0}</b>`).join(" · ");
-  return `<td><b>${total}</b> total<div class="agr-scraper-desglose">${detalle}</div></td>`;
+// conteosBruto: histórico completo de esta tienda/agregador (de /panel/resumen-estados)
+// -- SIEMPRE se usa para el total de "X/Y" (el tamaño real del grid no cambia con
+// la ronda). hechoRonda (opcional): puntos ya cubiertos en la vuelta en curso, para
+// el "X/" delante. desgloseRonda (opcional): si hay ronda para este agregador, el
+// detalle de abajo (Disponible/No disponible/Error) es el de ESTA ronda (arranca en
+// 0 cada vuelta nueva, pedido explícito del usuario 27/08) en vez del histórico.
+function agrCeldaEstadoHtml(conteosBruto, hechoRonda, desgloseRonda) {
+  const total = AGR_CATEGORIAS_ESTADO.reduce((s, c) => s + (conteosBruto?.[c] || 0), 0);
+  const detalle = desgloseRonda
+    ? agrDesgloseHtml(desgloseRonda)
+    : agrDesgloseHtml(conteosBruto, AGR_CATEGORIAS_ESTADO);
+  const cabecera = hechoRonda != null ? `<b>${hechoRonda}</b>/${total}` : `<b>${total}</b> total`;
+  return `<td>${cabecera}<div class="agr-scraper-desglose">${detalle}</div></td>`;
 }
 
 async function agrCargarDashboardScraper() {
   const contenido = document.getElementById("agr-scraper-contenido");
   const actualizado = document.getElementById("agr-scraper-actualizado");
   try {
-    const [resEstados, resDedup, resRondas] = await Promise.all([
+    const [resEstados, resRondas] = await Promise.all([
       fetch(`${AGR_API}/panel/resumen-estados`, { credentials: "include" }),
-      fetch(`${AGR_API}/panel/resumen-deduplicado`, { credentials: "include" }),
       fetch(`${AGR_API}/panel/rondas-actuales`, { credentials: "include" }),
     ]);
-    if (!resEstados.ok || !resDedup.ok || !resRondas.ok) throw new Error("fetch falló");
+    if (!resEstados.ok || !resRondas.ok) throw new Error("fetch falló");
     const estados = await resEstados.json();
-    const dedup = await resDedup.json();
     const rondas = await resRondas.json();
 
     const agregadores = Object.keys(AGR_NOMBRE_AGREGADOR);
@@ -2285,29 +2303,43 @@ async function agrCargarDashboardScraper() {
     const cabeceras = agregadores.map((a) => `<th>${AGR_NOMBRE_AGREGADOR[a]}</th>`).join("");
 
     const totales = {};
-    agregadores.forEach((a) => { totales[a] = { disponible: 0, no_disponible: 0, error: 0, sin_datos: 0 }; });
+    const totalesHechoRonda = {};
+    const totalesDesgloseRonda = {};
+    agregadores.forEach((a) => {
+      totales[a] = { disponible: 0, no_disponible: 0, error: 0, sin_datos: 0 };
+      totalesHechoRonda[a] = rondas[a] ? 0 : null;
+      totalesDesgloseRonda[a] = rondas[a] ? { disponible: 0, no_disponible: 0, error: 0 } : null;
+    });
     tiendas.forEach((t) => {
       agregadores.forEach((a) => {
         AGR_CATEGORIAS_ESTADO.forEach((c) => { totales[a][c] += estados[t]?.[a]?.[c] || 0; });
+        if (rondas[a]) {
+          totalesHechoRonda[a] += (rondas[a].por_tienda || {})[t] || 0;
+          const d = (rondas[a].por_tienda_desglose || {})[t];
+          if (d) AGR_CATEGORIAS_RONDA.forEach((c) => { totalesDesgloseRonda[a][c] += d[c] || 0; });
+        }
       });
     });
 
     const filasTienda = tiendas.map((t) => {
       const nombre = agrCentrosPorTienda[t]?.nombre || t;
-      return `<tr><td>${nombre}</td>${agregadores.map((a) => agrCeldaEstadoHtml(estados[t]?.[a])).join("")}</tr>`;
+      const celdas = agregadores.map((a) => {
+        const hechoRonda = rondas[a] ? ((rondas[a].por_tienda || {})[t] || 0) : null;
+        const desgloseRonda = rondas[a] ? (rondas[a].por_tienda_desglose || {})[t] : null;
+        return agrCeldaEstadoHtml(estados[t]?.[a], hechoRonda, desgloseRonda);
+      }).join("");
+      return `<tr><td>${nombre}</td>${celdas}</tr>`;
     }).join("");
-    const filaTotales = agregadores.map((a) => agrCeldaEstadoHtml(totales[a])).join("");
+    const filaTotales = agregadores.map((a) => agrCeldaEstadoHtml(totales[a], totalesHechoRonda[a], totalesDesgloseRonda[a])).join("");
 
-    const filaDedup = agregadores.map((a) => {
-      const info = dedup[a] || { vistos: 0, total: 0, faltan: 0, faltan_direcciones: [] };
-      const idLista = `agr-scraper-faltan-${a}`;
-      const lista = (info.faltan_direcciones || []).map((d) => `<li>${d}</li>`).join("") || "<li>(ninguna)</li>";
-      return `<td>
-        <b>${info.vistos}</b>/${info.total} vistos
-        <details><summary class="agr-scraper-dedup-faltan">${info.faltan} faltan</summary>
-          <ul class="agr-drill-lista" id="${idLista}" style="max-height:180px;overflow-y:auto;">${lista}</ul>
-        </details>
-      </td>`;
+    // "Total único": mismo hechos/total_objetivo de la sección de arriba, en tabla
+    // para comparar los 3 agregadores de un vistazo -- ya viene deduplicado (cada
+    // dirección cuenta una sola vez), no hace falta pedir /panel/resumen-deduplicado
+    // aparte.
+    const filaTotalUnico = agregadores.map((a) => {
+      const ronda = rondas[a];
+      if (!ronda) return `<td>—</td>`;
+      return `<td><b>${ronda.hechos}</b>/${ronda.total_objetivo} · faltan ${ronda.faltan}</td>`;
     }).join("");
 
     const seccionRondas = agregadores.map((a) => agrRondaHtml(a, rondas[a])).join("");
@@ -2316,15 +2348,15 @@ async function agrCargarDashboardScraper() {
       <h4 class="agr-scraper-titulo-seccion">Vuelta completa en curso</h4>
       <p class="agr-drill-nota">Solo cuenta lo revalidado DESDE que empezó esta pasada -- si un sitio ya tenía dato de antes (aunque sea viejo), no cuenta aquí como "hecho" hasta que se vuelva a comprobar de verdad en esta ronda.</p>
       ${seccionRondas}
-      <h4 class="agr-scraper-titulo-seccion">Cobertura real (deduplicada entre tiendas)</h4>
-      <p class="agr-drill-nota">Esto es distinto de la sección de arriba: cuenta si un sitio tiene dato ALGUNA VEZ (aunque sea de hace días), no si se ha revalidado en la ronda actual -- por eso puede estar al 100% con la vuelta completa recién empezada. Cuenta sitios reales únicos, no filas -- los grids de tiendas vecinas se solapan geográficamente, así que el mismo sitio puede tener una fila por tienda.</p>
+      <h4 class="agr-scraper-titulo-seccion">Total único</h4>
       <div class="agr-scraper-tabla-wrap">
         <table class="agr-scraper-tabla">
           <thead><tr><th></th>${cabeceras}</tr></thead>
-          <tbody><tr><td><b>TOTAL único</b></td>${filaDedup}</tr></tbody>
+          <tbody><tr><td><b>Hechos/total</b></td>${filaTotalUnico}</tr></tbody>
         </table>
       </div>
-      <h4 class="agr-scraper-titulo-seccion">Por tienda (bruto, con solape entre tiendas vecinas)</h4>
+      <h4 class="agr-scraper-titulo-seccion">Por tienda</h4>
+      <p class="agr-drill-nota">"Hechos en esta ronda / total bruto" por tienda -- el total bruto puede tener solape entre tiendas vecinas (un mismo sitio real en más de una fila).</p>
       <div class="agr-scraper-tabla-wrap">
         <table class="agr-scraper-tabla">
           <thead><tr><th>Tienda</th>${cabeceras}</tr></thead>

@@ -1,7 +1,7 @@
 import logging
 import re
 
-from scrapers.base import BaseAggregatorScraper, ResultadoChequeo
+from scrapers.base import BaseAggregatorScraper, PaginaSobrecargadaError, ResultadoChequeo, _pagina_muestra_error_generico
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +138,12 @@ class GlovoScraper(BaseAggregatorScraper):
                     "dirección -- captura: %s -- html: %s",
                     ruta, ruta_html,
                 )
+                # Antes de asumir un fallo genérico, comprobar si es LA PÁGINA la que
+                # se cayó (confirmado en vivo 27/08, ver PaginaSobrecargadaError) --
+                # cambia el backoff del reintento en base.py, mucho más largo que el
+                # de un fallo normal.
+                if await _pagina_muestra_error_generico(page):
+                    raise PaginaSobrecargadaError("glovo") from None
                 raise
 
         campo = page.locator(SEL_ADDRESS_EDITABLE_INPUT).first

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -87,6 +88,19 @@ class ChallengeDetectedError(Exception):
     """El sitio ha mostrado un challenge anti-bot (Cloudflare u otro WAF)."""
 
 
+class PaginaSobrecargadaError(Exception):
+    """El sitio mostró su propia página de error genérica ("Oh, no! It looks like
+    there's a problem", confirmado en vivo 27/08 con capturas reales de Glovo bajo
+    carga concurrente) -- no es un challenge anti-bot ni un timeout de red nuestro,
+    es EL SITIO diciendo que está teniendo problemas. Se trata distinto en
+    _verificar_con_retry: un backoff mucho más largo que el de un fallo normal, para
+    darle tiempo real a recuperarse en vez de darle más carga a los pocos segundos."""
+
+    def __init__(self, contexto: str, texto_pagina: str | None = None):
+        super().__init__(f"{contexto}: la página mostró su propio error genérico (sobrecarga)")
+        self.texto_pagina = texto_pagina
+
+
 # Frase EXACTA que lanzan glovo.py/justeat.py/ubereats.py (con su propio prefijo
 # "<agregador>: ") cuando la búsqueda de la tienda se completó de verdad (sin
 # challenge, sin fallo de red) pero Krispy Kreme sencillamente no salió en los
@@ -96,6 +110,42 @@ class ChallengeDetectedError(Exception):
 # que main.py/chequear_tienda pueda tratarla igual en el flujo normal del daemon, no
 # solo en la búsqueda de límite.
 MARCADOR_TIENDA_NO_CONFIRMADA = "tienda no confirmada en resultados de búsqueda"
+
+# Texto EXACTO de la página de error genérica que Glovo muestra cuando su propio
+# backend tiene problemas bajo carga (confirmado con captura real 27/08, ver
+# PaginaSobrecargadaError) -- no es un mensaje nuestro, es el suyo.
+MARCADOR_PAGINA_SOBRECARGADA = "Oh, no!"
+
+
+# Antes SIEMPRE el mismo UA + mismo viewport exacto (800x900) en TODOS los workers,
+# TODAS las peticiones -- huella idéntica de sesión en sesión, sea cual sea la IP.
+# Pequeño pool de UAs reales de escritorio (Windows, navegadores/versiones que de
+# verdad se ven hoy) + viewport con algo de variación, elegidos al azar en cada
+# _run_once (27/08, uno de los cambios probados junto al backoff largo de
+# PaginaSobrecargadaError -- ver docstring de esa excepción).
+_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+]
+
+
+def _viewport_aleatorio() -> dict:
+    return {"width": random.randint(780, 900), "height": random.randint(860, 960)}
+
+
+async def _pagina_muestra_error_generico(page) -> bool:
+    """True si la página actual es la de error genérico del sitio (ver
+    MARCADOR_PAGINA_SOBRECARGADA) -- para distinguir "el sitio nos dijo que tiene un
+    problema" de un timeout/fallo nuestro cualquiera. Silencioso ante cualquier fallo
+    al leer la página (si ni eso se puede leer, mejor tratarlo como el error normal
+    de siempre que como este caso especial)."""
+    try:
+        texto = await page.inner_text("body", timeout=2000)
+        return MARCADOR_PAGINA_SOBRECARGADA in texto
+    except Exception:
+        return False
 
 
 @dataclass
@@ -167,6 +217,12 @@ class BaseAggregatorScraper:
     # del usuario, sin confirmar todavía. No tocar este default fuera de esa prueba.
     bloquear_recursos: bool = True
 
+    # Proxy opcional (27/08, experimento de rotación de IP -- ver config.PROXIES y
+    # revalidar_completo.py --proxy-index). None = sale por la IP propia, como
+    # siempre. dict con {"server", "username", "password"} = todo el tráfico de
+    # este worker (todas sus peticiones, todos sus reintentos) sale por ese proxy.
+    proxy: dict | None = None
+
     def __init__(self, timeout_seg: int = 30, retry_max: int = 3):
         self.timeout_ms = timeout_seg * 1000
         self.retry_max = retry_max
@@ -197,10 +253,26 @@ class BaseAggregatorScraper:
     async def _verificar_con_retry(self, tienda_nombre: str, direccion: str) -> ResultadoChequeo:
         headless = self.iniciar_headless
         last_exc = None
+        espera_seg = None  # None = usar el backoff normal (2**intento)
 
         for intento in range(self.retry_max + 1):
+            espera_seg = None
             try:
                 return await self._run_once(tienda_nombre, direccion, headless=headless)
+            except PaginaSobrecargadaError as exc:
+                last_exc = exc
+                # El SITIO dijo que tiene un problema (ver docstring de la excepción)
+                # -- no es un fallo nuestro de red/timeout, es su backend
+                # sobrecargado. 2s/4s de backoff normal solo le añade más carga a los
+                # pocos segundos; aquí esperamos mucho más (30-60s con aleatoriedad,
+                # para no sincronizar el reintento de varios workers en el mismo
+                # instante) a ver si para entonces ya se recuperó.
+                espera_seg = random.uniform(30, 60)
+                logger.warning(
+                    "%s: la página mostró su propio error de sobrecarga (intento %d/%d) -- "
+                    "esperando %.0fs antes de reintentar (más que un fallo normal, a propósito).",
+                    self.nombre_agregador, intento + 1, self.retry_max, espera_seg,
+                )
             except ChallengeDetectedError as exc:
                 last_exc = exc
                 # OJO: antes esto comprobaba "and headless", pensado solo para
@@ -240,7 +312,7 @@ class BaseAggregatorScraper:
                 )
 
             if intento < self.retry_max:
-                await asyncio.sleep(2**intento)
+                await asyncio.sleep(espera_seg if espera_seg is not None else 2**intento)
 
         raise last_exc
 
@@ -262,15 +334,12 @@ class BaseAggregatorScraper:
             browser = await pw.chromium.launch(
                 headless=headless,
                 args=args,
+                proxy=self.proxy,
             )
             try:
                 context = await browser.new_context(
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
-                    ),
-                    viewport={"width": 800, "height": 900},
+                    user_agent=random.choice(_USER_AGENTS),
+                    viewport=_viewport_aleatorio(),
                     locale="es-ES",
                 )
                 await _STEALTH.apply_stealth_async(context)

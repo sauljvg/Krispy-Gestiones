@@ -795,6 +795,40 @@ def get_rondas_actuales() -> dict:
                 f"WHERE agregador=? AND timestamp >= ? {condicion} GROUP BY tienda",
                 parametros,
             ).fetchall()
+            # Disponible/no disponible/error de ESTA ronda (arranca en 0 con cada
+            # vuelta nueva) -- pedido explícito del usuario 27/08, distinto del
+            # desglose bruto histórico de /panel/resumen-estados. Un punto puede
+            # tener varios chequeos dentro de la misma ronda (reintentos) -- se
+            # cuenta solo el ÚLTIMO por dirección (ROW_NUMBER), no cada fila, para
+            # no contar dos veces ni quedarse con un intento fallido ya superado.
+            filas_desglose = conn.execute(
+                f"""
+                WITH ultimos AS (
+                    SELECT direccion_id, tienda, disponible, error_texto,
+                           ROW_NUMBER() OVER (PARTITION BY direccion_id ORDER BY timestamp DESC) AS rn
+                    FROM agregadores_chequeos
+                    WHERE agregador=? AND timestamp >= ? {condicion}
+                )
+                SELECT tienda,
+                       SUM(CASE WHEN error_texto IS NOT NULL THEN 1 ELSE 0 END) AS error,
+                       SUM(CASE WHEN error_texto IS NULL AND disponible=1 THEN 1 ELSE 0 END) AS disponible,
+                       SUM(CASE WHEN error_texto IS NULL AND disponible=0 THEN 1 ELSE 0 END) AS no_disponible
+                FROM ultimos WHERE rn=1
+                GROUP BY tienda
+                """,
+                parametros,
+            ).fetchall()
+            por_tienda_desglose = {
+                f["tienda"]: {
+                    "disponible": f["disponible"], "no_disponible": f["no_disponible"], "error": f["error"],
+                }
+                for f in filas_desglose
+            }
+            desglose = {
+                "disponible": sum(v["disponible"] for v in por_tienda_desglose.values()),
+                "no_disponible": sum(v["no_disponible"] for v in por_tienda_desglose.values()),
+                "error": sum(v["error"] for v in por_tienda_desglose.values()),
+            }
             resultado[agregador] = {
                 "iniciada_en": fila["iniciada_en"],
                 "finalizada_en": fila["finalizada_en"],
@@ -803,6 +837,8 @@ def get_rondas_actuales() -> dict:
                 "hechos": hechos,
                 "faltan": max(fila["total_objetivo"] - hechos, 0),
                 "por_tienda": {f["tienda"]: f["n"] for f in filas_tienda},
+                "desglose": desglose,
+                "por_tienda_desglose": por_tienda_desglose,
             }
         return resultado
     finally:
