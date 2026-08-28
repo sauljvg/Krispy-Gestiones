@@ -929,6 +929,17 @@ def mapa_datos_todas_route(_user: dict = Depends(require_agregadores)):
     return agregadores_module.get_mapa_datos_todas()
 
 
+@router.get("/admin/mapa-datos-todas", dependencies=[Depends(require_api_key)])
+def admin_mapa_datos_todas_route():
+    """Igual que /mapa-datos-todas de arriba (estado actual por punto/agregador,
+    el mismo dato que pinta el mapa), pero con X-API-Key en vez de sesión de staff
+    -- para que scripts del scraper puedan consultarlo (p.ej. revalidar_completo.py
+    --solo-disponibles, pedido explícito del usuario 28/08: relanzar una vuelta
+    completa pero solo sobre los puntos que HOY están en verde/disponible en cada
+    agregador, no todo el grid)."""
+    return agregadores_module.get_mapa_datos_todas()
+
+
 @router.get("/alertas")
 def alertas_route(
     tienda: str | None = None, horas: int = 24, _user: dict = Depends(require_agregadores)
