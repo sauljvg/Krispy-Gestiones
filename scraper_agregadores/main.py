@@ -143,7 +143,9 @@ async def chequear_tienda(
             continue  # sin scrape real -> también se salta la pausa anti-bot de este punto
 
         logger.info("Chequeando %s / %s @ %s", tienda, agregador_nombre, texto)
-        resultado = await scraper.verificar_disponibilidad(tienda, consulta)
+        resultado = await scraper.verificar_disponibilidad(
+            tienda, consulta, lat=direccion.get("lat"), lng=direccion.get("lng")
+        )
 
         # verificar_disponibilidad ya reintentó varias veces internamente (ver
         # scrapers/base.py) antes de darse por vencida -- si SIGUE fallando siempre

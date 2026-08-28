@@ -59,7 +59,7 @@ class JustEatScraper(BaseAggregatorScraper):
     nombre_agregador = "justeat"
     url_base = BASE_URL
 
-    async def _verificar(self, page, tienda_nombre: str, direccion: str) -> ResultadoChequeo:
+    async def _verificar(self, page, tienda_nombre: str, direccion: str, lat: float | None = None, lng: float | None = None) -> ResultadoChequeo:
         await page.goto(BASE_URL, wait_until="domcontentloaded")
         await self._comprobar_challenge(page)
 
