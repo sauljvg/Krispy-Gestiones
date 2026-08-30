@@ -22,6 +22,16 @@ FONDOS_DIR = os.path.join(DATA_DIR, "uploads", "encuestas_fondos")
 
 TIPOS_PREGUNTA = {"texto", "email", "numero", "likert", "abierta", "opcion_simple", "opcion_multiple", "prioridad", "fecha", "calificacion"}
 
+# Todas las claves de tipo_informe_clave de "Valores y Competencias" (KK y
+# SAONA, tienda/oficina, ver informes.DEFAULT_TIPOS/DEFAULT_TIPOS_SAONA)
+# contienen "valores" -- se usa como substring en vez de una lista cerrada
+# para que siga funcionando si se añade una variante nueva sin tocar este
+# archivo. El anti-fraude (contador, bloqueo de salida, aviso en página 2,
+# ver frontend/js/encuesta.js) pedido explícito del usuario 28/08 SOLO para
+# estos tests -- los demás (clima, entrevistas de salida, encuestas sueltas
+# sin tipo) no lo activan.
+ANTICHEAT_CLAVE_MARCADOR = "valores"
+
 LIKERT_OPCIONES = [
     "Totalmente en desacuerdo", "En desacuerdo", "Ni de acuerdo ni en desacuerdo",
     "De acuerdo", "Totalmente de acuerdo",
@@ -550,7 +560,10 @@ def _fila_por_slug_o_codigo(conn, identificador):
 def get_encuesta_publica(identificador):
     """Igual que get_encuesta pero solo si está abierta, y sin exponer
     tipo_informe_clave (detalle interno de administración, no le hace falta
-    al candidato)."""
+    al candidato) -- salvo `es_valores_competencias`, un booleano derivado de
+    esa clave (ver ANTICHEAT_CLAVE_MARCADOR) para que la página pública sepa
+    si debe activar el anti-fraude (contador, bloqueo de salida, aviso en la
+    página 2) sin necesitar el detalle interno completo."""
     conn = get_connection()
     row = _fila_por_slug_o_codigo(conn, identificador)
     if not row or row["estado"] != "abierta" or _vencido(row["fecha_cierre"]):
@@ -559,6 +572,8 @@ def get_encuesta_publica(identificador):
     encuesta = _row_encuesta(row)
     encuesta["paginas"] = _fetch_estructura(conn, row["id"])
     conn.close()
+    clave = encuesta.get("tipo_informe_clave") or ""
+    encuesta["es_valores_competencias"] = ANTICHEAT_CLAVE_MARCADOR in clave
     encuesta.pop("tipo_informe_clave", None)
     encuesta.pop("tipo_entrevista_empresa", None)
     encuesta.pop("clima_oleada_id", None)
