@@ -2188,6 +2188,51 @@ def get_ultimos(tienda: str, horas: int = 24, desde: str | None = None, hasta: s
     return [dict(f) for f in filas]
 
 
+def _horas_utc_con_datos() -> list[str]:
+    """Un timestamp UTC representativo por cada hora UTC que tuvo al menos un
+    chequeo real -- consulta barata (agrupa en SQL por el prefijo YYYY-MM-DDTHH
+    del timestamp ISO, sin traer cada fila) que alimenta tanto
+    get_fechas_con_datos como get_horas_con_datos. Crece como mucho ~8760
+    filas/año, así que no hace falta preocuparse de su tamaño."""
+    conn = get_connection()
+    filas = conn.execute(
+        "SELECT MIN(timestamp) AS t FROM agregadores_chequeos GROUP BY substr(timestamp, 1, 13)"
+    ).fetchall()
+    conn.close()
+    return [f["t"] for f in filas if f["t"]]
+
+
+def get_fechas_con_datos() -> list[str]:
+    """Fechas (YYYY-MM-DD, hora de Madrid) con al menos un chequeo real --
+    para que el selector de fecha del filtro del mapa (ver
+    frontend/js/agregadores.js) solo deje elegir días que de verdad tienen
+    datos, en vez de cualquier fecha del calendario. Pedido explícito del
+    usuario 28/08. Más reciente primero."""
+    fechas = set()
+    for t in _horas_utc_con_datos():
+        try:
+            fechas.add(datetime.fromisoformat(t).astimezone(MADRID_TZ).date().isoformat())
+        except (ValueError, TypeError):
+            continue
+    return sorted(fechas, reverse=True)
+
+
+def get_horas_con_datos(fecha: str) -> list[str]:
+    """Horas en punto (HH:00, hora de Madrid) del día `fecha` (YYYY-MM-DD) en
+    las que hubo al menos un chequeo real -- para que, al elegir un día en el
+    filtro del mapa, el selector de hora solo ofrezca huecos en los que de
+    verdad se scrapeó ese día, no cualquier hora. Orden ascendente."""
+    horas = set()
+    for t in _horas_utc_con_datos():
+        try:
+            dt = datetime.fromisoformat(t).astimezone(MADRID_TZ)
+        except (ValueError, TypeError):
+            continue
+        if dt.date().isoformat() == fecha:
+            horas.add(dt.strftime("%H:00"))
+    return sorted(horas)
+
+
 def get_mapa_datos(tienda: str, hasta: str | None = None):
     """`hasta` (ISO, opcional): en vez del estado ACTUAL de cada punto (el
     chequeo más reciente de cada agregador, comportamiento de siempre),

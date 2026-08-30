@@ -1067,22 +1067,78 @@ function agrFilaTabla(c) {
 
 let agrFiltroFechaActivo = null; // null = últimas 24h (de siempre) -- si no, {desde, hasta} ISO UTC
 
+// Los selects de fecha/hora del filtro del mapa solo ofrecen días y horas en
+// los que de verdad hubo scraping -- pedido explícito del usuario 28/08:
+// "me va a dejar seleccionar solo las fechas que tengamos información
+// disponible... al seleccionar la fecha me dejará escoger entre las horas
+// que tengamos disponible la info de ese día". Un <select> con solo las
+// opciones válidas logra el mismo efecto que "desactivar" el resto del
+// calendario, sin necesitar un date-picker a medida (el <input type="date">
+// nativo no permite deshabilitar días sueltos).
+async function agrCargarFechasFiltroFecha() {
+  const select = document.getElementById("agr-filtro-fecha");
+  if (!select) return;
+  try {
+    const res = await fetch(`${AGR_API}/mapa-datos-fechas`, { credentials: "include" });
+    const data = await res.json();
+    const fechas = data.fechas || [];
+    select.innerHTML = fechas.length
+      ? `<option value="">— elige un día con datos —</option>` + fechas.map((f) => `<option value="${f}">${agrFormatearFechaCorta(f)}</option>`).join("")
+      : `<option value="">Sin datos todavía</option>`;
+  } catch {
+    select.innerHTML = `<option value="">No se pudo cargar</option>`;
+  }
+}
+
+function agrFormatearFechaCorta(fechaISO) {
+  const [y, m, d] = fechaISO.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+async function agrCargarHorasFiltroFecha() {
+  const fecha = document.getElementById("agr-filtro-fecha").value;
+  const selectHora = document.getElementById("agr-filtro-hora-hasta");
+  if (!fecha) {
+    selectHora.innerHTML = `<option value="">—</option>`;
+    selectHora.disabled = true;
+    return;
+  }
+  selectHora.disabled = true;
+  selectHora.innerHTML = `<option value="">Cargando…</option>`;
+  try {
+    const res = await fetch(`${AGR_API}/mapa-datos-horas?fecha=${encodeURIComponent(fecha)}`, { credentials: "include" });
+    const data = await res.json();
+    const horas = data.horas || [];
+    if (horas.length === 0) {
+      selectHora.innerHTML = `<option value="">Sin horas con datos</option>`;
+      return;
+    }
+    // Última hora del día primero -- es la vista más probable ("¿cómo quedó
+    // el día?"), aunque siguen disponibles todas las demás horas del select.
+    selectHora.innerHTML = [...horas].reverse().map((h) => `<option value="${h}">${h}</option>`).join("");
+    selectHora.disabled = false;
+  } catch {
+    selectHora.innerHTML = `<option value="">No se pudo cargar</option>`;
+  }
+}
+
 function agrAplicarFiltroFecha() {
   const fecha = document.getElementById("agr-filtro-fecha").value;
   if (!fecha) { mostrarAviso("Elige un día primero."); return; }
+  const horaHasta = document.getElementById("agr-filtro-hora-hasta").value;
+  if (!horaHasta) { mostrarAviso("Elige una hora con datos primero."); return; }
   // "Desde" ya no es un campo aparte (se quitó al mover este bloque al mapa,
   // pedido explícito del usuario 28/08) -- para el mapa lo que importa es un
   // único corte ("cómo estaba TODO hasta este momento"), no un rango; para
   // la tabla de abajo, que sigue siendo un rango, se asume el día entero
   // hasta esa hora.
-  const horaHasta = document.getElementById("agr-filtro-hora-hasta").value || "23:59";
   // new Date("YYYY-MM-DDTHH:MM") se interpreta en la zona horaria del navegador (Madrid,
   // ya que es donde trabaja el equipo) -- toISOString() lo pasa a UTC para el backend,
   // que guarda todos los timestamps en UTC.
   const desde = new Date(`${fecha}T00:00:00`).toISOString();
   const hasta = new Date(`${fecha}T${horaHasta}:59`).toISOString();
   agrFiltroFechaActivo = { desde, hasta };
-  document.getElementById("agr-filtro-fecha-activo").textContent = `Mostrando cómo estaba el ${fecha} hasta las ${horaHasta}`;
+  document.getElementById("agr-filtro-fecha-activo").textContent = `Mostrando cómo estaba el ${agrFormatearFechaCorta(fecha)} hasta las ${horaHasta}`;
   agrActualizarTituloResumen();
   agrCargarTabla();
   agrCargarResumen();
@@ -2375,6 +2431,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await agrCargarTiendas();
   await agrCargarTodo();
+  agrCargarFechasFiltroFecha(); // no bloquea el resto -- solo llena el <select> del filtro del mapa
 
   if (agrIntervalo) clearInterval(agrIntervalo);
   agrIntervalo = setInterval(agrCargarTodo, 30000);

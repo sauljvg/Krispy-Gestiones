@@ -919,6 +919,16 @@ def ultimos_route(
     return agregadores_module.get_ultimos(tienda, horas, desde, hasta)
 
 
+@router.get("/mapa-datos-fechas")
+def mapa_datos_fechas_route(_user: dict = Depends(require_agregadores)):
+    return {"fechas": agregadores_module.get_fechas_con_datos()}
+
+
+@router.get("/mapa-datos-horas")
+def mapa_datos_horas_route(fecha: str, _user: dict = Depends(require_agregadores)):
+    return {"horas": agregadores_module.get_horas_con_datos(fecha)}
+
+
 @router.get("/mapa-datos")
 def mapa_datos_route(tienda: str, hasta: str | None = None, _user: dict = Depends(require_agregadores)):
     return agregadores_module.get_mapa_datos(tienda, hasta=hasta)

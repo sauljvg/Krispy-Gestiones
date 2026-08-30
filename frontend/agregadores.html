@@ -216,7 +216,8 @@
 
   #agr-tabla-titulo { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   .agr-tabla-filtro { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); margin: 8px 0; }
-  .agr-tabla-filtro input[type="date"], .agr-tabla-filtro input[type="time"] { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 12px; }
+  .agr-tabla-filtro select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 12px; }
+  .agr-tabla-filtro select:disabled { opacity: 0.5; }
   #agr-tabla-toggle { font-size: 0.72rem; background: none; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; color: var(--text-secondary); cursor: pointer; }
   #agr-tabla-toggle:hover { background: var(--surface-page); }
   #agr-tabla-scroll { max-height: 520px; overflow-y: auto; overflow-x: auto; }
@@ -312,8 +313,8 @@
         </div>
       </div>
       <div id="agr-tabla-filtro" class="agr-tabla-filtro">
-        <label>Día: <input type="date" id="agr-filtro-fecha"></label>
-        <label>Hasta: <input type="time" id="agr-filtro-hora-hasta" value="23:59"></label>
+        <label>Día: <select id="agr-filtro-fecha" onchange="agrCargarHorasFiltroFecha()"><option value="">— elige un día con datos —</option></select></label>
+        <label>Hasta: <select id="agr-filtro-hora-hasta" disabled><option value="">—</option></select></label>
         <button type="button" class="btn btn-ghost" style="font-size:12px;padding:4px 10px;" onclick="agrAplicarFiltroFecha()">Ver ese día</button>
         <button type="button" class="btn btn-ghost" style="font-size:12px;padding:4px 10px;" onclick="agrQuitarFiltroFecha()">Volver a ahora mismo</button>
         <span id="agr-filtro-fecha-activo" style="font-size:12px;color:var(--text-muted);"></span>
