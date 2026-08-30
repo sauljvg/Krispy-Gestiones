@@ -72,7 +72,7 @@ function iniciarAnticheat() {
     anticheatAvisado = true;
     mostrarAviso(
       "Este test tiene un control anti-fraude activo: no cambies de pestaña ni salgas de esta pantalla hasta terminar. " +
-      "Si lo haces, el test se reiniciará desde el principio. Tienes un tiempo orientativo para completarlo."
+      "Si lo haces, el test se reiniciará desde el principio. Tienes un tiempo para completarlo."
     );
   }
 }
