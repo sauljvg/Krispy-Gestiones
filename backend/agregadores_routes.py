@@ -921,21 +921,33 @@ def ultimos_route(
 
 @router.get("/mapa-datos-fechas")
 def mapa_datos_fechas_route(_user: dict = Depends(require_agregadores)):
-    return {"fechas": agregadores_module.get_fechas_con_datos()}
+    # Checkpoint del 30/08 (ver agregadores.AGR_CHECKPOINT_FECHA): las fechas
+    # anteriores solo se ofrecen al admin (Saúl) -- mismo criterio ya usado
+    # en agregadores_routes.py::usuarios_en_linea_route, atado al username
+    # literal, no al rol.
+    es_admin = _user["username"].lower() == "saul"
+    return {"fechas": agregadores_module.get_fechas_con_datos(incluir_anteriores_checkpoint=es_admin)}
 
 
 @router.get("/mapa-datos-horas")
 def mapa_datos_horas_route(fecha: str, _user: dict = Depends(require_agregadores)):
+    es_admin = _user["username"].lower() == "saul"
+    if not es_admin and fecha < agregadores_module.AGR_CHECKPOINT_FECHA:
+        return {"horas": []}
     return {"horas": agregadores_module.get_horas_con_datos(fecha)}
 
 
 @router.get("/mapa-datos")
 def mapa_datos_route(tienda: str, hasta: str | None = None, _user: dict = Depends(require_agregadores)):
+    es_admin = _user["username"].lower() == "saul"
+    hasta = agregadores_module.limitar_hasta_por_checkpoint(hasta, es_admin=es_admin)
     return agregadores_module.get_mapa_datos(tienda, hasta=hasta)
 
 
 @router.get("/mapa-datos-todas")
 def mapa_datos_todas_route(hasta: str | None = None, _user: dict = Depends(require_agregadores)):
+    es_admin = _user["username"].lower() == "saul"
+    hasta = agregadores_module.limitar_hasta_por_checkpoint(hasta, es_admin=es_admin)
     return agregadores_module.get_mapa_datos_todas(hasta=hasta)
 
 

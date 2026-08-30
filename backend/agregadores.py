@@ -2188,6 +2188,18 @@ def get_ultimos(tienda: str, horas: int = 24, desde: str | None = None, hasta: s
     return [dict(f) for f in filas]
 
 
+AGR_CHECKPOINT_FECHA = "2026-08-30"
+# Checkpoint del filtro de fecha del mapa (pedido explícito del usuario
+# 30/08): antes de esta fecha el grid tuvo mucho movimiento de pruebas
+# (puntos duplicados, direcciones de prueba, cambios de tienda mientras se
+# afinaba el scraper) -- comparar esas fechas contra el estado actual da una
+# comparación confusa, no real ("estamos comparando con info que ya no
+# hay"). Esos datos siguen siendo válidos y NO se borran (siguen en
+# agregadores_chequeos tal cual), pero solo los ve el admin (Saúl, ver
+# agregadores_routes.py) -- el resto de gente con acceso al módulo solo ve
+# fechas desde este checkpoint en adelante, con el módulo ya estable.
+
+
 def _horas_utc_con_datos() -> list[str]:
     """Un timestamp UTC representativo por cada hora UTC que tuvo al menos un
     chequeo real -- consulta barata (agrupa en SQL por el prefijo YYYY-MM-DDTHH
@@ -2202,18 +2214,24 @@ def _horas_utc_con_datos() -> list[str]:
     return [f["t"] for f in filas if f["t"]]
 
 
-def get_fechas_con_datos() -> list[str]:
+def get_fechas_con_datos(incluir_anteriores_checkpoint: bool = False) -> list[str]:
     """Fechas (YYYY-MM-DD, hora de Madrid) con al menos un chequeo real --
     para que el selector de fecha del filtro del mapa (ver
     frontend/js/agregadores.js) solo deje elegir días que de verdad tienen
     datos, en vez de cualquier fecha del calendario. Pedido explícito del
-    usuario 28/08. Más reciente primero."""
+    usuario 28/08. Más reciente primero.
+
+    `incluir_anteriores_checkpoint`: False (por defecto, para todo el mundo
+    salvo el admin) filtra fuera cualquier fecha anterior a
+    AGR_CHECKPOINT_FECHA -- ver ese comentario más arriba."""
     fechas = set()
     for t in _horas_utc_con_datos():
         try:
             fechas.add(datetime.fromisoformat(t).astimezone(MADRID_TZ).date().isoformat())
         except (ValueError, TypeError):
             continue
+    if not incluir_anteriores_checkpoint:
+        fechas = {f for f in fechas if f >= AGR_CHECKPOINT_FECHA}
     return sorted(fechas, reverse=True)
 
 
@@ -2221,7 +2239,11 @@ def get_horas_con_datos(fecha: str) -> list[str]:
     """Horas en punto (HH:00, hora de Madrid) del día `fecha` (YYYY-MM-DD) en
     las que hubo al menos un chequeo real -- para que, al elegir un día en el
     filtro del mapa, el selector de hora solo ofrezca huecos en los que de
-    verdad se scrapeó ese día, no cualquier hora. Orden ascendente."""
+    verdad se scrapeó ese día, no cualquier hora. Orden ascendente.
+
+    Sin filtro de checkpoint aquí a propósito -- la ruta (agregadores_routes.py)
+    ya no llama a esto para una `fecha` anterior al checkpoint si quien
+    pregunta no es admin, así que esta función puede quedarse simple."""
     horas = set()
     for t in _horas_utc_con_datos():
         try:
@@ -2231,6 +2253,22 @@ def get_horas_con_datos(fecha: str) -> list[str]:
         if dt.date().isoformat() == fecha:
             horas.add(dt.strftime("%H:00"))
     return sorted(horas)
+
+
+def limitar_hasta_por_checkpoint(hasta: str | None, es_admin: bool) -> str | None:
+    """Si `hasta` (ISO, el corte del filtro de fecha del mapa) cae antes del
+    checkpoint y quien pregunta no es el admin, se ignora el filtro (se
+    devuelve None -- "estado actual") en vez de dejar ver el histórico de
+    antes del checkpoint. Refuerza en el propio backend lo mismo que ya no
+    ofrece el selector de fecha (get_fechas_con_datos): no basta con
+    construir la URL a mano para saltárselo."""
+    if es_admin or not hasta:
+        return hasta
+    try:
+        fecha_hasta = datetime.fromisoformat(hasta).astimezone(MADRID_TZ).date().isoformat()
+    except (ValueError, TypeError):
+        return hasta
+    return hasta if fecha_hasta >= AGR_CHECKPOINT_FECHA else None
 
 
 def get_mapa_datos(tienda: str, hasta: str | None = None):
