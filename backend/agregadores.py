@@ -2188,7 +2188,14 @@ def get_ultimos(tienda: str, horas: int = 24, desde: str | None = None, hasta: s
     return [dict(f) for f in filas]
 
 
-def get_mapa_datos(tienda: str):
+def get_mapa_datos(tienda: str, hasta: str | None = None):
+    """`hasta` (ISO, opcional): en vez del estado ACTUAL de cada punto (el
+    chequeo más reciente de cada agregador, comportamiento de siempre),
+    devuelve cómo estaba cada uno en un momento concreto del pasado -- el
+    último chequeo real de cada agregador que ya existía EN ese momento.
+    Pedido explícito del usuario 28/08: comparar el mapa de una fecha contra
+    otra ("¿estaban todos disponibles o no?"), no solo ver el estado de
+    ahora mismo. Sin `hasta`, es exactamente el mismo mapa de siempre."""
     conn = get_connection()
     direcciones = conn.execute(
         "SELECT * FROM agregadores_direcciones WHERE tienda=? AND activo=1", (tienda,)
@@ -2208,10 +2215,16 @@ def get_mapa_datos(tienda: str):
     resultado = []
     for d in direcciones:
         ultimos_por_agregador = {}
-        chequeos = conn.execute(
-            "SELECT * FROM agregadores_chequeos WHERE direccion_id=? ORDER BY timestamp DESC LIMIT 50",
-            (d["id"],),
-        ).fetchall()
+        if hasta:
+            chequeos = conn.execute(
+                "SELECT * FROM agregadores_chequeos WHERE direccion_id=? AND timestamp<=? ORDER BY timestamp DESC LIMIT 50",
+                (d["id"], hasta),
+            ).fetchall()
+        else:
+            chequeos = conn.execute(
+                "SELECT * FROM agregadores_chequeos WHERE direccion_id=? ORDER BY timestamp DESC LIMIT 50",
+                (d["id"],),
+            ).fetchall()
         for c in chequeos:
             if c["agregador"] not in ultimos_por_agregador:
                 ultimos_por_agregador[c["agregador"]] = c
@@ -2297,11 +2310,11 @@ def get_resumen_estados_todas() -> dict:
     return resultado
 
 
-def get_mapa_datos_todas():
+def get_mapa_datos_todas(hasta: str | None = None):
     tiendas = []
     direcciones = []
     for slug in TIENDAS:
-        datos = get_mapa_datos(slug)
+        datos = get_mapa_datos(slug, hasta=hasta)
         if datos["tienda"]:
             tiendas.append(datos["tienda"])
         for d in datos["direcciones"]:
@@ -2400,15 +2413,12 @@ def get_estado():
                 "chequeos_exitosos": None,
                 "chequeos_fallidos": None,
                 "frecuencia_esperada_min": frecuencia_min,
-                "retrasado": es_horario_apertura(),
                 "minutos_desde_ultima": None,
             }
         referencia = fila["fecha_fin"] or fila["fecha_inicio"]
         minutos_desde = (
             datetime.now(timezone.utc) - datetime.fromisoformat(referencia)
         ).total_seconds() / 60
-        margen = frecuencia_min * 3
-        retrasado = es_horario_apertura() and minutos_desde > margen
 
         en_curso = fila["fecha_fin"] is None
         hechos = None
@@ -2425,7 +2435,6 @@ def get_estado():
             "chequeos_exitosos": fila["chequeos_exitosos"],
             "chequeos_fallidos": fila["chequeos_fallidos"],
             "frecuencia_esperada_min": frecuencia_min,
-            "retrasado": retrasado,
             "minutos_desde_ultima": round(minutos_desde, 1),
             "en_curso": en_curso,
             "progreso_hechos": hechos,

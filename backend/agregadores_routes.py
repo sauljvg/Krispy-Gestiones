@@ -920,13 +920,13 @@ def ultimos_route(
 
 
 @router.get("/mapa-datos")
-def mapa_datos_route(tienda: str, _user: dict = Depends(require_agregadores)):
-    return agregadores_module.get_mapa_datos(tienda)
+def mapa_datos_route(tienda: str, hasta: str | None = None, _user: dict = Depends(require_agregadores)):
+    return agregadores_module.get_mapa_datos(tienda, hasta=hasta)
 
 
 @router.get("/mapa-datos-todas")
-def mapa_datos_todas_route(_user: dict = Depends(require_agregadores)):
-    return agregadores_module.get_mapa_datos_todas()
+def mapa_datos_todas_route(hasta: str | None = None, _user: dict = Depends(require_agregadores)):
+    return agregadores_module.get_mapa_datos_todas(hasta=hasta)
 
 
 @router.get("/admin/mapa-datos-todas", dependencies=[Depends(require_api_key)])

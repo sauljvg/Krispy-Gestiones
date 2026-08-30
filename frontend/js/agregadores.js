@@ -987,7 +987,15 @@ async function agrCargarMapa() {
   // endpoint nuevo por cada combinación posible (pedido explícito del
   // usuario 09/08: poder elegir qué tiendas ver en el mapa, no solo "una" o
   // "todas").
-  const res = await fetch(`${AGR_API}/mapa-datos-todas`, { credentials: "include" });
+  // Con filtro de fecha activo (ver agrAplicarFiltroFecha), el mapa deja de
+  // mostrar el estado ACTUAL de cada punto y pasa a mostrar cómo estaba ese
+  // día concreto (el último chequeo real de cada uno hasta esa hora) --
+  // pedido explícito del usuario 28/08: "lo que queremos ver por fechas
+  // realmente es una fecha vs otra, cómo estaba el mapa con los dots".
+  const urlMapa = agrFiltroFechaActivo
+    ? `${AGR_API}/mapa-datos-todas?hasta=${encodeURIComponent(agrFiltroFechaActivo.hasta)}`
+    : `${AGR_API}/mapa-datos-todas`;
+  const res = await fetch(urlMapa, { credentials: "include" });
   const data = await res.json();
 
   // Un punto guardado con tienda=X en la BD puede en realidad estar pegado a
@@ -1062,18 +1070,23 @@ let agrFiltroFechaActivo = null; // null = últimas 24h (de siempre) -- si no, {
 function agrAplicarFiltroFecha() {
   const fecha = document.getElementById("agr-filtro-fecha").value;
   if (!fecha) { mostrarAviso("Elige un día primero."); return; }
-  const horaDesde = document.getElementById("agr-filtro-hora-desde").value || "00:00";
+  // "Desde" ya no es un campo aparte (se quitó al mover este bloque al mapa,
+  // pedido explícito del usuario 28/08) -- para el mapa lo que importa es un
+  // único corte ("cómo estaba TODO hasta este momento"), no un rango; para
+  // la tabla de abajo, que sigue siendo un rango, se asume el día entero
+  // hasta esa hora.
   const horaHasta = document.getElementById("agr-filtro-hora-hasta").value || "23:59";
   // new Date("YYYY-MM-DDTHH:MM") se interpreta en la zona horaria del navegador (Madrid,
   // ya que es donde trabaja el equipo) -- toISOString() lo pasa a UTC para el backend,
   // que guarda todos los timestamps en UTC.
-  const desde = new Date(`${fecha}T${horaDesde}:00`).toISOString();
+  const desde = new Date(`${fecha}T00:00:00`).toISOString();
   const hasta = new Date(`${fecha}T${horaHasta}:59`).toISOString();
   agrFiltroFechaActivo = { desde, hasta };
-  document.getElementById("agr-filtro-fecha-activo").textContent = `Mostrando ${fecha} de ${horaDesde} a ${horaHasta}`;
+  document.getElementById("agr-filtro-fecha-activo").textContent = `Mostrando cómo estaba el ${fecha} hasta las ${horaHasta}`;
   agrActualizarTituloResumen();
   agrCargarTabla();
   agrCargarResumen();
+  agrCargarMapa();
 }
 
 function agrQuitarFiltroFecha() {
@@ -1082,6 +1095,7 @@ function agrQuitarFiltroFecha() {
   agrActualizarTituloResumen();
   agrCargarTabla();
   agrCargarResumen();
+  agrCargarMapa();
 }
 
 function agrActualizarTituloResumen() {
@@ -2152,50 +2166,15 @@ function agrTextoProgreso(estado) {
   return modo.progreso_total ? ` (${modo.progreso_hechos}/${modo.progreso_total})` : ` (${modo.progreso_hechos})`;
 }
 
-function agrActualizarDaemonLive(estado) {
-  // Contador en vivo (qué tienda está recorriendo el daemon AHORA MISMO,
-  // cuántos dots lleva y cuántos le faltan) -- solo para el admin (usuario
-  // "saul"), pedido explícito del usuario 10/08. El resto de usuarios no ve
-  // ni el elemento (queda "hidden" en el HTML).
-  const live = document.getElementById("agr-daemon-live");
-  if (!live) return;
-  if (!agrUsuarioActual || agrUsuarioActual.username !== "saul") {
-    live.hidden = true;
-    return;
-  }
-  live.hidden = false;
-  const enCurso = [estado.cercano, estado.completo].filter((m) => m.en_curso);
-  if (enCurso.length === 0) {
-    live.className = "agr-estado-pill neutro";
-    live.textContent = "🔎 Daemon inactivo";
-    return;
-  }
-  const modo = enCurso.sort((a, b) => (b.progreso_hechos || 0) - (a.progreso_hechos || 0))[0];
-  const nombreTienda = modo.tienda_actual
-    ? agrCentrosPorTienda[modo.tienda_actual]?.nombre || modo.tienda_actual
-    : "arrancando…";
-  const hechos = modo.progreso_hechos ?? 0;
-  const total = modo.progreso_total;
-  const faltan = total != null ? Math.max(total - hechos, 0) : null;
-  live.className = "agr-estado-pill ok";
-  live.textContent = `🔎 ${nombreTienda} · ${hechos}${total != null ? `/${total}` : ""} hechos${faltan != null ? ` · faltan ${faltan}` : ""}`;
-}
-
 async function agrCargarEstado() {
   const pill = document.getElementById("agr-estado");
   try {
     const res = await fetch(`${AGR_API}/estado`, { credentials: "include" });
     const estado = await res.json();
     const progreso = agrTextoProgreso(estado);
-    agrActualizarDaemonLive(estado);
     if (!estado.es_horario_apertura) {
       pill.textContent = "⏸ Fuera de horario";
       pill.className = "agr-estado-pill neutro";
-      return;
-    }
-    if (estado.cercano.retrasado || estado.completo.retrasado) {
-      pill.textContent = "⚠ Scraper retrasado" + progreso;
-      pill.className = "agr-estado-pill alerta";
       return;
     }
     pill.textContent = "● Scraper OK" + progreso;
