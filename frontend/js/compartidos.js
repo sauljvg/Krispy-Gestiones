@@ -306,11 +306,16 @@ let tandasAbiertas = new Set(); // claves de <details> que el usuario ha dejado 
 let tandasSeccionInicializada = new Set(); // qué secciones ("conmigo"/"por-mi") ya recibieron su apertura por defecto
 
 async function actualizarCandidatoInline(candidatoId, campos) {
-  await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(campos),
-  });
+  try {
+    const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(campos),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 // candidatoCardHTML/grupoHTML/seccionHTML (la tarjeta grande de respuesta de
@@ -377,7 +382,11 @@ function wireSeleccionCompartidos(wrap, { listaId, seleccionSet, cache, btnTodos
   wrap.querySelectorAll(`#${listaId} .candidato-mini-contacto-select`).forEach((select) => {
     select.addEventListener("click", (e) => e.stopPropagation());
     select.addEventListener("change", async () => {
-      await actualizarCandidatoInline(select.dataset.candidatoId, { contacto_estado: select.value });
+      const ok = await actualizarCandidatoInline(select.dataset.candidatoId, { contacto_estado: select.value });
+      if (!ok) {
+        mostrarAviso("No se pudo guardar el estado de contacto. Inténtalo de nuevo.");
+        await loadCompartidos();
+      }
     });
   });
 }
@@ -741,7 +750,7 @@ function vacanteFormHTML() {
       ${v ? `<p class="staff-hint">Solicitada el ${escapeHTML(fmtFechaHora(v.fecha_solicitud))}${v.fecha_cierre ? ` · cerrada el ${escapeHTML(fmtFechaHora(v.fecha_cierre))}` : ""}</p>` : ""}
       ${v ? `<p class="staff-hint">
         👥 Responsables: ${(v.gerentes || []).length
-          ? v.gerentes.map((g) => `${escapeHTML(g.nombre)} <button type="button" class="btn-quitar-gerente" data-usuario-id="${g.usuario_id}" title="Quitar como responsable">✕</button>`).join(", ")
+          ? v.gerentes.map((g) => `${escapeHTML(g.nombre)} <button type="button" class="btn-quitar-gerente" data-usuario-id="${g.usuario_id}" title="Quitar como responsable" aria-label="Quitar a ${escapeHTML(g.nombre)} como responsable">✕</button>`).join(", ")
           : "(nadie todavía)"}
         <button type="button" id="btn-compartir-vacante" class="btn-mini">＋ Añadir</button>
       </p>
@@ -768,7 +777,7 @@ function renderVacanteForm() {
     document.getElementById("btn-fusionar-vacante").addEventListener("click", abrirModalFusionarVacante);
     document.getElementById("btn-compartir-vacante").addEventListener("click", abrirModalCompartirVacante);
     wrap.querySelectorAll(".btn-quitar-gerente").forEach((btn) => {
-      btn.addEventListener("click", () => quitarGerenteVacante(Number(btn.dataset.usuarioId)));
+      btn.addEventListener("click", () => quitarGerenteVacante(Number(btn.dataset.usuarioId), btn));
     });
     const btnWhatsapp = document.getElementById("btn-whatsapp-vacante");
     if (btnWhatsapp) btnWhatsapp.addEventListener("click", () => abrirCampanaWhatsapp(vacanteEditando.candidatos));
@@ -791,18 +800,24 @@ async function guardarVacante() {
   const notas = document.getElementById("vacante-notas").value.trim() || null;
   const archivoInput = document.getElementById("vacante-cv-lote");
   const archivo = !vacanteEditando && archivoInput?.files.length ? archivoInput.files[0] : null;
+  const btn = document.getElementById("btn-guardar-vacante");
+  if (btn) btn.disabled = true;
   let res;
-  if (vacanteEditando) {
-    const estado = document.getElementById("vacante-estado-form").value;
-    res = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}`, {
-      method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ puesto, centro, notas, estado }),
-    });
-  } else {
-    res = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ empresa: EMPRESA, puesto, centro, notas }),
-    });
+  try {
+    if (vacanteEditando) {
+      const estado = document.getElementById("vacante-estado-form").value;
+      res = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ puesto, centro, notas, estado }),
+      });
+    } else {
+      res = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ empresa: EMPRESA, puesto, centro, notas }),
+      });
+    }
+  } finally {
+    if (btn) btn.disabled = false;
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -872,11 +887,18 @@ async function confirmarFusionarVacante() {
   if (!destinoId || !vacanteEditando) return;
   const destino = vacantesTodasCache.find((v) => v.id === destinoId);
   if (!(await pedirConfirmacion(`Se moverán todos los candidatos de "${vacanteEditando.puesto}" a "${destino ? destino.puesto : "la solicitud elegida"}" y se eliminará "${vacanteEditando.puesto}". ¿Continuar?`))) return;
-  const res = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}/fusionar`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ destino_id: destinoId }),
-  });
+  const btn = document.getElementById("btn-fusionar-vacante-confirmar");
+  if (btn) btn.disabled = true;
+  let res;
+  try {
+    res = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}/fusionar`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ destino_id: destinoId }),
+    });
+  } finally {
+    if (btn) btn.disabled = false;
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     mostrarAviso(err.detail || `No se pudo fusionar (error ${res.status}).`);
@@ -919,20 +941,37 @@ function cerrarModalCompartirVacante() {
 async function confirmarCompartirVacante() {
   const usuarioId = Number(document.getElementById("compartir-vacante-select").value);
   if (!usuarioId || !vacanteEditando) return;
-  await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}/compartir`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ usuario_ids: [usuarioId] }),
-  });
+  const btn = document.getElementById("btn-compartir-vacante-confirmar");
+  if (btn) btn.disabled = true;
+  let res;
+  try {
+    res = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}/compartir`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usuario_ids: [usuarioId] }),
+    });
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+  if (!res.ok) {
+    mostrarAviso(`No se pudo compartir la solicitud (error ${res.status}).`);
+    return;
+  }
   cerrarModalCompartirVacante();
   vacanteEditando = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}`).then((r) => r.json());
   renderVacanteForm();
 }
 
-async function quitarGerenteVacante(usuarioId) {
+async function quitarGerenteVacante(usuarioId, btn) {
   if (!vacanteEditando) return;
   if (!(await pedirConfirmacion("¿Quitar a esta persona como responsable de la solicitud? Dejará de ver sus candidatos (salvo que se los hayas compartido también uno a uno)."))) return;
-  await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}/compartir/${usuarioId}`, { method: "DELETE" });
+  if (btn) btn.disabled = true;
+  const res = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}/compartir/${usuarioId}`, { method: "DELETE" });
+  if (!res.ok) {
+    mostrarAviso(`No se pudo quitar como responsable (error ${res.status}).`);
+    if (btn) btn.disabled = false;
+    return;
+  }
   vacanteEditando = await fetch(`${AUTH_API_BASE}/reclutamiento/vacantes/${vacanteEditando.id}`).then((r) => r.json());
   renderVacanteForm();
 }
@@ -1400,8 +1439,8 @@ function renderForm() {
     });
   });
   wrap.querySelectorAll(".btn-borrar-legado").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (!confirm("¿Borrar este texto antiguo? No se puede deshacer una vez que guardes la ficha.")) return;
+    btn.addEventListener("click", async () => {
+      if (!(await pedirConfirmacion("¿Borrar este texto antiguo? No se puede deshacer una vez que guardes la ficha."))) return;
       const campo = btn.dataset.campo;
       document.querySelector(`.candidato-input[data-campo="${campo}"]`).value = "";
       btn.closest(".form-field").remove();
@@ -1877,7 +1916,12 @@ function mostrarFotoForm(candidatoId) {
 }
 
 async function quitarFotoCandidato(candidatoId) {
-  await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}/foto`, { method: "DELETE" });
+  if (!(await pedirConfirmacion("¿Quitar la foto de este candidato? No se puede deshacer."))) return;
+  const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}/foto`, { method: "DELETE" });
+  if (!res.ok) {
+    mostrarAviso("No se pudo quitar la foto. Inténtalo de nuevo.");
+    return;
+  }
   const wrap = document.getElementById("candidato-foto-wrap-cont");
   if (wrap) wrap.innerHTML = "";
 }
@@ -1894,47 +1938,53 @@ async function guardarCandidato() {
   const vacanteValor = document.getElementById("candidato-vacante-form").value;
   campos.vacante_id = vacanteValor ? Number(vacanteValor) : null;
 
-  let candidatoId;
-  if (candidatoEditando) {
-    campos.estado = document.getElementById("candidato-estado-form").value;
-    campos.contacto_estado = document.getElementById("candidato-contacto-estado-form").value;
-    const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(campos),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      mostrarAviso(err.detail || `No se pudo guardar el candidato (error ${res.status}).`);
-      return;
-    }
-    candidatoId = candidatoEditando.id;
-  } else {
-    campos.empresa = EMPRESA;
-    const resp = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(campos),
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      mostrarAviso(err.detail || `No se pudo crear el candidato (error ${resp.status}).`);
-      return;
-    }
-    const data = await resp.json();
-    candidatoId = data.id;
-    const inputCv = document.getElementById("input-cv-nuevo");
-    if (inputCv && inputCv.files.length) {
-      const formData = new FormData();
-      formData.append("file", inputCv.files[0]);
-      const archivoResp = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}/archivos`, { method: "POST", body: formData })
-        .then((r) => (r.ok ? r.json() : null)).catch(() => null);
-      // Intenta sacar la foto de perfil del mismo PDF -- si no encuentra
-      // ninguna razonable, sencillamente no pasa nada (queda sin foto).
-      if (archivoResp?.id) {
-        await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}/archivos/${archivoResp.id}/extraer-foto`, { method: "POST" }).catch(() => {});
+  const btnGuardar = document.getElementById("btn-guardar-candidato");
+  if (btnGuardar) btnGuardar.disabled = true;
+  try {
+    let candidatoId;
+    if (candidatoEditando) {
+      campos.estado = document.getElementById("candidato-estado-form").value;
+      campos.contacto_estado = document.getElementById("candidato-contacto-estado-form").value;
+      const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(campos),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        mostrarAviso(err.detail || `No se pudo guardar el candidato (error ${res.status}).`);
+        return;
+      }
+      candidatoId = candidatoEditando.id;
+    } else {
+      campos.empresa = EMPRESA;
+      const resp = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(campos),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        mostrarAviso(err.detail || `No se pudo crear el candidato (error ${resp.status}).`);
+        return;
+      }
+      const data = await resp.json();
+      candidatoId = data.id;
+      const inputCv = document.getElementById("input-cv-nuevo");
+      if (inputCv && inputCv.files.length) {
+        const formData = new FormData();
+        formData.append("file", inputCv.files[0]);
+        const archivoResp = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}/archivos`, { method: "POST", body: formData })
+          .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        // Intenta sacar la foto de perfil del mismo PDF -- si no encuentra
+        // ninguna razonable, sencillamente no pasa nada (queda sin foto).
+        if (archivoResp?.id) {
+          await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}/archivos/${archivoResp.id}/extraer-foto`, { method: "POST" }).catch(() => {});
+        }
       }
     }
+    cerrarForm();
+    await refreshVacantes();
+    await loadCandidatos();
+  } finally {
+    if (btnGuardar) btnGuardar.disabled = false;
   }
-  cerrarForm();
-  await refreshVacantes();
-  await loadCandidatos();
 }
 
 async function eliminarCandidatoActual() {
@@ -1955,7 +2005,11 @@ async function agregarArchivoAlCandidato() {
   if (!candidatoEditando || !input.files.length) return;
   const formData = new FormData();
   formData.append("file", input.files[0]);
-  await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}/archivos`, { method: "POST", body: formData });
+  const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}/archivos`, { method: "POST", body: formData });
+  if (!res.ok) {
+    mostrarAviso("No se pudo añadir el archivo. Inténtalo de nuevo.");
+    return;
+  }
   const actualizado = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoEditando.id}`).then((r) => r.json());
   candidatoEditando = actualizado;
   renderForm();
@@ -2041,7 +2095,7 @@ function candidatoMiniCardHTML(c, opts = {}) {
   const compartidoHTML = compartidos.length > 0
     ? `<p class="candidato-mini-compartido">🔗 Compartido con: ${
         opts.compartidoRemovible
-          ? compartidos.map((x) => `${escapeHTML(x.nombre)} <button type="button" class="btn-dejar-compartir-mini btn-dejar-compartir" data-directo="${x.directo ? "1" : "0"}" data-candidato-id="${c.id}" data-respuesta-id="${x.respuesta_id ?? ""}" data-destinatario-id="${x.usuario_id}" title="Dejar de compartir con ${escapeHTML(x.nombre)}">✕</button>`).join(", ")
+          ? compartidos.map((x) => `${escapeHTML(x.nombre)} <button type="button" class="btn-dejar-compartir-mini btn-dejar-compartir" data-directo="${x.directo ? "1" : "0"}" data-candidato-id="${c.id}" data-respuesta-id="${x.respuesta_id ?? ""}" data-destinatario-id="${x.usuario_id}" title="Dejar de compartir con ${escapeHTML(x.nombre)}" aria-label="Dejar de compartir con ${escapeHTML(x.nombre)}">✕</button>`).join(", ")
           : escapeHTML(compartidos.map((x) => x.nombre).join(", "))
       }</p>`
     : "";
@@ -2233,11 +2287,18 @@ async function confirmarCompartirCandidatos() {
     }
     if (partes.length && !(await pedirConfirmacion(`${partes.join(" ")}\n¿Continuar?`))) return;
   }
-  const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/compartir`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ candidato_ids: ids, usuario_id: usuarioId }),
-  });
+  const btn = document.getElementById("btn-compartir-candidatos-confirmar");
+  if (btn) btn.disabled = true;
+  let res;
+  try {
+    res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/compartir`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ candidato_ids: ids, usuario_id: usuarioId }),
+    });
+  } finally {
+    if (btn) btn.disabled = false;
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     mostrarAviso(err.detail || "No se pudo compartir.");
@@ -2283,11 +2344,23 @@ async function confirmarAsignarVacante() {
   const vacanteId = valor ? Number(valor) : null;
   const ids = [...(origenAsignarVacante === "compartidos" ? compartidosSeleccionadosIds : candidatosSeleccionadosIds)];
   if (ids.length === 0) return;
-  await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/vacante-multiple`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ candidato_ids: ids, vacante_id: vacanteId }),
-  });
+  const btn = document.getElementById("btn-asignar-vacante-confirmar");
+  if (btn) btn.disabled = true;
+  let res;
+  try {
+    res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/vacante-multiple`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ candidato_ids: ids, vacante_id: vacanteId }),
+    });
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    mostrarAviso(err.detail || `No se pudo asignar la solicitud (error ${res.status}).`);
+    return;
+  }
   cerrarModalAsignarVacante();
   // Mueve gente dentro/fuera de una vacante -- el contador de candidatos de
   // su tarjeta (vacanteMiniCardHTML) se quedaba con el número de cuando se
@@ -2403,11 +2476,18 @@ async function confirmarCambiarDestinatario() {
     mostrarAviso("Ninguno de los seleccionados tiene un compartir individual que reasignar (los que solo tienen acceso por una vacante entera se gestionan desde \"Responsables\" en esa vacante).");
     return;
   }
-  const res = await fetch(`${AUTH_API_BASE}/informes/compartidos-por-mi/destinatario`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items, nuevo_usuario_id: nuevoUsuarioId }),
-  });
+  const btn = document.getElementById("btn-cambiar-destinatario-confirmar");
+  if (btn) btn.disabled = true;
+  let res;
+  try {
+    res = await fetch(`${AUTH_API_BASE}/informes/compartidos-por-mi/destinatario`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items, nuevo_usuario_id: nuevoUsuarioId }),
+    });
+  } finally {
+    if (btn) btn.disabled = false;
+  }
   if (!res.ok) {
     mostrarAviso("No se pudo cambiar el destinatario. Inténtalo de nuevo.");
     return;
@@ -2684,7 +2764,11 @@ function renderCandidatosGrid() {
   grid.querySelectorAll(".candidato-mini-contacto-select").forEach((select) => {
     select.addEventListener("click", (e) => e.stopPropagation());
     select.addEventListener("change", async () => {
-      await actualizarCandidatoInline(select.dataset.candidatoId, { contacto_estado: select.value });
+      const ok = await actualizarCandidatoInline(select.dataset.candidatoId, { contacto_estado: select.value });
+      if (!ok) {
+        mostrarAviso("No se pudo guardar el estado de contacto. Inténtalo de nuevo.");
+        await loadCandidatos();
+      }
     });
   });
 }
@@ -2810,7 +2894,7 @@ function cerrarCampanaEmail() {
   document.getElementById("campana-email-wrap").innerHTML = "";
 }
 
-function confirmarAbrirEmail() {
+async function confirmarAbrirEmail() {
   const asunto = document.getElementById("campana-email-asunto").value.trim();
   const cuerpoOriginal = document.getElementById("campana-email-cuerpo").value;
   // Sin vacante común, {vacante}/{centro} no se sustituyen (ver aviso en
@@ -2818,7 +2902,7 @@ function confirmarAbrirEmail() {
   // mejor confirmar antes de mandar el placeholder literal a los candidatos
   // que descubrirlo después de enviado.
   if (!campanaEmailVacanteComun && (cuerpoOriginal.includes("{vacante}") || cuerpoOriginal.includes("{centro}"))) {
-    if (!confirm('El mensaje usa {vacante} o {centro}, pero los candidatos elegidos no son todos de la misma vacante -- se enviará ese texto TAL CUAL, sin sustituir. ¿Seguro que quieres continuar?')) {
+    if (!(await pedirConfirmacion('El mensaje usa {vacante} o {centro}, pero los candidatos elegidos no son todos de la misma vacante -- se enviará ese texto TAL CUAL, sin sustituir. ¿Seguro que quieres continuar?'))) {
       return;
     }
   }
@@ -2951,7 +3035,7 @@ async function reextraerTodosLocal() {
     await mostrarAviso("No hay ningún candidato con el filtro actual puesto.");
     return;
   }
-  if (!confirm(`Esto vuelve a leer el CV ya guardado de los ${idsFiltrados.length} candidato(s) que coinciden con el filtro actual y sustituye formación/experiencia/idiomas por lo último que encuentre. ¿Continuar?`)) return;
+  if (!(await pedirConfirmacion(`Esto vuelve a leer el CV ya guardado de los ${idsFiltrados.length} candidato(s) que coinciden con el filtro actual y sustituye formación/experiencia/idiomas por lo último que encuentre. ¿Continuar?`))) return;
   const btn = document.getElementById("btn-reextraer-todos");
   const textoOriginal = btn.textContent;
   btn.disabled = true;

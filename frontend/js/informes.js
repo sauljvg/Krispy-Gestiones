@@ -191,11 +191,17 @@ async function loadTipos() {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
       const archivarAhora = btn.dataset.archivado !== "1";
-      const res2 = await fetch(`${AUTH_API_BASE}/informes/tipos/${btn.dataset.clave}/archivar`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ archivado: archivarAhora }),
-      });
+      btn.disabled = true;
+      let res2;
+      try {
+        res2 = await fetch(`${AUTH_API_BASE}/informes/tipos/${btn.dataset.clave}/archivar`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ archivado: archivarAhora }),
+        });
+      } finally {
+        btn.disabled = false;
+      }
       if (!res2.ok) {
         const err = await res2.json().catch(() => ({}));
         mostrarAviso(err.detail || "No se pudo archivar el tipo.");
@@ -210,7 +216,13 @@ async function loadTipos() {
       if (!(await pedirConfirmacion(
         `¿Eliminar por completo "${btn.dataset.nombre}"? Esto borra todas sus respuestas e importaciones. No es reversible -- si solo quieres dejar de verlo, usa "Archivar" en vez de esto.`
       ))) return;
-      const res2 = await fetch(`${AUTH_API_BASE}/informes/tipos/${btn.dataset.clave}`, { method: "DELETE" });
+      btn.disabled = true;
+      let res2;
+      try {
+        res2 = await fetch(`${AUTH_API_BASE}/informes/tipos/${btn.dataset.clave}`, { method: "DELETE" });
+      } finally {
+        btn.disabled = false;
+      }
       if (!res2.ok) {
         const err = await res2.json().catch(() => ({}));
         mostrarAviso(err.detail || "No se pudo eliminar el tipo.");
@@ -327,11 +339,22 @@ function renderHojasPanel() {
   list.querySelectorAll(".btn-eliminar-hoja").forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!(await pedirConfirmacion(`¿Eliminar por completo la hoja "${btn.dataset.hoja}"? Esto borra sus datos, no es reversible.`))) return;
-      await fetch(`${AUTH_API_BASE}/informes/${currentTipo}/hojas/eliminar`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hoja: btn.dataset.hoja }),
-      });
+      btn.disabled = true;
+      let res2;
+      try {
+        res2 = await fetch(`${AUTH_API_BASE}/informes/${currentTipo}/hojas/eliminar`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hoja: btn.dataset.hoja }),
+        });
+      } finally {
+        btn.disabled = false;
+      }
+      if (!res2.ok) {
+        const err = await res2.json().catch(() => ({}));
+        mostrarAviso(err.detail || "No se pudo eliminar la hoja.");
+        return;
+      }
       await loadHojas();
       await loadRespuestas();
       await loadTipos();
@@ -418,6 +441,7 @@ function renderTable() {
         const vacanteHTML = r.vacante_nombre
           ? `<span title="${escapeHTML(vacanteTitle)}">📁 ${escapeHTML(r.vacante_nombre)}${gerentes.length ? ` · 👤 ${escapeHTML(gerentes.join(", "))}` : ""}</span>`
           : `<span class="staff-hint">—</span>`;
+        const compartidoConHTML = compartidoCon.map((x) => `${escapeHTML(x.nombre)} <button type="button" class="btn-dejar-compartir-informe" data-directo="${x.directo ? "1" : "0"}" data-respuesta-id="${r.id}" data-candidato-id="${x.candidato_id ?? ""}" data-destinatario-id="${x.usuario_id}" title="Dejar de compartir con ${escapeHTML(x.nombre)}" aria-label="Dejar de compartir con ${escapeHTML(x.nombre)}">✕</button>`).join(", ");
         return `<tr data-id="${r.id}" class="${compartida ? "fila-compartida" : ""}">
           <td><input type="checkbox" class="row-check" data-id="${r.id}" ${checked}></td>
           ${columnasVisibles.map((c) => {
@@ -426,7 +450,7 @@ function renderTable() {
             return `<td title="${escapeHTML(valor)}">${escapeHTML(mostrar)}</td>`;
           }).join("")}
           <td class="col-vacante">${vacanteHTML}</td>
-          <td class="col-compartido-con" title="${escapeHTML(compartidoCon.join(", "))}">${compartida ? `🔗 ${escapeHTML(compartidoCon.join(", "))}` : ""}</td>
+          <td class="col-compartido-con">${compartida ? `🔗 ${compartidoConHTML}` : ""}</td>
           <td>
             ${cvBtn}
             <label class="btn btn-ghost btn-cv btn-upload">⬆
@@ -462,11 +486,29 @@ function renderTable() {
   // propia acción y no deben además cambiar la selección.
   tbody.querySelectorAll("tr[data-id]").forEach((row) => {
     row.addEventListener("click", (e) => {
-      if (e.target.closest(".row-check, .btn-cv, .input-cv-upload")) return;
+      if (e.target.closest(".row-check, .btn-cv, .input-cv-upload, .btn-dejar-compartir-informe")) return;
       const cb = row.querySelector(".row-check");
       if (!cb) return;
       cb.checked = !cb.checked;
       cb.dispatchEvent(new Event("change"));
+    });
+  });
+
+  tbody.querySelectorAll(".btn-dejar-compartir-informe").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!(await pedirConfirmacion("¿Dejar de compartir este candidato? La persona ya no lo verá en su Reclutamiento."))) return;
+      const url = btn.dataset.directo === "1"
+        ? `${AUTH_API_BASE}/reclutamiento/candidatos/${btn.dataset.candidatoId}/compartir/${btn.dataset.destinatarioId}`
+        : `${AUTH_API_BASE}/informes/compartir/${btn.dataset.respuestaId}/${btn.dataset.destinatarioId}`;
+      btn.disabled = true;
+      const res = await fetch(url, { method: "DELETE" });
+      if (!res.ok) {
+        mostrarAviso("No se pudo dejar de compartir. Inténtalo de nuevo.");
+        btn.disabled = false;
+        return;
+      }
+      await loadRespuestas();
     });
   });
 
@@ -677,8 +719,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         const con = r.compartido_con || [];
         if (con.length === 0) return;
         const nombre = r.datos["Nombre y apellido"] || r.datos["Nombre"] || `#${r.id}`;
-        if (con.includes(usuario.nombre)) mismoDestinatario.push(nombre);
-        else otroDestinatario.push(`${nombre} (de ${con.join(", ")})`);
+        if (con.some((x) => x.nombre === usuario.nombre)) mismoDestinatario.push(nombre);
+        else otroDestinatario.push(`${nombre} (de ${con.map((x) => x.nombre).join(", ")})`);
       });
       const partes = [];
       if (mismoDestinatario.length) {

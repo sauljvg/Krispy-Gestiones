@@ -704,19 +704,29 @@ def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=N
         # por debajo de lo que de verdad había (se veían menos filas
         # compartidas aquí que en Reclutamiento, que sí unía las dos).
         for r in conn.execute(f"""
-            SELECT respuesta_id, usuario_nombre FROM (
-                SELECT ic.respuesta_id AS respuesta_id, u.nombre AS usuario_nombre
+            SELECT respuesta_id, usuario_id, usuario_nombre, directo, candidato_id FROM (
+                SELECT ic.respuesta_id AS respuesta_id, u.id AS usuario_id, u.nombre AS usuario_nombre,
+                       0 AS directo, NULL AS candidato_id
                 FROM informe_compartidos ic JOIN usuarios u ON u.id = ic.usuario_id
                 WHERE ic.respuesta_id IN ({placeholders})
                 UNION
-                SELECT cand.respuesta_id AS respuesta_id, u.nombre AS usuario_nombre
+                SELECT cand.respuesta_id AS respuesta_id, u.id AS usuario_id, u.nombre AS usuario_nombre,
+                       1 AS directo, cand.id AS candidato_id
                 FROM candidatos cand
                 JOIN candidato_compartidos cc ON cc.candidato_id = cand.id
                 JOIN usuarios u ON u.id = cc.usuario_id
                 WHERE cand.respuesta_id IN ({placeholders})
             )
         """, ids_pagina + ids_pagina).fetchall():
-            compartidos_por_respuesta.setdefault(r["respuesta_id"], []).append(r["usuario_nombre"])
+            # usuario_id/directo/candidato_id (no solo el nombre) -- para que
+            # el frontend pueda ofrecer "dejar de compartir" directamente
+            # desde esta tabla, igual que ya se puede desde Reclutamiento
+            # (antes Informes solo mostraba con quién, sin forma de deshacerlo
+            # sin ir a la otra pantalla).
+            compartidos_por_respuesta.setdefault(r["respuesta_id"], []).append({
+                "usuario_id": r["usuario_id"], "nombre": r["usuario_nombre"],
+                "directo": bool(r["directo"]), "candidato_id": r["candidato_id"],
+            })
 
     # Vacante del candidato ligado a esta respuesta (si lo hay) -- para saber
     # de un vistazo a quién compartir sin adivinar; si la vacante ya tiene
