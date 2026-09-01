@@ -31,10 +31,10 @@ CAMPOS_EXPORTABLES = {
     "test_resultado": "Resultado del test",
     "estado": "Estado",
     "puesto_solicitado": "Puesto solicitado",
-    "direccion": "Dirección",
-    "fecha_nacimiento": "Fecha de nacimiento",
-    "dni": "DNI",
-    "disponibilidad": "Disponibilidad",
+    # direccion/fecha_nacimiento/dni/disponibilidad se quitaron de aquí a
+    # petición expresa: son datos que no se recogen (el campo existe en la
+    # ficha por si algún día hiciera falta, pero siempre sale vacío), así
+    # que ofrecerlos como columna de exportación solo era ruido.
     "fecha_solicitud": "Fecha de solicitud",
     "contacto_estado": "Estado de contacto",
     "notas": "Notas",
