@@ -45,7 +45,7 @@ class UberEatsScraper(BaseAggregatorScraper):
     # genuinamente en pantalla, dejó de bloquear.
     mantener_visible = True
 
-    async def _verificar(self, page, tienda_nombre: str, direccion: str) -> ResultadoChequeo:
+    async def _verificar(self, page, tienda_nombre: str, direccion: str, lat: float | None = None, lng: float | None = None) -> ResultadoChequeo:
         # Confirmado en vivo 08/08: /feed nunca trae chip de ubicación aquí porque
         # cada chequeo lanza un navegador nuevo sin cookies/geolocalización previa
         # (ver _run_once) -- el intento de /feed caía al fallback de portada el

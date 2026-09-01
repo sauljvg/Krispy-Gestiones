@@ -64,6 +64,12 @@
   .agr-filtro-btn-cobertura.activo[data-agregador="ubereats"] { background: #06c167; color: #fff; border-color: #06c167; }
 
   .agr-tiendas-mapa { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 8px; }
+  /* flex-basis:100% dentro de .agr-toolbar (flex-wrap) fuerza esta fila a
+     empezar siempre en una línea nueva, en vez de depender de si sobra o no
+     sitio detrás del botón "Dashboard del scraper" -- pedido explícito del
+     usuario 28/08: "Tienda:" (la selección de tiendas) va en su propia
+     línea, no pegado al título de la barra de arriba. */
+  .agr-tiendas-mapa-fila { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex-basis: 100%; }
   .agr-tiendas-mapa-label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
   .agr-tiendas-mapa-chips { display: flex; gap: 6px; flex-wrap: wrap; }
   .agr-tienda-chip {
@@ -210,7 +216,8 @@
 
   #agr-tabla-titulo { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   .agr-tabla-filtro { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); margin: 8px 0; }
-  .agr-tabla-filtro input[type="date"], .agr-tabla-filtro input[type="time"] { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 12px; }
+  .agr-tabla-filtro select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 12px; }
+  .agr-tabla-filtro select:disabled { opacity: 0.5; }
   #agr-tabla-toggle { font-size: 0.72rem; background: none; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; color: var(--text-secondary); cursor: pointer; }
   #agr-tabla-toggle:hover { background: var(--surface-page); }
   #agr-tabla-scroll { max-height: 520px; overflow-y: auto; overflow-x: auto; }
@@ -278,11 +285,12 @@
   <div class="agr-wrap">
     <div class="agr-toolbar">
       <span id="agr-estado" class="agr-estado-pill neutro">…</span>
-      <span id="agr-daemon-live" class="agr-estado-pill neutro" hidden></span>
       <button type="button" id="agr-btn-dashboard-scraper" class="btn btn-ghost" hidden onclick="agrAbrirDashboardScraper()">📊 Dashboard del scraper</button>
-      <span class="agr-tiendas-mapa-label">Tiendas:</span>
-      <div id="agr-tiendas-mapa-chips" class="agr-tiendas-mapa-chips"></div>
       <span id="agr-actualizado" style="color:var(--text-muted); font-size:12px;"></span>
+      <div class="agr-tiendas-mapa-fila">
+        <span class="agr-tiendas-mapa-label">Tiendas:</span>
+        <div id="agr-tiendas-mapa-chips" class="agr-tiendas-mapa-chips"></div>
+      </div>
     </div>
     <div class="agr-toolbar">
       <button type="button" id="agr-btn-anadir" class="btn btn-ghost" onclick="agrToggleModoAnadir()">➕ Añadir punto</button>
@@ -303,6 +311,13 @@
           <button type="button" class="agr-filtro-btn" data-agregador="glovo">Glovo</button>
           <button type="button" class="agr-filtro-btn" data-agregador="ubereats">Uber Eats</button>
         </div>
+      </div>
+      <div id="agr-tabla-filtro" class="agr-tabla-filtro">
+        <label>Día: <select id="agr-filtro-fecha" onchange="agrCargarHorasFiltroFecha()"><option value="">— elige un día con datos —</option></select></label>
+        <label>Hasta: <select id="agr-filtro-hora-hasta" disabled><option value="">—</option></select></label>
+        <button type="button" class="btn btn-ghost" style="font-size:12px;padding:4px 10px;" onclick="agrAplicarFiltroFecha()">Ver ese día</button>
+        <button type="button" class="btn btn-ghost" style="font-size:12px;padding:4px 10px;" onclick="agrQuitarFiltroFecha()">Volver a ahora mismo</button>
+        <span id="agr-filtro-fecha-activo" style="font-size:12px;color:var(--text-muted);"></span>
       </div>
       <label class="agr-toggle-nuevos">
         <input type="checkbox" id="agr-mostrar-poligono" checked onchange="agrToggleMostrarPoligono()">
@@ -330,14 +345,6 @@
               <svg id="agr-tabla-colapsar-icono" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
             </button>
           </div>
-        </div>
-        <div id="agr-tabla-filtro" class="agr-tabla-filtro">
-          <label>Día: <input type="date" id="agr-filtro-fecha"></label>
-          <label>Desde: <input type="time" id="agr-filtro-hora-desde" value="00:00"></label>
-          <label>Hasta: <input type="time" id="agr-filtro-hora-hasta" value="23:59"></label>
-          <button type="button" class="btn btn-ghost" style="font-size:12px;padding:4px 10px;" onclick="agrAplicarFiltroFecha()">Filtrar</button>
-          <button type="button" class="btn btn-ghost" style="font-size:12px;padding:4px 10px;" onclick="agrQuitarFiltroFecha()">Últimas 24h</button>
-          <span id="agr-filtro-fecha-activo" style="font-size:12px;color:var(--text-muted);"></span>
         </div>
         <div id="agr-tabla-scroll">
           <table id="agr-tabla">

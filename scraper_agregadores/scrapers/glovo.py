@@ -1,5 +1,7 @@
+import json
 import logging
 import re
+import urllib.parse
 
 from scrapers.base import BaseAggregatorScraper, PaginaSobrecargadaError, ResultadoChequeo, _pagina_muestra_error_generico
 
@@ -36,14 +38,25 @@ class GlovoScraper(BaseAggregatorScraper):
     nombre_agregador = "glovo"
     url_base = URL_INICIO
 
-    async def _verificar(self, page, tienda_nombre: str, direccion: str) -> ResultadoChequeo:
+    async def _verificar(
+        self, page, tienda_nombre: str, direccion: str,
+        lat: float | None = None, lng: float | None = None,
+    ) -> ResultadoChequeo:
+        # 27/08: se probó un atajo con la cookie glovo_delivery_address (ver
+        # _verificar_via_cookie, se deja el código documentado por si se retoma)
+        # para saltarse el flujo de interfaz de la dirección -- confirmado en un
+        # navegador YA con sesión establecida que funciona, pero en 4 pruebas
+        # reales seguidas con un Playwright recién arrancado (sin el historial de
+        # sesión/dispositivo que acumula una sesión de verdad) la página de
+        # resultados se queda vacía siempre, ni con más tiempo de espera se
+        # arregla. Descartado por ahora -- vuelta al flujo de interfaz de
+        # siempre, que es el que de verdad funciona.
         await page.goto(URL_INICIO, wait_until="domcontentloaded")
         await self._comprobar_challenge(page)
-
         await self._aceptar_cookies(page)
         await self._establecer_direccion(page, direccion)
-
         encontrado = await self._buscar_tienda(page)
+
         if not encontrado:
             return ResultadoChequeo(
                 disponible=False,
@@ -59,6 +72,61 @@ class GlovoScraper(BaseAggregatorScraper):
         # de verdad), así que ahora solo se usa para el dato informativo del tiempo
         # de entrega, nunca para decidir disponible/no disponible.
         return await self._leer_tiempo_entrega(page)
+
+    async def _verificar_via_cookie(self, page, direccion: str, lat: float, lng: float) -> bool:
+        """Atajo (27/08, confirmado en vivo con el navegador): Glovo guarda la
+        dirección de entrega en una cookie de cliente en texto plano
+        (`glovo_delivery_address`, un JSON con lat/lng), no la resuelve contra
+        Google Places en el servidor -- se puede escribir directamente sin pasar
+        por el flujo de interfaz de "escribir -> esperar sugerencias -> elegir tipo
+        de lugar -> confirmar" (~7 pasos, cada uno un punto más de fallo). Con la
+        cookie puesta, ir derecho a la URL de búsqueda con la marca en `?q=` hace
+        lo mismo que rellenar el buscador a mano -- confirmado que da el resultado
+        correcto tanto para una dirección con cobertura como para una sin ella.
+        placeId/isVerified van con un valor cualquiera -- confirmado que el
+        backend no los valida contra Google, solo lee lat/lng."""
+        valor_cookie = json.dumps(
+            {
+                "latitude": lat,
+                "longitude": lng,
+                "cityCode": "MAD",
+                "countryCode": "ES",
+                "cityName": "Madrid",
+                "text": direccion,
+                "details": "",
+                "placeId": "",
+                "isVerified": True,
+                "postalCode": None,
+            },
+            separators=(",", ":"),
+        )
+        # Doble percent-encoding -- así es como lo escribe la propia web (confirmado
+        # inspeccionando document.cookie en vivo), no un capricho nuestro.
+        valor_doble_encoded = urllib.parse.quote(urllib.parse.quote(valor_cookie, safe=""), safe="")
+
+        # Visitar la home ANTES de poner la cookie de dirección -- una sesión
+        # arrancando en frío directo en /search, sin las cookies de sesión/
+        # dispositivo que la propia web pone en la primera visita (device id,
+        # A/B, etc.), no llegó a mostrar ninguna tarjeta en la prueba real 28/08
+        # (probablemente su lógica de fetch en cliente depende de ese estado).
+        # Sale más caro que el atajo puro pero sigue ahorrando los ~7 pasos del
+        # flujo de dirección (escribir, esperar sugerencias, hover, click, tipo
+        # de lugar, confirmar).
+        await page.goto(URL_INICIO, wait_until="domcontentloaded")
+        await self._comprobar_challenge(page)
+        await self._aceptar_cookies(page)
+        await page.wait_for_timeout(3000)  # prueba: dar tiempo a init async (Incognia, etc.)
+
+        await page.context.add_cookies(
+            [{"name": "glovo_delivery_address", "value": valor_doble_encoded, "domain": "glovoapp.com", "path": "/"}]
+        )
+
+        url_busqueda = f"{URL_INICIO}/search?q={urllib.parse.quote(MARCA_BUSQUEDA)}"
+        await page.goto(url_busqueda, wait_until="networkidle")
+        await self._comprobar_challenge(page)
+        await page.wait_for_timeout(5000)  # prueba: dar mas tiempo al fetch de resultados en cliente
+
+        return await self._esperar_y_abrir_tarjeta(page)
 
     async def _click_js(self, locator):
         """Click vía JS: el click sintético de Playwright no siempre dispara el handler
@@ -179,6 +247,14 @@ class GlovoScraper(BaseAggregatorScraper):
         boton_buscar = page.locator(SEL_SEARCH_BUTTON).first
         await boton_buscar.click(force=True)
 
+        return await self._esperar_y_abrir_tarjeta(page)
+
+    async def _esperar_y_abrir_tarjeta(self, page) -> bool:
+        """Parte común a las dos formas de llegar a los resultados de búsqueda
+        (rellenar el buscador a mano en _buscar_tienda, o ir directo a la URL con
+        ?q=... en _verificar cuando hay lat/lng -- ver ese método): esperar la
+        tarjeta de la tienda y abrirla. Separado de _buscar_tienda el 27/08 para
+        no duplicar esta lógica entre las dos rutas."""
         tarjeta = page.locator(f'{SEL_STORE_CARD}:has-text("{MARCA_BUSQUEDA}")').first
         try:
             await tarjeta.wait_for(state="visible", timeout=8000)

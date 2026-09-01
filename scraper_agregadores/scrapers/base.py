@@ -235,11 +235,20 @@ class BaseAggregatorScraper:
         SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
     async def verificar_disponibilidad(
-        self, tienda_nombre: str, direccion: str
+        self, tienda_nombre: str, direccion: str, lat: float | None = None, lng: float | None = None
     ) -> ResultadoChequeo:
-        """Punto de entrada público: lanza browser, reintenta y captura errores."""
+        """Punto de entrada público: lanza browser, reintenta y captura errores.
+
+        lat/lng (27/08, opcionales): coordenadas reales del punto, si el caller las
+        tiene (main.py sí las tiene siempre, ver direccion["lat"]/["lng"]). Solo las
+        usa GlovoScraper de momento (ver su _verificar) para saltarse el flujo de
+        interfaz de "escribir dirección -> esperar sugerencias -> elegir tipo de
+        lugar -> confirmar" (~7 pasos) escribiendo la cookie de dirección
+        directamente -- confirmado en vivo que Glovo guarda la dirección de entrega
+        en una cookie de cliente en texto plano (`glovo_delivery_address`), no en el
+        servidor. Otros scrapers ignoran estos parámetros sin más."""
         try:
-            return await self._verificar_con_retry(tienda_nombre, direccion)
+            return await self._verificar_con_retry(tienda_nombre, direccion, lat, lng)
         except Exception as exc:
             logger.error(
                 "%s: fallo definitivo verificando '%s' en '%s': %s",
@@ -250,7 +259,9 @@ class BaseAggregatorScraper:
             )
             return ResultadoChequeo(disponible=False, error_texto=str(exc))
 
-    async def _verificar_con_retry(self, tienda_nombre: str, direccion: str) -> ResultadoChequeo:
+    async def _verificar_con_retry(
+        self, tienda_nombre: str, direccion: str, lat: float | None = None, lng: float | None = None
+    ) -> ResultadoChequeo:
         headless = self.iniciar_headless
         last_exc = None
         espera_seg = None  # None = usar el backoff normal (2**intento)
@@ -258,7 +269,7 @@ class BaseAggregatorScraper:
         for intento in range(self.retry_max + 1):
             espera_seg = None
             try:
-                return await self._run_once(tienda_nombre, direccion, headless=headless)
+                return await self._run_once(tienda_nombre, direccion, headless=headless, lat=lat, lng=lng)
             except PaginaSobrecargadaError as exc:
                 last_exc = exc
                 # El SITIO dijo que tiene un problema (ver docstring de la excepción)
@@ -316,7 +327,10 @@ class BaseAggregatorScraper:
 
         raise last_exc
 
-    async def _run_once(self, tienda_nombre: str, direccion: str, headless: bool) -> ResultadoChequeo:
+    async def _run_once(
+        self, tienda_nombre: str, direccion: str, headless: bool,
+        lat: float | None = None, lng: float | None = None,
+    ) -> ResultadoChequeo:
         args = ["--disable-blink-features=AutomationControlled"]
         if not headless:
             if self._modo_resolucion_manual or self.mantener_visible:
@@ -395,7 +409,7 @@ class BaseAggregatorScraper:
                 )
                 page = await context.new_page()
                 page.set_default_timeout(self.timeout_ms)
-                resultado = await self._verificar(page, tienda_nombre, direccion)
+                resultado = await self._verificar(page, tienda_nombre, direccion, lat=lat, lng=lng)
                 if not resultado.disponible and not resultado.error_texto:
                     # Antes de aceptar un "no disponible" como dato real: el chequeo de
                     # challenge (_comprobar_challenge) solo se hace una vez, justo al
@@ -427,7 +441,10 @@ class BaseAggregatorScraper:
             finally:
                 await browser.close()
 
-    async def _verificar(self, page, tienda_nombre: str, direccion: str) -> ResultadoChequeo:
+    async def _verificar(
+        self, page, tienda_nombre: str, direccion: str,
+        lat: float | None = None, lng: float | None = None,
+    ) -> ResultadoChequeo:
         raise NotImplementedError("Cada scraper debe implementar _verificar()")
 
     async def _comprobar_challenge(self, page):

@@ -114,6 +114,21 @@
   .encuesta-final { text-align: center; padding: 20px 0; }
   .encuesta-final .icono { font-size: 40px; margin-bottom: 12px; }
   .encuesta-error { text-align: center; color: #900; padding: 30px 0; }
+
+  /* Contador del anti-fraude (solo tests de Valores y Competencias, ver
+     encuesta.js::iniciarAnticheat) -- fijo en la esquina, fuera de
+     .encuesta-card, para que sobreviva a que la tarjeta se redibuje entera
+     en cada cambio de página. */
+  .anticheat-timer {
+    position: fixed; top: 14px; right: 14px; z-index: 900;
+    background: rgba(255,255,255,0.95); border: 1px solid #ddd; border-radius: 10px;
+    padding: 6px 14px; font-size: 15px; font-weight: 600; color: #222;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.12); font-variant-numeric: tabular-nums;
+  }
+  .anticheat-timer.agotado { color: #c00; border-color: #e5b3b3; background: #fff5f5; }
+  @media (max-width: 480px) {
+    .anticheat-timer { top: 8px; right: 8px; padding: 5px 10px; font-size: 13px; }
+  }
 </style>
 </head>
 <body>

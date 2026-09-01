@@ -2,14 +2,119 @@ const API_BASE = `${window.location.origin}/api/public/encuestas`;
 
 let encuesta = null;
 let paginaActual = 0;
-const respuestas = {}; // pregunta_id -> valor
+let respuestas = {}; // pregunta_id -> valor -- `let`, no `const`: reiniciarPorSalida() la reemplaza entera
+
+function nuevoTokenSesion() {
+  return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 // Token propio de esta apertura del enlace — deja rastro de quién abrió el
 // test y hasta dónde llegó aunque nunca lo termine (ver encuesta_sesiones en
 // el backend), para poder medir abandono en tests largos. No es información
-// personal, solo un identificador aleatorio de esta visita.
-const SESION_TOKEN = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+// personal, solo un identificador aleatorio de esta visita. `let`, no
+// `const`: reiniciarPorSalida() genera uno nuevo para que el intento
+// reiniciado se registre como una sesión aparte, no mezclada con la que se
+// abandonó.
+let SESION_TOKEN = nuevoTokenSesion();
 let ultimaPaginaReportada = 1;
+
+// --- Anti-fraude (solo tests de "Valores y Competencias", pedido explícito
+// del usuario 28/08 -- ver es_valores_competencias en la respuesta pública
+// de backend/encuestas.py::get_encuesta_publica). Tres piezas:
+//  1. Aviso una sola vez, en la página 2 (justo después de los datos
+//     personales de la página 1), explicando la regla.
+//  2. Contador visual de 20 min hacia atrás -- solo de presión psicológica,
+//     al llegar a 0 sigue contando en NEGATIVO sin bloquear ni auto-enviar
+//     el test (pedido explícito: "deja que el candidato termine el test").
+//  3. Si el candidato cambia de pestaña/minimiza (document.hidden) mientras
+//     el anti-fraude está armado, el test se reinicia desde la página 1 en
+//     cuanto vuelve -- respuestas nuevas, token de sesión nuevo, contador
+//     nuevo. Cerrar la pestaña del todo ya "reinicia" solo (recarga la
+//     página desde cero si vuelven a abrir el enlace), así que solo hace
+//     falta vigilar visibilitychange, no un mecanismo aparte para eso.
+const ANTICHEAT_MINUTOS = 20;
+let anticheatActivo = false; // true desde que se arma en la página 2 hasta el envío final
+let anticheatAvisado = false; // el aviso solo se muestra una vez por intento
+let anticheatSegundosRestantes = ANTICHEAT_MINUTOS * 60;
+let anticheatIntervalId = null;
+let anticheatTimerEl = null;
+let anticheatReinicioPendiente = false; // true mientras la pestaña está oculta, para reiniciar al volver
+
+function formatearTiempo(segundos) {
+  const negativo = segundos < 0;
+  const abs = Math.abs(segundos);
+  const mm = String(Math.floor(abs / 60)).padStart(2, "0");
+  const ss = String(abs % 60).padStart(2, "0");
+  return `${negativo ? "-" : ""}${mm}:${ss}`;
+}
+
+function actualizarTimerUI() {
+  if (!anticheatTimerEl) return;
+  anticheatTimerEl.textContent = `⏱ ${formatearTiempo(anticheatSegundosRestantes)}`;
+  anticheatTimerEl.classList.toggle("agotado", anticheatSegundosRestantes <= 0);
+}
+
+function iniciarAnticheat() {
+  anticheatActivo = true;
+  anticheatSegundosRestantes = ANTICHEAT_MINUTOS * 60;
+  if (!anticheatTimerEl) {
+    anticheatTimerEl = document.createElement("div");
+    anticheatTimerEl.className = "anticheat-timer";
+    document.body.appendChild(anticheatTimerEl);
+  }
+  actualizarTimerUI();
+  if (anticheatIntervalId) clearInterval(anticheatIntervalId);
+  anticheatIntervalId = setInterval(() => {
+    anticheatSegundosRestantes -= 1; // sigue bajando de 0 en adelante, a propósito
+    actualizarTimerUI();
+  }, 1000);
+  if (!anticheatAvisado) {
+    anticheatAvisado = true;
+    mostrarAviso(
+      "Este test tiene un control anti-fraude activo: no cambies de pestaña ni salgas de esta pantalla hasta terminar. " +
+      "Si lo haces, el test se reiniciará desde el principio. Tienes un tiempo para completarlo."
+    );
+  }
+}
+
+function detenerAnticheat() {
+  anticheatActivo = false;
+  if (anticheatIntervalId) {
+    clearInterval(anticheatIntervalId);
+    anticheatIntervalId = null;
+  }
+  if (anticheatTimerEl) {
+    anticheatTimerEl.remove();
+    anticheatTimerEl = null;
+  }
+}
+
+async function reiniciarPorSalida() {
+  detenerAnticheat();
+  respuestas = {};
+  paginaActual = 0;
+  anticheatAvisado = false;
+  SESION_TOKEN = nuevoTokenSesion();
+  renderPagina(0);
+  window.scrollTo({ top: 0 });
+  await mostrarAviso("Se detectó que saliste de la pantalla del test. Por el control anti-fraude, se ha reiniciado desde el principio.");
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!anticheatActivo) return;
+  if (document.hidden) {
+    anticheatReinicioPendiente = true;
+  } else if (anticheatReinicioPendiente) {
+    anticheatReinicioPendiente = false;
+    reiniciarPorSalida();
+  }
+});
+
+window.addEventListener("beforeunload", (e) => {
+  if (!anticheatActivo) return;
+  e.preventDefault();
+  e.returnValue = "";
+});
 
 function reportarSesion(pagina) {
   ultimaPaginaReportada = pagina;
@@ -231,6 +336,12 @@ function renderPagina(index) {
   const posActual = visibles.indexOf(index);
   const totalPaginas = visibles.length;
   reportarSesion(posActual + 1);
+  // Página 2 (posActual===1, la primera tras los datos personales de la
+  // página 1) es donde se arma el anti-fraude para tests de Valores y
+  // Competencias -- ver iniciarAnticheat().
+  if (encuesta.es_valores_competencias && posActual === 1 && !anticheatActivo) {
+    iniciarAnticheat();
+  }
   let bloquesHtml = "";
   let i = 0;
   while (i < pagina.preguntas.length) {
@@ -354,6 +465,7 @@ async function enviarRespuestas() {
     btn.textContent = "Enviar";
     return;
   }
+  detenerAnticheat(); // ya se envió de verdad -- ni el contador ni el bloqueo de salida tienen sentido después de esto
   document.getElementById("encuesta-card").innerHTML = `
     <div class="encuesta-final">
       <div class="icono">✅</div>

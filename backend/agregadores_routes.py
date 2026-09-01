@@ -919,13 +919,46 @@ def ultimos_route(
     return agregadores_module.get_ultimos(tienda, horas, desde, hasta)
 
 
+@router.get("/mapa-datos-fechas")
+def mapa_datos_fechas_route(_user: dict = Depends(require_agregadores)):
+    # Checkpoint del 30/08 (ver agregadores.AGR_CHECKPOINT_FECHA): las fechas
+    # anteriores solo se ofrecen al admin (Saúl) -- mismo criterio ya usado
+    # en agregadores_routes.py::usuarios_en_linea_route, atado al username
+    # literal, no al rol.
+    es_admin = _user["username"].lower() == "saul"
+    return {"fechas": agregadores_module.get_fechas_con_datos(incluir_anteriores_checkpoint=es_admin)}
+
+
+@router.get("/mapa-datos-horas")
+def mapa_datos_horas_route(fecha: str, _user: dict = Depends(require_agregadores)):
+    es_admin = _user["username"].lower() == "saul"
+    if not es_admin and fecha < agregadores_module.AGR_CHECKPOINT_FECHA:
+        return {"horas": []}
+    return {"horas": agregadores_module.get_horas_con_datos(fecha)}
+
+
 @router.get("/mapa-datos")
-def mapa_datos_route(tienda: str, _user: dict = Depends(require_agregadores)):
-    return agregadores_module.get_mapa_datos(tienda)
+def mapa_datos_route(tienda: str, hasta: str | None = None, _user: dict = Depends(require_agregadores)):
+    es_admin = _user["username"].lower() == "saul"
+    hasta = agregadores_module.limitar_hasta_por_checkpoint(hasta, es_admin=es_admin)
+    return agregadores_module.get_mapa_datos(tienda, hasta=hasta)
 
 
 @router.get("/mapa-datos-todas")
-def mapa_datos_todas_route(_user: dict = Depends(require_agregadores)):
+def mapa_datos_todas_route(hasta: str | None = None, _user: dict = Depends(require_agregadores)):
+    es_admin = _user["username"].lower() == "saul"
+    hasta = agregadores_module.limitar_hasta_por_checkpoint(hasta, es_admin=es_admin)
+    return agregadores_module.get_mapa_datos_todas(hasta=hasta)
+
+
+@router.get("/admin/mapa-datos-todas", dependencies=[Depends(require_api_key)])
+def admin_mapa_datos_todas_route():
+    """Igual que /mapa-datos-todas de arriba (estado actual por punto/agregador,
+    el mismo dato que pinta el mapa), pero con X-API-Key en vez de sesión de staff
+    -- para que scripts del scraper puedan consultarlo (p.ej. revalidar_completo.py
+    --solo-disponibles, pedido explícito del usuario 28/08: relanzar una vuelta
+    completa pero solo sobre los puntos que HOY están en verde/disponible en cada
+    agregador, no todo el grid)."""
     return agregadores_module.get_mapa_datos_todas()
 
 
