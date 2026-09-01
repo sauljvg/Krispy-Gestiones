@@ -293,60 +293,17 @@ function candidatoCompartidoCoincideBusqueda(c, termino) {
     || (c.puesto_solicitado || "").toLowerCase().includes(t);
 }
 
-// Agrupa una lista (ya ordenada por fecha desc) en "tandas". Con
-// porVacante=true (solo "Compartidos por ti"), si el candidato ya tiene
-// vacante asignada, la tanda se identifica por esa vacante en vez de por la
-// fecha exacta -- así, aunque se compartieran en momentos distintos, dos
-// candidatos de la misma solicitud quedan bajo el mismo grupo (y ese grupo
-// se llama como la vacante, ver tandaTituloHTML). Sin vacante (o en
-// "Compartidos conmigo") se sigue agrupando por fecha+contraparte como
-// antes. claveOtro = campo que identifica a la otra persona (quién lo
-// compartió, o con quién se compartió).
-let modoSeleccionCompartidos = false;
+// Selección de "Compartidos por ti" (ver candidatosCompartidosPorTiSeccionHTML)
+// y de "Compartidos conmigo" (ver candidatosCompartidosConmigoSeccionHTML) --
+// cada una la suya, para que marcar en una sección no mezcle ni active la
+// otra. Ninguna de las dos tiene un modo "Seleccionar" que activar -- las
+// casillas están siempre visibles, igual que en Base de candidatos.
 let compartidosSeleccionadosIds = new Set();
-// Selección independiente para "Compartidos conmigo" (ver
-// candidatosCompartidosConmigoSeccionHTML) -- separada de la de "Compartidos
-// por ti" de arriba para que marcar en una sección no mezcle ni active la
-// otra. A diferencia de "por ti", "conmigo" no tiene un modo "Seleccionar"
-// que activar -- las casillas están siempre visibles, igual que en Base de
-// candidatos.
+let compartidosPorMiCache = []; // candidatos (fichas completas) con el filtro/búsqueda actual -- para "Seleccionar todos" y "Cambiar destinatario"
 let compartidosConmigoSeleccionadosIds = new Set();
 let compartidosConmigoCache = []; // candidatos (fichas completas) con el filtro/búsqueda actual -- para "Seleccionar todos"
-let compartidosPorMiCache = []; // items crudos de "Compartidos por ti" (para armar el payload de cambiar destinatario)
-let gruposPorMiCache = []; // tandas ya agrupadas de "Compartidos por ti" (para el botón "Dejar de compartir todo el grupo")
 let tandasAbiertas = new Set(); // claves de <details> que el usuario ha dejado abiertas -- se respeta entre re-renders
 let tandasSeccionInicializada = new Set(); // qué secciones ("conmigo"/"por-mi") ya recibieron su apertura por defecto
-
-function agruparPorTanda(items, claveOtro, porVacante) {
-  const mapa = new Map();
-  for (const it of items) {
-    const otro = it[claveOtro] || "";
-    const clave = porVacante && it.vacante_id ? `vacante-${it.vacante_id}|${otro}` : `fecha-${it.compartido_en}|${otro}`;
-    if (!mapa.has(clave)) {
-      mapa.set(clave, { clave, vacanteId: porVacante ? it.vacante_id || null : null, compartido_en: it.compartido_en, otro, items: [] });
-    }
-    const grupo = mapa.get(clave);
-    grupo.items.push(it);
-    if (it.compartido_en > grupo.compartido_en) grupo.compartido_en = it.compartido_en;
-  }
-  // Los items llegan ordenados por fecha desc, pero al agrupar por vacante
-  // un grupo puede "moverse" en el tiempo -- se reordena por la fecha más
-  // reciente de cada grupo para que el más nuevo siga arriba.
-  return [...mapa.values()].sort((a, b) => (a.compartido_en < b.compartido_en ? 1 : a.compartido_en > b.compartido_en ? -1 : 0));
-}
-
-// Nombre que se muestra en la cabecera de la tanda: si está agrupada por
-// vacante, el puesto/centro de esa vacante (se resuelve de
-// vacantesTodasCache, ya cargada para el desplegable de filtro); si no, la
-// fecha de siempre.
-function tandaTituloHTML(grupo) {
-  if (grupo.vacanteId) {
-    const v = vacantesTodasCache.find((v) => v.id === grupo.vacanteId);
-    const nombre = v ? `${v.puesto}${v.centro ? ` · ${v.centro}` : ""}` : "(vacante)";
-    return `<span class="tanda-fecha">📁 ${escapeHTML(nombre)}</span>`;
-  }
-  return `<span class="tanda-fecha">${escapeHTML(fmtFechaHora(grupo.compartido_en))}</span>`;
-}
 
 async function actualizarCandidatoInline(candidatoId, campos) {
   await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}`, {
@@ -356,118 +313,13 @@ async function actualizarCandidatoInline(candidatoId, campos) {
   });
 }
 
-// Misma tarjeta compacta que "Base de candidatos" (candidatoMiniCardHTML) --
-// antes esta vista tenía su propia tarjeta grande con TODOS los campos del
-// test volcados (candidatoCardHTML), muy distinta de cómo se ve el resto de
-// Reclutamiento; ahora es la misma tarjeta en todos lados, con solo lo que
-// esta vista necesita de más (Ver CV, Dejar de compartir) como botones
-// pequeños al pie. El detalle completo del test se sigue viendo desde "Ver
-// ficha completa" (📋 Respuestas del test), no hace falta duplicarlo aquí.
-// Solo usada por "Compartidos por ti" -- "Compartidos conmigo" y "Solicitudes
-// compartidas contigo" se unificaron en candidatosCompartidosConmigoHTML +
-// candidatoMiniCardHTML (ver ese comentario), que ya trae fichas completas
-// del candidato en vez de la respuesta cruda del test.
-function candidatoCardHTML(item, permitirDejarDeCompartir, permitirSeleccion) {
-  const candId = item.candidato_id;
-  const nombre = nombreCandidato(item.datos);
-  const vacante = vacantesTodasCache.find((v) => v.id === item.vacante_id);
-  const vacanteTxt = vacante ? `📁 ${vacante.puesto}${vacante.centro ? ` · ${vacante.centro}` : ""}` : "Sin vacante asignada";
-  const linea2 = [item.telefono, item.email].filter(Boolean).join(" · ");
-  const checkboxHTML = permitirSeleccion && candId
-    ? `<input type="checkbox" class="candidato-compartido-check" data-candidato-id="${candId}" ${compartidosSeleccionadosIds.has(candId) ? "checked" : ""} style="margin-right:4px;">`
-    : "";
-  const cvBtn = item.tiene_cv
-    ? `<a href="${AUTH_API_BASE}/informes/respuestas/${item.respuesta_id}/cv" target="_blank" rel="noopener" class="btn-mini">📄 Ver CV</a>`
-    : "";
-  const whatsappBtn = item.telefono
-    ? `<a class="btn-mini" href="https://wa.me/${numeroWhatsapp(item.telefono)}" target="_blank" rel="noopener">${ICONO_WHATSAPP}WhatsApp</a>`
-    : "";
-  const fichaBtn = candId
-    ? `<button type="button" class="btn-mini candidato-abrir-ficha" data-candidato-id="${candId}">📋 Ver ficha completa</button>`
-    : "";
-  // Solo tiene sentido en "Compartidos por ti" -- deja de compartir ESTE
-  // candidato con ESTE destinatario en concreto (no borra el candidato ni
-  // afecta a otros a los que se lo hayas compartido). El origen del share
-  // determina el endpoint: uno viene de Informes (informe_compartidos,
-  // compartido_id numérico) y otro es un "compartir directo" desde
-  // Reclutamiento (candidato_compartidos, compartido_id "candidato-N").
-  const dejarDeCompartirBtn = permitirDejarDeCompartir
-    ? `<button type="button" class="btn-mini btn-dejar-compartir"
-         data-directo="${String(item.compartido_id).startsWith("candidato-") ? "1" : "0"}"
-         data-candidato-id="${candId}" data-respuesta-id="${item.respuesta_id ?? ""}"
-         data-destinatario-id="${item.destinatario_id ?? ""}">✕ Dejar de compartir</button>`
-    : "";
-  return `
-    <div class="candidato-mini-card" data-candidato-id="${candId || ""}">
-      <div class="candidato-mini-card-fila">
-        <span class="candidato-mini-foto candidato-mini-foto-vacia">${escapeHTML((nombre || "?").trim()[0] || "?")}</span>
-        <div class="candidato-mini-card-info">
-          <h4>${checkboxHTML}${escapeHTML(nombre)} ${item.estado ? estadoBadgeHTML(item.estado) : ""} ${resultadoBadgeHTML(item.test_resultado)}</h4>
-          <p>${escapeHTML(linea2)}</p>
-          <p style="color:var(--text-muted);">${escapeHTML(vacanteTxt)}</p>
-          <div class="candidato-mini-acciones">${fichaBtn}${cvBtn}${whatsappBtn}${dejarDeCompartirBtn}</div>
-        </div>
-      </div>
-    </div>`;
-}
-
-// Cada tanda es un <details> desplegable, identificada por `grupo.clave`
-// para poder recordar si el usuario la dejó abierta entre re-renders (ver
-// tandasAbiertas) -- antes se perdía el estado en cuanto se marcaba un
-// checkbox, porque cada cambio de selección repinta toda la lista.
-function grupoHTML(grupo, etiquetaOtro, abierta, permitirDejarDeCompartir, permitirSeleccion) {
-  const n = grupo.items.length;
-  const eliminarGrupoBtn = permitirDejarDeCompartir
-    ? `<button type="button" class="btn btn-ghost btn-eliminar-grupo" data-clave="${escapeHTML(grupo.clave)}">🗑 Dejar de compartir todo el grupo</button>`
-    : "";
-  return `
-    <details class="tanda" data-clave="${escapeHTML(grupo.clave)}" ${abierta ? "open" : ""}>
-      <summary class="tanda-summary">
-        ${tandaTituloHTML(grupo)}
-        <span class="tanda-meta">${n} candidato${n === 1 ? "" : "s"} · ${escapeHTML(etiquetaOtro)} <b>${escapeHTML(grupo.otro || "")}</b></span>
-      </summary>
-      <div class="tanda-body">
-        ${eliminarGrupoBtn}
-        <div class="candidatos-grid ${candidatosVista !== "tarjetas" ? "candidatos-lista" : ""}">
-          ${grupo.items.map((it) => candidatoCardHTML(it, permitirDejarDeCompartir, permitirSeleccion)).join("")}
-        </div>
-      </div>
-    </details>`;
-}
-
-// Ahora solo la usa "Compartidos por ti" -- "Compartidos conmigo" y
-// "Solicitudes compartidas contigo" se unificaron en una sola pantalla (ver
-// candidatosCompartidosConmigoHTML), así que "Unir a la misma solicitud" y
-// "Cambiar destinatario" (solo tienen sentido para quien COMPARTE, no para
-// quien recibe) son ya lo único que hace falta aquí.
-function seccionHTML(seccionId, titulo, grupos, etiquetaOtro, vacioMsg, permitirDejarDeCompartir, permitirSeleccion, abrirPorDefecto = true) {
-  const modoActivo = modoSeleccionCompartidos;
-  const seleccionSet = compartidosSeleccionadosIds;
-  const accionesContexto = `<button type="button" id="btn-unir-compartidos" class="btn btn-primary" ${seleccionSet.size === 0 ? "disabled" : ""}>🔗 Unir a la misma solicitud...</button>
-       <button type="button" id="btn-cambiar-destinatario" class="btn btn-primary" ${seleccionSet.size === 0 ? "disabled" : ""}>👤 Cambiar destinatario...</button>`;
-  const barraSeleccion = permitirSeleccion ? `
-    <div class="compartidos-seleccion-bar">
-      <button type="button" id="btn-modo-seleccion-compartidos" class="btn btn-ghost">${modoActivo ? "✕ Cancelar selección" : "☑ Seleccionar"}</button>
-      ${modoActivo ? `
-        <span id="compartidos-seleccion-contador" class="staff-hint">${seleccionSet.size} seleccionado(s)</span>
-        ${accionesContexto}
-      ` : ""}
-    </div>` : "";
-  if (grupos.length === 0) {
-    return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2>${barraSeleccion}<p class="staff-hint">${escapeHTML(vacioMsg)}</p>`;
-  }
-  // La primera vez que se pinta esta sección (por sesión de página), se
-  // aplica su apertura por defecto -- a partir de ahí se respeta lo que el
-  // usuario haya colapsado/expandido a mano. "Compartidos por ti" arranca
-  // siempre colapsada (puede ser una lista muy larga, ruido para quien solo
-  // quiere abrir una tanda concreta).
-  if (!tandasSeccionInicializada.has(seccionId)) {
-    if (abrirPorDefecto) grupos.forEach((g) => tandasAbiertas.add(g.clave));
-    tandasSeccionInicializada.add(seccionId);
-  }
-  return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2>${barraSeleccion}` +
-    grupos.map((g) => grupoHTML(g, etiquetaOtro, tandasAbiertas.has(g.clave), permitirDejarDeCompartir, permitirSeleccion && modoActivo)).join("");
-}
+// candidatoCardHTML/grupoHTML/seccionHTML (la tarjeta grande de respuesta de
+// test, agrupada por tanda+destinatario) se retiraron -- "Compartidos por
+// ti" y "Solicitudes que has compartido" eran la misma idea (candidatos que
+// ESTE usuario ha compartido) con dos formatos de tarjeta y dos barras de
+// herramientas distintas; ahora es una sola lista de fichas completas
+// (candidatoMiniCardHTML), agrupada por vacante igual que "Compartidos
+// conmigo" -- ver candidatosCompartidosPorTiSeccionHTML más abajo.
 
 async function dejarDeCompartirClick(btn) {
   if (!(await pedirConfirmacion("¿Dejar de compartir este candidato? La persona ya no lo verá en su Reclutamiento."))) return;
@@ -484,18 +336,50 @@ async function dejarDeCompartirClick(btn) {
   await loadCompartidos();
 }
 
-async function eliminarGrupoClick(btn, grupo) {
-  const n = grupo.items.length;
-  if (!(await pedirConfirmacion(`¿Dejar de compartir los ${n} candidato${n === 1 ? "" : "s"} de este grupo? La persona ya no los verá en su Reclutamiento.`))) return;
-  btn.disabled = true;
-  await Promise.all(grupo.items.map((it) => {
-    const url = String(it.compartido_id).startsWith("candidato-")
-      ? `${AUTH_API_BASE}/reclutamiento/candidatos/${it.candidato_id}/compartir/${it.destinatario_id}`
-      : `${AUTH_API_BASE}/informes/compartir/${it.respuesta_id}/${it.destinatario_id}`;
-    return fetch(url, { method: "DELETE" });
-  }));
-  tandasAbiertas.delete(grupo.clave);
-  await loadCompartidos();
+// wireSeleccionCompartidos: cablea una sección "Compartidos" (conmigo o por
+// ti) que sigue el mismo patrón -- lista con id `listaId` dentro de la cual
+// cada .candidato-mini-card tiene su .candidato-mini-checkbox (siempre
+// visible, sin modo "Seleccionar" que activar) atado a `seleccionSet`, más
+// los botones "Seleccionar todos"/"Quitar selección" (id `btnTodosId`/
+// `btnNingunoId`) que usan `cache` (la lista completa con el filtro actual)
+// para saber a quién marcar. Evita repetir este bloque dos veces para
+// conmigo/por-ti, que son idénticos salvo qué Set/cache/ids usan.
+function wireSeleccionCompartidos(wrap, { listaId, seleccionSet, cache, btnTodosId, btnNingunoId }) {
+  const btnTodos = document.getElementById(btnTodosId);
+  if (btnTodos) {
+    btnTodos.addEventListener("click", () => {
+      cache.forEach((c) => seleccionSet.add(c.id));
+      loadCompartidos();
+    });
+  }
+  const btnNinguno = document.getElementById(btnNingunoId);
+  if (btnNinguno) {
+    btnNinguno.addEventListener("click", () => {
+      seleccionSet.clear();
+      loadCompartidos();
+    });
+  }
+  wrap.querySelectorAll(`#${listaId} .candidato-mini-card`).forEach((card) => {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest(".candidato-mini-checkbox-col") || e.target.closest(".candidato-mini-contacto-select") || e.target.closest(".btn-dejar-compartir")) return;
+      abrirEdicionCandidato(card.dataset.candidatoId);
+    });
+  });
+  wrap.querySelectorAll(`#${listaId} .candidato-mini-checkbox`).forEach((check) => {
+    check.addEventListener("click", (e) => e.stopPropagation());
+    check.addEventListener("change", (e) => {
+      const id = Number(e.target.closest(".candidato-mini-card").dataset.candidatoId);
+      if (e.target.checked) seleccionSet.add(id);
+      else seleccionSet.delete(id);
+      loadCompartidos();
+    });
+  });
+  wrap.querySelectorAll(`#${listaId} .candidato-mini-contacto-select`).forEach((select) => {
+    select.addEventListener("click", (e) => e.stopPropagation());
+    select.addEventListener("change", async () => {
+      await actualizarCandidatoInline(select.dataset.candidatoId, { contacto_estado: select.value });
+    });
+  });
 }
 
 function wireCompartidosInteractivos(wrap) {
@@ -503,24 +387,11 @@ function wireCompartidosInteractivos(wrap) {
     el.addEventListener("click", () => abrirEdicionCandidato(el.dataset.candidatoId));
   });
   wrap.querySelectorAll(".btn-dejar-compartir").forEach((el) => {
-    el.addEventListener("click", () => dejarDeCompartirClick(el));
-  });
-  wrap.querySelectorAll(".candidato-compartido-check").forEach((el) => {
-    el.addEventListener("change", () => {
-      const id = Number(el.dataset.candidatoId);
-      if (el.checked) compartidosSeleccionadosIds.add(id);
-      else compartidosSeleccionadosIds.delete(id);
-      loadCompartidos();
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dejarDeCompartirClick(el);
     });
   });
-  const btnModo = document.getElementById("btn-modo-seleccion-compartidos");
-  if (btnModo) {
-    btnModo.addEventListener("click", () => {
-      modoSeleccionCompartidos = !modoSeleccionCompartidos;
-      compartidosSeleccionadosIds.clear();
-      loadCompartidos();
-    });
-  }
   const btnUnir = document.getElementById("btn-unir-compartidos");
   if (btnUnir) {
     btnUnir.addEventListener("click", () => abrirModalAsignarVacante("compartidos"));
@@ -529,6 +400,21 @@ function wireCompartidosInteractivos(wrap) {
   if (btnCambiarDestinatario) {
     btnCambiarDestinatario.addEventListener("click", abrirModalCambiarDestinatario);
   }
+  const btnExportarPorMi = document.getElementById("btn-exportar-excel-por-mi");
+  if (btnExportarPorMi) {
+    btnExportarPorMi.addEventListener("click", () => abrirModalExportarExcel("compartidos-por-mi"));
+  }
+  const btnDescargarPdfsPorMi = document.getElementById("btn-descargar-pdfs-por-mi");
+  if (btnDescargarPdfsPorMi) {
+    btnDescargarPdfsPorMi.addEventListener("click", descargarPdfsCompartidosPorMi);
+  }
+  wireSeleccionCompartidos(wrap, {
+    listaId: "compartidos-por-mi-lista",
+    seleccionSet: compartidosSeleccionadosIds,
+    cache: compartidosPorMiCache,
+    btnTodosId: "btn-seleccionar-todos-por-mi",
+    btnNingunoId: "btn-deseleccionar-todos-por-mi",
+  });
   const btnExportarCompartidos = document.getElementById("btn-exportar-excel-compartidos");
   if (btnExportarCompartidos) {
     btnExportarCompartidos.addEventListener("click", () => abrirModalExportarExcel("compartidos-conmigo"));
@@ -537,50 +423,16 @@ function wireCompartidosInteractivos(wrap) {
   if (btnDescargarPdfsCompartidos) {
     btnDescargarPdfsCompartidos.addEventListener("click", descargarPdfsCompartidosConmigo);
   }
-  const btnSeleccionarTodosCompartidos = document.getElementById("btn-seleccionar-todos-compartidos");
-  if (btnSeleccionarTodosCompartidos) {
-    btnSeleccionarTodosCompartidos.addEventListener("click", () => {
-      compartidosConmigoCache.forEach((c) => compartidosConmigoSeleccionadosIds.add(c.id));
-      loadCompartidos();
-    });
-  }
-  const btnDeseleccionarTodosCompartidos = document.getElementById("btn-deseleccionar-todos-compartidos");
-  if (btnDeseleccionarTodosCompartidos) {
-    btnDeseleccionarTodosCompartidos.addEventListener("click", () => {
-      compartidosConmigoSeleccionadosIds.clear();
-      loadCompartidos();
-    });
-  }
-  wrap.querySelectorAll("#compartidos-conmigo-lista .candidato-mini-card").forEach((card) => {
-    card.addEventListener("click", (e) => {
-      if (e.target.closest(".candidato-mini-checkbox-col") || e.target.closest(".candidato-mini-contacto-select")) return;
-      abrirEdicionCandidato(card.dataset.candidatoId);
-    });
-  });
-  wrap.querySelectorAll("#compartidos-conmigo-lista .candidato-mini-checkbox").forEach((check) => {
-    check.addEventListener("click", (e) => e.stopPropagation());
-    check.addEventListener("change", (e) => {
-      const id = Number(e.target.closest(".candidato-mini-card").dataset.candidatoId);
-      if (e.target.checked) compartidosConmigoSeleccionadosIds.add(id);
-      else compartidosConmigoSeleccionadosIds.delete(id);
-      loadCompartidos();
-    });
-  });
-  wrap.querySelectorAll("#compartidos-conmigo-lista .candidato-mini-contacto-select").forEach((select) => {
-    select.addEventListener("click", (e) => e.stopPropagation());
-    select.addEventListener("change", async () => {
-      await actualizarCandidatoInline(select.dataset.candidatoId, { contacto_estado: select.value });
-    });
-  });
-  wrap.querySelectorAll(".btn-eliminar-grupo").forEach((el) => {
-    el.addEventListener("click", () => {
-      const grupo = gruposPorMiCache.find((g) => g.clave === el.dataset.clave);
-      if (grupo) eliminarGrupoClick(el, grupo);
-    });
+  wireSeleccionCompartidos(wrap, {
+    listaId: "compartidos-conmigo-lista",
+    seleccionSet: compartidosConmigoSeleccionadosIds,
+    cache: compartidosConmigoCache,
+    btnTodosId: "btn-seleccionar-todos-compartidos",
+    btnNingunoId: "btn-deseleccionar-todos-compartidos",
   });
   // Recuerda qué tandas deja el usuario abiertas/cerradas a mano, para que
   // no se le cierren al marcar un checkbox (cada cambio de selección
-  // repinta toda la lista -- ver el listener de .candidato-compartido-check).
+  // repinta toda la lista).
   wrap.querySelectorAll(".tanda").forEach((det) => {
     det.addEventListener("toggle", () => {
       if (det.open) tandasAbiertas.add(det.dataset.clave);
@@ -589,64 +441,70 @@ function wireCompartidosInteractivos(wrap) {
   });
 }
 
-// Una vacante compartida da acceso a TODOS sus candidatos de una vez
-// (presentes y futuros) en vez de un "slot" suelto por cada candidato
-// compartido individualmente -- ver reclutamiento.compartir_vacante. Se
-// muestra como una sola tarjeta con todos sus candidatos dentro, reusando
-// candidatoMiniCardHTML (mismo formato que la Base de candidatos). Ahora
-// solo la usa "Solicitudes que has compartido" (vista de quien comparte,
-// necesita ver el proceso entero) -- "Solicitudes compartidas contigo" (la
-// del gerente que recibe) se unificó con "Compartidos conmigo" en
-// candidatosCompartidosConmigoHTML, que sí filtra a solo "Entrevistado".
-// colapsable: cada tarjeta es un <details> que arranca cerrado -- ver
-// abrirPorDefecto en seccionHTML, para evitar una página infinita.
-function vacanteCompartidaHTML(vacante, { colapsable = false } = {}) {
-  const gerentesTxt = (vacante.gerentes || []).map((g) => escapeHTML(g.nombre)).join(", ") || "—";
-  const candidatosVisibles = vacante.candidatos.filter((c) => candidatoCompartidoCoincideBusqueda(c, compartidosBusqueda));
-  const ocultosPorBusqueda = vacante.candidatos.length - candidatosVisibles.length;
-  const ocultosTxt = ocultosPorBusqueda > 0 ? ` (${ocultosPorBusqueda} oculto${ocultosPorBusqueda === 1 ? "" : "s"} por la búsqueda)` : "";
-  const n = candidatosVisibles.length;
-  const titulo = `📁 ${escapeHTML(vacante.puesto)}${vacante.centro ? ` · ${escapeHTML(vacante.centro)}` : ""}`;
-  const estadoBadge = `<span class="badge-vacante-estado badge-${vacante.estado}">${VACANTE_ESTADO_LABELS[vacante.estado]}</span>`;
-  const meta = `👥 ${gerentesTxt} · ${n} candidato${n === 1 ? "" : "s"}${ocultosTxt}`;
-  // vacante-compartida-candidatos: marca este grid en concreto (a
-  // diferencia del de "Compartidos conmigo/por ti", que usa la misma clase
-  // .candidato-mini-card pero dentro de .tanda-body con OTRO cableado --
-  // ver candidato-abrir-ficha) para poder engancharle el clic que abre la
-  // ficha y el botón de exportar sin pisar el otro.
-  const idsVisiblesCSV = candidatosVisibles.map((c) => c.id).join(",");
-  const accionesBtns = candidatosVisibles.length
-    ? `<button type="button" class="btn-mini btn-exportar-excel-vacante-compartida" data-candidato-ids="${idsVisiblesCSV}">📊 Exportar a Excel...</button>
-       <button type="button" class="btn-mini btn-descargar-pdfs-vacante-compartida" data-candidato-ids="${idsVisiblesCSV}">📄 Descargar PDFs</button>`
-    : "";
-  const cuerpo = candidatosVisibles.length
-    ? `<div class="candidatos-grid ${candidatosVista !== "tarjetas" ? "candidatos-lista" : ""} vacante-compartida-candidatos">${candidatosVisibles.map((c) => candidatoMiniCardHTML(c, { ocultarVacante: true })).join("")}</div>`
-    : `<p class="staff-hint">Ningún candidato en esta solicitud todavía.</p>`;
-  if (colapsable) {
-    const clave = `vacsol-${vacante.id}`;
-    return `
-      <details class="tanda" data-clave="${clave}" ${tandasAbiertas.has(clave) ? "open" : ""}>
-        <summary class="tanda-summary">
-          <span class="tanda-fecha">${titulo}</span> ${estadoBadge}
-          <span class="tanda-meta">${escapeHTML(meta)}</span>
-        </summary>
-        <div class="tanda-body">${accionesBtns}${cuerpo}</div>
-      </details>`;
-  }
+function compartidosPorTiToolbarHTML(n) {
   return `
-    <div class="vacante-compartida-card">
-      <h3>${titulo} ${estadoBadge}</h3>
-      <p class="staff-hint">${escapeHTML(meta)}</p>
-      ${accionesBtns}
-      ${cuerpo}
+    <div class="compartidos-seleccion-bar">
+      <button type="button" id="btn-seleccionar-todos-por-mi" class="btn btn-ghost">Seleccionar todos</button>
+      <button type="button" id="btn-deseleccionar-todos-por-mi" class="btn btn-ghost" ${n === 0 ? "disabled" : ""}>Quitar selección</button>
+      <span class="staff-hint">${n} seleccionado${n === 1 ? "" : "s"}</span>
+      <button type="button" id="btn-unir-compartidos" class="btn btn-primary" ${n === 0 ? "disabled" : ""}>🔗 Unir a la misma solicitud...</button>
+      <button type="button" id="btn-cambiar-destinatario" class="btn btn-primary" ${n === 0 ? "disabled" : ""}>👤 Cambiar destinatario...</button>
+      <button type="button" id="btn-exportar-excel-por-mi" class="btn btn-primary" ${n === 0 ? "disabled" : ""}>📊 Exportar a Excel...</button>
+      <button type="button" id="btn-descargar-pdfs-por-mi" class="btn btn-primary" ${n === 0 ? "disabled" : ""}>📄 Descargar PDFs</button>
     </div>`;
 }
 
-function vacantesCompartidasSeccionHTML(titulo, vacantes, vacioMsg, opciones = {}) {
-  if (vacantes.length === 0) {
-    return vacioMsg ? `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2><p class="staff-hint">${escapeHTML(vacioMsg)}</p>` : "";
+// Unifica "Solicitudes que has compartido" (agrupada por vacante, con
+// fichas completas) y "Compartidos por ti" (agrupada por tanda+destinatario,
+// con el formato crudo de una respuesta de test) -- misma idea que
+// candidatosCompartidosConmigoSeccionHTML pero del lado de quien COMPARTE:
+// una única lista de fichas completas (ver reclutamiento.candidatos_compartidos_por),
+// agrupada por vacante ("Sin vacante asignada" al final). `gerentesPorVacante`
+// (Map vacante_id -> [{nombre}, ...]) viene de /vacantes-compartidas-por-mi,
+// que se sigue pidiendo solo para poder mostrar "👥 Responsables" en la
+// cabecera de cada grupo -- los candidatos en sí ya vienen todos juntos en
+// `candidatos`. Cada candidato compartido individualmente (no solo por
+// pertenecer a una vacante con responsables) muestra "🔗 Compartido con:
+// X ✕, Y ✕" (ver candidatoMiniCardHTML con compartidoRemovible) -- ese ✕ es
+// lo que reemplaza a "Dejar de compartir todo el grupo": ahora es un candidato
+// a la vez, con quien corresponda, en vez de por tanda.
+function candidatosCompartidosPorTiSeccionHTML(candidatos, gerentesPorVacante) {
+  let html = `<h2 class="reclu-seccion">Compartidos por ti</h2>${compartidosPorTiToolbarHTML(compartidosSeleccionadosIds.size)}`;
+  if (candidatos.length === 0) {
+    return html + `<p class="staff-hint">Todavía no has compartido ningún candidato.</p>`;
   }
-  return `<h2 class="reclu-seccion">${escapeHTML(titulo)}</h2><div class="vacantes-compartidas-lista">${vacantes.map((v) => vacanteCompartidaHTML(v, opciones)).join("")}</div>`;
+  const grupos = new Map();
+  for (const c of candidatos) {
+    const clave = c.vacante_id ? `v${c.vacante_id}` : "sin_vacante";
+    if (!grupos.has(clave)) {
+      grupos.set(clave, {
+        clave,
+        titulo: c.vacante_id ? `📁 ${c.vacante_puesto}${c.vacante_centro ? ` · ${c.vacante_centro}` : ""}` : "Sin vacante asignada",
+        gerentes: c.vacante_id ? (gerentesPorVacante.get(c.vacante_id) || []) : [],
+        candidatos: [],
+      });
+    }
+    grupos.get(clave).candidatos.push(c);
+  }
+  const listaGrupos = [...grupos.values()].sort((a, b) => (a.clave === "sin_vacante" ? 1 : 0) - (b.clave === "sin_vacante" ? 1 : 0));
+  html += `<div id="compartidos-por-mi-lista">` + listaGrupos.map((g) => {
+    const clave = `comppormi-${g.clave}`;
+    const n = g.candidatos.length;
+    const gerentesTxt = g.gerentes.length ? ` · 👥 ${g.gerentes.map((x) => escapeHTML(x.nombre)).join(", ")}` : "";
+    return `
+      <details class="tanda" data-clave="${clave}" ${tandasAbiertas.has(clave) ? "open" : ""}>
+        <summary class="tanda-summary">
+          <span class="tanda-fecha">${escapeHTML(g.titulo)}</span>
+          <span class="tanda-meta">${n} candidato${n === 1 ? "" : "s"}${gerentesTxt}</span>
+        </summary>
+        <div class="tanda-body">
+          <div class="candidatos-grid ${candidatosVista !== "tarjetas" ? "candidatos-lista" : ""}">
+            ${g.candidatos.map((c) => candidatoMiniCardHTML(c, { ocultarVacante: true, seleccionSet: compartidosSeleccionadosIds, compartidoRemovible: true })).join("")}
+          </div>
+        </div>
+      </details>`;
+  }).join("") + `</div>`;
+  return html;
 }
 
 function candidatosCompartidosConmigoToolbarHTML(n) {
@@ -739,9 +597,9 @@ async function loadCompartidos() {
   const buscarInput = document.getElementById("compartidos-buscar");
   compartidosBusqueda = buscarInput ? buscarInput.value.trim() : "";
   const filtroEmpresa = esUsuarioRestringido ? "" : `?empresa=${EMPRESA}`;
-  const [conmigoTodos, porMi, vacantesPorMi] = await Promise.all([
+  const [conmigoTodos, porMiTodos, vacantesPorMi] = await Promise.all([
     fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/compartidos-conmigo${filtroEmpresa}`).then((r) => (r.ok ? r.json() : [])),
-    fetch(`${AUTH_API_BASE}/informes/compartidos-por-mi${filtroEmpresa}`).then((r) => (r.ok ? r.json() : [])),
+    fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/compartidos-por-mi${filtroEmpresa}`).then((r) => (r.ok ? r.json() : [])),
     fetch(`${AUTH_API_BASE}/reclutamiento/vacantes-compartidas-por-mi${filtroEmpresa}`).then((r) => (r.ok ? r.json() : [])),
   ]);
 
@@ -756,10 +614,11 @@ async function loadCompartidos() {
   const conmigoVisibles = conmigoEntrevistados.filter((c) => candidatoCompartidoCoincideBusqueda(c, compartidosBusqueda));
   const ocultosPorEstado = conmigoTodos.length - conmigoEntrevistados.length;
   compartidosConmigoCache = conmigoVisibles;
-  const porMiVisibles = porMi.filter((it) => candidatoCompartidoCoincideBusqueda(it, compartidosBusqueda));
-  const gruposPorMi = agruparPorTanda(porMiVisibles, "destinatario_nombre", true);
-  compartidosPorMiCache = porMi;
-  gruposPorMiCache = gruposPorMi;
+  const porMiVisibles = porMiTodos.filter((c) => candidatoCompartidoCoincideBusqueda(c, compartidosBusqueda));
+  compartidosPorMiCache = porMiVisibles;
+  // Solo para poder pintar "👥 Responsables" en la cabecera de cada grupo de
+  // vacante -- ver candidatosCompartidosPorTiSeccionHTML.
+  const gerentesPorVacante = new Map(vacantesPorMi.map((v) => [v.id, v.gerentes || []]));
 
   // Toggle de vista propio para quien no ve "Base de candidatos" (donde
   // vive el otro) -- mismo candidatosVista compartido, ver wireVistaToggle/
@@ -774,73 +633,16 @@ async function loadCompartidos() {
 
   // "Compartidos conmigo" (unificado, lo que recibe este usuario) va
   // primero -- es la sección que de verdad importa para quien no tiene el
-  // módulo completo; las dos de abajo son para quien SÍ comparte (RRHH/admin).
+  // módulo completo; "Compartidos por ti" es para quien SÍ comparte (RRHH/admin).
   let html = vistaToggleHTML;
   html += candidatosCompartidosConmigoSeccionHTML(conmigoVisibles, ocultosPorEstado);
-  html += vacantesCompartidasSeccionHTML("Solicitudes que has compartido", vacantesPorMi, "", { colapsable: true });
-
-  // La sección "Compartidos por ti" solo tiene sentido enseñarla si esta
-  // persona ha compartido algo alguna vez (a un gerente no le aparecerá).
-  // Arranca colapsada -- para no convertir la pantalla en una página
-  // infinita cuando hay muchas tandas acumuladas.
-  if (gruposPorMi.length > 0) {
-    html += seccionHTML("por-mi", "Compartidos por ti", gruposPorMi, "compartido con", "", true, true, false);
-  }
+  html += candidatosCompartidosPorTiSeccionHTML(porMiVisibles, gerentesPorVacante);
 
   aparcarFormWrapEnSitio();
   wrap.innerHTML = html;
   wireCompartidosInteractivos(wrap);
   wireVistaToggle(wrap, aplicarVistaGlobal);
   aplicarVistaGlobal();
-  // .vacante-compartida-candidatos (no .vacante-compartida-card) porque
-  // "Solicitudes compartidas contigo" se pinta colapsable -- ahí el grid de
-  // candidatos queda dentro de un <details class="tanda"> igual que
-  // "Compartidos conmigo/por ti", NO dentro de .vacante-compartida-card
-  // (esa clase solo se usa cuando colapsable=false). Con el selector viejo,
-  // ningún clic abría la ficha en "Solicitudes compartidas contigo".
-  wrap.querySelectorAll(".vacante-compartida-candidatos .candidato-mini-card").forEach((card) => {
-    card.addEventListener("click", (e) => {
-      // El checkbox no tiene cableado propio en esta vista (solo sirve para
-      // marcar a quién exportar, ver btn-exportar-excel-vacante-compartida
-      // más abajo) -- sin este corte, el clic se colaba hasta la tarjeta y
-      // abría la ficha en vez de solo marcar la casilla.
-      if (e.target.closest(".candidato-mini-checkbox-col") || e.target.closest(".candidato-mini-contacto-select")) return;
-      abrirEdicionCandidato(card.dataset.candidatoId);
-    });
-  });
-  wrap.querySelectorAll(".vacante-compartida-candidatos .candidato-mini-checkbox").forEach((check) => {
-    check.addEventListener("click", (e) => e.stopPropagation());
-  });
-  wrap.querySelectorAll(".vacante-compartida-candidatos .candidato-mini-contacto-select").forEach((select) => {
-    select.addEventListener("click", (e) => e.stopPropagation());
-    select.addEventListener("change", async () => {
-      await actualizarCandidatoInline(select.dataset.candidatoId, { contacto_estado: select.value });
-    });
-  });
-  wrap.querySelectorAll(".btn-exportar-excel-vacante-compartida").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      // Si se marcó algún checkbox dentro de esta misma solicitud, exporta
-      // solo esos -- si no se marcó ninguno, exporta la solicitud entera
-      // (el comportamiento de siempre, para no obligar a marcar uno a uno
-      // cuando se quieren todos).
-      const marcados = Array.from(btn.parentElement.querySelectorAll(".candidato-mini-checkbox:checked"))
-        .map((c) => Number(c.closest(".candidato-mini-card").dataset.candidatoId));
-      const ids = marcados.length ? marcados : btn.dataset.candidatoIds.split(",").map(Number).filter(Boolean);
-      abrirModalExportarExcel("vacante-compartida", ids);
-    });
-  });
-  wrap.querySelectorAll(".btn-descargar-pdfs-vacante-compartida").forEach((btn) => {
-    btn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      // Mismo criterio que btn-exportar-excel-vacante-compartida: marcados
-      // si hay alguno, si no la solicitud entera.
-      const marcados = Array.from(btn.parentElement.querySelectorAll(".candidato-mini-checkbox:checked"))
-        .map((c) => Number(c.closest(".candidato-mini-card").dataset.candidatoId));
-      const ids = marcados.length ? marcados : btn.dataset.candidatoIds.split(",").map(Number).filter(Boolean);
-      await descargarPdfsLote(ids, btn);
-    });
-  });
 }
 
 // ---------------------------------------------------------------------
@@ -2198,8 +2000,18 @@ function candidatoMiniCardHTML(c, opts = {}) {
     ? `<img class="candidato-mini-foto" src="${AUTH_API_BASE}/reclutamiento/candidatos/${c.id}/foto" alt="">`
     : `<span class="candidato-mini-foto candidato-mini-foto-vacia">${escapeHTML((c.nombre_completo || "?").trim()[0] || "?")}</span>`;
   const compartidos = c.compartidos || [];
+  // compartidoRemovible: para "Compartidos por ti" -- añade una ✕ por
+  // nombre que deja de compartir con ESA persona en concreto sin afectar a
+  // las demás (reusa .btn-dejar-compartir, ya cableado en
+  // wireCompartidosInteractivos). En el resto de sitios (Base de
+  // candidatos, "Compartidos conmigo") es solo informativo, sin ✕, porque
+  // quien lo ve no es quien compartió.
   const compartidoHTML = compartidos.length > 0
-    ? `<p class="candidato-mini-compartido">🔗 Compartido con: ${escapeHTML(compartidos.map((x) => x.nombre).join(", "))}</p>`
+    ? `<p class="candidato-mini-compartido">🔗 Compartido con: ${
+        opts.compartidoRemovible
+          ? compartidos.map((x) => `${escapeHTML(x.nombre)} <button type="button" class="btn-dejar-compartir-mini btn-dejar-compartir" data-directo="${x.directo ? "1" : "0"}" data-candidato-id="${c.id}" data-respuesta-id="${x.respuesta_id ?? ""}" data-destinatario-id="${x.usuario_id}" title="Dejar de compartir con ${escapeHTML(x.nombre)}">✕</button>`).join(", ")
+          : escapeHTML(compartidos.map((x) => x.nombre).join(", "))
+      }</p>`
     : "";
   return `
     <div class="candidato-mini-card ${seleccionada ? "seleccionada" : ""} ${abierta ? "abierta" : ""}" data-candidato-id="${c.id}">
@@ -2268,10 +2080,9 @@ function deseleccionarTodosCandidatos() {
 // individual (diseño propio si ya está enriquecido, recorte original si
 // no), fusionados por el backend (ver descargar_pdfs_lote_route). Compartida
 // entre "Base de candidatos" (btn-descargar-pdfs-seleccionados) y
-// "Compartidos" (gerentes con candidatos sueltos o vacantes compartidas,
-// ver descargarPdfsCompartidosConmigo/descargarPdfsVacanteCompartida) -- el
-// backend ya filtra en silencio a los ids que de verdad puede ver quien no
-// tiene el módulo completo.
+// "Compartidos" (ver descargarPdfsCompartidosConmigo/descargarPdfsCompartidosPorMi)
+// -- el backend ya filtra en silencio a los ids que de verdad puede ver
+// quien no tiene el módulo completo.
 async function descargarPdfsLote(ids, btn) {
   if (!ids.length) return;
   const textoOriginal = btn.textContent;
@@ -2316,9 +2127,8 @@ async function descargarPdfsCompartidosConmigo() {
   await descargarPdfsLote([...compartidosConmigoSeleccionadosIds], document.getElementById("btn-descargar-pdfs-compartidos"));
 }
 
-async function descargarPdfsVacanteCompartida(btn) {
-  const ids = (btn.dataset.candidatoIds || "").split(",").filter(Boolean).map(Number);
-  await descargarPdfsLote(ids, btn);
+async function descargarPdfsCompartidosPorMi() {
+  await descargarPdfsLote([...compartidosSeleccionadosIds], document.getElementById("btn-descargar-pdfs-por-mi"));
 }
 
 async function cambiarEstadoSeleccionados(estado) {
@@ -2432,7 +2242,6 @@ async function confirmarAsignarVacante() {
   // candidatos" aunque se hubieran ido añadiendo más).
   await refreshVacantes();
   if (origenAsignarVacante === "compartidos") {
-    modoSeleccionCompartidos = false;
     compartidosSeleccionadosIds.clear();
     await loadCompartidos();
   } else {
@@ -2443,19 +2252,14 @@ async function confirmarAsignarVacante() {
 
 let columnasExportablesCache = null;
 let origenExportarExcel = "grid";
-let idsExportarExcelFijos = []; // para origen "vacante-compartida": lista ya cerrada, no un Set de selección
 const COLUMNAS_EXPORTAR_POR_DEFECTO = ["nombre_completo", "telefono", "email", "vacante", "test_resultado"];
 
-// idsFijos: solo se usa con origen "vacante-compartida" -- exporta TODOS
-// los candidatos de esa solicitud de una vez (botón por tarjeta), sin pasar
-// por una selección con checkboxes.
-async function abrirModalExportarExcel(origen = "grid", idsFijos = []) {
+async function abrirModalExportarExcel(origen = "grid") {
   const ids = origen === "compartidos-conmigo" ? compartidosConmigoSeleccionadosIds
-    : origen === "vacante-compartida" ? new Set(idsFijos)
+    : origen === "compartidos-por-mi" ? compartidosSeleccionadosIds
     : candidatosSeleccionadosIds;
   if (ids.size === 0) return;
   origenExportarExcel = origen;
-  idsExportarExcelFijos = idsFijos;
   if (!columnasExportablesCache) {
     columnasExportablesCache = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/columnas-exportables`).then((r) => r.json());
   }
@@ -2479,7 +2283,7 @@ async function confirmarExportarExcel() {
     return;
   }
   const ids = origenExportarExcel === "compartidos-conmigo" ? [...compartidosConmigoSeleccionadosIds]
-    : origenExportarExcel === "vacante-compartida" ? idsExportarExcelFijos
+    : origenExportarExcel === "compartidos-por-mi" ? [...compartidosSeleccionadosIds]
     : [...candidatosSeleccionadosIds];
   const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/exportar-excel`, {
     method: "POST",
@@ -2526,17 +2330,26 @@ function cerrarModalCambiarDestinatario() {
 async function confirmarCambiarDestinatario() {
   const nuevoUsuarioId = Number(document.getElementById("cambiar-destinatario-select").value);
   if (!nuevoUsuarioId) return;
-  // Un mismo candidato puede aparecer en más de una tanda si se compartió
-  // con varias personas a la vez -- se incluyen TODAS sus filas de
-  // "Compartidos por ti" que estén seleccionadas, no solo una.
-  const seleccionados = compartidosPorMiCache.filter((it) => compartidosSeleccionadosIds.has(it.candidato_id));
-  const items = seleccionados.map((it) => ({
-    tipo: String(it.compartido_id).startsWith("candidato-") ? "directo" : "informe",
-    candidato_id: it.candidato_id,
-    respuesta_id: it.respuesta_id,
-    usuario_id_actual: it.destinatario_id,
-  }));
-  if (items.length === 0) return;
+  // Un mismo candidato puede tener más de un compartir individual a la vez
+  // (compartido con varias personas) -- se incluyen TODOS los de cada
+  // candidato seleccionado (candidato.compartidos, ver
+  // reclutamiento._compartidos_por_candidato), no solo uno. Un candidato que
+  // solo tiene acceso vía vacante entera (sin compartir individual) no pone
+  // ningún item aquí -- eso se gestiona con "Responsables" en la vacante,
+  // no con "Cambiar destinatario".
+  const seleccionados = compartidosPorMiCache.filter((c) => compartidosSeleccionadosIds.has(c.id));
+  const items = seleccionados.flatMap((c) =>
+    (c.compartidos || []).map((comp) => ({
+      tipo: comp.directo ? "directo" : "informe",
+      candidato_id: c.id,
+      respuesta_id: comp.respuesta_id,
+      usuario_id_actual: comp.usuario_id,
+    }))
+  );
+  if (items.length === 0) {
+    mostrarAviso("Ninguno de los seleccionados tiene un compartir individual que reasignar (los que solo tienen acceso por una vacante entera se gestionan desde \"Responsables\" en esa vacante).");
+    return;
+  }
   const res = await fetch(`${AUTH_API_BASE}/informes/compartidos-por-mi/destinatario`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -2547,7 +2360,6 @@ async function confirmarCambiarDestinatario() {
     return;
   }
   cerrarModalCambiarDestinatario();
-  modoSeleccionCompartidos = false;
   compartidosSeleccionadosIds.clear();
   await loadCompartidos();
 }

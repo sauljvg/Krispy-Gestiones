@@ -250,6 +250,14 @@ def candidatos_compartidos_conmigo_route(empresa: str | None = None, user: dict 
     return reclutamiento_module.candidatos_compartidos_con(user["id"], empresa=empresa)
 
 
+@router.get("/candidatos/compartidos-por-mi")
+def candidatos_compartidos_por_mi_route(empresa: str | None = None, user: dict = Depends(get_current_user)):
+    """Espejo de candidatos_compartidos_conmigo_route para el lado de quien
+    comparte -- une "Solicitudes que has compartido" y "Compartidos por ti"
+    en una sola lista de fichas completas."""
+    return reclutamiento_module.candidatos_compartidos_por(user["username"], empresa=empresa)
+
+
 @router.get("/candidatos")
 def list_candidatos_route(
     empresa: str | None = None,

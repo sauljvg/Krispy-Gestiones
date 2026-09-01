@@ -610,27 +610,45 @@ def mapear_datos_a_candidato(datos: dict):
 
 def _compartidos_por_candidato(conn, candidato_ids):
     """Para cada candidato de la lista, quién ya lo tiene compartido -- une
-    los dos caminos de compartir (candidato_compartidos, directo desde
-    Reclutamiento, e informe_compartidos, que también guarda candidato_id
-    desde que existe el enlace automático con el test) para poder avisar
-    "ya compartido con X" sin importar por cuál de los dos caminos se hizo."""
+    los dos caminos de compartir INDIVIDUAL (candidato_compartidos, directo
+    desde Reclutamiento, e informe_compartidos, que también guarda
+    candidato_id desde que existe el enlace automático con el test) para
+    poder avisar "ya compartido con X" sin importar por cuál de los dos
+    caminos se hizo. No incluye vacante_compartidos a propósito -- ese es un
+    acceso a nivel de SOLICITUD entera (ver "Responsables" en el editor de
+    vacante), no una fila individual que se pueda "dejar de compartir" ni
+    "cambiar de destinatario" uno a uno como estas dos.
+    `directo`/`respuesta_id` van en cada entrada para que dejar_de_compartir
+    y cambiar_destinatario sepan a qué tabla apuntar sin otra consulta."""
     if not candidato_ids:
         return {}
     placeholders = ",".join("?" * len(candidato_ids))
     rows = conn.execute(f"""
-        SELECT candidato_id, usuario_id, usuario_nombre FROM (
-            SELECT cc.candidato_id AS candidato_id, cc.usuario_id AS usuario_id, u.nombre AS usuario_nombre
-            FROM candidato_compartidos cc JOIN usuarios u ON u.id = cc.usuario_id
-            WHERE cc.candidato_id IN ({placeholders})
-            UNION
-            SELECT ic.candidato_id AS candidato_id, ic.usuario_id AS usuario_id, u.nombre AS usuario_nombre
-            FROM informe_compartidos ic JOIN usuarios u ON u.id = ic.usuario_id
-            WHERE ic.candidato_id IN ({placeholders})
-        )
+        SELECT cc.candidato_id AS candidato_id, cc.usuario_id AS usuario_id, u.nombre AS usuario_nombre,
+               1 AS directo, NULL AS respuesta_id
+        FROM candidato_compartidos cc JOIN usuarios u ON u.id = cc.usuario_id
+        WHERE cc.candidato_id IN ({placeholders})
+        UNION ALL
+        SELECT ic.candidato_id AS candidato_id, ic.usuario_id AS usuario_id, u.nombre AS usuario_nombre,
+               0 AS directo, ic.respuesta_id AS respuesta_id
+        FROM informe_compartidos ic JOIN usuarios u ON u.id = ic.usuario_id
+        WHERE ic.candidato_id IN ({placeholders})
     """, candidato_ids + candidato_ids).fetchall()
     mapa = {}
+    vistos = set()
     for r in rows:
-        mapa.setdefault(r["candidato_id"], []).append({"usuario_id": r["usuario_id"], "nombre": r["usuario_nombre"]})
+        # Si por lo que sea el mismo candidato-destinatario está compartido
+        # por los dos caminos a la vez, no se muestra duplicado.
+        clave = (r["candidato_id"], r["usuario_id"])
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+        mapa.setdefault(r["candidato_id"], []).append({
+            "usuario_id": r["usuario_id"],
+            "nombre": r["usuario_nombre"],
+            "directo": bool(r["directo"]),
+            "respuesta_id": r["respuesta_id"],
+        })
     return mapa
 
 
@@ -1455,6 +1473,59 @@ def candidatos_compartidos_con(usuario_id, empresa=None):
         SELECT c.id FROM candidatos c JOIN vacante_compartidos vc ON vc.vacante_id = c.vacante_id
         WHERE vc.usuario_id = ? {clausula_empresa}
     """, (usuario_id, *params_empresa)):
+        ids.add(row["id"])
+    if not ids:
+        conn.close()
+        return []
+    marcadores = ",".join("?" * len(ids))
+    rows = conn.execute(f"""
+        SELECT c.*, json_extract(r.datos_json, '$.RESULTADO') AS test_resultado,
+               v.puesto AS vacante_puesto, v.centro AS vacante_centro
+        FROM candidatos c
+        LEFT JOIN informe_respuestas r ON r.id = c.respuesta_id
+        LEFT JOIN vacantes v ON v.id = c.vacante_id
+        WHERE c.id IN ({marcadores})
+        ORDER BY c.actualizado_en DESC
+    """, list(ids)).fetchall()
+    candidatos = [_row_to_dict(r) for r in rows]
+    mapa_compartidos = _compartidos_por_candidato(conn, [c["id"] for c in candidatos])
+    conn.close()
+    for c in candidatos:
+        c["compartidos"] = mapa_compartidos.get(c["id"], [])
+    return candidatos
+
+
+def candidatos_compartidos_por(username, empresa=None):
+    """Espejo de candidatos_compartidos_con, pero para el lado de quien
+    COMPARTE en vez de quien recibe: todos los candidatos que este usuario
+    ha compartido con alguien, por cualquiera de las tres vías (directo,
+    vía Informes, o por compartir la vacante entera con un responsable),
+    como una única lista de fichas completas -- unifica lo que antes eran
+    "Solicitudes que has compartido" (agrupada por vacante) y "Compartidos
+    por ti" (agrupada por tanda+destinatario, con el formato crudo de una
+    respuesta de test) en una sola fuente de datos. Cada ficha trae su
+    "compartidos" (ver _compartidos_por_candidato) con quién exactamente la
+    tiene -- eso es lo que permite "Dejar de compartir" a una persona en
+    concreto sin afectar a las demás, y detectar qué compartir individual
+    hay que reasignar en "Cambiar destinatario"."""
+    conn = get_connection()
+    clausula_empresa = "AND c.empresa = ?" if empresa else ""
+    params_empresa = (empresa,) if empresa else ()
+    ids = set()
+    for row in conn.execute(f"""
+        SELECT c.id FROM candidato_compartidos cc JOIN candidatos c ON c.id = cc.candidato_id
+        WHERE cc.compartido_por = ? {clausula_empresa}
+    """, (username, *params_empresa)):
+        ids.add(row["id"])
+    for row in conn.execute(f"""
+        SELECT c.id FROM informe_compartidos ic JOIN candidatos c ON c.id = ic.candidato_id
+        WHERE ic.compartido_por = ? {clausula_empresa}
+    """, (username, *params_empresa)):
+        ids.add(row["id"])
+    for row in conn.execute(f"""
+        SELECT c.id FROM candidatos c JOIN vacante_compartidos vc ON vc.vacante_id = c.vacante_id
+        WHERE vc.compartido_por = ? {clausula_empresa}
+    """, (username, *params_empresa)):
         ids.add(row["id"])
     if not ids:
         conn.close()
