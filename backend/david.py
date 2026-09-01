@@ -186,7 +186,25 @@ alguno asi, se avisa cuantos son sin listarlos ("X candidatos mas en el proceso,
 'Entrevistado' todavia"). Cada ficha tiene su propio checkbox (siempre visible, no hace falta activar
 ningun modo) y un desplegable "Sin contactar"/"Contactado"/"Respondio" para marcar el seguimiento; con
 candidatos marcados: "Seleccionar todos", "Quitar seleccion", "Exportar a Excel...", "Descargar PDFs".
-Clic en la ficha (fuera del checkbox) abre su detalle completo.
+Clic en la ficha (fuera del checkbox) abre su detalle completo (ver mas abajo).
+
+Un gerente NO tiene ningun boton de "mensaje en grupo" ni "enviar email a todos" -- esas son
+acciones EXCLUSIVAS de la vista completa (viven en Base de candidatos, que un gerente ni ve). Para
+contactar a un candidato, la unica via de un gerente es abrir su ficha individual y usar el boton
+"WhatsApp" de ahi (ver "Ficha de un candidato" justo abajo) -- NO hay boton de WhatsApp en la propia
+tarjeta de la lista, solo dentro de la ficha.
+
+### Ficha de un candidato (clic en su tarjeta, fuera del checkbox -- MISMA ficha en las dos vistas,
+con pocas diferencias)
+
+Se abre un formulario con sus datos (Vacante, Estado, Estado del contacto, Notas, "Ver otros datos"
+para idiomas/carnet/certificaciones...) y, si ya respondio un test, sus respuestas. Botones al fondo:
+"Guardar", "WhatsApp" (SOLO si el candidato tiene telefono guardado -- abre WhatsApp Web/app directo
+con ESE candidato, esta es la forma de contactar a UNA persona concreta, la unica que tiene un
+gerente), y "Descargar CV" (el PDF de su curriculum, con el diseno propio del portal si ya esta
+enriquecido o el original si no). Con el modulo completo hay ademas: subir/anadir mas ficheros a la
+ficha, "Re-extraer" un PDF concreto con la IA, y "Eliminar" la ficha -- un gerente NO ve nada de eso,
+solo puede ver/descargar el CV que ya hay, no gestionar ficheros.
 
 ## Usuarios (usuarios.html) -- solo rol admin
 
