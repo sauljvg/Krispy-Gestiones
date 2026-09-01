@@ -1282,6 +1282,18 @@ def compute_reporte(oleada_id, centro=None):
     }
 
 
+def list_salidas(oleada_id, centro=None):
+    """Todas las salidas de una oleada (id, centro, nombre, fecha_baja,
+    puesto, email, motivo), tengan o no ya un match con una respuesta --
+    a diferencia de auditoria_f (compute_reporte), que solo trae las que
+    siguen SIN match. Para poder ver/editar el motivo de TODAS, incluidas
+    las que ya cruzaron con una respuesta (ver /salidas en las rutas)."""
+    conn = get_connection()
+    resultado = _fetch_salidas(conn, oleada_id, centro)
+    conn.close()
+    return resultado
+
+
 def _fetch_salidas(conn, oleada_id, centro):
     if centro:
         rows = conn.execute(

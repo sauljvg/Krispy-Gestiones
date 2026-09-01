@@ -122,6 +122,11 @@ def evolucion_route(oleada_id: int, centro: str | None = None, _user: dict = Dep
         raise HTTPException(status_code=404, detail=str(exc))
 
 
+@router.get("/{oleada_id}/salidas")
+def list_salidas_route(oleada_id: int, centro: str | None = None, _user: dict = Depends(require_entrevistas_oleada)):
+    return entrevistas_module.list_salidas(oleada_id, centro)
+
+
 @router.post("/{oleada_id}/salidas")
 def crear_salida_route(oleada_id: int, body: SalidaIn, _user: dict = Depends(require_entrevistas_oleada)):
     if not body.centro.strip() or not body.nombre.strip() or not body.fecha_baja.strip() or not body.motivo.strip():
