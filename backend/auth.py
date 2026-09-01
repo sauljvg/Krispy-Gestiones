@@ -263,6 +263,16 @@ def get_user_by_username(username: str):
     return dict(row) if row else None
 
 
+def usuario_existe(usuario_id: int) -> bool:
+    """Sin PRAGMA foreign_keys activo, compartir con un usuario_id que ya no
+    existe no falla -- se cuela una fila "compartido" con nadie de verdad
+    detrás. Usar antes de insertar en *_compartidos."""
+    conn = get_connection()
+    row = conn.execute("SELECT 1 FROM usuarios WHERE id = ?", (usuario_id,)).fetchone()
+    conn.close()
+    return row is not None
+
+
 def username_disponible(username: str) -> bool:
     """Para evitar crear 'Berta' y 'berta' como dos cuentas distintas, ya que
     el login ahora no distingue mayúsculas de minúsculas."""

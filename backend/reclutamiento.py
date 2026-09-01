@@ -427,15 +427,6 @@ def dejar_de_compartir_vacante(vacante_id, usuario_id):
     conn.close()
 
 
-def usuario_tiene_acceso_vacante(usuario_id, vacante_id):
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT 1 FROM vacante_compartidos WHERE vacante_id = ? AND usuario_id = ?", (vacante_id, usuario_id)
-    ).fetchone()
-    conn.close()
-    return row is not None
-
-
 def get_vacantes_compartidas_con(usuario_id, empresa=None):
     """Vacantes donde este usuario es responsable -- para "Compartidos
     conmigo", en vez de fichas sueltas agrupadas por cuándo se compartieron,
@@ -1324,14 +1315,24 @@ def contar_por_estado(empresa=None, q=None, vacante_id=None, sin_vacante=False):
 
 
 def compartir_candidatos_directo(candidato_ids: list[int], usuario_id: int, compartido_por: str):
-    """Comparte cada candidato con `usuario_id` -- compartir es EXCLUSIVO: si
-    el candidato ya estaba compartido con otra persona (por cualquiera de
-    los dos caminos, directo aquí o vía Informes), se le quita el acceso a
-    esa persona antes de dárselo al nuevo destinatario. Así un candidato
-    tiene como mucho un responsable de Reclutamiento a la vez, en vez de
+    """Comparte cada candidato con `usuario_id` -- compartir DIRECTO es
+    EXCLUSIVO: si el candidato ya estaba compartido con otra persona (por
+    cualquiera de los dos caminos, directo aquí o vía Informes), se le quita
+    el acceso a esa persona antes de dárselo al nuevo destinatario. Así un
+    candidato tiene como mucho un responsable DIRECTO a la vez, en vez de
     acumular gente cada vez que se re-comparte a alguien distinto (ver
     confirmarCompartirCandidatos en el frontend, que avisa de este cambio
-    antes de hacerlo)."""
+    antes de hacerlo). Para cambiar quién es ese responsable directo, se
+    vuelve a compartir con la persona nueva (no hay un "transferir" aparte).
+
+    Esto es EXCLUSIVO SOLO en este camino -- no afecta a compartir_vacante
+    (más abajo), que es intencionalmente lo contrario: una vacante SÍ puede
+    tener varios responsables a la vez (un area manager o el director de
+    operaciones necesitan ver TODAS las vacantes que se están compartiendo
+    en cada momento, no solo la última). Un candidato puede perfectamente
+    tener un responsable directo Y, a la vez, ser visible para varios
+    responsables de su vacante -- son dos niveles de acceso distintos, no
+    una contradicción."""
     conn = get_connection()
     for candidato_id in candidato_ids:
         conn.execute(
@@ -1628,6 +1629,12 @@ def eliminar_candidato(candidato_id):
         _borrar_archivo_disco(archivo["id"])
     conn = get_connection()
     conn.execute("DELETE FROM candidato_archivos WHERE candidato_id = ?", (candidato_id,))
+    # Sin PRAGMA foreign_keys activo en esta conexión no hay ON DELETE
+    # CASCADE de verdad -- se limpia a mano, igual que ya hace
+    # eliminar_vacante con vacante_compartidos, para no dejar filas
+    # huérfanas de "compartido con X" apuntando a un candidato borrado.
+    conn.execute("DELETE FROM candidato_compartidos WHERE candidato_id = ?", (candidato_id,))
+    conn.execute("DELETE FROM informe_compartidos WHERE candidato_id = ?", (candidato_id,))
     conn.execute("DELETE FROM candidatos WHERE id = ?", (candidato_id,))
     conn.commit()
     conn.close()

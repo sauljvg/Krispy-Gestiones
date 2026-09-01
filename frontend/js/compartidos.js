@@ -1430,6 +1430,26 @@ function renderForm() {
   if (agregarArchivoHTML) {
     document.getElementById("btn-agregar-archivo").addEventListener("click", agregarArchivoAlCandidato);
   }
+  // Quien solo tiene esta ficha compartida (sin el módulo completo) puede
+  // ver todos los datos y anotar seguimiento (Notas, Estado del contacto),
+  // pero no tocar el resto -- el backend ya lo rechaza en silencio si se
+  // manda igualmente, esto es solo para que la ficha no aparente permitir
+  // algo que luego no se guarda. Se deshabilita en vez de ocultar para que
+  // los datos existentes se sigan viendo.
+  if (esEdicion && esUsuarioRestringido) {
+    wrap.querySelectorAll("input, textarea, select").forEach((el) => {
+      if (el.id !== "candidato-notas-form" && el.id !== "candidato-contacto-estado-form") el.disabled = true;
+    });
+    const btnEliminar = document.getElementById("btn-eliminar-candidato");
+    if (btnEliminar) btnEliminar.hidden = true;
+    ["btn-formacion-agregar", "btn-experiencia-agregar", "btn-extra-agregar"].forEach((id) => {
+      const btn = document.getElementById(id);
+      if (btn) btn.hidden = true;
+    });
+    wrap.querySelectorAll(".historial-quitar, .extra-quitar, .btn-borrar-legado, .btn-quitar-foto").forEach((btn) => {
+      btn.hidden = true;
+    });
+  }
   // En "Lista + CV" la ficha ya está fija (sticky) a la vista -- desplazar
   // la página entera solo haría perder el sitio en la lista de la izquierda.
   // En "Lista" y "Tarjetas" el scroll se hace después, en
