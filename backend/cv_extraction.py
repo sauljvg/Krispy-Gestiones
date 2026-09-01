@@ -312,8 +312,9 @@ def _parsear_formacion_local(texto_seccion: str) -> list[dict]:
     historial estructurado (con el texto libre de siempre) que con una
     entrada mal cortada."""
     lineas = [l.strip() for l in texto_seccion.split("\n") if l.strip()]
+    entradas = _parsear_entradas_fechadas(lineas, 3)
     resultado = []
-    for e in _parsear_entradas_fechadas(lineas, 3):
+    for e in entradas:
         tipo, especifico, centro = e["contexto"] if len(e["contexto"]) == 3 else (None, None, None)
         if not centro:
             continue
@@ -325,6 +326,13 @@ def _parsear_formacion_local(texto_seccion: str) -> list[dict]:
             "titulo": titulo, "centro": centro,
             "fecha_inicio": e["fecha_inicio"], "fecha_fin": e["fecha_fin"],
         })
+    # Se encontraron más rangos de fechas que entradas reconstruidas -- el
+    # resto se descartó por no traer las 3 líneas de contexto esperadas (CV
+    # con un formato distinto). No hay dónde mostrar este aviso en la ficha
+    # todavía, pero al menos queda constancia en el log para poder revisar
+    # a mano CVs con formato raro en vez de perder la entrada sin rastro.
+    if len(resultado) < len(entradas):
+        print(f"[cv_extraction] Formación: {len(entradas) - len(resultado)} entrada(s) con fecha descartada(s) por formato inesperado.")
     return resultado
 
 
@@ -348,6 +356,9 @@ def _parsear_experiencia_local(texto_seccion: str) -> list[dict]:
             "fecha_inicio": e["fecha_inicio"], "fecha_fin": e["fecha_fin"],
             "descripcion": descripcion[:600],
         })
+    # Ver el mismo comentario en _parsear_formacion_local.
+    if len(resultado) < len(entradas):
+        print(f"[cv_extraction] Experiencia: {len(entradas) - len(resultado)} entrada(s) con fecha descartada(s) por formato inesperado.")
     return resultado
 
 
@@ -409,6 +420,15 @@ def _extraer_de_texto(texto_crudo: str) -> dict:
             extra[nombre_extra] = contenido[:200]
 
     extraido["extra_fields"] = extra
+    # Ni nombre, ni email, ni teléfono -- lo más probable es que el PDF sea
+    # un CV escaneado como imagen (sin capa de texto real) y no que la
+    # persona no diera ninguno de sus tres datos de contacto más básicos.
+    # Sin esta marca, extraer_cv_route/adjuntar_pdf_lote_route devuelven
+    # 200 con un formulario en blanco sin ninguna pista de qué pasó -- el
+    # frontend usa esto para avisar explícitamente en vez de dejarlo parecer
+    # un fallo silencioso de la app.
+    if not extraido.get("nombre_completo") and not extraido.get("email") and not extraido.get("telefono"):
+        extraido["sin_texto_extraible"] = True
     return extraido
 
 

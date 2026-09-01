@@ -47,6 +47,7 @@ from entrevistas_routes import router as entrevistas_router
 from evaluaciones360_routes import router as evaluaciones360_router
 from informes_routes import router as informes_router
 from notificaciones_routes import router as notificaciones_router
+import reclutamiento as reclutamiento_module
 from reclutamiento_routes import reanudar_lotes_ia_pendientes
 from reclutamiento_routes import router as reclutamiento_router
 from request_context import tiendas_permitidas_actual
@@ -138,6 +139,7 @@ app.include_router(router, prefix="/api", dependencies=[Depends(require_resenas)
 def _start_db_backups():
     backups_module.start_scheduler()
     agregadores_module.start_scheduler_limpieza_capturas()
+    reclutamiento_module.start_scheduler_purga_pdfs()
     reanudar_lotes_ia_pendientes()
 
 

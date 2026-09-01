@@ -30,8 +30,19 @@ from reportlab.platypus.flowables import HRFlowable
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 
 TOKENS_PATH = os.path.join(os.path.dirname(__file__), "..", "frontend", "assets", "design-tokens.json")
-with open(TOKENS_PATH, encoding="utf-8") as _f:
-    TOKENS = json.load(_f)
+try:
+    with open(TOKENS_PATH, encoding="utf-8") as _f:
+        TOKENS = json.load(_f)
+except Exception as _exc:
+    # Sin este try/except, que falte o esté corrupto este archivo (deploy
+    # parcial, reestructuración de frontend/assets/...) tumba el IMPORT de
+    # este módulo entero -- y como reclutamiento_routes.py lo importa a
+    # nivel de módulo, se llevaría por delante TODO Reclutamiento, no solo
+    # la generación de PDF. Con un color de emergencia se pierde el
+    # branding exacto del PDF, no el módulo entero (mismo criterio que ya
+    # se usa un poco más abajo para las fuentes).
+    print(f"[cv_pdf] No se pudo cargar {TOKENS_PATH} ({_exc}), usando un color por defecto.")
+    TOKENS = {"marca": {"verde_kk": "#2f5233"}, "marca_saona": {"verde_kk": "#2f5233"}}
 
 FONT_DIR = os.path.join(ASSETS_DIR, "fonts")
 FUENTE_TITULO = "Helvetica-Bold"
@@ -91,7 +102,16 @@ class FotoCandidato(Flowable):
         recorte = c.beginPath()
         recorte.circle(self.diametro / 2, self.diametro / 2, self.diametro / 2)
         c.clipPath(recorte, stroke=0, fill=0)
-        c.drawImage(self.ruta, 0, 0, width=self.diametro, height=self.diametro, preserveAspectRatio=True, anchor="c")
+        try:
+            c.drawImage(self.ruta, 0, 0, width=self.diametro, height=self.diametro, preserveAspectRatio=True, anchor="c")
+        except Exception as exc:
+            # Una foto corrupta/a medio escribir rompía TODA la generación
+            # del CV propio (ver generar_cv_pdf), y como eso vuelve a
+            # intentarse en CADA descarga, el candidato se quedaba sirviendo
+            # el PDF original para siempre, en cada visita, sin que nadie se
+            # enterara de que había que resubir la foto. Mejor un CV sin
+            # foto que ninguno.
+            print(f"[cv_pdf] Foto ilegible en {self.ruta}, se omite del CV ({exc}).")
         c.restoreState()
 
 

@@ -3,6 +3,8 @@ import hashlib
 import json
 import os
 import re
+import threading
+import time
 import unicodedata
 
 from db import DATA_DIR, get_connection
@@ -1609,6 +1611,69 @@ def candidatos_descartados_antiguos(meses: int):
     """, (f"-{meses} months",)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+PURGA_PDF_ORIGINAL_DIAS = 10
+
+
+def purgar_pdfs_originales_antiguos(dias: int = PURGA_PDF_ORIGINAL_DIAS) -> int:
+    """Borra el PDF original subido (candidato_archivos) de candidatos que
+    YA se procesaron (ia_extraida_en no nulo) en cuanto pasan `dias` desde
+    que se subió -- no hace falta guardar el archivo bruto para siempre una
+    vez ya se sacaron los datos y hubo margen para revisarlos/corregirlos a
+    mano. El PDF con diseño propio NO depende de este archivo (se genera al
+    vuelo desde los datos ya guardados en la ficha), así que sigue
+    disponible igual después de purgar el original.
+
+    Ojo: un CV escaneado como imagen (sin texto legible, ver el aviso "sin
+    texto extraíble" al subirlo) también cuenta como "ya procesado" aunque
+    no sacara ningún dato -- si nadie completa la ficha a mano en esos
+    `dias`, se pierde la única copia legible por una persona (el nuestro
+    sale casi vacío). Se acepta ese margen a cambio de no acumular PDFs
+    originales indefinidamente; quien suba un CV así tiene el aviso al
+    momento para completarlo a tiempo."""
+    conn = get_connection()
+    corte = (datetime.datetime.utcnow() - datetime.timedelta(days=dias)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute("""
+        SELECT ca.id, ca.ruta
+        FROM candidato_archivos ca JOIN candidatos c ON c.id = ca.candidato_id
+        WHERE c.ia_extraida_en IS NOT NULL
+          AND ca.subido_en < ?
+          AND LOWER(ca.nombre_original) LIKE '%.pdf'
+    """, (corte,)).fetchall()
+    for row in rows:
+        if row["ruta"] and os.path.exists(row["ruta"]):
+            os.remove(row["ruta"])
+        conn.execute("DELETE FROM candidato_archivos WHERE id = ?", (row["id"],))
+    conn.commit()
+    conn.close()
+    return len(rows)
+
+
+_scheduler_purga_pdfs_started = False
+
+
+def start_scheduler_purga_pdfs():
+    """Arranca (una sola vez) el hilo en segundo plano que revisa cada 24h
+    si hay PDFs originales listos para purgar (ver
+    purgar_pdfs_originales_antiguos), empezando por una pasada inmediata al
+    arrancar el backend."""
+    global _scheduler_purga_pdfs_started
+    if _scheduler_purga_pdfs_started:
+        return
+    _scheduler_purga_pdfs_started = True
+
+    def _loop():
+        while True:
+            try:
+                n = purgar_pdfs_originales_antiguos()
+                if n:
+                    print(f"[reclutamiento] Purgados {n} PDF(s) original(es) de candidatos ya procesados (>{PURGA_PDF_ORIGINAL_DIAS} días).", flush=True)
+            except Exception as exc:
+                print(f"[reclutamiento] Fallo purgando PDFs originales antiguos: {exc}", flush=True)
+            time.sleep(24 * 60 * 60)
+
+    threading.Thread(target=_loop, daemon=True).start()
 
 
 def purgar_descartados(meses: int) -> int:

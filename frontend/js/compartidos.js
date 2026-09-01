@@ -1471,9 +1471,12 @@ function cerrarForm() {
   refrescarResaltadoAbierta();
 }
 
-function avisoExtraccionHTML(n) {
+function avisoExtraccionHTML(n, sinTexto = false) {
   const texto = `✓ ${n} candidato${n === 1 ? "" : "s"} extraído${n === 1 ? "" : "s"} del PDF. Revisa los datos antes de guardar.`;
-  return `<p class="extraccion-aviso local">${escapeHTML(texto)}</p>`;
+  const avisoSinTexto = sinTexto
+    ? `<p class="extraccion-aviso local">⚠️ Este PDF parece un CV escaneado como imagen (sin texto que se pueda leer) -- no se pudo sacar ningún dato. Rellena la ficha a mano.</p>`
+    : "";
+  return `<p class="extraccion-aviso local">${escapeHTML(texto)}</p>${avisoSinTexto}`;
 }
 
 function rellenarFormConCandidato(campos) {
@@ -1807,7 +1810,7 @@ async function procesarPdfNuevosCandidatos(file, avisoWrap, { vacantePreseleccio
   }
 
   if (candidatos.length === 1) {
-    avisoWrap.innerHTML = avisoExtraccionHTML(candidatos.length);
+    avisoWrap.innerHTML = avisoExtraccionHTML(candidatos.length, candidatos[0].sin_texto_extraible);
     rellenarFormConCandidato(candidatos[0]);
     document.getElementById("input-cv-nuevo").dataset.pendingUpload = "1";
     const selectVacante = document.getElementById("candidato-vacante-form");
@@ -1815,7 +1818,11 @@ async function procesarPdfNuevosCandidatos(file, avisoWrap, { vacantePreseleccio
     return;
   }
 
-  avisoWrap.innerHTML = `<p class="extraccion-aviso local">✓ ${candidatos.length} candidatos detectados.</p>`;
+  const nSinTexto = candidatos.filter((c) => c.sin_texto_extraible).length;
+  const avisoSinTexto = nSinTexto
+    ? `<p class="extraccion-aviso local">⚠️ ${nSinTexto} de ${candidatos.length} parece${nSinTexto === 1 ? "" : "n"} un CV escaneado como imagen (sin texto legible) -- revísalo(s) a mano.</p>`
+    : "";
+  avisoWrap.innerHTML = `<p class="extraccion-aviso local">✓ ${candidatos.length} candidatos detectados.</p>${avisoSinTexto}`;
   renderRevisionMultiple(candidatos, {
     file,
     rangosPaginas: data.division_disponible ? data.rangos_paginas : null,
@@ -1840,7 +1847,7 @@ async function reextraerCv(archivoId) {
     return;
   }
   const data = await resp.json();
-  avisoWrap.innerHTML = avisoExtraccionHTML(1);
+  avisoWrap.innerHTML = avisoExtraccionHTML(1, data.candidato.sin_texto_extraible);
   rellenarFormConCandidato(data.candidato);
   // Si el PDF adjunto es un lote con varias personas, la foto de la
   // "página 1" no tiene por qué ser la de esta ficha -- no se intenta sacar

@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import io
 import json
@@ -564,13 +565,21 @@ async def extraer_cv_route(file: UploadFile = File(...), _user: dict = Depends(r
         raise HTTPException(status_code=400, detail="Sube el CV en formato PDF")
     contenido = await file.read()
     try:
-        candidatos = cv_extraction.extraer_cv(contenido)
+        # asyncio.to_thread: extraer_cv es una función normal (bloqueante,
+        # de CPU) llamada dentro de una ruta async -- sin esto, mientras lee
+        # un PDF grande deja colgado el único hilo que atiende TODAS las
+        # peticiones de la app, no solo la de quien subió el archivo (ya
+        # pasó en producción con un patrón parecido, ver reextraer_todos_route
+        # más abajo). Corriéndolo en otro hilo, quien sube el PDF sigue
+        # esperando su propia respuesta igual, pero deja de bloquear a todo
+        # el mundo mientras tanto.
+        candidatos = await asyncio.to_thread(cv_extraction.extraer_cv, contenido)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     rangos = []
     if len(candidatos) > 1:
         try:
-            rangos = cv_extraction.detectar_paginas_por_candidato(contenido)
+            rangos = await asyncio.to_thread(cv_extraction.detectar_paginas_por_candidato, contenido)
         except Exception:
             rangos = []
     division_disponible = len(rangos) == len(candidatos)
@@ -597,11 +606,14 @@ async def adjuntar_pdf_lote_route(empresa: str = "kk", file: UploadFile = File(.
         raise HTTPException(status_code=400, detail="Sube el PDF con todos los candidatos")
     contenido = await file.read()
     try:
-        candidatos = cv_extraction.extraer_cv(contenido)
+        # Ver el mismo comentario en extraer_cv_route -- esto puede ser un
+        # PDF de hasta ~50 candidatos, el caso donde más tarda y más
+        # importa no bloquear al resto de la app mientras se procesa.
+        candidatos = await asyncio.to_thread(cv_extraction.extraer_cv, contenido)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     try:
-        rangos = cv_extraction.detectar_paginas_por_candidato(contenido)
+        rangos = await asyncio.to_thread(cv_extraction.detectar_paginas_por_candidato, contenido)
     except Exception:
         rangos = []
     division_disponible = len(rangos) == len(candidatos)
