@@ -165,7 +165,12 @@ def eliminar_tipo_route(tipo_clave: str, _user: dict = Depends(require_tipo_acce
 
 
 @router.get("/usuarios-para-compartir")
-def usuarios_para_compartir_route(_user: dict = Depends(require_informes_o_reclutamiento)):
+def usuarios_para_compartir_route(_user: dict = Depends(get_current_user)):
+    # Cualquiera logueado puede pedir esta lista (nombre/usuario/rol, nada
+    # sensible) -- hace falta también para un gerente sin módulo que
+    # comparte un candidato de su vacante con otro gerente (ver
+    # compartir_candidatos_route en reclutamiento_routes.py, que sí filtra
+    # de verdad qué candidatos puede compartir).
     conn = get_connection()
     rows = conn.execute("SELECT id, username, nombre, rol FROM usuarios ORDER BY nombre").fetchall()
     conn.close()

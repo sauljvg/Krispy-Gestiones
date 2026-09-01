@@ -416,11 +416,19 @@ def marcar_invitados_test_route(body: MarcarInvitadosTestIn, _user: dict = Depen
 
 
 @router.post("/candidatos/compartir")
-def compartir_candidatos_route(body: CompartirCandidatosIn, user: dict = Depends(require_informes_o_reclutamiento)):
+def compartir_candidatos_route(body: CompartirCandidatosIn, user: dict = Depends(get_current_user)):
+    """Ya no exige el módulo completo -- un gerente responsable de una
+    vacante (o al que le compartieron un candidato suelto) también puede
+    compartirlo con otro gerente, p.ej. para cubrirse mutuamente. Se filtra
+    con _candidatos_accesibles para que solo pueda compartir candidatos a
+    los que él mismo tiene acceso, nunca cualquiera de la base entera."""
     if not auth_module.usuario_existe(body.usuario_id):
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    reclutamiento_module.compartir_candidatos_directo(body.candidato_ids, body.usuario_id, user["username"])
-    return {"ok": True}
+    ids_accesibles = _candidatos_accesibles(user, body.candidato_ids)
+    if not ids_accesibles:
+        raise HTTPException(status_code=403, detail="No tienes acceso a ninguno de estos candidatos")
+    reclutamiento_module.compartir_candidatos_directo(ids_accesibles, body.usuario_id, user["username"])
+    return {"ok": True, "compartidos": len(ids_accesibles)}
 
 
 @router.delete("/candidatos/{candidato_id}/compartir/{usuario_id}")

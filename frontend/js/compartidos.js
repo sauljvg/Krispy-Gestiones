@@ -423,6 +423,10 @@ function wireCompartidosInteractivos(wrap) {
   if (btnDescargarPdfsCompartidos) {
     btnDescargarPdfsCompartidos.addEventListener("click", descargarPdfsCompartidosConmigo);
   }
+  const btnCompartirCompartidos = document.getElementById("btn-compartir-compartidos");
+  if (btnCompartirCompartidos) {
+    btnCompartirCompartidos.addEventListener("click", () => abrirModalCompartirCandidatos("compartidos-conmigo"));
+  }
   wireSeleccionCompartidos(wrap, {
     listaId: "compartidos-conmigo-lista",
     seleccionSet: compartidosConmigoSeleccionadosIds,
@@ -515,6 +519,7 @@ function candidatosCompartidosConmigoToolbarHTML(n) {
       <span class="staff-hint">${n} seleccionado${n === 1 ? "" : "s"}</span>
       <button type="button" id="btn-exportar-excel-compartidos" class="btn btn-primary" ${n === 0 ? "disabled" : ""}>📊 Exportar a Excel...</button>
       <button type="button" id="btn-descargar-pdfs-compartidos" class="btn btn-primary" ${n === 0 ? "disabled" : ""}>📄 Descargar PDFs</button>
+      <button type="button" id="btn-compartir-compartidos" class="btn btn-primary" ${n === 0 ? "disabled" : ""}>🔗 Compartir con...</button>
     </div>`;
 }
 
@@ -2164,8 +2169,18 @@ async function cambiarEstadoSeleccionados(estado) {
   await loadCandidatos();
 }
 
-async function abrirModalCompartirCandidatos() {
-  if (candidatosSeleccionadosIds.size === 0) return;
+let origenCompartirCandidatos = "grid";
+
+function _idsYCacheCompartir(origen) {
+  return origen === "compartidos-conmigo"
+    ? { ids: compartidosConmigoSeleccionadosIds, cache: compartidosConmigoCache }
+    : { ids: candidatosSeleccionadosIds, cache: ultimosCandidatosCargados };
+}
+
+async function abrirModalCompartirCandidatos(origen = "grid") {
+  const { ids } = _idsYCacheCompartir(origen);
+  if (ids.size === 0) return;
+  origenCompartirCandidatos = origen;
   if (usuariosParaCompartirCandidatos.length === 0) {
     usuariosParaCompartirCandidatos = await fetch(`${AUTH_API_BASE}/informes/usuarios-para-compartir`).then((r) => r.json());
   }
@@ -2182,7 +2197,8 @@ function cerrarModalCompartirCandidatos() {
 
 async function confirmarCompartirCandidatos() {
   const usuarioId = Number(document.getElementById("compartir-candidatos-usuario-select").value);
-  const ids = [...candidatosSeleccionadosIds];
+  const { ids: seleccionSet, cache } = _idsYCacheCompartir(origenCompartirCandidatos);
+  const ids = [...seleccionSet];
   if (!usuarioId || ids.length === 0) return;
   const usuario = usuariosParaCompartirCandidatos.find((u) => u.id === usuarioId);
   if (usuario) {
@@ -2193,7 +2209,7 @@ async function confirmarCompartirCandidatos() {
     // informa (probable duplicado sin querer).
     const mismoDestinatario = [];
     const otroDestinatario = [];
-    ultimosCandidatosCargados.forEach((c) => {
+    cache.forEach((c) => {
       if (!ids.includes(c.id)) return;
       const compartidos = c.compartidos || [];
       if (compartidos.length === 0) return;
@@ -2210,13 +2226,23 @@ async function confirmarCompartirCandidatos() {
     }
     if (partes.length && !(await pedirConfirmacion(`${partes.join(" ")}\n¿Continuar?`))) return;
   }
-  await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/compartir`, {
+  const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/compartir`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ candidato_ids: ids, usuario_id: usuarioId }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    mostrarAviso(err.detail || "No se pudo compartir.");
+    return;
+  }
   cerrarModalCompartirCandidatos();
-  deseleccionarTodosCandidatos();
+  if (origenCompartirCandidatos === "compartidos-conmigo") {
+    compartidosConmigoSeleccionadosIds.clear();
+    await loadCompartidos();
+  } else {
+    deseleccionarTodosCandidatos();
+  }
 }
 
 // Asignar en lote una solicitud (vacante) a los candidatos seleccionados --
@@ -2994,7 +3020,7 @@ async function initBaseCandidatos(user) {
   document.getElementById("btn-deseleccionar-todos-candidatos").addEventListener("click", deseleccionarTodosCandidatos);
   document.getElementById("btn-whatsapp-seleccionados").addEventListener("click", abrirCampanaWhatsappSeleccionados);
   document.getElementById("btn-mailto-seleccionados").addEventListener("click", abrirMailtoSeleccionados);
-  document.getElementById("btn-compartir-seleccionados").addEventListener("click", abrirModalCompartirCandidatos);
+  document.getElementById("btn-compartir-seleccionados").addEventListener("click", () => abrirModalCompartirCandidatos("grid"));
   document.getElementById("btn-compartir-candidatos-cancelar").addEventListener("click", cerrarModalCompartirCandidatos);
   document.getElementById("btn-compartir-candidatos-confirmar").addEventListener("click", confirmarCompartirCandidatos);
   document.getElementById("btn-asignar-vacante-seleccionados").addEventListener("click", () => abrirModalAsignarVacante("grid"));
