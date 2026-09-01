@@ -1425,6 +1425,58 @@ def usuario_tiene_acceso_candidato(usuario_id, candidato_id):
     return row is not None
 
 
+def candidatos_compartidos_con(usuario_id, empresa=None):
+    """Todos los candidatos a los que este usuario tiene acceso, por
+    CUALQUIERA de las tres vías de usuario_tiene_acceso_candidato (directo,
+    vía Informes, o por ser responsable de la vacante entera), como una
+    única lista de fichas completas -- mismo formato que list_candidatos,
+    con vacante_puesto/vacante_centro ya resueltos aparte (quien no tiene el
+    módulo completo no puede pedir /vacantes para resolverlo él mismo).
+    Antes esto eran dos listados con lógicas y formatos de tarjeta distintos
+    en Reclutamiento (uno agrupado por vacante con fichas completas, otro
+    agrupado por tanda con el formato de una respuesta de test) -- se
+    unifican aquí para que la pantalla de "Compartidos" sea una sola lista,
+    sin duplicar ni la consulta ni el pintado."""
+    conn = get_connection()
+    clausula_empresa = "AND c.empresa = ?" if empresa else ""
+    params_empresa = (empresa,) if empresa else ()
+    ids = set()
+    for row in conn.execute(f"""
+        SELECT c.id FROM candidato_compartidos cc JOIN candidatos c ON c.id = cc.candidato_id
+        WHERE cc.usuario_id = ? {clausula_empresa}
+    """, (usuario_id, *params_empresa)):
+        ids.add(row["id"])
+    for row in conn.execute(f"""
+        SELECT c.id FROM informe_compartidos ic JOIN candidatos c ON c.id = ic.candidato_id
+        WHERE ic.usuario_id = ? {clausula_empresa}
+    """, (usuario_id, *params_empresa)):
+        ids.add(row["id"])
+    for row in conn.execute(f"""
+        SELECT c.id FROM candidatos c JOIN vacante_compartidos vc ON vc.vacante_id = c.vacante_id
+        WHERE vc.usuario_id = ? {clausula_empresa}
+    """, (usuario_id, *params_empresa)):
+        ids.add(row["id"])
+    if not ids:
+        conn.close()
+        return []
+    marcadores = ",".join("?" * len(ids))
+    rows = conn.execute(f"""
+        SELECT c.*, json_extract(r.datos_json, '$.RESULTADO') AS test_resultado,
+               v.puesto AS vacante_puesto, v.centro AS vacante_centro
+        FROM candidatos c
+        LEFT JOIN informe_respuestas r ON r.id = c.respuesta_id
+        LEFT JOIN vacantes v ON v.id = c.vacante_id
+        WHERE c.id IN ({marcadores})
+        ORDER BY c.actualizado_en DESC
+    """, list(ids)).fetchall()
+    candidatos = [_row_to_dict(r) for r in rows]
+    mapa_compartidos = _compartidos_por_candidato(conn, [c["id"] for c in candidatos])
+    conn.close()
+    for c in candidatos:
+        c["compartidos"] = mapa_compartidos.get(c["id"], [])
+    return candidatos
+
+
 def candidatos_descartados_antiguos(meses: int):
     """Candidatos en estado 'descartado' que llevan más de `meses` sin
     actividad (actualizado_en) — la lista de lo que se borraría, para poder

@@ -240,6 +240,16 @@ def vacantes_compartidas_por_mi_route(empresa: str | None = None, user: dict = D
     return reclutamiento_module.get_vacantes_compartidas_por(user["username"], empresa=empresa)
 
 
+@router.get("/candidatos/compartidos-conmigo")
+def candidatos_compartidos_conmigo_route(empresa: str | None = None, user: dict = Depends(get_current_user)):
+    """Todos los candidatos a los que este usuario tiene acceso, por
+    cualquiera de las tres vías de compartir (directo, vía Informes, o
+    vacante entera) -- una única lista, para que "Compartidos" en
+    Reclutamiento sea una sola pantalla en vez de dos con formato distinto.
+    Accesible sin el módulo completo, igual que /vacantes-compartidas-conmigo."""
+    return reclutamiento_module.candidatos_compartidos_con(user["id"], empresa=empresa)
+
+
 @router.get("/candidatos")
 def list_candidatos_route(
     empresa: str | None = None,
