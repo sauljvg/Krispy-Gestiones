@@ -135,7 +135,7 @@ function candidatoWhatsappRowHTML(c, i) {
         <p>${escapeHTML(c.telefono || "Sin teléfono guardado")}</p>
       </div>
       ${tieneTelefono
-        ? `<a class="btn btn-ghost btn-whatsapp-campana" data-idx="${i}" data-candidato-id="${c.id}" target="_blank" rel="noopener">💬 Enviar</a>`
+        ? `<a class="btn btn-ghost btn-whatsapp-campana" data-idx="${i}" data-candidato-id="${c.id}" target="_blank" rel="noopener">${ICONO_WHATSAPP}Enviar</a>`
         : ""}
     </div>`;
 }
@@ -187,7 +187,7 @@ async function abrirCampanaWhatsapp(candidatos) {
   const wrap = document.getElementById("campana-whatsapp-wrap");
   wrap.innerHTML = `
     <div class="vacante-form">
-      <h3>💬 Mensaje por WhatsApp</h3>
+      <h3>${ICONO_WHATSAPP} Mensaje por WhatsApp</h3>
       <p class="staff-hint">
         Escribe el mensaje una sola vez — usa <code>{nombre}</code>, <code>{nombre_completo}</code>, <code>{mail}</code>,
         <code>{telefono}</code>, <code>{vacante}</code> o <code>{centro}</code> para insertar datos de cada candidato
@@ -201,7 +201,7 @@ async function abrirCampanaWhatsapp(candidatos) {
       <p class="staff-hint">${conTelefono} de ${candidatos.length} candidatos tienen teléfono guardado.</p>
       <div class="candidatos-grid">${candidatos.map(candidatoWhatsappRowHTML).join("")}</div>
       <div class="form-actions">
-        ${conTelefono ? `<button type="button" id="btn-whatsapp-enviar-todos" class="btn btn-primary">💬 Enviar a todos</button>` : ""}
+        ${conTelefono ? `<button type="button" id="btn-whatsapp-enviar-todos" class="btn btn-primary">${ICONO_WHATSAPP}Enviar a todos</button>` : ""}
         <button type="button" id="btn-cerrar-campana" class="btn btn-ghost">Cerrar</button>
       </div>
     </div>`;
@@ -380,7 +380,7 @@ function candidatoCardHTML(item, permitirDejarDeCompartir, permitirSeleccion) {
     ? `<a href="${AUTH_API_BASE}/informes/respuestas/${item.respuesta_id}/cv" target="_blank" rel="noopener" class="btn-mini">📄 Ver CV</a>`
     : "";
   const whatsappBtn = item.telefono
-    ? `<a class="btn-mini" href="https://wa.me/${numeroWhatsapp(item.telefono)}" target="_blank" rel="noopener">💬 WhatsApp</a>`
+    ? `<a class="btn-mini" href="https://wa.me/${numeroWhatsapp(item.telefono)}" target="_blank" rel="noopener">${ICONO_WHATSAPP}WhatsApp</a>`
     : "";
   const fichaBtn = candId
     ? `<button type="button" class="btn-mini candidato-abrir-ficha" data-candidato-id="${candId}">📋 Ver ficha completa</button>`
@@ -941,7 +941,7 @@ function vacanteFormHTML() {
       <p class="staff-hint" style="margin-top:-8px;">Un responsable ve TODOS los candidatos de esta solicitud, aunque se añadan después -- no hace falta compartirlos uno a uno.</p>` : ""}
       <div class="form-actions form-actions-compacta">
         <button type="button" id="btn-guardar-vacante" class="btn btn-primary">Guardar</button>
-        ${v && v.candidatos.length ? `<button type="button" id="btn-whatsapp-vacante" class="btn btn-ghost" title="Mensaje a los candidatos de esta vacante">💬 Mensaje</button>` : ""}
+        ${v && v.candidatos.length ? `<button type="button" id="btn-whatsapp-vacante" class="btn btn-ghost" title="Mensaje a los candidatos de esta vacante">${ICONO_WHATSAPP}Mensaje</button>` : ""}
         ${v ? `<button type="button" id="btn-fusionar-vacante" class="btn btn-ghost" title="Fusionar con otra solicitud...">🔗 Fusionar</button>` : ""}
         ${v ? `<button type="button" id="btn-archivar-vacante" class="btn btn-ghost">${v.archivada ? "📤 Desarchivar" : "🗄️ Archivar"}</button>` : ""}
         ${v ? `<button type="button" id="btn-eliminar-vacante" class="btn btn-ghost" title="Eliminar vacante">🗑 Eliminar</button>` : ""}
@@ -1577,7 +1577,7 @@ function renderForm() {
         <div class="form-actions">
           <button type="button" id="btn-guardar-candidato" class="btn btn-primary">Guardar</button>
           ${descargarCvBotonHTML}
-          ${esEdicion ? `<a class="btn btn-ghost" id="btn-whatsapp-candidato" href="https://wa.me/${numeroWhatsapp(candidatoEditando.telefono)}" target="_blank" rel="noopener" ${candidatoEditando.telefono ? "" : "hidden"}>💬 WhatsApp</a>` : ""}
+          ${esEdicion ? `<a class="btn btn-ghost" id="btn-whatsapp-candidato" href="https://wa.me/${numeroWhatsapp(candidatoEditando.telefono)}" target="_blank" rel="noopener" ${candidatoEditando.telefono ? "" : "hidden"}>${ICONO_WHATSAPP}WhatsApp</a>` : ""}
           ${esEdicion ? `<button type="button" id="btn-eliminar-candidato" class="btn btn-ghost">Eliminar</button>` : ""}
           <button type="button" id="btn-cerrar-form" class="btn btn-ghost">Cancelar</button>
         </div>
