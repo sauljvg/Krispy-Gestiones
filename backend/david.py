@@ -137,25 +137,56 @@ filas con checkbox y compartirlas con otro usuario del portal (pasan a su seccio
 mediante el boton "Compartir con...". Cada candidato puede tener un CV adjunto (ver o subir). Informes
 NO tiene boton de exportar PDF.
 
-## Reclutamiento (compartidos.html) -- lo ve cualquiera logueado, no depende de modulo
+## Reclutamiento (compartidos.html) -- lo ve cualquiera logueado, no depende de modulo (aunque tener
+el modulo Informes o Reclutamiento cambia MUCHO lo que se ve, ver mas abajo)
 
-Gestiona vacantes y candidatos propios (altas manuales, o candidatos que le hayan compartido desde
-Informes o desde aqui mismo). Boton "Nuevo candidato" para dar de alta uno a mano. Filtros de busqueda
-y por vacante.
+IMPORTANTE: esta pantalla tiene DOS VISTAS MUY DISTINTAS segun el usuario -- mira siempre el
+"Contexto de acceso" de mas abajo (dice cual de las dos le toca a quien pregunta) antes de explicar
+nada de Reclutamiento, y responde solo con la vista que le corresponde.
 
-Seleccion multiple: boton "Seleccion multiple" activa el modo (clic en una ficha la marca en vez de
-abrirla); aparece una barra con "Seleccionar todos" (marca TODOS los candidatos cargados en pantalla
-ahora mismo, respetando el filtro aplicado) y, si ya hay alguno marcado, "Quitar seleccion". Con
-candidatos marcados se puede: cambiar su estado en bloque (selector "Cambiar estado a..."), mandarles
-un mensaje de WhatsApp en grupo ("Mensaje por WhatsApp"), mandarles un correo a todos a la vez
-("Enviar email" -- abre el cliente de correo del propio usuario con todos los que tengan email
-guardado en copia oculta, igual que el recordatorio de Entrevista de Salida), o "Compartir con..."
-(elegir un usuario del portal y enviarselos).
+### Vista completa (con el modulo Informes o Reclutamiento) -- RRHH, admin...
 
-Seccion "Compartidos": tiene dos partes. "Compartidos conmigo" -- candidatos que otras personas le han
-compartido a este usuario. "Compartidos por ti" -- candidatos que este usuario ha compartido con
-otros, agrupados por tanda y destinatario; cada candidato tiene ahi un boton "Dejar de compartir" para
-quitarle el acceso a ESE destinatario en concreto (no borra el candidato, solo dejan de verlo).
+"Vacantes": boton "+ Nueva vacante" (Puesto, Centro, notas, y opcionalmente subir ya el CV de una
+persona o un PDF con varios juntos para crearla con candidatos dentro). Cada tarjeta muestra cuantos
+dias lleva abierta y cuantos candidatos tiene. Al abrir una vacante: "Guardar", "Mensaje" (WhatsApp a
+todos sus candidatos de golpe), "Fusionar" con otra solicitud, "Archivar"/"Desarchivar", "Eliminar",
+y anadir mas "Responsables" (gerentes que veran TODOS los candidatos de esa vacante, incluidos los que
+se anadan despues, sin compartirlos uno a uno).
+
+"Base de candidatos": buscador (nombre, telefono, email o puesto), filtro por vacante y por estado,
+"+ Nuevo candidato", "Buscar tests ya respondidos" (reintenta enlazar respuestas de test sueltas con
+fichas sin enlace), "Adjuntar PDF a fichas existentes" (un PDF con varios CVs que ya se uso para crear
+esas fichas, reparte cada recorte por nombre sin duplicar a nadie), "Reextraer CV filtrados" (vuelve a
+leer el CV YA guardado de los candidatos que coinciden con el filtro puesto ahora mismo, NO de toda la
+base -- para cuando mejora el lector de CVs y solo hace falta refrescar a unos cuantos), "Recordatorio
+a pendientes" (WhatsApp solo a quien tiene un test invitado sin responder todavia). Con candidatos
+marcados (checkbox en cada ficha): "Seleccionar todos"/"Quitar seleccion", "Cambiar estado a...",
+mensaje de WhatsApp en grupo, "Enviar email" (un unico correo con todos los que tengan email guardado
+en copia oculta -- BCC -- que abre el cliente de correo del propio usuario, igual que el recordatorio
+de Entrevista de Salida; NO se personaliza por persona, ese cuerpo lo ve todo el mundo igual), "Compartir
+con..." (elegir un usuario del portal), "Asignar a solicitud..." (vacante), "Exportar a Excel..." y
+"Descargar PDFs..." (fusiona el CV de cada seleccionado en un solo PDF, en el orden en que se marcaron).
+
+Debajo, "Compartidos conmigo" (candidatos que otras personas te han compartido A TI, misma lista y
+misma barra de herramientas -- Seleccionar todos, Quitar seleccion, Exportar a Excel, Descargar PDFs --
+que la vista reducida de gerente descrita abajo) y, si alguna vez has compartido algo, "Compartidos por
+ti" (lo que TU has compartido con otros, agrupado por tanda y destinatario, con boton "Dejar de
+compartir" por candidato para quitarle el acceso a ESE destinatario en concreto sin borrar la ficha).
+
+### Vista reducida de gerente/area manager (SIN el modulo, solo le comparten candidatos sueltos o una
+vacante entera)
+
+No ve "Vacantes" ni "Base de candidatos" -- solo una seccion, "Compartidos conmigo": un buscador
+(nombre, telefono, email o puesto) y la lista de TODOS los candidatos a los que tiene acceso (por
+vacante compartida entera, o candidatos sueltos), agrupada por vacante ("Sin vacante asignada" para
+los sueltos al final). IMPORTANTE: solo se ven los candidatos que RRHH ya marco con el estado
+"Entrevistado" (la senal de que estan listos para que el gerente los cite) -- los que siguen
+"Pendiente" (o cualquier otro estado) NO aparecen todavia, aunque ya esten en el proceso; si hay
+alguno asi, se avisa cuantos son sin listarlos ("X candidatos mas en el proceso, sin marcar
+'Entrevistado' todavia"). Cada ficha tiene su propio checkbox (siempre visible, no hace falta activar
+ningun modo) y un desplegable "Sin contactar"/"Contactado"/"Respondio" para marcar el seguimiento; con
+candidatos marcados: "Seleccionar todos", "Quitar seleccion", "Exportar a Excel...", "Descargar PDFs".
+Clic en la ficha (fuera del checkbox) abre su detalle completo.
 
 ## Usuarios (usuarios.html) -- solo rol admin
 
@@ -213,10 +244,34 @@ def _texto_acceso(modulos_usuario: list[str]) -> str:
     """Bloque de contexto POR PETICION (no forma parte del SYSTEM_PROMPT
     fijo porque depende de quien pregunta) que le dice a David exactamente
     a que tiene acceso ESTE usuario en concreto, para que no explique pasos
-    de una seccion que la persona ni siquiera puede abrir."""
-    permitidos = ["Reclutamiento (esto lo puede usar cualquier persona logueada)"]
-    permitidos += [nombre for clave, nombre in auth_module.MODULOS.items() if clave in modulos_usuario]
-    denegados = [nombre for clave, nombre in auth_module.MODULOS.items() if clave not in modulos_usuario]
+    de una seccion que la persona ni siquiera puede abrir -- incluye cual de
+    las dos vistas de Reclutamiento le toca (ver CONOCIMIENTO_PORTAL), algo
+    que antes no se distinguia y hacia que David le explicara a un gerente
+    botones de la vista completa (Vacantes, Base de candidatos...) que ese
+    gerente ni siquiera puede ver."""
+    tiene_reclutamiento_completo = any(
+        m in modulos_usuario for m in ("informes", "saona_informes", "reclutamiento", "saona_reclutamiento")
+    )
+    vista_reclutamiento = (
+        "vista COMPLETA (Vacantes + Base de candidatos + Compartidos)"
+        if tiene_reclutamiento_completo
+        else "vista REDUCIDA de gerente/area manager (solo Compartidos conmigo, filtrado a candidatos 'Entrevistado')"
+    )
+    # "reclutamiento"/"saona_reclutamiento" se excluyen del listado generico de
+    # abajo -- ya se explican aparte con vista_reclutamiento arriba, listarlos
+    # tambien ahi podia sonar contradictorio (aparecer en "SI tiene acceso" Y
+    # en "NO tiene acceso" a la vez si el usuario entra por el modulo Informes
+    # en vez del propio Reclutamiento).
+    modulos_reclutamiento = {"reclutamiento", "saona_reclutamiento"}
+    permitidos = [f"Reclutamiento (cualquier persona logueada lo ve, pero a ESTE usuario le toca la {vista_reclutamiento})"]
+    permitidos += [
+        nombre for clave, nombre in auth_module.MODULOS.items()
+        if clave in modulos_usuario and clave not in modulos_reclutamiento
+    ]
+    denegados = [
+        nombre for clave, nombre in auth_module.MODULOS.items()
+        if clave not in modulos_usuario and clave not in modulos_reclutamiento
+    ]
 
     texto = (
         "Contexto de acceso de ESTE usuario en el portal ahora mismo (esto puede ser distinto para "
