@@ -57,6 +57,18 @@ def require_acceso_candidato(candidato_id: int, user: dict = Depends(get_current
     raise HTTPException(status_code=403, detail="No tienes acceso a este candidato")
 
 
+def _candidatos_accesibles(user: dict, candidato_ids: list[int]) -> list[int]:
+    """Mismo criterio que require_acceso_candidato pero para una LISTA de
+    ids de golpe (acciones en lote: exportar Excel, descargar PDFs...) --
+    quien tiene el módulo completo pasa todos tal cual; quien no, se queda
+    solo con los que de verdad le compartieron (en vez de un 403 en bloque,
+    que le bloquearía también los que sí puede ver)."""
+    modulos = ("informes", "saona_informes", "reclutamiento", "saona_reclutamiento")
+    if any(auth_module.tiene_modulo(user, m) for m in modulos):
+        return candidato_ids
+    return [cid for cid in candidato_ids if reclutamiento_module.usuario_tiene_acceso_candidato(user["id"], cid)]
+
+
 class VacanteIn(BaseModel):
     empresa: str = "kk"
     puesto: str
@@ -297,13 +309,7 @@ def exportar_excel_route(body: ExportarExcelIn, user: dict = Depends(get_current
     # (un gerente al que solo le comparten fichas, ver require_acceso_candidato)
     # -- así que en vez de bloquear a quien no tiene el módulo, se filtran en
     # silencio los ids a los que de verdad tiene acceso, y se exporta solo esos.
-    if auth_module.tiene_modulo(user, "informes") or auth_module.tiene_modulo(user, "saona_informes"):
-        candidato_ids = body.candidato_ids
-    else:
-        candidato_ids = [
-            cid for cid in body.candidato_ids
-            if reclutamiento_module.usuario_tiene_acceso_candidato(user["id"], cid)
-        ]
+    candidato_ids = _candidatos_accesibles(user, body.candidato_ids)
     filas = reclutamiento_module.exportar_candidatos(candidato_ids, body.columnas)
     contenido = rows_to_xlsx(filas)
     return Response(
@@ -994,20 +1000,25 @@ class DescargarPdfsLoteBody(BaseModel):
 
 
 @router.post("/candidatos/descargar-pdfs-lote")
-def descargar_pdfs_lote_route(body: DescargarPdfsLoteBody, _user: dict = Depends(require_informes_o_reclutamiento)):
+def descargar_pdfs_lote_route(body: DescargarPdfsLoteBody, user: dict = Depends(get_current_user)):
     """Un único PDF con el CV de cada candidato seleccionado (el mismo que
     saldría en /cv.pdf para cada uno -- diseño propio o recorte original,
     lo que toque) fusionado en el orden EXACTO en que se pasan los ids, que
-    es el orden en que el reclutador los fue marcando en el listado -- así
-    el PDF final sale ordenado igual que la selección, sin que haya que
-    reordenar nada a mano después de descargarlo."""
+    es el orden en que se fueron marcando en el listado -- así el PDF final
+    sale ordenado igual que la selección, sin que haya que reordenar nada a
+    mano después de descargarlo. Mismo criterio que exportar_excel_route:
+    quien no tiene el módulo completo (un gerente con candidatos sueltos
+    compartidos) se queda solo con los ids a los que de verdad tiene
+    acceso, en vez de un 403 en bloque -- así puede descargar los CV de
+    quien le compartieron para entrevistar."""
     from pypdf import PdfReader, PdfWriter
 
-    if not body.candidato_ids:
+    candidato_ids = _candidatos_accesibles(user, body.candidato_ids)
+    if not candidato_ids:
         raise HTTPException(status_code=400, detail="No se ha seleccionado ningún candidato")
     writer = PdfWriter()
     omitidos = []
-    for candidato_id in body.candidato_ids:
+    for candidato_id in candidato_ids:
         resultado = _cv_pdf_bytes(candidato_id)
         if resultado is None:
             candidato = reclutamiento_module.get_candidato(candidato_id)
