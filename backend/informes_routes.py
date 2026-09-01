@@ -7,10 +7,36 @@ from pydantic import BaseModel
 
 import auth as auth_module
 import informes as informes_module
+import reclutamiento as reclutamiento_module
 from auth_routes import get_current_user
 from db import get_connection
 
 router = APIRouter()
+
+
+def _modulos_informes_empresa(empresa: str | None) -> tuple[str, ...]:
+    """Igual que require_tipo_acceso resuelve la empresa desde el tipo, pero
+    reutilizable para candidatos/respuestas sueltos -- el módulo de KK no
+    debe dar acceso a compartir/descargar/reasignar nada de Saona, y
+    viceversa. Se acepta también el módulo de Reclutamiento de esa misma
+    empresa porque estas rutas las reutiliza compartidos.js."""
+    if empresa == "saona":
+        return ("saona_informes", "saona_reclutamiento")
+    return ("informes", "reclutamiento")
+
+
+def _exigir_modulo_informes_empresa(empresa: str | None, user: dict) -> None:
+    if empresa is not None and not any(auth_module.tiene_modulo(user, m) for m in _modulos_informes_empresa(empresa)):
+        raise HTTPException(status_code=403, detail="No tienes acceso a Informes/Reclutamiento de esa empresa")
+
+
+def _exigir_dueno_del_compartido(compartido_por: str | None, user: dict) -> None:
+    """Solo quien compartió originalmente (o un admin) puede quitarlo o
+    reasignarlo a otra persona -- si no, cualquiera con acceso al módulo
+    podría robarle a otro compañero un candidato que compartió con un
+    tercero."""
+    if compartido_por is not None and compartido_por != user["username"] and user.get("rol") != "admin":
+        raise HTTPException(status_code=403, detail="Solo quien lo compartió (o un admin) puede hacer este cambio")
 
 
 def require_informes(user: dict = Depends(get_current_user)) -> dict:
@@ -264,18 +290,36 @@ def descargar_cv_route(respuesta_id: int, user: dict = Depends(get_current_user)
 
 @router.post("/compartir")
 def compartir_route(body: CompartirBody, user: dict = Depends(require_informes)):
+    for rid in body.respuesta_ids:
+        empresa = informes_module.get_empresa_respuesta(rid)
+        if empresa is None:
+            raise HTTPException(status_code=404, detail=f"Respuesta no encontrada: {rid}")
+        _exigir_modulo_informes_empresa(empresa, user)
     informes_module.compartir_respuestas(body.respuesta_ids, body.usuario_id, user["username"])
     return {"ok": True}
 
 
 @router.delete("/compartir/{respuesta_id}/{usuario_id}")
-def dejar_de_compartir_route(respuesta_id: int, usuario_id: int, _user: dict = Depends(require_informes)):
+def dejar_de_compartir_route(respuesta_id: int, usuario_id: int, user: dict = Depends(require_informes)):
+    _exigir_modulo_informes_empresa(informes_module.get_empresa_respuesta(respuesta_id), user)
+    _exigir_dueno_del_compartido(informes_module.get_informe_compartido_por(respuesta_id, usuario_id), user)
     informes_module.dejar_de_compartir(respuesta_id, usuario_id)
     return {"ok": True}
 
 
 @router.put("/compartidos-por-mi/destinatario")
-def cambiar_destinatario_route(body: CambiarDestinatarioBody, _user: dict = Depends(require_informes_o_reclutamiento)):
+def cambiar_destinatario_route(body: CambiarDestinatarioBody, user: dict = Depends(require_informes_o_reclutamiento)):
     items = [it.model_dump() for it in body.items]
+    for it in items:
+        if it["tipo"] == "directo":
+            _exigir_modulo_informes_empresa(reclutamiento_module.get_empresa_candidato(it["candidato_id"]), user)
+            _exigir_dueno_del_compartido(
+                reclutamiento_module.get_candidato_compartido_por(it["candidato_id"], it["usuario_id_actual"]), user
+            )
+        else:
+            _exigir_modulo_informes_empresa(informes_module.get_empresa_respuesta(it["respuesta_id"]), user)
+            _exigir_dueno_del_compartido(
+                informes_module.get_informe_compartido_por(it["respuesta_id"], it["usuario_id_actual"]), user
+            )
     informes_module.cambiar_destinatario_compartidos(items, body.nuevo_usuario_id)
     return {"ok": True}

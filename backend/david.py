@@ -20,15 +20,22 @@ crea su propio PIN de 4 digitos (con "Repite el PIN"). Tras 5 fallos, la cuenta 
 Home (index.html) tiene una tarjeta propia y directa por cada modulo: "Resenas" (reviews.html),
 "Informes" (informes.html), "Clima Laboral" (clima.html, una landing con 2 tarjetas propias --
 "Test" y "Informes", ver mas abajo), "Entrevista de Salida" (entrevistas.html),
-"Reclutamiento" (compartidos.html, visible para cualquiera, no depende de modulo), "Boletines"
-(boletines.html), "Test" (tests.html), "Perfil DISC" (disc_form.html), y "SAONA" (si tiene algun
-modulo saona_* o es admin). IMPORTANTE: "Informes" y "Entrevista de Salida" son DOS TARJETAS
+"Reclutamiento" (compartidos.html), "Test" (tests.html), "Perfil DISC" (disc_form.html),
+"Agregadores" (agregadores.html), "Evaluaciones 360°" (evaluaciones360.html), y "SAONA" (si tiene
+algun modulo saona_* o es admin). IMPORTANTE: "Informes" y "Entrevista de Salida" son DOS TARJETAS
 DISTINTAS que llevan a DOS PAGINAS DISTINTAS (informes.html no tiene nada de Entrevista de Salida) --
 solo comparten el mismo permiso de acceso por detras (el modulo "informes"), pero para entrar a
 Entrevista de Salida se pulsa DIRECTAMENTE su propia tarjeta "Entrevista de Salida" en el Home, nunca
-hay que pasar antes por la tarjeta "Informes". El menu con tres lineas (arriba a la derecha) tiene
-"Ajustes" (solo admin, gestion de usuarios), "Cambiar tema" y "Salir". El boton de casa vuelve al
-Home, la flecha atras vuelve a la pagina anterior.
+hay que pasar antes por la tarjeta "Informes". La tarjeta "Reclutamiento" aparece con el modulo
+Informes o el modulo Reclutamiento (de cualquiera de las dos empresas que tenga) -- si alguien tiene
+SOLO un candidato o una vacante compartida suelta, sin ninguno de esos modulos, hoy esa tarjeta NO le
+aparece en el Home (tendria que guardarse el enlace a compartidos.html a mano); si pregunta por que no
+encuentra el candidato que le compartieron, es esto, no un fallo suyo. Hay tambien una tarjeta
+"Boletines" en el HTML pero esta oculta a proposito para todo el mundo por ahora (decision del
+negocio, no un fallo) -- si alguien pregunta por Boletines, la pagina y sus datos siguen ahi, solo no
+hay tarjeta en el Home para entrar. El menu con tres lineas (arriba a la derecha) tiene "Ajustes"
+(solo admin, gestion de usuarios), "Cambiar tema" y "Salir". El boton de casa vuelve al Home, la
+flecha atras vuelve a la pagina anterior.
 
 SAONA (saona.html) es el mismo hub pero para la marca Saona: Informes, Clima Laboral, Entrevista de
 Salida y Reclutamiento llevan el parametro ?empresa=saona en la URL, que es lo que separa esos datos
@@ -43,6 +50,60 @@ sentimiento, fecha, texto/autor y orden, con "Limpiar filtros". Graficas: Timeli
 estrellas, Horario de resenas (boton "Mostrar"). Barra lateral: Ranking de Krispy Team (clic en un
 nombre filtra sus resenas), Ranking de tiendas (boton "Excel" para importar datos de transacciones
 por tienda/mes), Valoracion media por tienda.
+
+Solo admin: boton "Gestionar personal" abre un panel aparte para el personal cuyo nombre se busca
+dentro del texto de las resenas (lo que alimenta el Ranking de Krispy Team) -- alta manual, editar
+sus variantes de nombre ("Sugerir variantes" lo hace con IA a partir del nombre), marcar salida o
+traslado de tienda, y fusionar dos fichas duplicadas de la misma persona en una sola.
+
+## Agregadores (agregadores.html)
+
+Mapa de cobertura de reparto a domicilio en JustEat, Glovo y Uber Eats: comprueba automaticamente,
+tienda por tienda, si cada punto del mapa esta disponible en cada agregador ahora mismo. Filtros por
+agregador (botones "Todos"/"JustEat"/"Glovo"/"Uber Eats") y por dia ("Dia" + "Ver ese dia" para ver
+como estaba la cobertura en un momento pasado, "Volver a ahora mismo" para quitar ese filtro).
+Herramientas para editar el mapa: "Anadir punto", "Unir puntos" (cuando dos puntos son en realidad el
+mismo sitio) y "Pincel: rellenar hueco" (copia el estado de un punto ya comprobado a varios puntos
+cercanos de golpe).
+
+Debajo del mapa: "Ultimos chequeos" (tabla en vivo de cada comprobacion individual, con "Mostrar
+detalles correctos" para ver tambien los que SI estaban disponibles, no solo los fallos), "Resumen
+(24h)" (disponible / no disponible / fallo tecnico, por agregador), "Alertas (24h)" y "Dejaron de
+estar disponibles (24h)". El boton "Dashboard del scraper" (arriba) muestra el progreso en vivo de
+las rondas de comprobacion automaticas: cuando empezaron, cuantas tiendas llevan hechas.
+
+## Evaluaciones 360° (evaluaciones360.html)
+
+Cualquiera con el modulo ve la pestana "Mis evaluaciones": lo que le han asignado evaluar y sigue sin
+responder (escala de 5 niveles + "N/A" para lo que no le corresponda valorar), con "Enviar
+evaluacion" al terminar o "Guardar y salir mas tarde" para continuar despues. Las respuestas son
+anonimas para la persona evaluada.
+
+SOLO el rol admin ve ademas cuatro pestanas de gestion (a cualquier otro rol ni le aparecen, y el
+backend rechaza igualmente si intenta llamarlas por su cuenta):
+
+"Organigrama": arbol de puestos y personas -- arrastrar una caja sobre otra cambia a quien reporta,
+arrastrar el fondo vacio mueve la vista. "+ Nuevo puesto" / "+ Nueva persona" (una persona puede tener
+mas de un puesto a la vez, y opcionalmente una cuenta de portal vinculada para que le aparezcan sus
+evaluaciones al entrar). "Reparar organigrama" corrige de golpe los puestos que no coinciden con quien
+reporta a quien.
+
+"Campanas": "+ Nueva campana" (Nombre, Periodo desde/hasta). Dentro de una campana en borrador:
+"+ Anadir evaluados" (elegir a quien se evalua) y "Lanzar campana" (genera automaticamente quien
+evalua a quien: su jefe, sus companeros con el mismo jefe, y sus reportes). Con la campana ya
+lanzada: "Cerrar campana" / "Reabrir campana", "Recordatorio" (como en Entrevista de Salida, abre un
+correo -mailto- a quien le falte responder) y "Eliminar campana". Los resultados agregados (pestanas
+"Por persona" / "Por puesto de trabajo") solo se ven, y solo el admin los ve, cuando la campana ya no
+esta en borrador -- hoy no hay boton para exportarlos a PDF.
+
+"Preguntas": banco de preguntas comun a todas las campanas, "+ Nueva pregunta", los cambios de texto
+se guardan solos al salir del campo.
+
+"Accesos": todas las personas del organigrama, tengan o no cuenta de portal ya creada -- usuario y
+PIN se editan aqui mismo (se sincronizan con Ajustes -> Usuarios). "Autocompletar emails que faltan"
+y "Crear todos los accesos que faltan" (crea, para quien todavia no tiene cuenta, una con rol
+"colaborador" y UNICAMENTE el modulo Evaluaciones 360° -- es la forma de que alguien que no usa el
+resto del portal pueda entrar solo a responder sus evaluaciones).
 
 ## Test (tests.html) -- encuestas propias con enlace publico
 
@@ -217,8 +278,10 @@ de candidatos descartados por antiguedad (retencion de datos de Reclutamiento).
 
 ## Roles y modulos (quien puede ver que)
 
-Roles: admin (tiene TODO, sin excepcion), rrhh, director_operaciones, area_manager, gerente -- el rol
-es solo una etiqueta de puesto, NO da acceso por si solo (salvo admin).
+Roles: admin (tiene TODO, sin excepcion), rrhh, director_operaciones, area_manager, gerente,
+colaborador (cuentas creadas desde Evaluaciones 360° > Accesos para gente que solo entra a responder
+sus evaluaciones, con unicamente ese modulo) -- el rol es solo una etiqueta de puesto, NO da acceso
+por si solo (salvo admin).
 Modulos que se marcan por checkbox al crear/editar un usuario: Resenas, Informes (incluye Entrevista
 de Salida), Clima Laboral, Boletines, Test, Perfil DISC, y sus equivalentes SAONA (SAONA Resenas,
 SAONA Informes, SAONA Clima Laboral). Reclutamiento no depende de ningun modulo, lo ve cualquiera

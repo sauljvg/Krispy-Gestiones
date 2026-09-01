@@ -781,6 +781,31 @@ def get_respuesta(respuesta_id):
     return dict(row) if row else None
 
 
+def get_empresa_respuesta(respuesta_id):
+    """A qué empresa (kk/saona) pertenece esta respuesta, vía su tipo --
+    para comprobar permisos por marca antes de compartir/descargar."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT t.empresa FROM informe_respuestas r JOIN informe_tipos t ON t.id = r.tipo_id WHERE r.id = ?",
+        (respuesta_id,),
+    ).fetchone()
+    conn.close()
+    return row["empresa"] if row else None
+
+
+def get_informe_compartido_por(respuesta_id, usuario_id):
+    """Quién compartió esta respuesta con este destinatario en concreto --
+    para comprobar que solo esa misma persona (o un admin) puede quitarle
+    el acceso o reasignarlo a otro."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT compartido_por FROM informe_compartidos WHERE respuesta_id = ? AND usuario_id = ?",
+        (respuesta_id, usuario_id),
+    ).fetchone()
+    conn.close()
+    return row["compartido_por"] if row else None
+
+
 def guardar_cv(respuesta_id, archivo_nombre, contenido):
     respuesta = get_respuesta(respuesta_id)
     if respuesta is None:

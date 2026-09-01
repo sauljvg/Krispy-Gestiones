@@ -56,6 +56,22 @@ def require_entrevistas_oleada(oleada_id: int, user: dict = Depends(get_current_
     return user
 
 
+def _exigir_misma_oleada(oleada_id: int, salida_id: int | None = None, respuesta_id: int | None = None) -> None:
+    """El permiso de arriba (require_entrevistas_oleada) solo valida la
+    oleada que viene en la URL -- esto comprueba que la salida/respuesta
+    concreta que se va a editar o borrar sea REALMENTE de esa oleada, para
+    que no se pueda tocar un registro de otra oleada (y por tanto de otra
+    empresa) pasando su id aunque la URL diga una oleada permitida."""
+    if salida_id is not None:
+        real = entrevistas_module.get_oleada_de_salida(salida_id)
+        if real is not None and real != oleada_id:
+            raise HTTPException(status_code=403, detail="Esta salida no pertenece a esta oleada")
+    if respuesta_id is not None:
+        real = entrevistas_module.get_oleada_de_respuesta(respuesta_id)
+        if real is not None and real != oleada_id:
+            raise HTTPException(status_code=403, detail="Esta respuesta no pertenece a esta oleada")
+
+
 @router.get("/oleadas")
 def list_oleadas_route(empresa: str = "kk", _user: dict = Depends(require_entrevistas)):
     return entrevistas_module.list_oleadas(empresa)
@@ -121,12 +137,14 @@ def crear_salida_route(oleada_id: int, body: SalidaIn, _user: dict = Depends(req
 
 @router.delete("/{oleada_id}/salidas/{salida_id}")
 def borrar_salida_route(oleada_id: int, salida_id: int, _user: dict = Depends(require_entrevistas_oleada)):
+    _exigir_misma_oleada(oleada_id, salida_id=salida_id)
     entrevistas_module.delete_salida(salida_id)
     return {"ok": True}
 
 
 @router.patch("/{oleada_id}/salidas/{salida_id}/email")
 def actualizar_salida_email_route(oleada_id: int, salida_id: int, body: SalidaEmailIn, _user: dict = Depends(require_entrevistas_oleada)):
+    _exigir_misma_oleada(oleada_id, salida_id=salida_id)
     try:
         entrevistas_module.update_salida_email(salida_id, body.email)
     except ValueError as exc:
@@ -136,6 +154,7 @@ def actualizar_salida_email_route(oleada_id: int, salida_id: int, body: SalidaEm
 
 @router.patch("/{oleada_id}/salidas/{salida_id}/motivo")
 def actualizar_salida_motivo_route(oleada_id: int, salida_id: int, body: SalidaMotivoIn, _user: dict = Depends(require_entrevistas_oleada)):
+    _exigir_misma_oleada(oleada_id, salida_id=salida_id)
     try:
         entrevistas_module.update_salida_motivo(salida_id, body.motivo)
     except ValueError as exc:
@@ -145,18 +164,21 @@ def actualizar_salida_motivo_route(oleada_id: int, salida_id: int, body: SalidaM
 
 @router.post("/{oleada_id}/matches")
 def crear_match_route(oleada_id: int, body: MatchIn, _user: dict = Depends(require_entrevistas_oleada)):
+    _exigir_misma_oleada(oleada_id, salida_id=body.salida_id, respuesta_id=body.respuesta_id)
     entrevistas_module.set_match_manual(body.respuesta_id, body.salida_id)
     return {"ok": True}
 
 
 @router.delete("/{oleada_id}/matches/{respuesta_id}")
 def borrar_match_route(oleada_id: int, respuesta_id: int, _user: dict = Depends(require_entrevistas_oleada)):
+    _exigir_misma_oleada(oleada_id, respuesta_id=respuesta_id)
     entrevistas_module.quitar_match_manual(respuesta_id)
     return {"ok": True}
 
 
 @router.delete("/{oleada_id}/respuestas/{respuesta_id}")
 def borrar_respuesta_route(oleada_id: int, respuesta_id: int, _user: dict = Depends(require_entrevistas_oleada)):
+    _exigir_misma_oleada(oleada_id, respuesta_id=respuesta_id)
     entrevistas_module.borrar_respuesta(respuesta_id)
     return {"ok": True}
 
@@ -168,6 +190,7 @@ def list_respuestas_route(oleada_id: int, centro: str | None = None, _user: dict
 
 @router.patch("/{oleada_id}/respuestas/{respuesta_id}/motivo")
 def update_motivo_route(oleada_id: int, respuesta_id: int, body: MotivoIn, _user: dict = Depends(require_entrevistas_oleada)):
+    _exigir_misma_oleada(oleada_id, respuesta_id=respuesta_id)
     if not body.motivo.strip():
         raise HTTPException(status_code=400, detail="El motivo no puede estar vacío")
     try:
@@ -179,6 +202,7 @@ def update_motivo_route(oleada_id: int, respuesta_id: int, body: MotivoIn, _user
 
 @router.patch("/{oleada_id}/respuestas/{respuesta_id}/centro")
 def update_centro_route(oleada_id: int, respuesta_id: int, body: CentroIn, _user: dict = Depends(require_entrevistas_oleada)):
+    _exigir_misma_oleada(oleada_id, respuesta_id=respuesta_id)
     if not body.centro.strip():
         raise HTTPException(status_code=400, detail="El centro no puede estar vacío")
     try:

@@ -42,31 +42,80 @@ def _nombre_archivo_cv(candidato: dict) -> str:
     return f"{base}.pdf"
 
 
+_MODULOS_RECLUTAMIENTO_TODOS = ("informes", "saona_informes", "reclutamiento", "saona_reclutamiento")
+
+
+def _modulos_para_empresa(empresa: str | None) -> tuple[str, ...]:
+    """KK y Saona tienen cada una su propio par de módulos (Informes +
+    Reclutamiento) -- tener el de una marca no debe dar acceso a los datos
+    de la otra. Si no se conoce la empresa (recurso inexistente), se cae al
+    conjunto amplio para no convertir un 404 en un 403 confuso."""
+    if empresa == "saona":
+        return ("saona_informes", "saona_reclutamiento")
+    if empresa == "kk":
+        return ("informes", "reclutamiento")
+    return _MODULOS_RECLUTAMIENTO_TODOS
+
+
+def _exigir_modulo_empresa(empresa: str | None, user: dict) -> None:
+    """Para rutas donde la empresa la manda el propio cliente (crear
+    candidato/vacante, filtros y acciones en lote por empresa)."""
+    if not any(auth_module.tiene_modulo(user, m) for m in _modulos_para_empresa(empresa)):
+        raise HTTPException(status_code=403, detail="No tienes acceso a Reclutamiento de esa empresa")
+
+
 def require_acceso_candidato(candidato_id: int, user: dict = Depends(get_current_user)) -> dict:
     """A diferencia de require_informes_o_reclutamiento (para la sección
     propia de Reclutamiento), esto también deja pasar a quien no tiene
     ninguno de esos módulos pero SÍ recibió justo este candidato compartido
     — mismo espíritu que /informes/compartidos (get_current_user a secas)
     para que un gerente o area manager pueda abrir la ficha completa que le
-    compartieron, no solo la tarjeta resumen."""
-    modulos = ("informes", "saona_informes", "reclutamiento", "saona_reclutamiento")
-    if any(auth_module.tiene_modulo(user, m) for m in modulos):
+    compartieron, no solo la tarjeta resumen. El módulo que vale es el de la
+    empresa REAL del candidato, no "cualquiera de los cuatro" -- si no, KK y
+    Saona se ven las fichas de la otra marca entre sí."""
+    empresa = reclutamiento_module.get_empresa_candidato(candidato_id)
+    if any(auth_module.tiene_modulo(user, m) for m in _modulos_para_empresa(empresa)):
         return user
     if reclutamiento_module.usuario_tiene_acceso_candidato(user["id"], candidato_id):
         return user
     raise HTTPException(status_code=403, detail="No tienes acceso a este candidato")
 
 
+def require_modulo_candidato(candidato_id: int, user: dict = Depends(get_current_user)) -> dict:
+    """Como require_acceso_candidato pero SIN el atajo de "me lo compartieron
+    a mí" -- para una acción que no debería quedar en manos de quien solo
+    recibió esta ficha compartida (borrarla del todo)."""
+    empresa = reclutamiento_module.get_empresa_candidato(candidato_id)
+    _exigir_modulo_empresa(empresa, user)
+    return user
+
+
+def require_acceso_vacante(vacante_id: int, user: dict = Depends(get_current_user)) -> dict:
+    """Equivalente a require_acceso_candidato pero para una vacante entera
+    (sin compartido directo, porque una vacante no se "comparte contigo",
+    se comparte con un responsable ya con módulo -- ver compartir_vacante)."""
+    empresa = reclutamiento_module.get_empresa_vacante(vacante_id)
+    if any(auth_module.tiene_modulo(user, m) for m in _modulos_para_empresa(empresa)):
+        return user
+    raise HTTPException(status_code=403, detail="No tienes acceso a esta solicitud")
+
+
 def _candidatos_accesibles(user: dict, candidato_ids: list[int]) -> list[int]:
     """Mismo criterio que require_acceso_candidato pero para una LISTA de
     ids de golpe (acciones en lote: exportar Excel, descargar PDFs...) --
-    quien tiene el módulo completo pasa todos tal cual; quien no, se queda
-    solo con los que de verdad le compartieron (en vez de un 403 en bloque,
-    que le bloquearía también los que sí puede ver)."""
-    modulos = ("informes", "saona_informes", "reclutamiento", "saona_reclutamiento")
-    if any(auth_module.tiene_modulo(user, m) for m in modulos):
-        return candidato_ids
-    return [cid for cid in candidato_ids if reclutamiento_module.usuario_tiene_acceso_candidato(user["id"], cid)]
+    quien tiene el módulo de la empresa de ESE candidato pasa; quien no, se
+    queda solo con los que de verdad le compartieron (en vez de un 403 en
+    bloque, que le bloquearía también los que sí puede ver)."""
+    empresas = reclutamiento_module.get_empresas_candidatos(candidato_ids)
+    con_modulo, resto = [], []
+    for cid in candidato_ids:
+        if any(auth_module.tiene_modulo(user, m) for m in _modulos_para_empresa(empresas.get(cid))):
+            con_modulo.append(cid)
+        else:
+            resto.append(cid)
+    compartidos = [cid for cid in resto if reclutamiento_module.usuario_tiene_acceso_candidato(user["id"], cid)]
+    orden = {cid: i for i, cid in enumerate(candidato_ids)}
+    return sorted(con_modulo + compartidos, key=lambda cid: orden[cid])
 
 
 class VacanteIn(BaseModel):
@@ -158,7 +207,7 @@ def list_vacantes_route(
 
 
 @router.get("/vacantes/{vacante_id}")
-def get_vacante_route(vacante_id: int, _user: dict = Depends(require_informes_o_reclutamiento)):
+def get_vacante_route(vacante_id: int, _user: dict = Depends(require_acceso_vacante)):
     vacante = reclutamiento_module.get_vacante(vacante_id)
     if vacante is None:
         raise HTTPException(status_code=404, detail="Vacante no encontrada")
@@ -167,6 +216,7 @@ def get_vacante_route(vacante_id: int, _user: dict = Depends(require_informes_o_
 
 @router.post("/vacantes")
 def crear_vacante_route(body: VacanteIn, user: dict = Depends(require_informes_o_reclutamiento)):
+    _exigir_modulo_empresa(body.empresa, user)
     vacante_id = reclutamiento_module.crear_vacante(
         body.empresa, body.puesto, centro=body.centro, notas=body.notas, creado_por=user["username"]
     )
@@ -174,7 +224,7 @@ def crear_vacante_route(body: VacanteIn, user: dict = Depends(require_informes_o
 
 
 @router.put("/vacantes/{vacante_id}")
-def actualizar_vacante_route(vacante_id: int, body: VacanteUpdateIn, _user: dict = Depends(require_informes_o_reclutamiento)):
+def actualizar_vacante_route(vacante_id: int, body: VacanteUpdateIn, _user: dict = Depends(require_acceso_vacante)):
     if reclutamiento_module.get_vacante(vacante_id) is None:
         raise HTTPException(status_code=404, detail="Vacante no encontrada")
     if body.estado is not None and body.estado not in reclutamiento_module.VACANTE_ESTADOS:
@@ -185,7 +235,7 @@ def actualizar_vacante_route(vacante_id: int, body: VacanteUpdateIn, _user: dict
 
 
 @router.delete("/vacantes/{vacante_id}")
-def eliminar_vacante_route(vacante_id: int, _user: dict = Depends(require_informes_o_reclutamiento)):
+def eliminar_vacante_route(vacante_id: int, _user: dict = Depends(require_acceso_vacante)):
     if reclutamiento_module.get_vacante(vacante_id) is None:
         raise HTTPException(status_code=404, detail="Vacante no encontrada")
     reclutamiento_module.eliminar_vacante(vacante_id)
@@ -197,11 +247,15 @@ class FusionarVacanteIn(BaseModel):
 
 
 @router.post("/vacantes/{vacante_id}/fusionar")
-def fusionar_vacantes_route(vacante_id: int, body: FusionarVacanteIn, _user: dict = Depends(require_informes_o_reclutamiento)):
+def fusionar_vacantes_route(vacante_id: int, body: FusionarVacanteIn, user: dict = Depends(require_acceso_vacante)):
     if reclutamiento_module.get_vacante(vacante_id) is None or reclutamiento_module.get_vacante(body.destino_id) is None:
         raise HTTPException(status_code=404, detail="Vacante no encontrada")
     if vacante_id == body.destino_id:
         raise HTTPException(status_code=400, detail="Elige una solicitud distinta como destino")
+    # el permiso sobre vacante_id ya lo valida require_acceso_vacante (path);
+    # falta comprobar el mismo permiso sobre la vacante destino, que llega
+    # por el cuerpo y no pasa por esa dependencia.
+    _exigir_modulo_empresa(reclutamiento_module.get_empresa_vacante(body.destino_id), user)
     reclutamiento_module.fusionar_vacantes(vacante_id, body.destino_id)
     return {"ok": True}
 
@@ -211,7 +265,7 @@ class CompartirVacanteIn(BaseModel):
 
 
 @router.post("/vacantes/{vacante_id}/compartir")
-def compartir_vacante_route(vacante_id: int, body: CompartirVacanteIn, user: dict = Depends(require_informes_o_reclutamiento)):
+def compartir_vacante_route(vacante_id: int, body: CompartirVacanteIn, user: dict = Depends(require_acceso_vacante)):
     """Asigna uno o más gerentes/responsables a TODA la solicitud -- a
     diferencia de /candidatos/compartir (candidato a candidato), esto da
     acceso a todos sus candidatos de una vez, presentes y futuros."""
@@ -222,7 +276,7 @@ def compartir_vacante_route(vacante_id: int, body: CompartirVacanteIn, user: dic
 
 
 @router.delete("/vacantes/{vacante_id}/compartir/{usuario_id}")
-def dejar_de_compartir_vacante_route(vacante_id: int, usuario_id: int, _user: dict = Depends(require_informes_o_reclutamiento)):
+def dejar_de_compartir_vacante_route(vacante_id: int, usuario_id: int, _user: dict = Depends(require_acceso_vacante)):
     reclutamiento_module.dejar_de_compartir_vacante(vacante_id, usuario_id)
     return {"ok": True}
 
@@ -424,6 +478,7 @@ def get_candidato_route(candidato_id: int, _user: dict = Depends(require_acceso_
 
 @router.post("/candidatos")
 def crear_candidato_route(body: CandidatoIn, user: dict = Depends(require_informes_o_reclutamiento)):
+    _exigir_modulo_empresa(body.empresa, user)
     campos = body.model_dump(exclude={"empresa", "vacante_id"})
     candidato_id = reclutamiento_module.crear_candidato(
         campos, empresa=body.empresa, origen="manual", creado_por=user["username"], vacante_id=body.vacante_id
@@ -450,7 +505,7 @@ def actualizar_candidato_route(candidato_id: int, body: CandidatoUpdateIn, _user
 
 
 @router.delete("/candidatos/{candidato_id}")
-def eliminar_candidato_route(candidato_id: int, _user: dict = Depends(require_informes_o_reclutamiento)):
+def eliminar_candidato_route(candidato_id: int, _user: dict = Depends(require_modulo_candidato)):
     if reclutamiento_module.get_candidato(candidato_id) is None:
         raise HTTPException(status_code=404, detail="Candidato no encontrado")
     reclutamiento_module.eliminar_candidato(candidato_id)

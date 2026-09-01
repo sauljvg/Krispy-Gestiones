@@ -1096,6 +1096,24 @@ def list_respuestas_con_motivo(oleada_id, centro=None):
     ]
 
 
+def get_oleada_de_respuesta(respuesta_id):
+    """A qué oleada pertenece de verdad esta respuesta -- para comprobar,
+    antes de editarla o borrarla, que es la misma oleada que el permiso ya
+    validó por la URL (y no una de otra tienda/empresa)."""
+    conn = get_connection()
+    row = conn.execute("SELECT oleada_id FROM entrevistas_respuestas WHERE id = ?", (respuesta_id,)).fetchone()
+    conn.close()
+    return row["oleada_id"] if row else None
+
+
+def get_oleada_de_salida(salida_id):
+    """Igual que get_oleada_de_respuesta pero para una salida."""
+    conn = get_connection()
+    row = conn.execute("SELECT oleada_id FROM entrevistas_salidas WHERE id = ?", (salida_id,)).fetchone()
+    conn.close()
+    return row["oleada_id"] if row else None
+
+
 def update_motivo(respuesta_id, nuevo_motivo):
     """Corrige el motivo de salida de UNA respuesta concreta -- el motivo que
     la persona marco en el formulario no siempre coincide con el motivo real

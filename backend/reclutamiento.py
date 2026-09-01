@@ -374,6 +374,15 @@ def get_gerentes_de_vacante(vacante_id, conn=None):
     return [dict(r) for r in rows]
 
 
+def get_empresa_vacante(vacante_id):
+    """Solo la empresa de una vacante, sin cargar el resto -- para
+    comprobar permisos por marca (KK/Saona) antes de tocar el recurso."""
+    conn = get_connection()
+    row = conn.execute("SELECT empresa FROM vacantes WHERE id = ?", (vacante_id,)).fetchone()
+    conn.close()
+    return row["empresa"] if row else None
+
+
 def get_vacante(vacante_id):
     conn = get_connection()
     row = conn.execute("SELECT * FROM vacantes WHERE id = ?", (vacante_id,)).fetchone()
@@ -650,6 +659,29 @@ def _compartidos_por_candidato(conn, candidato_ids):
             "respuesta_id": r["respuesta_id"],
         })
     return mapa
+
+
+def get_empresa_candidato(candidato_id):
+    """Solo la empresa de un candidato, sin cargar el resto -- para
+    comprobar permisos por marca (KK/Saona) antes de tocar el recurso."""
+    conn = get_connection()
+    row = conn.execute("SELECT empresa FROM candidatos WHERE id = ?", (candidato_id,)).fetchone()
+    conn.close()
+    return row["empresa"] if row else None
+
+
+def get_empresas_candidatos(candidato_ids: list[int]) -> dict[int, str]:
+    """Igual que get_empresa_candidato pero para una lista de ids de golpe
+    (acciones en lote: exportar, descargar PDFs...)."""
+    if not candidato_ids:
+        return {}
+    conn = get_connection()
+    placeholders = ",".join("?" for _ in candidato_ids)
+    rows = conn.execute(
+        f"SELECT id, empresa FROM candidatos WHERE id IN ({placeholders})", candidato_ids
+    ).fetchall()
+    conn.close()
+    return {r["id"]: r["empresa"] for r in rows}
 
 
 def get_candidato(candidato_id):
@@ -1330,6 +1362,19 @@ def dejar_de_compartir_candidato(candidato_id: int, usuario_id: int):
     )
     conn.commit()
     conn.close()
+
+
+def get_candidato_compartido_por(candidato_id, usuario_id):
+    """Quién compartió este candidato con este destinatario en concreto --
+    para comprobar que solo esa misma persona (o un admin) puede quitarle
+    el acceso o reasignarlo a otro."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT compartido_por FROM candidato_compartidos WHERE candidato_id = ? AND usuario_id = ?",
+        (candidato_id, usuario_id),
+    ).fetchone()
+    conn.close()
+    return row["compartido_por"] if row else None
 
 
 def cambiar_destinatario_directo(pares, nuevo_usuario_id, compartido_en):
