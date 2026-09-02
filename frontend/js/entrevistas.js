@@ -932,25 +932,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("salida-manual-email").value = "";
   });
 
-  document.getElementById("btn-sincronizar-motivos").addEventListener("click", async () => {
-    const btn = document.getElementById("btn-sincronizar-motivos");
-    btn.disabled = true;
-    const params = new URLSearchParams();
-    if (currentCentro) params.set("centro", currentCentro);
-    const res = await fetch(`${AUTH_API_BASE}/entrevistas/${currentOleada}/respuestas/sincronizar-motivos?${params.toString()}`, {
-      method: "POST",
-    });
-    btn.disabled = false;
-    if (!res.ok) {
-      mostrarAviso("No se pudo sincronizar los motivos.");
-      return;
-    }
-    const data = await res.json();
-    mostrarAviso(`${data.actualizadas} respuesta(s) actualizada(s) con el motivo real de su salida.`);
-    await loadReporte(currentCentro);
-    await loadRespuestasEditables(currentCentro);
-  });
-
   document.getElementById("btn-exportar-pdf").addEventListener("click", () => {
     const params = new URLSearchParams();
     if (currentCentro) params.set("centro", currentCentro);
