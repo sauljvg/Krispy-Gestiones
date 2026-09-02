@@ -347,14 +347,33 @@ def _empresa_de_usuario(user: dict) -> str | None:
     return None
 
 
+def _todas_efectivo(user: dict, empresa: str | None) -> tuple[bool, str | None]:
+    """Envuelve _ve_todo_lo_compartido/_empresa_de_usuario con una salvedad
+    (hallazgo de QA): _empresa_de_usuario devuelve None tanto para quien
+    tiene módulos de LAS DOS marcas (caso legítimo, se deja ver todo sin
+    filtrar) como para quien no tiene NINGÚN módulo de Informes/Reclutamiento
+    (cuenta mal configurada -- p.ej. se le quitaron los módulos sin bajarle
+    el rol) -- para este segundo caso, forzar todas=True sin poder acotar la
+    empresa filtraría por las DOS marcas a la vez para alguien que en
+    realidad no debería ver ninguna, así que se cae a todas=False (solo lo
+    compartido con él en concreto, que en la práctica será nada)."""
+    todas = _ve_todo_lo_compartido(user)
+    if not todas or empresa:
+        return todas, empresa
+    empresa_forzada = _empresa_de_usuario(user)
+    if empresa_forzada:
+        return todas, empresa_forzada
+    if auth_module.get_modulos_permitidos(user["id"]):
+        return todas, None  # tiene de las dos marcas -- caso legítimo, sin filtrar
+    return False, None  # no tiene ningún módulo -- no forzar "ver todo"
+
+
 @router.get("/vacantes-compartidas-conmigo")
 def vacantes_compartidas_conmigo_route(empresa: str | None = None, user: dict = Depends(get_current_user)):
     """Igual que /candidatos/compartir a nivel de solicitud: vacantes de las
     que este usuario es responsable, con TODOS sus candidatos juntos --
     accesible sin el módulo completo, igual que /informes/compartidos."""
-    todas = _ve_todo_lo_compartido(user)
-    if todas and not empresa:
-        empresa = _empresa_de_usuario(user)
+    todas, empresa = _todas_efectivo(user, empresa)
     return reclutamiento_module.get_vacantes_compartidas_con(user["id"], empresa=empresa, todas=todas)
 
 
@@ -370,9 +389,7 @@ def candidatos_compartidos_conmigo_route(empresa: str | None = None, user: dict 
     vacante entera) -- una única lista, para que "Compartidos" en
     Reclutamiento sea una sola pantalla en vez de dos con formato distinto.
     Accesible sin el módulo completo, igual que /vacantes-compartidas-conmigo."""
-    todas = _ve_todo_lo_compartido(user)
-    if todas and not empresa:
-        empresa = _empresa_de_usuario(user)
+    todas, empresa = _todas_efectivo(user, empresa)
     return reclutamiento_module.candidatos_compartidos_con(user["id"], empresa=empresa, todas=todas)
 
 
