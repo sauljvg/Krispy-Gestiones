@@ -4,6 +4,9 @@ manual es una secuencia de PASOS (una captura de pantalla + una frase corta
 cada uno), como una guía visual en vez de un manual de texto. Un manual se
 agrupa por `categoria` (texto libre, p.ej. "Odoo") para el catálogo."""
 import os
+import sqlite3
+
+from PIL import Image, ImageDraw, ImageFilter
 
 from db import DATA_DIR, get_connection
 
@@ -46,9 +49,74 @@ def ensure_manuales_tables():
             imagen_nombre_original TEXT
         )
     """)
+    # "Spotlight": la captura entera en blanco y negro salvo un círculo a
+    # color en el punto exacto donde hay que mirar/hacer clic -- pedido
+    # explícito del usuario ("tipo tutoriales de ikea... todo en blanco y
+    # negro excepto lo único que estamos señalando"). marca_x/marca_y/
+    # marca_radio son fracciones (0-1) del ancho/alto de la imagen, no
+    # píxeles -- así la marca se sigue viendo en el sitio correcto aunque la
+    # imagen se reescale. Ver generar_spotlight más abajo.
+    cols_pasos = {row[1] for row in conn.execute("PRAGMA table_info(manual_pasos)")}
+    for columna in ("marca_x", "marca_y", "marca_radio"):
+        if columna not in cols_pasos:
+            try:
+                conn.execute(f"ALTER TABLE manual_pasos ADD COLUMN {columna} REAL")
+            except sqlite3.OperationalError:
+                pass
     conn.commit()
     conn.close()
     os.makedirs(IMAGENES_DIR, exist_ok=True)
+
+
+def _ruta_spotlight(paso_id):
+    return os.path.join(IMAGENES_DIR, f"{paso_id}_spot.png")
+
+
+def generar_spotlight(manual_id, paso_id, x, y, radio):
+    """Genera (o borra, si x es None) la versión "spotlight" de la imagen de
+    este paso: el resto en blanco y negro, un círculo a color centrado en
+    (x, y) -- fracciones 0-1 del ancho/alto -- con `radio` (fracción del
+    ancho) y un borde difuminado para que no quede un corte duro."""
+    paso = get_paso(manual_id, paso_id)
+    if paso is None:
+        raise ValueError("El paso no existe")
+    conn = get_connection()
+    if x is None or paso["imagen_ruta"] is None:
+        conn.execute(
+            "UPDATE manual_pasos SET marca_x = NULL, marca_y = NULL, marca_radio = NULL WHERE id = ?", (paso_id,)
+        )
+        conn.commit()
+        conn.close()
+        _borrar_imagen_fisica(_ruta_spotlight(paso_id))
+        return
+    with Image.open(paso["imagen_ruta"]) as im:
+        color = im.convert("RGB")
+    ancho, alto = color.size
+    gris = color.convert("L").convert("RGB")
+    radio_px = max(radio, 0.02) * ancho
+    cx, cy = x * ancho, y * alto
+    mascara = Image.new("L", (ancho, alto), 0)
+    ImageDraw.Draw(mascara).ellipse([cx - radio_px, cy - radio_px, cx + radio_px, cy + radio_px], fill=255)
+    mascara = mascara.filter(ImageFilter.GaussianBlur(radio_px * 0.18))
+    resultado = Image.composite(color, gris, mascara)
+    resultado.save(_ruta_spotlight(paso_id), "PNG")
+    conn.execute(
+        "UPDATE manual_pasos SET marca_x = ?, marca_y = ?, marca_radio = ? WHERE id = ?",
+        (x, y, radio, paso_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_imagen_servida(manual_id, paso_id):
+    """Ruta física que hay que servir para este paso: la versión spotlight
+    si tiene marca puesta, si no la original tal cual."""
+    paso = get_paso(manual_id, paso_id)
+    if paso is None or paso["imagen_ruta"] is None:
+        return None
+    if paso["marca_x"] is not None and os.path.exists(_ruta_spotlight(paso_id)):
+        return _ruta_spotlight(paso_id)
+    return paso["imagen_ruta"]
 
 
 def _row_manual(r):
@@ -85,12 +153,13 @@ def get_manual(manual_id):
         conn.close()
         return None
     manual = _row_manual(row)
-    pasos = conn.execute(
-        "SELECT id, orden, texto, pictograma, imagen_ruta IS NOT NULL AS tiene_imagen FROM manual_pasos WHERE manual_id = ? ORDER BY orden",
-        (manual_id,),
-    ).fetchall()
+    pasos = conn.execute("""
+        SELECT id, orden, texto, pictograma, imagen_ruta IS NOT NULL AS tiene_imagen,
+               marca_x IS NOT NULL AS tiene_marca
+        FROM manual_pasos WHERE manual_id = ? ORDER BY orden
+    """, (manual_id,)).fetchall()
     conn.close()
-    manual["pasos"] = [dict(p) | {"tiene_imagen": bool(p["tiene_imagen"])} for p in pasos]
+    manual["pasos"] = [dict(p) | {"tiene_imagen": bool(p["tiene_imagen"]), "tiene_marca": bool(p["tiene_marca"])} for p in pasos]
     return manual
 
 
@@ -123,18 +192,22 @@ def _borrar_imagen_fisica(ruta):
 
 def eliminar_manual(manual_id):
     conn = get_connection()
-    rutas = [r["imagen_ruta"] for r in conn.execute(
-        "SELECT imagen_ruta FROM manual_pasos WHERE manual_id = ?", (manual_id,)
-    ).fetchall()]
+    pasos = conn.execute(
+        "SELECT id, imagen_ruta FROM manual_pasos WHERE manual_id = ?", (manual_id,)
+    ).fetchall()
     conn.execute("DELETE FROM manual_pasos WHERE manual_id = ?", (manual_id,))
     conn.execute("DELETE FROM manuales WHERE id = ?", (manual_id,))
     conn.commit()
     conn.close()
-    for ruta in rutas:
-        _borrar_imagen_fisica(ruta)
+    for p in pasos:
+        _borrar_imagen_fisica(p["imagen_ruta"])
+        _borrar_imagen_fisica(_ruta_spotlight(p["id"]))
 
 
-def agregar_paso(manual_id, texto, pictograma, nombre_original, extension, contenido):
+def agregar_paso(manual_id, texto, pictograma, nombre_original, extension, contenido, marca=None):
+    """`marca`, si se da, es (x, y, radio) -- fracciones 0-1 -- para dejar el
+    paso ya con el efecto spotlight puesto desde el momento en que se crea,
+    sin tener que subir la imagen y marcarla después en dos pasos."""
     if get_manual(manual_id) is None:
         raise ValueError("El manual no existe")
     conn = get_connection()
@@ -146,7 +219,6 @@ def agregar_paso(manual_id, texto, pictograma, nombre_original, extension, conte
         (manual_id, siguiente, texto, pictograma),
     )
     paso_id = cur.lastrowid
-    ruta = None
     if contenido is not None:
         ruta = os.path.join(IMAGENES_DIR, f"{paso_id}{extension}")
         with open(ruta, "wb") as f:
@@ -158,6 +230,8 @@ def agregar_paso(manual_id, texto, pictograma, nombre_original, extension, conte
     conn.execute("UPDATE manuales SET actualizado_en = datetime('now') WHERE id = ?", (manual_id,))
     conn.commit()
     conn.close()
+    if contenido is not None and marca is not None:
+        generar_spotlight(manual_id, paso_id, *marca)
     return paso_id
 
 
@@ -186,12 +260,13 @@ def reemplazar_imagen_paso(manual_id, paso_id, nombre_original, extension, conte
     if paso is None:
         raise ValueError("El paso no existe")
     _borrar_imagen_fisica(paso["imagen_ruta"])
+    _borrar_imagen_fisica(_ruta_spotlight(paso_id))  # marca vieja ya no aplica a la imagen nueva
     ruta = os.path.join(IMAGENES_DIR, f"{paso_id}{extension}")
     with open(ruta, "wb") as f:
         f.write(contenido)
     conn = get_connection()
     conn.execute(
-        "UPDATE manual_pasos SET imagen_ruta = ?, imagen_nombre_original = ? WHERE id = ?",
+        "UPDATE manual_pasos SET imagen_ruta = ?, imagen_nombre_original = ?, marca_x = NULL, marca_y = NULL, marca_radio = NULL WHERE id = ?",
         (ruta, nombre_original, paso_id),
     )
     conn.execute("UPDATE manuales SET actualizado_en = datetime('now') WHERE id = ?", (manual_id,))
@@ -219,6 +294,7 @@ def eliminar_paso(manual_id, paso_id):
     conn.commit()
     conn.close()
     _borrar_imagen_fisica(paso["imagen_ruta"])
+    _borrar_imagen_fisica(_ruta_spotlight(paso_id))
 
 
 def mover_paso(manual_id, paso_id, direccion):

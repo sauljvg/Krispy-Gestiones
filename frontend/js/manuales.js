@@ -9,6 +9,25 @@ let manualesCache = [];
 let pictogramasCache = {}; // { clave: "🖱️ Clic", ... }
 let currentManual = null; // manual completo (con .pasos) actualmente abierto
 let currentPasoIdx = 0;
+let nuevoPasoMarca = null; // {x, y} fracciones 0-1, o null si no se marcó nada
+let pasoMarcandoId = null; // id del paso existente que se está marcando ahora mismo (o null)
+
+// Traduce un clic sobre la imagen a fracciones (x, y) 0-1 del tamaño
+// RENDERIZADO de la imagen -- válido igual aunque la imagen se muestre más
+// pequeña que su tamaño real, porque la marca se guarda como fracción, no
+// en píxeles absolutos.
+function clicAFraccion(e, imgEl) {
+  const rect = imgEl.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width;
+  const y = (e.clientY - rect.top) / rect.height;
+  return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
+}
+
+function mostrarPunto(puntoEl, x, y) {
+  puntoEl.style.left = `${x * 100}%`;
+  puntoEl.style.top = `${y * 100}%`;
+  puntoEl.hidden = false;
+}
 
 function esAdmin() {
   return usuarioActual?.rol === "admin";
@@ -162,6 +181,7 @@ function renderPasosAdminLista() {
         <span class="paso-admin-texto">${escapeHTML(p.texto || "(sin texto)")}</span>
         <button type="button" class="btn-mini btn-paso-subir" title="Subir" ${i === 0 ? "disabled" : ""}>↑</button>
         <button type="button" class="btn-mini btn-paso-bajar" title="Bajar" ${i === pasos.length - 1 ? "disabled" : ""}>↓</button>
+        ${p.tiene_imagen ? `<button type="button" class="btn-mini btn-paso-marcar" title="Marcar dónde mirar">${p.tiene_marca ? "🎯" : "⭕"}</button>` : ""}
         <button type="button" class="btn-mini btn-paso-eliminar" title="Eliminar paso">🗑</button>
       </li>`;
     })
@@ -175,6 +195,44 @@ function renderPasosAdminLista() {
   lista.querySelectorAll(".btn-paso-eliminar").forEach((btn) => {
     btn.addEventListener("click", (e) => eliminarPaso(Number(e.target.closest("li").dataset.pasoId)));
   });
+  lista.querySelectorAll(".btn-paso-marcar").forEach((btn) => {
+    btn.addEventListener("click", (e) => abrirMarcaPasoExistente(Number(e.target.closest("li").dataset.pasoId)));
+  });
+}
+
+// -------------------------------------------------- Marcar paso existente
+
+function abrirMarcaPasoExistente(pasoId) {
+  pasoMarcandoId = pasoId;
+  const wrap = document.getElementById("marca-paso-existente-wrap");
+  const img = document.getElementById("marca-existente-imagen");
+  const punto = document.getElementById("marca-existente-punto");
+  const paso = currentManual.pasos.find((p) => p.id === pasoId);
+  img.src = `${AUTH_API_BASE}/manuales/${currentManual.id}/pasos/${pasoId}/imagen-original`;
+  punto.hidden = !paso.tiene_marca;
+  wrap.hidden = false;
+  wrap.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+async function guardarMarcaExistente(x, y) {
+  const radio = Number(document.getElementById("marca-existente-radio").value);
+  await fetch(`${AUTH_API_BASE}/manuales/${currentManual.id}/pasos/${pasoMarcandoId}/marca`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ x, y, radio }),
+  });
+  await recargarManualActual(true);
+  abrirMarcaPasoExistente(pasoMarcandoId); // vuelve a abrir el mismo paso, ya con el punto puesto
+}
+
+async function quitarMarcaExistente() {
+  await fetch(`${AUTH_API_BASE}/manuales/${currentManual.id}/pasos/${pasoMarcandoId}/marca`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ x: null, y: null }),
+  });
+  document.getElementById("marca-existente-punto").hidden = true;
+  await recargarManualActual(true);
 }
 
 async function recargarManualActual(mantenerIdx) {
@@ -212,6 +270,11 @@ async function agregarPaso() {
   formData.append("texto", texto);
   if (pictograma) formData.append("pictograma", pictograma);
   if (fileInput.files[0]) formData.append("file", fileInput.files[0]);
+  if (nuevoPasoMarca) {
+    formData.append("marca_x", nuevoPasoMarca.x);
+    formData.append("marca_y", nuevoPasoMarca.y);
+    formData.append("marca_radio", document.getElementById("nuevo-paso-marca-radio").value);
+  }
   const res = await fetch(`${AUTH_API_BASE}/manuales/${currentManual.id}/pasos`, { method: "POST", body: formData });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -221,6 +284,9 @@ async function agregarPaso() {
   fileInput.value = "";
   document.getElementById("nuevo-paso-pictograma").value = "";
   document.getElementById("nuevo-paso-texto").value = "";
+  document.getElementById("nuevo-paso-marcar-wrap").hidden = true;
+  document.getElementById("nuevo-paso-marca-punto").hidden = true;
+  nuevoPasoMarca = null;
   const manual = await fetch(`${AUTH_API_BASE}/manuales/${currentManual.id}`).then((r) => r.json());
   currentManual = manual;
   currentPasoIdx = manual.pasos.length - 1; // salta al paso recién creado
@@ -277,6 +343,8 @@ function abrirEditor() {
   document.getElementById("editor-titulo").value = currentManual.titulo;
   document.getElementById("editor-categoria").value = currentManual.categoria;
   document.getElementById("manual-editor").hidden = false;
+  document.getElementById("marca-paso-existente-wrap").hidden = true;
+  pasoMarcandoId = null;
   renderPasosAdminLista();
 }
 
@@ -313,6 +381,46 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btn-guardar-manual").addEventListener("click", guardarManual);
   document.getElementById("btn-eliminar-manual").addEventListener("click", eliminarManualActual);
   document.getElementById("btn-agregar-paso").addEventListener("click", agregarPaso);
+
+  // Vista previa + marcado del "spotlight" para un paso NUEVO (aún sin
+  // crear en el servidor -- la marca se guarda junto con el paso al pulsar
+  // "＋ Añadir paso", ver agregarPaso).
+  document.getElementById("nuevo-paso-imagen").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    const wrap = document.getElementById("nuevo-paso-marcar-wrap");
+    const img = document.getElementById("nuevo-paso-marcar-imagen");
+    nuevoPasoMarca = null;
+    document.getElementById("nuevo-paso-marca-punto").hidden = true;
+    if (!file) { wrap.hidden = true; return; }
+    img.src = URL.createObjectURL(file);
+    wrap.hidden = false;
+  });
+  document.getElementById("nuevo-paso-marcar-imagen-wrap").addEventListener("click", (e) => {
+    const img = document.getElementById("nuevo-paso-marcar-imagen");
+    nuevoPasoMarca = clicAFraccion(e, img);
+    mostrarPunto(document.getElementById("nuevo-paso-marca-punto"), nuevoPasoMarca.x, nuevoPasoMarca.y);
+    document.getElementById("btn-nuevo-paso-quitar-marca").hidden = false;
+  });
+  document.getElementById("btn-nuevo-paso-quitar-marca").addEventListener("click", () => {
+    nuevoPasoMarca = null;
+    document.getElementById("nuevo-paso-marca-punto").hidden = true;
+    document.getElementById("btn-nuevo-paso-quitar-marca").hidden = true;
+  });
+
+  // Marcado de un paso YA EXISTENTE -- cada clic guarda al instante (ver
+  // guardarMarcaExistente), no hace falta un botón "Guardar" aparte.
+  document.getElementById("marca-existente-imagen-wrap").addEventListener("click", (e) => {
+    const img = document.getElementById("marca-existente-imagen");
+    const { x, y } = clicAFraccion(e, img);
+    mostrarPunto(document.getElementById("marca-existente-punto"), x, y);
+    guardarMarcaExistente(x, y);
+  });
+  document.getElementById("btn-marca-existente-quitar").addEventListener("click", quitarMarcaExistente);
+  document.getElementById("btn-marca-existente-cerrar").addEventListener("click", () => {
+    document.getElementById("marca-paso-existente-wrap").hidden = true;
+    pasoMarcandoId = null;
+  });
+
   document.getElementById("btn-paso-anterior").addEventListener("click", () => {
     if (currentPasoIdx > 0) { currentPasoIdx--; renderPaso(); }
   });

@@ -33,6 +33,12 @@ class MoverPasoIn(BaseModel):
     direccion: str  # "arriba" | "abajo"
 
 
+class MarcaIn(BaseModel):
+    x: float | None = None  # None = quitar la marca
+    y: float | None = None
+    radio: float = 0.12
+
+
 @router.get("/pictogramas")
 def list_pictogramas_route(_user: dict = Depends(require_manuales)):
     return manuales_module.PICTOGRAMAS
@@ -53,6 +59,20 @@ def get_manual_route(manual_id: int, _user: dict = Depends(require_manuales)):
 
 @router.get("/{manual_id}/pasos/{paso_id}/imagen")
 def get_imagen_paso_route(manual_id: int, paso_id: int, _user: dict = Depends(require_manuales)):
+    # Sirve la versión spotlight (blanco y negro + círculo a color en la
+    # marca) si el paso tiene una marca puesta -- si no, la imagen tal cual.
+    ruta = manuales_module.get_imagen_servida(manual_id, paso_id)
+    if not ruta:
+        raise HTTPException(status_code=404, detail="Este paso no tiene imagen")
+    ext = os.path.splitext(ruta)[1].lower()
+    return FileResponse(ruta, media_type=EXTENSIONES_IMAGEN.get(ext, "application/octet-stream"))
+
+
+@router.get("/{manual_id}/pasos/{paso_id}/imagen-original")
+def get_imagen_original_paso_route(manual_id: int, paso_id: int, _user: dict = Depends(require_manuales)):
+    """La captura sin el efecto spotlight -- para el editor, donde admin
+    necesita ver la imagen real (a color, completa) al hacer clic para
+    colocar o mover la marca."""
     paso = manuales_module.get_paso(manual_id, paso_id)
     if not paso or not paso["imagen_ruta"]:
         raise HTTPException(status_code=404, detail="Este paso no tiene imagen")
@@ -93,6 +113,9 @@ async def agregar_paso_route(
     manual_id: int,
     texto: str = Form(""),
     pictograma: str | None = Form(None),
+    marca_x: float | None = Form(None),
+    marca_y: float | None = Form(None),
+    marca_radio: float = Form(0.12),
     file: UploadFile | None = File(None),
     _user: dict = Depends(require_admin),
 ):
@@ -103,11 +126,25 @@ async def agregar_paso_route(
             raise HTTPException(status_code=400, detail="Sube una imagen (jpg, png o webp)")
         contenido = await file.read()
         nombre_original = file.filename
+    marca = (marca_x, marca_y, marca_radio) if marca_x is not None and marca_y is not None else None
     try:
-        paso_id = manuales_module.agregar_paso(manual_id, texto, pictograma, nombre_original, ext, contenido)
+        paso_id = manuales_module.agregar_paso(manual_id, texto, pictograma, nombre_original, ext, contenido, marca)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {"ok": True, "id": paso_id}
+
+
+@router.put("/{manual_id}/pasos/{paso_id}/marca")
+def marcar_paso_route(manual_id: int, paso_id: int, body: MarcaIn, _user: dict = Depends(require_admin)):
+    """Pone (o quita, si x/y vienen null) el punto "spotlight" sobre la
+    imagen ya subida de este paso."""
+    if (body.x is None) != (body.y is None):
+        raise HTTPException(status_code=400, detail="x e y van juntos: los dos o ninguno")
+    try:
+        manuales_module.generar_spotlight(manual_id, paso_id, body.x, body.y, body.radio)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"ok": True}
 
 
 @router.put("/{manual_id}/pasos/{paso_id}")

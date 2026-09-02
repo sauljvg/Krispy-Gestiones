@@ -77,6 +77,14 @@
   }
   .btn-mini:hover { border-color: var(--acento); }
   .btn-mini:disabled { opacity: .3; cursor: default; }
+  .marcar-imagen-wrap { position: relative; display: inline-block; max-width: 100%; cursor: crosshair; border-radius: 8px; overflow: hidden; }
+  .marcar-imagen-wrap img { max-width: 100%; max-height: 340px; display: block; }
+  .marca-punto {
+    position: absolute; width: 20px; height: 20px; border-radius: 50%;
+    background: color-mix(in srgb, var(--acento) 55%, transparent); border: 2px solid #fff;
+    transform: translate(-50%, -50%); pointer-events: none; box-shadow: 0 0 0 2px var(--acento);
+  }
+  .marca-controles { display: flex; align-items: center; gap: 14px; margin-top: 8px; flex-wrap: wrap; }
 </style>
 </head>
 <body>
@@ -168,6 +176,19 @@
           <label for="nuevo-paso-imagen">Captura de pantalla (opcional)</label>
           <input type="file" id="nuevo-paso-imagen" accept=".jpg,.jpeg,.png,.webp">
         </div>
+        <div class="editor-field" id="nuevo-paso-marcar-wrap" hidden>
+          <label>Marca dónde mirar/hacer clic (opcional) -- toca la captura</label>
+          <div class="marcar-imagen-wrap" id="nuevo-paso-marcar-imagen-wrap">
+            <img id="nuevo-paso-marcar-imagen" alt="">
+            <div class="marca-punto" id="nuevo-paso-marca-punto" hidden></div>
+          </div>
+          <div class="marca-controles">
+            <label style="display:flex; align-items:center; gap:6px; font-size:12px;">Tamaño del círculo
+              <input type="range" id="nuevo-paso-marca-radio" min="0.04" max="0.3" step="0.01" value="0.12">
+            </label>
+            <button type="button" id="btn-nuevo-paso-quitar-marca" class="btn-mini" hidden>Quitar marca</button>
+          </div>
+        </div>
         <div class="editor-field">
           <label for="nuevo-paso-pictograma">Pictograma (opcional)</label>
           <select id="nuevo-paso-pictograma"><option value="">(ninguno)</option></select>
@@ -177,16 +198,32 @@
           <textarea id="nuevo-paso-texto" placeholder="Una frase corta explicando este paso..."></textarea>
         </div>
         <button type="button" id="btn-agregar-paso" class="btn btn-primary">＋ Añadir paso</button>
+
+        <div id="marca-paso-existente-wrap" hidden>
+          <h3 style="margin-top:18px;">🎯 Marcar paso</h3>
+          <p class="staff-hint">Toca la captura para señalar dónde mirar/hacer clic.</p>
+          <div class="marcar-imagen-wrap" id="marca-existente-imagen-wrap">
+            <img id="marca-existente-imagen" alt="">
+            <div class="marca-punto" id="marca-existente-punto" hidden></div>
+          </div>
+          <div class="marca-controles">
+            <label style="display:flex; align-items:center; gap:6px; font-size:12px;">Tamaño del círculo
+              <input type="range" id="marca-existente-radio" min="0.04" max="0.3" step="0.01" value="0.12">
+            </label>
+            <button type="button" id="btn-marca-existente-quitar" class="btn-mini">Quitar marca</button>
+            <button type="button" id="btn-marca-existente-cerrar" class="btn-mini">Cerrar</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 </div>
 <script src="js/theme.js?v=20260723f"></script>
 <script src="js/dialogs.js?v=20260818a"></script>
-<script src="js/icons.js?v=20260824a"></script>
+<script src="js/icons.js?v=20260902a"></script>
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/manuales.js?v=20260902a"></script>
+<script src="js/manuales.js?v=20260902b"></script>
 </body>
 </html>
