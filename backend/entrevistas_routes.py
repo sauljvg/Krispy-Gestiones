@@ -188,6 +188,12 @@ def borrar_respuesta_route(oleada_id: int, respuesta_id: int, _user: dict = Depe
     return {"ok": True}
 
 
+@router.post("/{oleada_id}/respuestas/sincronizar-motivos")
+def sincronizar_motivos_route(oleada_id: int, centro: str | None = None, _user: dict = Depends(require_entrevistas_oleada)):
+    actualizadas = entrevistas_module.sincronizar_motivos_autoreportados(oleada_id, centro)
+    return {"ok": True, "actualizadas": actualizadas}
+
+
 @router.get("/{oleada_id}/respuestas")
 def list_respuestas_route(oleada_id: int, centro: str | None = None, _user: dict = Depends(require_entrevistas_oleada)):
     return entrevistas_module.list_respuestas_con_motivo(oleada_id, centro)

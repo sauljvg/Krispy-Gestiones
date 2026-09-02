@@ -1096,6 +1096,67 @@ def list_respuestas_con_motivo(oleada_id, centro=None):
     ]
 
 
+def sincronizar_motivos_autoreportados(oleada_id, centro=None):
+    """Copia el motivo REAL (RRHH, entrevistas_salidas.motivo) a cada
+    respuesta que tenga una salida cruzada -- para que "Corregir el centro o
+    el motivo de una respuesta" (y por tanto también auditoria_g/lo que ve
+    RRHH ahí) deje de mostrar lo que la propia persona escribió en su
+    formulario y muestre el motivo oficial ya confirmado. Mismo criterio de
+    cruce que compute_evolucion (match manual primero, si no fuzzy por
+    nombre+centro con score 1). Solo toca respuestas con salida cruzada Y con
+    motivo ya relleno -- una respuesta sin cruce, o cruzada con una salida
+    que todavía no tiene motivo, se deja tal cual. Devuelve cuántas se
+    actualizaron de verdad (con un valor distinto al que ya tenían)."""
+    conn = get_connection()
+    filas_con_id = _fetch_respuestas(conn, oleada_id, centro)
+    salidas = _fetch_salidas(conn, oleada_id, centro)
+    matches_manual = _fetch_matches_manual(conn, [rid for rid, _ in filas_con_id])
+    conn.close()
+    if not filas_con_id:
+        return 0
+
+    todas_las_filas = [datos for _id, datos in filas_con_id]
+    roles = _column_roles(_union_headers(todas_las_filas), todas_las_filas)
+    centro_col = roles["centro_col"]
+    nombre_col = _mejor_columna_nombre(_union_headers(todas_las_filas), roles["metadata"])
+    motivo_col = roles["motivo_col"]
+
+    salidas_por_id = {s["id"]: s for s in salidas}
+    salidas_por_centro = {}
+    for s in salidas:
+        salidas_por_centro.setdefault(s["centro"], []).append(s)
+
+    usadas_ids = set()
+    actualizadas = 0
+    for respuesta_id, fila in filas_con_id:
+        centro_fila = fila.get(centro_col) if centro_col else None
+        nombre_fila = fila.get(nombre_col) if nombre_col else None
+        salida = None
+
+        salida_manual_id = matches_manual.get(respuesta_id)
+        if salida_manual_id is not None and salida_manual_id in salidas_por_id and salida_manual_id not in usadas_ids:
+            salida = salidas_por_id[salida_manual_id]
+            usadas_ids.add(salida_manual_id)
+        else:
+            for s in salidas_por_centro.get(centro_fila, []):
+                if s["id"] in usadas_ids:
+                    continue
+                if nombre_fila and _nombre_score(nombre_fila, s["nombre"]) == 1:
+                    salida = s
+                    usadas_ids.add(s["id"])
+                    break
+
+        if salida is None or not salida.get("motivo"):
+            continue
+        motivo_actual = fila.get(motivo_col) if motivo_col else None
+        if motivo_actual == salida["motivo"]:
+            continue
+        update_motivo(respuesta_id, salida["motivo"])
+        actualizadas += 1
+
+    return actualizadas
+
+
 def get_oleada_de_respuesta(respuesta_id):
     """A qué oleada pertenece de verdad esta respuesta -- para comprobar,
     antes de editarla o borrarla, que es la misma oleada que el permiso ya
