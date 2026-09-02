@@ -469,8 +469,8 @@ def get_historial_accesos(dias: int = 30):
     sesiones = conn.execute("""
         SELECT u.username, u.nombre, s.creado AS login_en, s.ultima_actividad
         FROM sesiones s JOIN usuarios u ON u.id = s.usuario_id
-        WHERE s.creado >= datetime('now', ?)
-        ORDER BY s.creado DESC
+        WHERE COALESCE(s.ultima_actividad, s.creado) >= datetime('now', ?)
+        ORDER BY COALESCE(s.ultima_actividad, s.creado) DESC
         LIMIT 300
     """, (f"-{dias} days",)).fetchall()
     modulos = conn.execute("""
