@@ -180,11 +180,17 @@ def _normalizar_rol(rol: str) -> str:
         raise HTTPException(status_code=400, detail="El rol es demasiado largo (máximo 60 caracteres)")
     # Si coincide (sin distinguir mayúsculas) con uno de los roles conocidos
     # -- "admin" sobre todo, el único con permisos especiales de verdad, ver
-    # auth.tiene_modulo -- se ajusta a su forma exacta. Así escribir "Admin"
-    # no crea sin querer un rol nuevo "Admin" sin ningún permiso real,
-    # distinto del "admin" que sí los tiene.
-    for clave in auth_module.ROLES:
-        if rol.lower() == clave.lower():
+    # auth.tiene_modulo -- se ajusta a su forma exacta (la clave interna,
+    # p.ej. "area_manager"). Así escribir "Admin" no crea sin querer un rol
+    # nuevo "Admin" sin ningún permiso real, distinto del "admin" que sí los
+    # tiene. Antes solo comparaba contra las claves (auth_module.ROLES,
+    # "director_operaciones") y nunca contra las etiquetas que en realidad
+    # se escriben/muestran ("Director de Operaciones") -- así que escribir
+    # el nombre normal del rol nunca lo ajustaba a su clave interna, y
+    # comprobaciones como _ve_todo_lo_compartido() en reclutamiento_routes.py
+    # (que sí comparan contra la clave) nunca reconocían a esa persona.
+    for clave, etiqueta in auth_module.ROLES.items():
+        if rol.lower() in (clave.lower(), etiqueta.lower()):
             return clave
     return rol
 
