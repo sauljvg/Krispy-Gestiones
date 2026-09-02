@@ -108,6 +108,20 @@ def ensure_auth_tables():
         conn.execute("ALTER TABLE sesiones ADD COLUMN ultima_actividad TEXT")
     except sqlite3.OperationalError:
         pass  # La columna ya existía
+    # Espejo de `sesiones` que NUNCA se borra al cerrar sesión -- `sesiones`
+    # se borra en delete_session() para invalidar el token, lo cual está bien
+    # para "quién está en línea" pero hacía que el historial de accesos
+    # perdiera por completo cualquier sesión en cuanto el usuario cerraba
+    # sesión (aunque hubiera estado activa minutos antes). Ver create_session
+    # y get_user_by_token, que la mantienen en paralelo.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS historial_sesiones (
+            token TEXT PRIMARY KEY,
+            usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+            creado TEXT NOT NULL,
+            ultima_actividad TEXT
+        )
+    """)
     # Historial de a qué módulo entró cada usuario, un registro por
     # (usuario, módulo, día) -- no una fila por request (sería enorme y puro
     # ruido de polling/heartbeats), solo primera_vez/ultima_vez/veces de ESE
@@ -423,6 +437,10 @@ def create_session(usuario_id: int) -> str:
     token = secrets.token_hex(32)
     conn = get_connection()
     conn.execute("INSERT INTO sesiones (token, usuario_id) VALUES (?, ?)", (token, usuario_id))
+    conn.execute(
+        "INSERT INTO historial_sesiones (token, usuario_id, creado) VALUES (?, ?, datetime('now'))",
+        (token, usuario_id),
+    )
     conn.commit()
     conn.close()
     return token
@@ -468,7 +486,7 @@ def get_historial_accesos(dias: int = 30):
     conn = get_connection()
     sesiones = conn.execute("""
         SELECT u.username, u.nombre, s.creado AS login_en, s.ultima_actividad
-        FROM sesiones s JOIN usuarios u ON u.id = s.usuario_id
+        FROM historial_sesiones s JOIN usuarios u ON u.id = s.usuario_id
         WHERE COALESCE(s.ultima_actividad, s.creado) >= datetime('now', ?)
         ORDER BY COALESCE(s.ultima_actividad, s.creado) DESC
         LIMIT 300
@@ -500,8 +518,11 @@ def get_user_by_token(token: str):
         # Se marca aquí (no en un endpoint aparte) porque este es el único
         # punto por el que pasa CUALQUIER request autenticado — así "en
         # línea" refleja actividad real navegando la app, no solo tener
-        # sesión abierta desde hace días.
+        # sesión abierta desde hace días. Se actualiza también el espejo
+        # permanente (historial_sesiones) para que el historial de accesos
+        # conserve la última actividad aunque luego se cierre la sesión.
         conn.execute("UPDATE sesiones SET ultima_actividad = datetime('now') WHERE token = ?", (token,))
+        conn.execute("UPDATE historial_sesiones SET ultima_actividad = datetime('now') WHERE token = ?", (token,))
         conn.commit()
     conn.close()
     return dict(row) if row else None
