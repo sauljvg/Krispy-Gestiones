@@ -300,14 +300,39 @@ def _ve_todo_lo_compartido(user: dict) -> bool:
     return user["rol"] in ("area_manager", "director_operaciones")
 
 
+def _empresa_de_usuario(user: dict) -> str | None:
+    """Empresa (kk/saona) a la que pertenece este usuario según sus módulos
+    (mismo criterio que empresaDeUsuario() en usuarios.js: cualquier módulo
+    saona_* lo marca como Saona) -- None si tiene de las dos marcas o de
+    ninguna (ambiguo, no se fuerza nada). Para forzar el filtro de empresa
+    de _ve_todo_lo_compartido: quien NO tiene el módulo completo de Informes
+    (la inmensa mayoría de gerentes/area managers, que solo ven
+    "Compartidos") entra a esta pantalla SIN filtro de empresa a propósito
+    (ver compartidos.js, esUsuarioRestringido) para no perder de vista algo
+    compartido de la otra marca -- pero eso significa "ver todo lo
+    compartido de la empresa" (todas=True) se volvería "ver todo lo
+    compartido de LAS DOS empresas" para ellos, que es justo lo que no
+    queremos: un area manager de Saona (p.ej. Samuel, que solo tiene
+    saona_clima) no debe ver vacantes de Krispy Kreme."""
+    modulos = user.get("modulos") or []
+    tiene_saona = any(m.startswith("saona_") for m in modulos)
+    tiene_kk = any(not m.startswith("saona_") for m in modulos)
+    if tiene_saona and not tiene_kk:
+        return "saona"
+    if tiene_kk and not tiene_saona:
+        return "kk"
+    return None
+
+
 @router.get("/vacantes-compartidas-conmigo")
 def vacantes_compartidas_conmigo_route(empresa: str | None = None, user: dict = Depends(get_current_user)):
     """Igual que /candidatos/compartir a nivel de solicitud: vacantes de las
     que este usuario es responsable, con TODOS sus candidatos juntos --
     accesible sin el módulo completo, igual que /informes/compartidos."""
-    return reclutamiento_module.get_vacantes_compartidas_con(
-        user["id"], empresa=empresa, todas=_ve_todo_lo_compartido(user)
-    )
+    todas = _ve_todo_lo_compartido(user)
+    if todas and not empresa:
+        empresa = _empresa_de_usuario(user)
+    return reclutamiento_module.get_vacantes_compartidas_con(user["id"], empresa=empresa, todas=todas)
 
 
 @router.get("/vacantes-compartidas-por-mi")
@@ -322,9 +347,10 @@ def candidatos_compartidos_conmigo_route(empresa: str | None = None, user: dict 
     vacante entera) -- una única lista, para que "Compartidos" en
     Reclutamiento sea una sola pantalla en vez de dos con formato distinto.
     Accesible sin el módulo completo, igual que /vacantes-compartidas-conmigo."""
-    return reclutamiento_module.candidatos_compartidos_con(
-        user["id"], empresa=empresa, todas=_ve_todo_lo_compartido(user)
-    )
+    todas = _ve_todo_lo_compartido(user)
+    if todas and not empresa:
+        empresa = _empresa_de_usuario(user)
+    return reclutamiento_module.candidatos_compartidos_con(user["id"], empresa=empresa, todas=todas)
 
 
 @router.get("/candidatos/compartidos-por-mi")
