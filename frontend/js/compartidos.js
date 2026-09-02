@@ -709,9 +709,17 @@ function vacanteMiniCardHTML(v) {
   const diasTxt = v.estado === "abierta"
     ? `${dias} día${dias === 1 ? "" : "s"} abierta`
     : `${dias} día${dias === 1 ? "" : "s"} hasta ${v.estado === "cubierta" ? "cubrirla" : "cancelarla"}`;
+  // Sin responsable asignado (0 en "Responsables" de la vacante) -- esta
+  // solicitud no le aparece a ningún gerente/area manager/director en
+  // Compartidos conmigo hasta que alguien la comparta, así que conviene
+  // que quien la creó lo note sin tener que abrir cada tarjeta una por una
+  // (pedido explícito del usuario).
+  const avisoSinResponsable = !v.gerentes_count
+    ? ` <span title="Esta vacante no tiene responsable asignado">⚠️</span>`
+    : "";
   return `
     <div class="vacante-mini-card ${activa ? "activa" : ""}" data-vacante-id="${v.id}">
-      <h4>${escapeHTML(v.puesto)} <span class="badge-vacante-estado badge-${v.estado}">${VACANTE_ESTADO_LABELS[v.estado]}</span></h4>
+      <h4>${escapeHTML(v.puesto)} <span class="badge-vacante-estado badge-${v.estado}">${VACANTE_ESTADO_LABELS[v.estado]}</span>${avisoSinResponsable}</h4>
       <p>${escapeHTML(v.centro || "")}</p>
       <p>${diasTxt} · ${v.candidato_count} candidato${v.candidato_count === 1 ? "" : "s"}</p>
     </div>`;

@@ -349,10 +349,18 @@ def list_vacantes(empresa=None, estado=None, archivadas=False):
         clauses.append("v.estado = ?")
         params.append(estado)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    # COUNT(DISTINCT ...) porque candidatos y vacante_compartidos se unen a
+    # la vez -- sin DISTINCT el cruce de los dos LEFT JOIN infla ambos
+    # conteos (candidato_count * nº de responsables). gerentes_count es para
+    # el aviso "sin responsable asignado" en la tarjeta (ver
+    # vacanteMiniCardHTML) -- pedido explícito del usuario, para que sea
+    # visible sin tener que abrir cada vacante una por una.
     rows = conn.execute(f"""
-        SELECT v.*, COUNT(c.id) AS candidato_count
+        SELECT v.*, COUNT(DISTINCT c.id) AS candidato_count,
+               COUNT(DISTINCT vc.usuario_id) AS gerentes_count
         FROM vacantes v
         LEFT JOIN candidatos c ON c.vacante_id = v.id
+        LEFT JOIN vacante_compartidos vc ON vc.vacante_id = v.id
         {where}
         GROUP BY v.id
         ORDER BY v.estado = 'abierta' DESC, v.fecha_solicitud DESC
