@@ -57,6 +57,14 @@ app = FastAPI(title="Krispy Kreme Reseñas API")
 
 app.add_middleware(
     CORSMiddleware,
+    # allow_origins=["*"] es más abierto de lo que hace falta -- el frontend
+    # se sirve desde este mismo proceso (ver app.mount("/", StaticFiles...)
+    # más abajo), así que un fetch normal del propio portal no necesita CORS
+    # en absoluto. Se deja así (bajo riesgo real: no hay allow_credentials,
+    # así que un fetch cross-origin con la cookie de sesión no funciona por
+    # defecto en el navegador) por si algún día hace falta un tercero
+    # consumiendo la API -- si nunca aparece ese caso, restringir
+    # allow_origins al dominio propio sería lo correcto.
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],

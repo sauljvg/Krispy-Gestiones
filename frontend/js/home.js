@@ -32,7 +32,22 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("card-informes").hidden = !modulos.includes("informes");
   document.getElementById("card-clima").hidden = !modulos.includes("clima");
   document.getElementById("card-entrevistas").hidden = !modulos.includes("informes");
-  document.getElementById("card-compartidos").hidden = !(modulos.includes("informes") || modulos.includes("reclutamiento"));
+  const tieneModuloReclutamiento = ["informes", "saona_informes", "reclutamiento", "saona_reclutamiento"].some((m) => modulos.includes(m));
+  const cardCompartidos = document.getElementById("card-compartidos");
+  cardCompartidos.hidden = !tieneModuloReclutamiento;
+  if (!tieneModuloReclutamiento) {
+    // Un gerente al que solo le compartieron un candidato o una vacante
+    // suelta (sin ninguno de los módulos de arriba) no tenía, hasta ahora,
+    // ningún punto de entrada a Reclutamiento desde el Home -- se comprueba
+    // aparte (en vez de bloquear el resto de la home con esto) si tiene algo
+    // compartido, y si es así se muestra la tarjeta igualmente.
+    fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/compartidos-conmigo`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((compartidos) => {
+        if (compartidos.length > 0) cardCompartidos.hidden = false;
+      })
+      .catch(() => {});
+  }
   // Boletines oculto de la home por ahora (no se va a usar) -- la página y
   // la API siguen intactas, solo se quita el acceso desde el menú principal.
   document.getElementById("card-tests").hidden = !modulos.includes("tests");
