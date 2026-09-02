@@ -166,32 +166,62 @@ async function cargarResumen() {
   }
 
   ultimoResumen = d;
-  poblarSelectorMesMotivo(d);
-  renderBajasMotivo(document.getElementById("kpi-bajas-motivo-mes").value);
+  poblarFiltroMesMotivo(d);
+  renderBajasMotivo();
 }
 
-function poblarSelectorMesMotivo(d) {
-  const select = document.getElementById("kpi-bajas-motivo-mes");
-  const valorPrevio = select.value;
-  select.innerHTML = '<option value="ytd">Año en curso</option>';
-  for (const m of d.rotacion_mensual) {
+const NOMBRES_MES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+
+function poblarFiltroMesMotivo(d) {
+  const selectMes = document.getElementById("kpi-bajas-motivo-mes");
+  const selectAnio = document.getElementById("kpi-bajas-motivo-anio");
+  const mesPrevio = selectMes.value;
+  const anioPrevio = selectAnio.value;
+
+  selectMes.innerHTML = '<option value="todos">Todo el año</option>';
+  NOMBRES_MES.forEach((nombre, i) => {
     const opt = document.createElement("option");
-    opt.value = m.mes;
-    opt.textContent = formatMes(m.mes);
-    select.appendChild(opt);
+    opt.value = String(i + 1).padStart(2, "0");
+    opt.textContent = nombre;
+    selectMes.appendChild(opt);
+  });
+
+  const anios = d.anios_disponibles && d.anios_disponibles.length ? d.anios_disponibles : [String(new Date().getFullYear())];
+  selectAnio.innerHTML = "";
+  for (const anio of anios) {
+    const opt = document.createElement("option");
+    opt.value = anio;
+    opt.textContent = anio;
+    selectAnio.appendChild(opt);
   }
-  const opciones = Array.from(select.options).map((o) => o.value);
-  select.value = opciones.includes(valorPrevio) ? valorPrevio : "ytd";
+
+  const opcionesMes = Array.from(selectMes.options).map((o) => o.value);
+  selectMes.value = opcionesMes.includes(mesPrevio) ? mesPrevio : "todos";
+  selectAnio.value = anios.includes(anioPrevio) ? anioPrevio : anios[anios.length - 1];
 }
 
-function renderBajasMotivo(seleccion) {
+function renderBajasMotivo() {
   if (!ultimoResumen) return;
   const d = ultimoResumen;
-  const esYtd = !seleccion || seleccion === "ytd";
-  const pares = esYtd ? d.bajas_por_motivo_ytd : (d.bajas_por_motivo_mensual[seleccion] || []);
-  document.getElementById("kpi-bajas-motivo-sub").textContent = esYtd
-    ? "Año en curso, según Entrevista de Salida."
-    : `${formatMes(seleccion)}, según Entrevista de Salida.`;
+  const mes = document.getElementById("kpi-bajas-motivo-mes").value;
+  const anio = document.getElementById("kpi-bajas-motivo-anio").value;
+
+  let pares;
+  let etiqueta;
+  if (mes === "todos") {
+    const acumulado = {};
+    for (const [clave, lista] of Object.entries(d.bajas_por_motivo_mensual)) {
+      if (!clave.startsWith(`${anio}-`)) continue;
+      for (const [motivo, n] of lista) acumulado[motivo] = (acumulado[motivo] || 0) + n;
+    }
+    pares = Object.entries(acumulado).sort((a, b) => b[1] - a[1]);
+    etiqueta = `Año ${anio}`;
+  } else {
+    const clave = `${anio}-${mes}`;
+    pares = d.bajas_por_motivo_mensual[clave] || [];
+    etiqueta = `${NOMBRES_MES[parseInt(mes, 10) - 1]} ${anio}`;
+  }
+  document.getElementById("kpi-bajas-motivo-sub").textContent = `${etiqueta}, según Entrevista de Salida.`;
 
   const sinBajas = pares.length === 0;
   document.getElementById("kpi-bajas-motivo-aviso").hidden = !sinBajas;
@@ -242,9 +272,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     importarExcel(file);
     e.target.value = "";
   });
-  document.getElementById("kpi-bajas-motivo-mes").addEventListener("change", (e) => {
-    renderBajasMotivo(e.target.value);
-  });
+  document.getElementById("kpi-bajas-motivo-mes").addEventListener("change", () => renderBajasMotivo());
+  document.getElementById("kpi-bajas-motivo-anio").addEventListener("change", () => renderBajasMotivo());
 
   await cargarUltimaImportacion();
   await cargarResumen();

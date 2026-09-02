@@ -402,13 +402,16 @@ def compute_resumen(meses_historico=12):
             conteo[clave] = conteo.get(clave, 0) + 1
         return sorted(conteo.items(), key=lambda x: -x[1])
 
-    # Desglose de motivos mes a mes (mismos 12 meses de rotacion_mensual) --
-    # para poder ver cómo era la mezcla de motivos en un mes concreto
-    # (enero, febrero...), no solo el acumulado del año en curso.
+    # Desglose de motivos mes a mes -- para TODO el histórico disponible en
+    # Entrevista de Salida (no solo los últimos 12 meses del gráfico de
+    # rotación), para poder filtrar por mes y año y ver cómo era la mezcla
+    # de motivos en cualquier punto (enero, febrero... de cualquier año).
     bajas_por_motivo_mensual = {
-        m: sorted(bajas_motivo_mes.get(m, {}).items(), key=lambda x: -x[1])
-        for m in serie_meses
+        m: sorted(motivos.items(), key=lambda x: -x[1])
+        for m, motivos in bajas_motivo_mes.items()
     }
+    meses_disponibles = sorted(bajas_por_motivo_mensual.keys())
+    anios_disponibles = sorted({m[:4] for m in meses_disponibles}) or [str(hoy.year)]
 
     return {
         "headcount_activo": headcount_activo,
@@ -425,6 +428,8 @@ def compute_resumen(meses_historico=12):
         "bajas_sin_nspp_empresario_ytd": len(bajas_ytd_sin_empresario),
         "bajas_por_motivo_ytd": _contar_por("motivo", bajas_ytd),
         "bajas_por_motivo_mensual": bajas_por_motivo_mensual,
+        "meses_disponibles": meses_disponibles,
+        "anios_disponibles": anios_disponibles,
         "horas_por_centro": horas_por_centro_lista,
         "sin_datos_plantilla": headcount_activo == 0,
         "sin_datos_bajas": len(bajas) == 0,
