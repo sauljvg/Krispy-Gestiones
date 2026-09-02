@@ -1,5 +1,7 @@
 let ROLES_CACHE = [];
 let MODULOS_CACHE = [];
+let USUARIOS_CACHE = []; // último fetch de /auth/users -- para poder re-filtrar por búsqueda sin volver a pedirlo
+let CURRENT_USER_ID = null;
 let TIPOS_INFORME_CACHE = null; // null = todavía no se ha pedido (se carga la primera vez que hace falta)
 let CLIMA_CENTROS_CACHE = null; // idem, para el checklist de restricción por centro de Clima Laboral
 
@@ -188,15 +190,8 @@ function climaCentrosResumenHTML(u) {
   return escapeHTML(centros.join(", "));
 }
 
-async function loadUsers(currentUserId) {
-  await loadTiposInformeSiHaceFalta();
-  await loadClimaCentrosSiHaceFalta();
-  const res = await fetch(`${AUTH_API_BASE}/auth/users`);
-  const users = await res.json();
-  const tbody = document.getElementById("users-list");
-  tbody.innerHTML = users
-    .map(
-      (u) => `
+function filaUsuarioHTML(u, currentUserId) {
+  return `
       <tr data-id="${u.id}">
         <td><input type="text" class="username-input" data-id="${u.id}" value="${escapeHTML(u.username)}" style="width:110px;"></td>
         <td>${escapeHTML(u.nombre)}</td>
@@ -315,8 +310,71 @@ async function loadUsers(currentUserId) {
           ${u.pin ? `<button type="button" class="btn btn-ghost btn-reset-pin" data-id="${u.id}" title="Borra el PIN — al volver a entrar, el usuario crea uno nuevo">Resetear PIN</button>` : ""}
           ${u.id === currentUserId ? "" : `<button type="button" class="btn btn-ghost btn-delete-user" data-id="${u.id}">Eliminar</button>`}
         </td>
-      </tr>`
-    )
+      </tr>`;
+}
+
+const ORDEN_ROLES_AGRUPADO = ["admin", "director_operaciones", "area_manager", "rrhh", "gerente", "colaborador"];
+
+function normalizarBusqueda(s) {
+  return (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+}
+
+async function loadUsers(currentUserId) {
+  CURRENT_USER_ID = currentUserId;
+  await loadTiposInformeSiHaceFalta();
+  await loadClimaCentrosSiHaceFalta();
+  const res = await fetch(`${AUTH_API_BASE}/auth/users`);
+  USUARIOS_CACHE = await res.json();
+  renderUsuariosFiltrados();
+}
+
+// Agrupado por rol (desplegable por grupo, cada uno su propia tabla con
+// cabecera) y filtrable por nombre/usuario -- antes era una única tabla
+// plana, manejable con pocos usuarios pero que iba a volverse muy larga de
+// recorrer a medida que crece la plantilla.
+function renderUsuariosFiltrados() {
+  const users = USUARIOS_CACHE;
+  const currentUserId = CURRENT_USER_ID;
+  const q = normalizarBusqueda(document.getElementById("users-buscar")?.value);
+  const filtrados = q
+    ? users.filter((u) => normalizarBusqueda(u.username).includes(q) || normalizarBusqueda(u.nombre).includes(q))
+    : users;
+
+  const porRol = new Map();
+  filtrados.forEach((u) => {
+    if (!porRol.has(u.rol)) porRol.set(u.rol, []);
+    porRol.get(u.rol).push(u);
+  });
+  // Roles conocidos primero en el orden de ORDEN_ROLES_AGRUPADO, luego
+  // cualquier rol nuevo que no esté en esa lista (por si se añade uno sin
+  // acordarse de actualizarla aquí), para no perder usuarios de vista.
+  const rolesOrdenados = [
+    ...ORDEN_ROLES_AGRUPADO.filter((r) => porRol.has(r)),
+    ...[...porRol.keys()].filter((r) => !ORDEN_ROLES_AGRUPADO.includes(r)),
+  ];
+
+  const cabecera = `<thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Módulos</th><th>Tiendas (Reseñas)</th><th>Informes</th><th>Clima Laboral</th><th>PIN</th><th>Creado</th><th></th></tr></thead>`;
+
+  const tbody = document.getElementById("users-list");
+  if (filtrados.length === 0) {
+    tbody.innerHTML = `<p class="staff-hint">Sin usuarios que coincidan con la búsqueda.</p>`;
+    return;
+  }
+  tbody.innerHTML = rolesOrdenados
+    .map((rol) => {
+      const grupo = porRol.get(rol);
+      const label = (ROLES_CACHE.find((r) => r.value === rol) || {}).label || rol;
+      return `
+        <details class="tabla-desplegable" open style="margin-bottom:14px;">
+          <summary style="cursor:pointer; font-weight:600; padding:6px 0;">${escapeHTML(label)} (${grupo.length})</summary>
+          <div class="store-ranking-wrap">
+            <table class="staff-table">
+              ${cabecera}
+              <tbody>${grupo.map((u) => filaUsuarioHTML(u, currentUserId)).join("")}</tbody>
+            </table>
+          </div>
+        </details>`;
+    })
     .join("");
 
   function wirePopoverToggle(btnClass, popoverPrefix) {
@@ -639,6 +697,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadRoles();
   await loadModulos();
   await loadUsers(user.id);
+  document.getElementById("users-buscar").addEventListener("input", renderUsuariosFiltrados);
   renderNuModulosChecklist();
   renderNuTiendasChecklist();
   actualizarVisibilidadPorRol();
