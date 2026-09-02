@@ -41,6 +41,11 @@ CENTROS_GO_A_CORTO = {
 
 HORAS_JORNADA_COMPLETA = 40  # pedido explícito del usuario
 
+# Administración central ("GO - ADMIN CENTRAL" / "Oficina Central") no cuenta
+# para estos KPIs -- son de tienda/fábrica, no de oficina. Se descarta tanto
+# la plantilla activa como las bajas de ese centro antes de calcular nada.
+CENTROS_EXCLUIDOS = {"Oficina Central"}
+
 # Motivos SEPE de "no superó el periodo de prueba" -- por iniciativa de la
 # empresa o del propio trabajador cuentan igual para este KPI (NSPP no
 # distingue quién lo decidió, solo que la baja fue en periodo de prueba).
@@ -293,6 +298,9 @@ def compute_resumen(meses_historico=12):
     empleados = [dict(r) for r in conn.execute("SELECT * FROM kpi_empleados").fetchall()]
     bajas = _get_bajas(conn)
     conn.close()
+
+    empleados = [e for e in empleados if e["centro"] not in CENTROS_EXCLUIDOS]
+    bajas = [b for b in bajas if b["centro"] not in CENTROS_EXCLUIDOS]
 
     activos = [e for e in empleados if not e["fecha_baja"]]
     headcount_activo = len(activos)
