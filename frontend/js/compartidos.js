@@ -650,7 +650,18 @@ async function loadCompartidos() {
   // módulo completo; "Compartidos por ti" es para quien SÍ comparte (RRHH/admin).
   let html = vistaToggleHTML;
   html += candidatosCompartidosConmigoSeccionHTML(conmigoVisibles, ocultosPorEstado);
-  html += candidatosCompartidosPorTiSeccionHTML(porMiVisibles, gerentesPorVacante);
+  // Quien solo RECIBE (gerente, area manager, director de operaciones) nunca
+  // comparte nada él mismo -- "Compartidos por ti" se quedaba siempre
+  // vacía para esta gente, pero se pintaba igual con toda su barra de
+  // herramientas duplicando la de arriba sin aportar nada (pedido explícito
+  // del usuario: "compartidos por ti y compartidos conmigo sigue siendo lo
+  // mismo... la barra de herramientas esta duplicada"). Se basa en
+  // porMiTodos (antes del filtro de búsqueda), no en porMiVisibles -- si de
+  // verdad ha compartido algo alguna vez, la sección debe seguir ahí aunque
+  // la búsqueda actual no encuentre nada.
+  if (porMiTodos.length > 0) {
+    html += candidatosCompartidosPorTiSeccionHTML(porMiVisibles, gerentesPorVacante);
+  }
 
   aparcarFormWrapEnSitio();
   wrap.innerHTML = html;
