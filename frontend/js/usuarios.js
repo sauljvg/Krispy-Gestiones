@@ -434,9 +434,24 @@ function renderUsuariosFiltrados() {
         tbody.querySelectorAll(".checklist-popover").forEach((p) => {
           if (p.id !== `${popoverPrefix}-${id}`) p.classList.remove("visible");
         });
-        document.getElementById(`${popoverPrefix}-${id}`).classList.toggle("visible");
+        const popover = document.getElementById(`${popoverPrefix}-${id}`);
+        const abrir = !popover.classList.contains("visible");
+        popover.classList.toggle("visible");
+        if (abrir) posicionarPopover(popover, btn);
       });
     });
+  }
+  function posicionarPopover(popover, btn) {
+    const r = btn.getBoundingClientRect();
+    const anchoPopover = popover.offsetWidth || 220;
+    let left = r.left;
+    if (left + anchoPopover > window.innerWidth - 8) left = window.innerWidth - anchoPopover - 8;
+    if (left < 8) left = 8;
+    let top = r.bottom + 6;
+    const altoPopover = popover.offsetHeight || 300;
+    if (top + altoPopover > window.innerHeight - 8) top = Math.max(8, r.top - altoPopover - 6);
+    popover.style.left = `${left}px`;
+    popover.style.top = `${top}px`;
   }
   function wirePopoverClose(btnClass, popoverPrefix) {
     tbody.querySelectorAll(btnClass).forEach((btn) => {
@@ -767,6 +782,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       document.querySelectorAll(".checklist-popover.visible").forEach((p) => p.classList.remove("visible"));
     }
   });
+  window.addEventListener("scroll", () => {
+    document.querySelectorAll(".checklist-popover.visible").forEach((p) => p.classList.remove("visible"));
+  }, true);
 
   const errorEl = document.getElementById("new-user-error");
   const okEl = document.getElementById("new-user-ok");
