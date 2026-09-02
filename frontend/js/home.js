@@ -54,7 +54,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("card-disc").hidden = !modulos.includes("disc");
   document.getElementById("card-agregadores").hidden = !modulos.includes("agregadores");
   aplicarVisibilidadEval360(document.getElementById("card-evaluaciones360"), user, modulos.includes("evaluaciones360"));
-  document.getElementById("card-manuales").hidden = !modulos.includes("manuales");
+  // Manuales pausado por ahora (todavía en construcción, un solo paso de
+  // ejemplo cargado) -- oculto de la home igual que Boletines, sin tocar
+  // nada del backend ni de los datos ya creados. Para reactivarlo: volver
+  // a `document.getElementById("card-manuales").hidden = !modulos.includes("manuales");`.
+  document.getElementById("card-manuales").hidden = true;
   const tieneModuloSaona = ["saona_resenas", "saona_informes", "saona_clima", "saona_evaluaciones360", "saona_reclutamiento"].some((m) => modulos.includes(m));
   document.getElementById("card-saona").hidden = !tieneModuloSaona;
   if (user.rol === "admin") {
