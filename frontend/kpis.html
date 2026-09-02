@@ -33,6 +33,13 @@
   .kpi-stat-card.placeholder { opacity: .6; border-style: dashed; }
   .kpi-stat-card.placeholder .valor { font-size: 16px; font-weight: 600; }
   .kpi-aviso-bajas { text-align: center; color: var(--text-secondary); padding: 24px 0; font-size: 13px; }
+  .kpi-filtro-fechas { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; }
+  .kpi-filtro-fechas .campo { display: flex; flex-direction: column; gap: 4px; }
+  .kpi-filtro-fechas label { font-size: 12px; color: var(--text-secondary); }
+  .kpi-filtro-fechas input[type="month"] { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 14px; }
+  .kpi-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .kpi-toggle-btn { border: none; background: var(--surface-page); color: var(--text-secondary); padding: 6px 12px; font-size: 13px; cursor: pointer; }
+  .kpi-toggle-btn.active { background: var(--brand, #006838); color: #fff; }
 </style>
 </head>
 <body>
@@ -114,38 +121,49 @@
         </div>
       </div>
 
+      <div class="kpi-chart-card kpi-filtro-fechas">
+        <div class="campo">
+          <label for="kpi-filtro-desde">Desde</label>
+          <input type="month" id="kpi-filtro-desde">
+        </div>
+        <div class="campo">
+          <label for="kpi-filtro-hasta">Hasta</label>
+          <input type="month" id="kpi-filtro-hasta">
+        </div>
+        <button type="button" id="kpi-filtro-reset" class="btn btn-ghost">Últimos 12 meses</button>
+        <span class="staff-hint" style="margin-left:auto;">Filtra los gráficos de rotación mensual, por centro y bajas por motivo.</span>
+      </div>
+
       <div class="kpi-chart-card">
-        <h2>Rotación mensual global</h2>
-        <p class="sub">Últimos 12 meses -- número de bajas por mes.</p>
-        <div style="position:relative; height:280px;"><canvas id="chart-rotacion-mensual"></canvas></div>
+        <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px;">
+          <div>
+            <h2 style="margin-bottom:0;">Rotación mensual global</h2>
+            <p class="sub" id="kpi-rotacion-mensual-sub" style="margin-bottom:0;"></p>
+          </div>
+          <div class="kpi-toggle" role="group" aria-label="Unidad">
+            <button type="button" class="kpi-toggle-btn active" id="kpi-unidad-numero" data-unidad="numero">Número</button>
+            <button type="button" class="kpi-toggle-btn" id="kpi-unidad-pct" data-unidad="pct">%</button>
+          </div>
+        </div>
+        <div style="position:relative; height:280px; margin-top:12px;"><canvas id="chart-rotacion-mensual"></canvas></div>
       </div>
 
       <div class="kpi-charts-grid">
         <div class="kpi-chart-card">
           <h2>Rotación por centro de trabajo</h2>
-          <p class="sub" id="kpi-rotacion-centro-sub">Mes en curso.</p>
+          <p class="sub" id="kpi-rotacion-centro-sub"></p>
           <div style="position:relative; height:300px;"><canvas id="chart-rotacion-centro"></canvas></div>
         </div>
         <div class="kpi-chart-card">
           <h2>Horas contratadas por centro</h2>
-          <p class="sub">Suma de horas/semana de la plantilla activa por centro.</p>
+          <p class="sub">Suma de horas/semana de la plantilla activa por centro (foto actual).</p>
           <div style="position:relative; height:300px;"><canvas id="chart-horas-centro"></canvas></div>
         </div>
       </div>
 
       <div class="kpi-chart-card">
-        <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
-          <div>
-            <h2 style="margin-bottom:0;">Bajas por motivo</h2>
-            <p class="sub" id="kpi-bajas-motivo-sub" style="margin-bottom:0;">Año en curso, según Entrevista de Salida.</p>
-          </div>
-          <div style="display:flex; gap:6px;">
-            <select id="kpi-bajas-motivo-mes">
-              <option value="todos" selected>Todo el año</option>
-            </select>
-            <select id="kpi-bajas-motivo-anio"></select>
-          </div>
-        </div>
+        <h2 style="margin-bottom:0;">Bajas por motivo</h2>
+        <p class="sub" id="kpi-bajas-motivo-sub" style="margin-bottom:0;"></p>
         <div id="kpi-bajas-motivo-aviso" class="kpi-aviso-bajas" hidden>No hay bajas registradas en Entrevista de Salida para ese periodo.</div>
         <div style="position:relative; height:360px; margin-top:12px;"><canvas id="chart-bajas-motivo"></canvas></div>
       </div>
@@ -158,6 +176,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/kpis.js?v=20260902h"></script>
+<script src="js/kpis.js?v=20260902i"></script>
 </body>
 </html>

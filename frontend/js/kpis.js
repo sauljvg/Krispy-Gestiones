@@ -4,9 +4,15 @@
 // de Salida (en vivo, se actualiza sola). Aquí solo se pinta. Importar es
 // solo admin, ver el resto de módulos de hoy (Entrevistas/Clima/Agregadores)
 // para el mismo criterio.
+//
+// Las 7 tarjetas de arriba (plantilla, rotación anual, NSPP...) son métricas
+// fijas con su propio periodo (año en curso / mes en curso) y no cambian con
+// el filtro de fechas. El filtro Desde/Hasta solo afecta a los 3 gráficos de
+// abajo (rotación mensual, rotación por centro, bajas por motivo) -- horas
+// por centro es una foto de la plantilla activa AHORA, tampoco cambia con
+// el filtro.
 
 const MARCA_COLOR = "#006838";
-const COLOR_ALERTA = "#c23a72";
 const COLORES = ["#006838", "#c98a12", "#1d6fb8", "#c23a72", "#7b4fb0", "#0e8a86", "#e0641e", "#3d5a80"];
 
 function colorTextoActual() {
@@ -52,8 +58,9 @@ function motivoCorto(motivo) {
 let chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo;
 let usuarioActual = null;
 let ultimoResumen = null;
+let unidadRotacionMensual = "numero"; // "numero" | "pct"
 
-function lineChart(canvasId, labels, valores) {
+function lineChart(canvasId, labels, valores, { sufijo = "" } = {}) {
   const ctx = document.getElementById(canvasId).getContext("2d");
   const colorTexto = colorTextoActual();
   return new Chart(ctx, {
@@ -74,11 +81,11 @@ function lineChart(canvasId, labels, valores) {
       maintainAspectRatio: false,
       scales: {
         x: { ticks: { color: colorTexto }, grid: { display: false } },
-        y: { beginAtZero: true, ticks: { color: colorTexto, precision: 0 }, grid: { color: "rgba(128,128,128,0.2)" } },
+        y: { beginAtZero: true, ticks: { color: colorTexto, precision: 0, callback: (v) => `${v}${sufijo}` }, grid: { color: "rgba(128,128,128,0.2)" } },
       },
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: (ctx2) => `${ctx2.parsed.y} baja${ctx2.parsed.y === 1 ? "" : "s"}` } },
+        tooltip: { callbacks: { label: (ctx2) => `${ctx2.parsed.y}${sufijo}` } },
       },
     },
   });
@@ -107,19 +114,6 @@ function barChart(canvasId, pares, { horizontal = true, sufijo = "" } = {}) {
   });
 }
 
-function donutChart(canvasId, labels, valores) {
-  const ctx = document.getElementById(canvasId).getContext("2d");
-  return new Chart(ctx, {
-    type: "doughnut",
-    data: { labels, datasets: [{ data: valores, backgroundColor: COLORES }] },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { position: "bottom", labels: { color: colorTextoActual() } } },
-    },
-  });
-}
-
 function destruirCharts() {
   [chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo].forEach((c) => c?.destroy());
 }
@@ -139,11 +133,9 @@ async function cargarResumen() {
   document.getElementById("kpi-rotacion-anual").textContent = `${d.acumulado_anual_pct}%`;
   document.getElementById("kpi-rotacion-anual-sub").textContent = `${d.bajas_ytd} bajas en lo que va de año`;
 
-  const mesActualPct = d.rotacion_mensual.length ? d.rotacion_mensual[d.rotacion_mensual.length - 1].pct : 0;
-  const bajasMesActual = d.rotacion_mensual.length ? d.rotacion_mensual[d.rotacion_mensual.length - 1].bajas : 0;
-  document.getElementById("kpi-rotacion-mes").textContent = bajasMesActual;
-  document.getElementById("kpi-rotacion-mes-sub").textContent = `${formatMes(d.mes_actual)} -- ${mesActualPct}% sobre la plantilla activa`;
-  document.getElementById("kpi-rotacion-centro-sub").textContent = `Mes en curso (${formatMes(d.mes_actual)}).`;
+  const mesActual = d.serie_mensual[d.mes_actual] || { bajas: 0, pct: 0 };
+  document.getElementById("kpi-rotacion-mes").textContent = mesActual.bajas;
+  document.getElementById("kpi-rotacion-mes-sub").textContent = `${formatMes(d.mes_actual)} -- ${mesActual.pct}% sobre la plantilla activa`;
 
   document.getElementById("kpi-nspp").textContent = d.bajas_ytd ? `${d.nspp_pct}%` : "--";
   document.getElementById("kpi-horas").textContent = `${d.horas_contratadas_totales} h/sem`;
@@ -153,82 +145,91 @@ async function cargarResumen() {
     `${d.bajas_sin_nspp_empresario_ytd} de ${d.bajas_ytd} bajas del año -- sin los ceses en prueba a instancia del empresario`;
 
   destruirCharts();
-  chartRotacionMensual = lineChart(
-    "chart-rotacion-mensual",
-    d.rotacion_mensual.map((m) => formatMes(m.mes)),
-    d.rotacion_mensual.map((m) => m.bajas)
-  );
-  if (d.rotacion_por_centro_mes_actual.length) {
-    chartRotacionCentro = barChart("chart-rotacion-centro", d.rotacion_por_centro_mes_actual, { sufijo: "%" });
-  }
   if (d.horas_por_centro.length) {
     chartHorasCentro = barChart("chart-horas-centro", d.horas_por_centro, { sufijo: "h" });
   }
 
   ultimoResumen = d;
-  poblarFiltroMesMotivo(d);
-  renderBajasMotivo();
+  configurarFiltroFechas(d);
+  renderGraficosFiltrados();
 }
 
-const NOMBRES_MES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+function configurarFiltroFechas(d) {
+  const inputDesde = document.getElementById("kpi-filtro-desde");
+  const inputHasta = document.getElementById("kpi-filtro-hasta");
+  const meses = d.meses_disponibles;
+  if (!meses.length) return;
 
-function poblarFiltroMesMotivo(d) {
-  const selectMes = document.getElementById("kpi-bajas-motivo-mes");
-  const selectAnio = document.getElementById("kpi-bajas-motivo-anio");
-  const mesPrevio = selectMes.value;
-  const anioPrevio = selectAnio.value;
+  inputDesde.min = inputHasta.min = meses[0];
+  inputDesde.max = inputHasta.max = meses[meses.length - 1];
 
-  selectMes.innerHTML = '<option value="todos">Todo el año</option>';
-  NOMBRES_MES.forEach((nombre, i) => {
-    const opt = document.createElement("option");
-    opt.value = String(i + 1).padStart(2, "0");
-    opt.textContent = nombre;
-    selectMes.appendChild(opt);
-  });
-
-  const anios = d.anios_disponibles && d.anios_disponibles.length ? d.anios_disponibles : [String(new Date().getFullYear())];
-  selectAnio.innerHTML = "";
-  for (const anio of anios) {
-    const opt = document.createElement("option");
-    opt.value = anio;
-    opt.textContent = anio;
-    selectAnio.appendChild(opt);
-  }
-
-  const opcionesMes = Array.from(selectMes.options).map((o) => o.value);
-  selectMes.value = opcionesMes.includes(mesPrevio) ? mesPrevio : "todos";
-  selectAnio.value = anios.includes(anioPrevio) ? anioPrevio : anios[anios.length - 1];
+  // Por defecto, últimos 12 meses (o todos los que haya si hay menos).
+  const inicioDefault = meses[Math.max(0, meses.length - 12)];
+  const finDefault = meses[meses.length - 1];
+  if (!inputDesde.value || !meses.includes(inputDesde.value)) inputDesde.value = inicioDefault;
+  if (!inputHasta.value || !meses.includes(inputHasta.value)) inputHasta.value = finDefault;
 }
 
-function renderBajasMotivo() {
+function renderGraficosFiltrados() {
   if (!ultimoResumen) return;
   const d = ultimoResumen;
-  const mes = document.getElementById("kpi-bajas-motivo-mes").value;
-  const anio = document.getElementById("kpi-bajas-motivo-anio").value;
+  const desde = document.getElementById("kpi-filtro-desde").value || d.meses_disponibles[0];
+  const hasta = document.getElementById("kpi-filtro-hasta").value || d.meses_disponibles[d.meses_disponibles.length - 1];
+  const mesesFiltrados = d.meses_disponibles.filter((m) => m >= desde && m <= hasta);
+  const etiquetaRango = mesesFiltrados.length
+    ? (mesesFiltrados.length === 1 ? formatMes(mesesFiltrados[0]) : `${formatMes(mesesFiltrados[0])} -- ${formatMes(mesesFiltrados[mesesFiltrados.length - 1])}`)
+    : "sin datos en ese rango";
 
-  let pares;
-  let etiqueta;
-  if (mes === "todos") {
-    const acumulado = {};
-    for (const [clave, lista] of Object.entries(d.bajas_por_motivo_mensual)) {
-      if (!clave.startsWith(`${anio}-`)) continue;
-      for (const [motivo, n] of lista) acumulado[motivo] = (acumulado[motivo] || 0) + n;
+  // --- Rotación mensual global (número o %, según el toggle) -------------
+  chartRotacionMensual?.destroy();
+  const esPct = unidadRotacionMensual === "pct";
+  chartRotacionMensual = lineChart(
+    "chart-rotacion-mensual",
+    mesesFiltrados.map(formatMes),
+    mesesFiltrados.map((m) => (esPct ? d.serie_mensual[m].pct : d.serie_mensual[m].bajas)),
+    { sufijo: esPct ? "%" : "" }
+  );
+  document.getElementById("kpi-rotacion-mensual-sub").textContent =
+    `${etiquetaRango} -- ${esPct ? "% sobre la plantilla activa" : "número de bajas por mes"}.`;
+
+  // --- Rotación por centro (suma del rango / plantilla activa actual) ----
+  const centroHc = Object.fromEntries(d.headcount_por_centro);
+  const centroBajas = {};
+  for (const m of mesesFiltrados) {
+    for (const [centro, n] of d.serie_mensual[m].por_centro) {
+      centroBajas[centro] = (centroBajas[centro] || 0) + n;
     }
-    pares = Object.entries(acumulado).sort((a, b) => b[1] - a[1]);
-    etiqueta = `Año ${anio}`;
-  } else {
-    const clave = `${anio}-${mes}`;
-    pares = d.bajas_por_motivo_mensual[clave] || [];
-    etiqueta = `${NOMBRES_MES[parseInt(mes, 10) - 1]} ${anio}`;
   }
-  document.getElementById("kpi-bajas-motivo-sub").textContent = `${etiqueta}, según Entrevista de Salida.`;
+  const centros = new Set([...Object.keys(centroHc), ...Object.keys(centroBajas)]);
+  const rotacionPorCentro = Array.from(centros)
+    .map((c) => {
+      const hc = centroHc[c] || 0;
+      const n = centroBajas[c] || 0;
+      return [c, hc ? Math.round((n / hc) * 1000) / 10 : 0];
+    })
+    .filter(([c]) => centroBajas[c] || centroHc[c])
+    .sort((a, b) => b[1] - a[1]);
+  chartRotacionCentro?.destroy();
+  if (rotacionPorCentro.length) {
+    chartRotacionCentro = barChart("chart-rotacion-centro", rotacionPorCentro, { sufijo: "%" });
+  }
+  document.getElementById("kpi-rotacion-centro-sub").textContent = `${etiquetaRango}.`;
 
-  const sinBajas = pares.length === 0;
+  // --- Bajas por motivo (suma del rango) ----------------------------------
+  const motivos = {};
+  for (const m of mesesFiltrados) {
+    for (const [motivo, n] of d.serie_mensual[m].por_motivo) {
+      motivos[motivo] = (motivos[motivo] || 0) + n;
+    }
+  }
+  const paresMotivo = Object.entries(motivos).sort((a, b) => b[1] - a[1]);
+  document.getElementById("kpi-bajas-motivo-sub").textContent = `${etiquetaRango}, según Entrevista de Salida.`;
+  const sinBajas = paresMotivo.length === 0;
   document.getElementById("kpi-bajas-motivo-aviso").hidden = !sinBajas;
   document.getElementById("chart-bajas-motivo").style.display = sinBajas ? "none" : "";
   chartBajasMotivo?.destroy();
   if (!sinBajas) {
-    chartBajasMotivo = barChart("chart-bajas-motivo", pares.map(([m, n]) => [motivoCorto(m), n]));
+    chartBajasMotivo = barChart("chart-bajas-motivo", paresMotivo.map(([m, n]) => [motivoCorto(m), n]));
   }
 }
 
@@ -272,8 +273,24 @@ document.addEventListener("DOMContentLoaded", async () => {
     importarExcel(file);
     e.target.value = "";
   });
-  document.getElementById("kpi-bajas-motivo-mes").addEventListener("change", () => renderBajasMotivo());
-  document.getElementById("kpi-bajas-motivo-anio").addEventListener("change", () => renderBajasMotivo());
+
+  document.getElementById("kpi-filtro-desde").addEventListener("change", renderGraficosFiltrados);
+  document.getElementById("kpi-filtro-hasta").addEventListener("change", renderGraficosFiltrados);
+  document.getElementById("kpi-filtro-reset").addEventListener("click", () => {
+    if (!ultimoResumen) return;
+    const meses = ultimoResumen.meses_disponibles;
+    document.getElementById("kpi-filtro-desde").value = meses[Math.max(0, meses.length - 12)];
+    document.getElementById("kpi-filtro-hasta").value = meses[meses.length - 1];
+    renderGraficosFiltrados();
+  });
+
+  document.querySelectorAll(".kpi-toggle-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      unidadRotacionMensual = btn.dataset.unidad;
+      document.querySelectorAll(".kpi-toggle-btn").forEach((b) => b.classList.toggle("active", b === btn));
+      renderGraficosFiltrados();
+    });
+  });
 
   await cargarUltimaImportacion();
   await cargarResumen();

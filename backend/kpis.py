@@ -304,7 +304,7 @@ def _mes(fecha_iso):
     return None
 
 
-def compute_resumen(meses_historico=12):
+def compute_resumen():
     conn = get_connection()
     empleados = [dict(r) for r in conn.execute("SELECT * FROM kpi_empleados").fetchall()]
     bajas = _get_bajas(conn)
@@ -316,19 +316,21 @@ def compute_resumen(meses_historico=12):
     activos = [e for e in empleados if not e["fecha_baja"]]
     headcount_activo = len(activos)
 
+    headcount_por_centro = {}
+    for e in activos:
+        c = e["centro"] or "(sin centro)"
+        headcount_por_centro[c] = headcount_por_centro.get(c, 0) + 1
+
     hoy = datetime.date.today()
 
-    # --- Rotación mensual (global): últimos `meses_historico` meses -------
+    # --- Serie mensual completa (todo el histórico de Entrevista de Salida) -
     # Denominador simplificado a propósito: la plantilla activa ACTUAL, no
     # una reconstrucción histórica mes a mes (para eso haría falta un
     # histórico diario de headcount que hoy no existe) -- documentado tal
     # cual en el frontend, es la misma aproximación que usan la mayoría de
-    # cuadros de mando de rotación cuando no hay ese histórico.
-    serie_meses = []
-    for i in range(meses_historico - 1, -1, -1):
-        anio = hoy.year + (hoy.month - 1 - i) // 12
-        mes = (hoy.month - 1 - i) % 12 + 1
-        serie_meses.append(f"{anio:04d}-{mes:02d}")
+    # cuadros de mando de rotación cuando no hay ese histórico. Se calcula
+    # para TODOS los meses con datos (no solo los últimos 12) para que el
+    # frontend pueda filtrar por un rango de fechas cualquiera.
     bajas_por_mes = {}
     bajas_centro_mes = {}
     bajas_motivo_mes = {}
@@ -338,32 +340,37 @@ def compute_resumen(meses_historico=12):
             continue
         bajas_por_mes[clave] = bajas_por_mes.get(clave, 0) + 1
         centro = b["centro"] or "(sin centro)"
-        bajas_centro_mes.setdefault(centro, {})
-        bajas_centro_mes[centro][clave] = bajas_centro_mes[centro].get(clave, 0) + 1
+        bajas_centro_mes.setdefault(clave, {})
+        bajas_centro_mes[clave][centro] = bajas_centro_mes[clave].get(centro, 0) + 1
         motivo = b["motivo"] or "(sin dato)"
         bajas_motivo_mes.setdefault(clave, {})
         bajas_motivo_mes[clave][motivo] = bajas_motivo_mes[clave].get(motivo, 0) + 1
 
-    rotacion_mensual = [
-        {"mes": m, "bajas": bajas_por_mes.get(m, 0),
-         "pct": round(bajas_por_mes.get(m, 0) / headcount_activo * 100, 1) if headcount_activo else 0}
-        for m in serie_meses
-    ]
+    mes_actual = f"{hoy.year:04d}-{hoy.month:02d}"
+    claves_con_datos = sorted(bajas_por_mes.keys())
+    inicio = min(claves_con_datos[0], mes_actual) if claves_con_datos else mes_actual
+    fin = max(claves_con_datos[-1], mes_actual) if claves_con_datos else mes_actual
 
-    # --- Rotación del mes en curso, por centro -----------------------------
-    mes_actual = serie_meses[-1]
-    headcount_por_centro = {}
-    for e in activos:
-        c = e["centro"] or "(sin centro)"
-        headcount_por_centro[c] = headcount_por_centro.get(c, 0) + 1
-    rotacion_por_centro = []
-    for centro, meses in bajas_centro_mes.items():
-        n = meses.get(mes_actual, 0)
-        if n == 0 and centro not in headcount_por_centro:
-            continue
-        hc = headcount_por_centro.get(centro, 0)
-        rotacion_por_centro.append((centro, round(n / hc * 100, 1) if hc else 0))
-    rotacion_por_centro.sort(key=lambda x: -x[1])
+    meses_disponibles = []
+    anio_i, mes_i = (int(x) for x in inicio.split("-"))
+    anio_f, mes_f = (int(x) for x in fin.split("-"))
+    while (anio_i, mes_i) <= (anio_f, mes_f):
+        meses_disponibles.append(f"{anio_i:04d}-{mes_i:02d}")
+        mes_i += 1
+        if mes_i > 12:
+            mes_i = 1
+            anio_i += 1
+
+    serie_mensual = {}
+    for clave in meses_disponibles:
+        n = bajas_por_mes.get(clave, 0)
+        serie_mensual[clave] = {
+            "bajas": n,
+            "pct": round(n / headcount_activo * 100, 1) if headcount_activo else 0,
+            "por_centro": sorted(bajas_centro_mes.get(clave, {}).items(), key=lambda x: -x[1]),
+            "por_motivo": sorted(bajas_motivo_mes.get(clave, {}).items(), key=lambda x: -x[1]),
+        }
+    anios_disponibles = sorted({m[:4] for m in meses_disponibles}) or [str(hoy.year)]
 
     # --- Acumulado anual (año natural, desde el 1 de enero) ----------------
     inicio_anio = f"{hoy.year}-01-01"
@@ -395,41 +402,21 @@ def compute_resumen(meses_historico=12):
         [(c, round(h, 1)) for c, h in horas_por_centro.items()], key=lambda x: -x[1]
     )
 
-    def _contar_por(campo, lista):
-        conteo = {}
-        for f in lista:
-            clave = f.get(campo) or "(sin dato)"
-            conteo[clave] = conteo.get(clave, 0) + 1
-        return sorted(conteo.items(), key=lambda x: -x[1])
-
-    # Desglose de motivos mes a mes -- para TODO el histórico disponible en
-    # Entrevista de Salida (no solo los últimos 12 meses del gráfico de
-    # rotación), para poder filtrar por mes y año y ver cómo era la mezcla
-    # de motivos en cualquier punto (enero, febrero... de cualquier año).
-    bajas_por_motivo_mensual = {
-        m: sorted(motivos.items(), key=lambda x: -x[1])
-        for m, motivos in bajas_motivo_mes.items()
-    }
-    meses_disponibles = sorted(bajas_por_motivo_mensual.keys())
-    anios_disponibles = sorted({m[:4] for m in meses_disponibles}) or [str(hoy.year)]
-
     return {
         "headcount_activo": headcount_activo,
         "horas_contratadas_totales": round(sum(horas_por_centro.values()), 1),
         "horas_jornada_completa": HORAS_JORNADA_COMPLETA,
-        "rotacion_mensual": rotacion_mensual,
-        "rotacion_por_centro_mes_actual": rotacion_por_centro,
         "mes_actual": mes_actual,
+        "serie_mensual": serie_mensual,
+        "meses_disponibles": meses_disponibles,
+        "anios_disponibles": anios_disponibles,
+        "headcount_por_centro": sorted(headcount_por_centro.items(), key=lambda x: -x[1]),
         "acumulado_anual_pct": acumulado_anual_pct,
         "bajas_ytd": len(bajas_ytd),
         "nspp_pct": nspp_pct,
         "nspp_ytd": len(nspp_ytd),
         "rotacion_sin_nspp_empresario_pct": rotacion_sin_nspp_empresario_pct,
         "bajas_sin_nspp_empresario_ytd": len(bajas_ytd_sin_empresario),
-        "bajas_por_motivo_ytd": _contar_por("motivo", bajas_ytd),
-        "bajas_por_motivo_mensual": bajas_por_motivo_mensual,
-        "meses_disponibles": meses_disponibles,
-        "anios_disponibles": anios_disponibles,
         "horas_por_centro": horas_por_centro_lista,
         "sin_datos_plantilla": headcount_activo == 0,
         "sin_datos_bajas": len(bajas) == 0,
