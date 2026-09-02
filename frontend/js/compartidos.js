@@ -559,12 +559,27 @@ function candidatosCompartidosConmigoToolbarHTML(n) {
 // visibles (sin un modo "Seleccionar" que activar), igual que en Base de
 // candidatos -- con las dos secciones fundidas en una ya no hacía falta
 // esconderlas para no abrumar.
-function candidatosCompartidosConmigoSeccionHTML(candidatos, ocultosPorEstado) {
+function candidatosCompartidosConmigoSeccionHTML(candidatos, ocultosPorEstado, totalCompartidos, hayBusqueda) {
   let html = `<h2 class="reclu-seccion">Compartidos conmigo</h2>${candidatosCompartidosConmigoToolbarHTML(compartidosConmigoSeleccionadosIds.size)}`;
-  // (ocultosPorEstado sigue calculándose y filtrando en loadCompartidos --
-  // solo se quitó el aviso de texto, pedido explícito del usuario.)
   if (candidatos.length === 0) {
-    return html + `<p class="staff-hint">Todavía no te han compartido ningún candidato.</p>`;
+    // Tres motivos MUY distintos para que esto salga vacío -- antes se
+    // mostraba siempre el mismo mensaje ("Todavía no te han compartido
+    // ningún candidato"), que es directamente falso si en realidad SÍ le
+    // compartieron algo pero todavía nadie lo marcó "Entrevistado" (el
+    // aviso de texto que distinguía este caso se quitó hoy sin ajustar
+    // este mensaje -- hallazgo de QA).
+    const entrevistadosSinBuscar = totalCompartidos - ocultosPorEstado;
+    let mensaje;
+    if (totalCompartidos === 0) {
+      mensaje = "Todavía no te han compartido ningún candidato.";
+    } else if (entrevistadosSinBuscar === 0) {
+      mensaje = `Tienes ${totalCompartidos} candidato${totalCompartidos === 1 ? "" : "s"} compartido${totalCompartidos === 1 ? "" : "s"}, pero ninguno está marcado como "Entrevistado" todavía.`;
+    } else if (hayBusqueda) {
+      mensaje = "Ningún candidato coincide con la búsqueda.";
+    } else {
+      mensaje = "Todavía no te han compartido ningún candidato.";
+    }
+    return html + `<p class="staff-hint">${escapeHTML(mensaje)}</p>`;
   }
   const grupos = new Map();
   for (const c of candidatos) {
@@ -650,6 +665,24 @@ async function loadCompartidos() {
   compartidosConmigoCache = conmigoVisibles;
   const porMiVisibles = porMiTodos.filter((c) => candidatoCompartidoCoincideBusqueda(c, compartidosBusqueda));
   compartidosPorMiCache = porMiVisibles;
+  // Poda selección "fantasma": si un candidato dejó de estar compartido con
+  // este usuario (p.ej. "Dejar de compartir con X" sobre el único
+  // destinatario) o dejó de cumplir el filtro de "Entrevistado"/vacante
+  // cerrada, su id no debe seguir contando como seleccionado -- si no, la
+  // barra sigue mostrando "N seleccionados" sin ningún checkbox marcado en
+  // pantalla, y acciones en lote (Exportar, Descargar PDFs, Cambiar
+  // destinatario...) seguirían incluyendo ese id fantasma (hallazgo de QA).
+  // Se poda contra la lista SIN el filtro de búsqueda (conmigoEntrevistados/
+  // porMiTodos), no contra la visible, para no perder la selección solo
+  // porque una búsqueda temporal oculta la tarjeta.
+  const idsConmigoVigentes = new Set(conmigoEntrevistados.map((c) => c.id));
+  for (const id of [...compartidosConmigoSeleccionadosIds]) {
+    if (!idsConmigoVigentes.has(id)) compartidosConmigoSeleccionadosIds.delete(id);
+  }
+  const idsPorMiVigentes = new Set(porMiTodos.map((c) => c.id));
+  for (const id of [...compartidosSeleccionadosIds]) {
+    if (!idsPorMiVigentes.has(id)) compartidosSeleccionadosIds.delete(id);
+  }
   // Solo para poder pintar "👥 Responsables" en la cabecera de cada grupo de
   // vacante -- ver candidatosCompartidosPorTiSeccionHTML.
   const gerentesPorVacante = new Map(vacantesPorMi.map((v) => [v.id, v.gerentes || []]));
@@ -669,7 +702,7 @@ async function loadCompartidos() {
   // primero -- es la sección que de verdad importa para quien no tiene el
   // módulo completo; "Compartidos por ti" es para quien SÍ comparte (RRHH/admin).
   let html = vistaToggleHTML;
-  html += candidatosCompartidosConmigoSeccionHTML(conmigoVisibles, ocultosPorEstado);
+  html += candidatosCompartidosConmigoSeccionHTML(conmigoVisibles, ocultosPorEstado, conmigoTodos.length, !!compartidosBusqueda);
   // Quien solo RECIBE (gerente, area manager, director de operaciones) nunca
   // comparte nada él mismo -- "Compartidos por ti" se quedaba siempre
   // vacía para esta gente, pero se pintaba igual con toda su barra de
