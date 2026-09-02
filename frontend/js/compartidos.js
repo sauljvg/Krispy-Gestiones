@@ -320,6 +320,19 @@ let compartidosConmigoSeleccionadosIds = new Set();
 let compartidosConmigoCache = []; // candidatos (fichas completas) con el filtro/búsqueda actual -- para "Seleccionar todos"
 let tandasAbiertas = new Set(); // claves de <details> que el usuario ha dejado abiertas -- se respeta entre re-renders
 
+// Última respuesta cruda del servidor (sin filtrar por búsqueda) -- para que
+// escribir en el buscador, marcar un checkbox o cambiar "Estado del
+// contacto" pueda repintar SOLO en cliente, sin volver a pedir las 3 listas
+// completas al servidor cada vez (antes cada tecleo/clic disparaba 3 fetch +
+// un re-render completo; con Area Manager/Director viendo cientos de
+// candidatos de golpe, esto se notaba como lag real -- hallazgos de QA).
+let _rawConmigo = [], _rawPorMi = [], _rawVacantesPorMi = [];
+// Contador de "qué carga es la más reciente" -- si dos loadCompartidos() se
+// solapan (red lenta + el usuario dispara otra antes de que la primera
+// resuelva), la respuesta más vieja no debe pintar por encima de la más
+// nueva (hallazgo de QA: condición de carrera).
+let _compartidosLoadGen = 0;
+
 async function actualizarCandidatoInline(candidatoId, campos) {
   try {
     const res = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/${candidatoId}`, {
@@ -365,18 +378,22 @@ async function dejarDeCompartirClick(btn) {
 // para saber a quién marcar. Evita repetir este bloque dos veces para
 // conmigo/por-ti, que son idénticos salvo qué Set/cache/ids usan.
 function wireSeleccionCompartidos(wrap, { listaId, seleccionSet, cache, btnTodosId, btnNingunoId }) {
+  // (De)marcar checkboxes y "Seleccionar todos"/"Quitar selección" no
+  // cambian nada en el servidor -- repintan en cliente con
+  // renderizarCompartidos() (sin fetch), no con loadCompartidos() (hallazgo
+  // de QA: cada clic disparaba 3 peticiones de red completas).
   const btnTodos = document.getElementById(btnTodosId);
   if (btnTodos) {
     btnTodos.addEventListener("click", () => {
       cache.forEach((c) => seleccionSet.add(c.id));
-      loadCompartidos();
+      renderizarCompartidos();
     });
   }
   const btnNinguno = document.getElementById(btnNingunoId);
   if (btnNinguno) {
     btnNinguno.addEventListener("click", () => {
       seleccionSet.clear();
-      loadCompartidos();
+      renderizarCompartidos();
     });
   }
   wrap.querySelectorAll(`#${listaId} .candidato-mini-card`).forEach((card) => {
@@ -391,17 +408,26 @@ function wireSeleccionCompartidos(wrap, { listaId, seleccionSet, cache, btnTodos
       const id = Number(e.target.closest(".candidato-mini-card").dataset.candidatoId);
       if (e.target.checked) seleccionSet.add(id);
       else seleccionSet.delete(id);
-      loadCompartidos();
+      renderizarCompartidos();
     });
   });
   wrap.querySelectorAll(`#${listaId} .candidato-mini-contacto-select`).forEach((select) => {
     select.addEventListener("click", (e) => e.stopPropagation());
     select.addEventListener("change", async () => {
+      const id = Number(select.dataset.candidatoId);
       const ok = await actualizarCandidatoInline(select.dataset.candidatoId, { contacto_estado: select.value });
       if (!ok) {
         mostrarAviso("No se pudo guardar el estado de contacto. Inténtalo de nuevo.");
         await loadCompartidos();
+        return;
       }
+      // Éxito: se actualiza a mano en la caché cruda (sin volver a pedir las
+      // 3 listas al servidor solo por esto) y se repinta desde ahí.
+      for (const lista of [_rawConmigo, _rawPorMi]) {
+        const c = lista.find((x) => x.id === id);
+        if (c) c.contacto_estado = select.value;
+      }
+      renderizarCompartidos();
     });
   });
 }
@@ -469,10 +495,10 @@ function wireCompartidosInteractivos(wrap) {
   });
 }
 
-function compartidosPorTiToolbarHTML(n) {
+function compartidosPorTiToolbarHTML(n, hayCandidatos = true) {
   return `
     <div class="compartidos-seleccion-bar">
-      <button type="button" id="btn-seleccionar-todos-por-mi" class="btn btn-ghost">Seleccionar todos</button>
+      <button type="button" id="btn-seleccionar-todos-por-mi" class="btn btn-ghost" ${hayCandidatos ? "" : "disabled"}>Seleccionar todos</button>
       <button type="button" id="btn-deseleccionar-todos-por-mi" class="btn btn-ghost" ${n === 0 ? "disabled" : ""}>Quitar selección</button>
       <span class="staff-hint">${n} seleccionado${n === 1 ? "" : "s"}</span>
       <button type="button" id="btn-unir-compartidos" class="btn btn-primary" ${n === 0 ? "disabled" : ""}>🔗 Unir a la misma solicitud...</button>
@@ -497,7 +523,7 @@ function compartidosPorTiToolbarHTML(n) {
 // lo que reemplaza a "Dejar de compartir todo el grupo": ahora es un candidato
 // a la vez, con quien corresponda, en vez de por tanda.
 function candidatosCompartidosPorTiSeccionHTML(candidatos, gerentesPorVacante) {
-  let html = `<h2 class="reclu-seccion">Compartidos por ti</h2>${compartidosPorTiToolbarHTML(compartidosSeleccionadosIds.size)}`;
+  let html = `<h2 class="reclu-seccion">Compartidos por ti</h2>${compartidosPorTiToolbarHTML(compartidosSeleccionadosIds.size, candidatos.length > 0)}`;
   if (candidatos.length === 0) {
     return html + `<p class="staff-hint">Todavía no has compartido ningún candidato.</p>`;
   }
@@ -535,10 +561,10 @@ function candidatosCompartidosPorTiSeccionHTML(candidatos, gerentesPorVacante) {
   return html;
 }
 
-function candidatosCompartidosConmigoToolbarHTML(n) {
+function candidatosCompartidosConmigoToolbarHTML(n, hayCandidatos = true) {
   return `
     <div class="compartidos-seleccion-bar">
-      <button type="button" id="btn-seleccionar-todos-compartidos" class="btn btn-ghost">Seleccionar todos</button>
+      <button type="button" id="btn-seleccionar-todos-compartidos" class="btn btn-ghost" ${hayCandidatos ? "" : "disabled"}>Seleccionar todos</button>
       <button type="button" id="btn-deseleccionar-todos-compartidos" class="btn btn-ghost" ${n === 0 ? "disabled" : ""}>Quitar selección</button>
       <span class="staff-hint">${n} seleccionado${n === 1 ? "" : "s"}</span>
       <button type="button" id="btn-exportar-excel-compartidos" class="btn btn-primary" ${n === 0 ? "disabled" : ""}>📊 Exportar a Excel...</button>
@@ -560,7 +586,7 @@ function candidatosCompartidosConmigoToolbarHTML(n) {
 // candidatos -- con las dos secciones fundidas en una ya no hacía falta
 // esconderlas para no abrumar.
 function candidatosCompartidosConmigoSeccionHTML(candidatos, ocultosPorEstado, totalCompartidos, hayBusqueda) {
-  let html = `<h2 class="reclu-seccion">Compartidos conmigo</h2>${candidatosCompartidosConmigoToolbarHTML(compartidosConmigoSeleccionadosIds.size)}`;
+  let html = `<h2 class="reclu-seccion">Compartidos conmigo</h2>${candidatosCompartidosConmigoToolbarHTML(compartidosConmigoSeleccionadosIds.size, candidatos.length > 0)}`;
   if (candidatos.length === 0) {
     // Tres motivos MUY distintos para que esto salga vacío -- antes se
     // mostraba siempre el mismo mensaje ("Todavía no te han compartido
@@ -627,7 +653,6 @@ function candidatosCompartidosConmigoSeccionHTML(candidatos, ocultosPorEstado, t
 }
 
 async function loadCompartidos() {
-  const wrap = document.getElementById("compartidos-list");
   // Quien tiene el módulo completo (informes/saona_informes) está viendo
   // esta pantalla dentro del contexto de UNA marca (la de la URL, ver
   // EMPRESA), así que tiene sentido acotar "Compartidos" a esa marca. Pero
@@ -643,15 +668,30 @@ async function loadCompartidos() {
   // .modo-restringido en compartidos.html, que hace que #compartidos-list
   // ocupe esa misma área en su lugar para esta gente.
   document.querySelector(".compartidos-wrap")?.classList.toggle("modo-restringido", esUsuarioRestringido);
-  const buscarInput = document.getElementById("compartidos-buscar");
-  compartidosBusqueda = buscarInput ? buscarInput.value.trim() : "";
   const filtroEmpresa = esUsuarioRestringido ? "" : `?empresa=${EMPRESA}`;
+  const miGen = ++_compartidosLoadGen;
   const [conmigoTodos, porMiTodos, vacantesPorMi] = await Promise.all([
     fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/compartidos-conmigo${filtroEmpresa}`).then((r) => (r.ok ? r.json() : [])),
     fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/compartidos-por-mi${filtroEmpresa}`).then((r) => (r.ok ? r.json() : [])),
     fetch(`${AUTH_API_BASE}/reclutamiento/vacantes-compartidas-por-mi${filtroEmpresa}`).then((r) => (r.ok ? r.json() : [])),
   ]);
+  // Si mientras esperaba esta respuesta se disparó OTRA carga más reciente
+  // (búsqueda, checkbox...), esta ya está obsoleta -- no pintar por encima.
+  if (miGen !== _compartidosLoadGen) return;
+  _rawConmigo = conmigoTodos;
+  _rawPorMi = porMiTodos;
+  _rawVacantesPorMi = vacantesPorMi;
+  renderizarCompartidos();
+}
 
+// Repinta desde la última respuesta del servidor (_rawConmigo/_rawPorMi/
+// _rawVacantesPorMi) aplicando el término de búsqueda actual -- NO hace
+// ningún fetch, para que escribir en el buscador, (de)marcar un checkbox o
+// "Seleccionar todos"/"Quitar selección" sea instantáneo en vez de volver a
+// pedir las 3 listas completas cada vez.
+function renderizarCompartidos() {
+  const wrap = document.getElementById("compartidos-list");
+  const conmigoTodos = _rawConmigo, porMiTodos = _rawPorMi, vacantesPorMi = _rawVacantesPorMi;
   // A quien le comparten candidatos (típicamente un gerente de tienda) no le
   // interesa gestionar el proceso entero -- solo entrevistar a quien RRHH ya
   // marcó como "Entrevistado" (la señal de que está listo para que el
@@ -747,8 +787,10 @@ function vacanteMiniCardHTML(v) {
   // Compartidos conmigo hasta que alguien la comparta, así que conviene
   // que quien la creó lo note sin tener que abrir cada tarjeta una por una
   // (pedido explícito del usuario).
+  // title solo no basta -- invisible en lector de pantalla y en móvil (sin
+  // hover), justo donde más falta hace este aviso (hallazgo de QA).
   const avisoSinResponsable = !v.gerentes_count
-    ? ` <span title="Esta vacante no tiene responsable asignado">⚠️</span>`
+    ? ` <span title="Esta vacante no tiene responsable asignado" role="img" aria-label="Aviso: esta vacante no tiene responsable asignado">⚠️</span>`
     : "";
   return `
     <div class="vacante-mini-card ${activa ? "activa" : ""}" data-vacante-id="${v.id}">
@@ -2177,13 +2219,21 @@ function candidatoMiniCardHTML(c, opts = {}) {
           : escapeHTML(compartidos.map((x) => x.nombre).join(", "))
       }</p>`
     : "";
+  // title solo no basta -- invisible en lector de pantalla y en móvil (sin
+  // hover), justo donde más falta hace este aviso (hallazgo de QA).
+  const faltanDatosTexto = !c.telefono || !c.email
+    ? `Faltan datos de contacto (${!c.telefono ? "teléfono" : ""}${!c.telefono && !c.email ? " y " : ""}${!c.email ? "email" : ""})`
+    : null;
+  const avisoFaltanDatosHTML = faltanDatosTexto
+    ? `<span title="${escapeHTML(faltanDatosTexto)}" role="img" aria-label="Aviso: ${escapeHTML(faltanDatosTexto)}">⚠️</span>`
+    : "";
   return `
     <div class="candidato-mini-card ${seleccionada ? "seleccionada" : ""} ${abierta ? "abierta" : ""}" data-candidato-id="${c.id}">
       <div class="candidato-mini-card-fila">
         <span class="candidato-mini-checkbox-col">${checkbox}</span>
         ${fotoHTML}
         <div class="candidato-mini-card-info">
-          <h4>${escapeHTML(c.nombre_completo || "(sin nombre)")} ${estadoBadgeHTML(c.estado)} ${resultadoBadgeHTML(c.test_resultado)} ${!c.telefono || !c.email ? `<span title="Faltan datos de contacto (${!c.telefono ? "teléfono" : ""}${!c.telefono && !c.email ? " y " : ""}${!c.email ? "email" : ""})">⚠️</span>` : ""}</h4>
+          <h4>${escapeHTML(c.nombre_completo || "(sin nombre)")} ${estadoBadgeHTML(c.estado)} ${resultadoBadgeHTML(c.test_resultado)} ${avisoFaltanDatosHTML}</h4>
           <p>${escapeHTML(c.puesto_solicitado || "")}</p>
           <p>${escapeHTML(linea2)}</p>
           ${opts.ocultarVacante ? "" : `<p style="color:var(--text-muted);">${escapeHTML(vacanteTxt)}</p>`}
@@ -3243,9 +3293,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   // pintada podría no tener todavía los nombres.
   await initBaseCandidatos(user);
   let buscarCompartidosTimeout;
-  document.getElementById("compartidos-buscar").addEventListener("input", () => {
+  document.getElementById("compartidos-buscar").addEventListener("input", (e) => {
     clearTimeout(buscarCompartidosTimeout);
-    buscarCompartidosTimeout = setTimeout(loadCompartidos, 300);
+    // Repinta en cliente (renderizarCompartidos, sin fetch) contra lo que ya
+    // se cargó -- antes cada tecleo volvía a pedir las 3 listas completas al
+    // servidor (hallazgo de QA), notorio con Area Manager/Director viendo
+    // cientos de candidatos de golpe.
+    buscarCompartidosTimeout = setTimeout(() => {
+      compartidosBusqueda = e.target.value.trim();
+      renderizarCompartidos();
+    }, 300);
   });
   await loadCompartidos();
 });

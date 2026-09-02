@@ -134,8 +134,12 @@
   }
   .candidatos-toolbar input { flex: 1; min-width: 160px; }
   .candidatos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 16px; }
-  .btn-quitar-gerente { background: none; border: none; color: var(--status-critical); cursor: pointer; padding: 0 2px; font-size: 12px; }
-  .btn-dejar-compartir-mini { background: none; border: none; color: var(--status-critical); cursor: pointer; padding: 0 2px; font-size: 12px; }
+  /* min-width/min-height 24px (mínimo WCAG) -- eran solo padding:0 2px con
+     font-size:12px, la zona de toque más pequeña de la pantalla pese a ser
+     acciones destructivas (quitar responsable, dejar de compartir), y area
+     manager/director las usan igual de móvil (hallazgo de QA). */
+  .btn-quitar-gerente { background: none; border: none; color: var(--status-critical); cursor: pointer; padding: 2px; font-size: 12px; min-width: 24px; min-height: 24px; }
+  .btn-dejar-compartir-mini { background: none; border: none; color: var(--status-critical); cursor: pointer; padding: 2px; font-size: 12px; min-width: 24px; min-height: 24px; }
   .candidato-mini-card {
     background: var(--surface-page); border: 1px solid var(--border); border-radius: 12px; padding: 14px;
     cursor: pointer; transition: border-color 0.15s;
@@ -535,6 +539,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/compartidos.js?v=20260902f"></script>
+<script src="js/compartidos.js?v=20260902g"></script>
 </body>
 </html>
