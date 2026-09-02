@@ -319,7 +319,6 @@ let compartidosPorMiCache = []; // candidatos (fichas completas) con el filtro/b
 let compartidosConmigoSeleccionadosIds = new Set();
 let compartidosConmigoCache = []; // candidatos (fichas completas) con el filtro/búsqueda actual -- para "Seleccionar todos"
 let tandasAbiertas = new Set(); // claves de <details> que el usuario ha dejado abiertas -- se respeta entre re-renders
-let tandasSeccionInicializada = new Set(); // qué secciones ("conmigo"/"por-mi") ya recibieron su apertura por defecto
 
 async function actualizarCandidatoInline(candidatoId, campos) {
   try {
@@ -562,9 +561,8 @@ function candidatosCompartidosConmigoToolbarHTML(n) {
 // esconderlas para no abrumar.
 function candidatosCompartidosConmigoSeccionHTML(candidatos, ocultosPorEstado) {
   let html = `<h2 class="reclu-seccion">Compartidos conmigo</h2>${candidatosCompartidosConmigoToolbarHTML(compartidosConmigoSeleccionadosIds.size)}`;
-  if (ocultosPorEstado > 0) {
-    html += `<p class="staff-hint">${ocultosPorEstado} candidato${ocultosPorEstado === 1 ? "" : "s"} más en el proceso, sin marcar "Entrevistado" todavía.</p>`;
-  }
+  // (ocultosPorEstado sigue calculándose y filtrando en loadCompartidos --
+  // solo se quitó el aviso de texto, pedido explícito del usuario.)
   if (candidatos.length === 0) {
     return html + `<p class="staff-hint">Todavía no te han compartido ningún candidato.</p>`;
   }
@@ -591,10 +589,9 @@ function candidatosCompartidosConmigoSeccionHTML(candidatos, ocultosPorEstado) {
   // aparición (candidatos ya vienen ordenados por actualizado_en desc, así
   // que las vacantes con movimiento más reciente quedan arriba).
   const listaGrupos = [...grupos.values()].sort((a, b) => (a.clave === "sin_vacante" ? 1 : 0) - (b.clave === "sin_vacante" ? 1 : 0));
-  if (!tandasSeccionInicializada.has("conmigo-unificado")) {
-    listaGrupos.forEach((g) => tandasAbiertas.add(`compconmigo-${g.clave}`));
-    tandasSeccionInicializada.add("conmigo-unificado");
-  }
+  // Cerrado por defecto (igual que "Compartidos por ti", que nunca se abría
+  // solo) -- con Area Manager/Director viendo TODO lo compartido de la
+  // empresa, abrir cada grupo de golpe era una pared enorme de candidatos.
   html += `<div id="compartidos-conmigo-lista">` + listaGrupos.map((g) => {
     const clave = `compconmigo-${g.clave}`;
     const n = g.candidatos.length;

@@ -1563,13 +1563,18 @@ def candidatos_compartidos_con(usuario_id, empresa=None, todas=False):
         conn.close()
         return []
     marcadores = ",".join("?" * len(ids))
+    # (c.vacante_id IS NULL OR v.archivada = 0): una vez que la vacante se
+    # cierra/archiva, deja de aparecer en "Compartidos conmigo" -- ya no
+    # tiene sentido que gerentes/area managers/directores sigan viendo (y
+    # dándole seguimiento a) un proceso que ya se cerró (pedido explícito
+    # del usuario: "si la vacante está cerrada, les deja de aparecer").
     rows = conn.execute(f"""
         SELECT c.*, json_extract(r.datos_json, '$.RESULTADO') AS test_resultado,
                v.puesto AS vacante_puesto, v.centro AS vacante_centro
         FROM candidatos c
         LEFT JOIN informe_respuestas r ON r.id = c.respuesta_id
         LEFT JOIN vacantes v ON v.id = c.vacante_id
-        WHERE c.id IN ({marcadores})
+        WHERE c.id IN ({marcadores}) AND (c.vacante_id IS NULL OR v.archivada = 0)
         ORDER BY c.actualizado_en DESC
     """, list(ids)).fetchall()
     candidatos = [_row_to_dict(r) for r in rows]
