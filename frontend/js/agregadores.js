@@ -264,7 +264,7 @@ function agrIconoTienda(tienda) {
   });
 }
 
-function agrPopupDireccion(dir, editable) {
+function agrPopupDireccion(dir, editable, puedeEditarMapa) {
   const iconos = { disponible: "✅", no_disponible: "❌", error: "⚠️" };
   const entradas = Object.entries(dir.detalle || {});
   const detalleHtml = (agrFiltroAgregador ? entradas.filter(([nombre]) => nombre === agrFiltroAgregador) : entradas)
@@ -302,7 +302,7 @@ function agrPopupDireccion(dir, editable) {
   // segundo clic en otro dot los une -- pensada para cuando el usuario ve a
   // ojo dos dots disponibles con un hueco raro entre medias en el polígono
   // (pedido explícito del usuario 10/08).
-  const unirHtml = editable && agrModoUnir && agrFiltroAgregador
+  const unirHtml = puedeEditarMapa && agrModoUnir && agrFiltroAgregador
     ? agrUnionPendiente && agrUnionPendiente.lat === dir.lat && agrUnionPendiente.lng === dir.lng
       ? `<div style="margin-top:6px;color:var(--acento-calido);font-size:12px;">🔗 Punto de partida -- haz clic en el segundo</div>`
       : `<div style="margin-top:6px;"><button type="button" class="btn btn-ghost" style="font-size:12px;padding:3px 8px;" onclick="agrUnionElegirPunto(${dir.lat}, ${dir.lng}, '${dir.tienda}', '${(dir.direccion_text || "punto").replace(/'/g, "\\'")}', ${dir.id})">🔗 ${agrUnionPendiente ? `Unir aquí (con ${agrUnionPendiente.etiqueta})` : "Unir con otro punto"}</button></div>`
@@ -310,7 +310,7 @@ function agrPopupDireccion(dir, editable) {
   const textoEliminar = agrFiltroAgregador
     ? `🗑️ Eliminar solo en ${AGR_NOMBRE_AGREGADOR[agrFiltroAgregador] || agrFiltroAgregador}`
     : "🗑️ Eliminar punto (los 3 agregadores)";
-  const pieEditable = editable
+  const pieEditable = puedeEditarMapa
     ? `<i style="color:var(--text-muted);font-size:11px;">Arrastra el punto para reubicarlo</i><br>
        <button type="button" class="btn btn-ghost" style="margin-top:6px;font-size:12px;padding:3px 8px;" onclick="agrEliminarPunto(${dir.id})">${textoEliminar}</button>`
     : "";
@@ -512,9 +512,15 @@ async function agrGuardarReubicacion(dir, marker, lat, lng) {
 
 function agrAgregarMarcador(dir, opts = {}) {
   const editable = opts.editable !== false;
+  // Reubicar arrastrando, eliminar y unir puntos son cambios estructurales
+  // del mapa (a diferencia de "marcar disponible/no disponible", que es un
+  // estado del día a día) -- solo admin puede tocarlos, el resto se queda en
+  // solo visualización (mismo criterio que Entrevistas de Salida y Clima
+  // Laboral).
+  const puedeEditarMapa = editable && agrUsuarioActual && agrUsuarioActual.rol === "admin";
   const marker = L.marker([dir.lat, dir.lng], {
     icon: agrIconoDireccion(dir),
-    draggable: editable,
+    draggable: puedeEditarMapa,
   })
     // Función en vez de string fijo: Leaflet la vuelve a llamar cada vez que
     // se abre el popup, así que siempre refleja el agregador filtrado
@@ -524,12 +530,12 @@ function agrAgregarMarcador(dir, opts = {}) {
     // agregador de cuando se creó el marcador, no el filtro activo
     // (confirmado en vivo 09/08 con capturas: filtro Uber Eats mostrando
     // datos de JustEat).
-    .bindPopup(() => agrPopupDireccion(dir, editable))
+    .bindPopup(() => agrPopupDireccion(dir, editable, puedeEditarMapa))
     .bindTooltip("", { permanent: false, direction: "top", className: "agr-drag-tooltip" });
 
   marker._agrDir = dir;
 
-  if (editable) {
+  if (puedeEditarMapa) {
     const centro = (dir.tienda && agrCentrosPorTienda[dir.tienda]) || agrTiendaCentro;
     marker.on("drag", (e) => {
       const { lat, lng } = e.target.getLatLng();
@@ -2430,6 +2436,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   wireUserBar(user);
   const btnDashboardScraper = document.getElementById("agr-btn-dashboard-scraper");
   if (btnDashboardScraper) btnDashboardScraper.hidden = user.rol !== "admin";
+  // Añadir/unir puntos/pincel modifican el mapa de cobertura para TODOS los
+  // que lo ven -- solo admin puede tocarlo, el resto se queda en visualización.
+  if (user.rol !== "admin") {
+    ["agr-btn-anadir", "agr-btn-unir", "agr-btn-pincel"].forEach((id) => {
+      const btn = document.getElementById(id);
+      if (btn) btn.hidden = true;
+    });
+  }
   agrWireFiltroAgregador();
   agrAplicarColapsoTabla();
 

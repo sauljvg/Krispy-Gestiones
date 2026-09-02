@@ -520,7 +520,7 @@ def cobertura_route(tienda: str | None = None, agregador: str | None = None, _us
 
 
 @router.put("/direcciones/{direccion_id}")
-def mover_direccion_route(direccion_id: int, body: DireccionMoverIn, _user: dict = Depends(require_agregadores)):
+def mover_direccion_route(direccion_id: int, body: DireccionMoverIn, _user: dict = Depends(require_admin)):
     """Reubicación manual desde el mapa: alguien arrastra el punto y confirma
     la dirección real (ej. mirando Google Maps) cuando Nominatim no acertó."""
     resultado = agregadores_module.mover_direccion_manual(direccion_id, body.lat, body.lng, body.direccion_text)
@@ -533,7 +533,7 @@ def mover_direccion_route(direccion_id: int, body: DireccionMoverIn, _user: dict
 def eliminar_direccion_route(
     direccion_id: int,
     agregador: str | None = None,
-    _user: dict = Depends(require_agregadores),
+    _user: dict = Depends(require_admin),
 ):
     """Quita un punto (baja lógica). Sin `agregador`: baja global (los 3).
     Con `agregador`: solo desactiva esa capa -- el mismo punto sigue vivo
@@ -765,7 +765,7 @@ def eliminar_limite_route(
     tienda: str,
     agregador: str,
     angulo_grados: float,
-    _user: dict = Depends(require_agregadores),
+    _user: dict = Depends(require_admin),
 ):
     """Igual que admin_eliminar_limite_route pero con sesión de usuario --
     para poder quitar a mano, desde el propio popup del vértice en el mapa,
@@ -788,7 +788,7 @@ def mover_limite_route(
     agregador: str,
     angulo_grados: float,
     body: LimiteMoverIn,
-    _user: dict = Depends(require_agregadores),
+    _user: dict = Depends(require_admin),
 ):
     """Arrastrar un vértice del borde para ajustarlo a mano, en vez de solo
     poder borrarlo -- recalcula el límite (distancia real) desde la nueva
@@ -811,7 +811,7 @@ class UnionIn(BaseModel):
 
 
 @router.post("/uniones")
-def crear_union_route(body: UnionIn, _user: dict = Depends(require_agregadores)):
+def crear_union_route(body: UnionIn, _user: dict = Depends(require_admin)):
     """Puente manual entre dos puntos: el usuario ve dos dots disponibles (o
     dos vértices ya calculados del borde) con un hueco/pico raro entre
     medias y decide a ojo que ahí también hay cobertura, sin depender de un
@@ -832,7 +832,7 @@ def get_uniones_route(tienda: str, agregador: str | None = None, _user: dict = D
 
 
 @router.delete("/uniones/{union_id}")
-def eliminar_union_route(union_id: int, _user: dict = Depends(require_agregadores)):
+def eliminar_union_route(union_id: int, _user: dict = Depends(require_admin)):
     if not agregadores_module.eliminar_union(union_id):
         raise HTTPException(status_code=404, detail="Unión no encontrada")
     return {"ok": True}
@@ -845,7 +845,7 @@ class RellenoIn(BaseModel):
 
 
 @router.post("/rellenos")
-def crear_relleno_route(body: RellenoIn, _user: dict = Depends(require_agregadores)):
+def crear_relleno_route(body: RellenoIn, _user: dict = Depends(require_admin)):
     """Pincel: zona pintada a mano (varios puntos formando un área) que se
     fusiona con el polígono calculado (turf.union en el frontend), para
     huecos DENTRO de la figura -- un puente recto entre dos puntos del borde
@@ -863,7 +863,7 @@ def get_rellenos_route(tienda: str, agregador: str | None = None, _user: dict = 
 
 
 @router.delete("/rellenos/{relleno_id}")
-def eliminar_relleno_route(relleno_id: int, _user: dict = Depends(require_agregadores)):
+def eliminar_relleno_route(relleno_id: int, _user: dict = Depends(require_admin)):
     if not agregadores_module.eliminar_relleno(relleno_id):
         raise HTTPException(status_code=404, detail="Relleno no encontrado")
     return {"ok": True}
@@ -897,7 +897,7 @@ def admin_eliminar_direccion_route(direccion_id: int, agregador: str | None = No
 
 
 @router.post("/direcciones")
-def agregar_direccion_route(body: DireccionNuevaIn, _user: dict = Depends(require_agregadores)):
+def agregar_direccion_route(body: DireccionNuevaIn, _user: dict = Depends(require_admin)):
     """Añade un punto de test a mano (clic en el mapa), fuera del grid fijo
     de radios/ángulos -- para vigilar de cerca una zona concreta."""
     resultado = agregadores_module.agregar_direccion_manual(body.tienda, body.lat, body.lng, body.direccion_text)
