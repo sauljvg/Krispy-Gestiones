@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+import re
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 import auth as auth_module
 import evaluaciones360 as eval360_module
+import evaluaciones360_pdf as evaluaciones360_pdf_module
 from auth_routes import get_current_user, require_admin
 
 router = APIRouter()
@@ -13,6 +16,14 @@ def _modulo_para_empresa(empresa: str) -> str:
 
 
 def _require_acceso_empresa(user: dict, empresa: str):
+    """OJO al leer esto: en la práctica NUNCA bloquea a nadie. Todas las
+    rutas que la llaman ya exigen Depends(require_admin) primero, y
+    tiene_modulo() devuelve True sin más para cualquier admin (ver
+    auth.tiene_modulo) -- así que hoy cualquier admin gestiona Evaluaciones
+    360° de KK y Saona indistintamente, sin aislamiento real por empresa.
+    Se deja tal cual (no hace daño, y por si algún día se separa el rol
+    admin por marca esto ya estaría en su sitio) pero no des por hecho que
+    hay una restricción real aquí solo porque el nombre lo sugiera."""
     if not auth_module.tiene_modulo(user, _modulo_para_empresa(empresa)):
         raise HTTPException(status_code=403, detail="No tienes acceso a Evaluaciones 360°")
 
@@ -387,6 +398,20 @@ def quitar_asignacion_route(asignacion_id: int, user: dict = Depends(require_adm
 def resultados_evaluado_route(campana_id: int, persona_id: int, user: dict = Depends(require_admin)):
     _require_acceso_campana(campana_id, user)
     return eval360_module.resultados_evaluado(campana_id, persona_id)
+
+
+@router.get("/campanas/{campana_id}/evaluados/{persona_id}/resultados.pdf")
+def resultados_evaluado_pdf_route(campana_id: int, persona_id: int, user: dict = Depends(require_admin)):
+    campana = _require_acceso_campana(campana_id, user)
+    persona = _require_acceso_persona(persona_id, user)
+    resultados = eval360_module.resultados_evaluado(campana_id, persona_id)
+    pdf_bytes = evaluaciones360_pdf_module.generar_resultados_pdf(persona, campana, resultados, empresa=campana.get("empresa", "kk"))
+    nombre = re.sub(r'[\\/:*?"<>|]', "", f"360 {persona.get('nombre_completo') or persona_id} {campana.get('nombre') or ''}").strip()
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}.pdf"'},
+    )
 
 
 # ---------------------------------------------------------------------------

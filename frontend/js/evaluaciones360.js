@@ -1493,6 +1493,8 @@ async function anadirEvaluadorManual() {
 }
 
 async function renderResultados() {
+  document.getElementById("btn-exportar-resultados-pdf").href =
+    `${AUTH_API_BASE}/evaluaciones360/campanas/${currentCampana.id}/evaluados/${currentEvaluadoId}/resultados.pdf`;
   const r = await fetch(
     `${AUTH_API_BASE}/evaluaciones360/campanas/${currentCampana.id}/evaluados/${currentEvaluadoId}/resultados`
   ).then((res) => (res.ok ? res.json() : null));
