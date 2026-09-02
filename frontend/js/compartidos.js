@@ -767,6 +767,10 @@ async function refreshVacantes() {
 
 function vacanteFormHTML() {
   const v = vacanteEditando;
+  // Gestionar responsables, fusionar y eliminar una vacante son ahora solo
+  // para admin (pedido explícito del usuario) -- se ocultan los botones en
+  // vez de mostrarlos y que el backend los rechace con un 403 confuso.
+  const esAdmin = usuarioActual?.rol === "admin";
   return `
     <div class="vacante-form">
       <h3>${v ? "Editar vacante" : "Nueva vacante"}</h3>
@@ -789,17 +793,17 @@ function vacanteFormHTML() {
       ${v ? `<p class="staff-hint">Solicitada el ${escapeHTML(fmtFechaHora(v.fecha_solicitud))}${v.fecha_cierre ? ` · cerrada el ${escapeHTML(fmtFechaHora(v.fecha_cierre))}` : ""}</p>` : ""}
       ${v ? `<p class="staff-hint">
         👥 Responsables: ${(v.gerentes || []).length
-          ? v.gerentes.map((g) => `${escapeHTML(g.nombre)} <button type="button" class="btn-quitar-gerente" data-usuario-id="${g.usuario_id}" title="Quitar como responsable" aria-label="Quitar a ${escapeHTML(g.nombre)} como responsable">✕</button>`).join(", ")
+          ? v.gerentes.map((g) => `${escapeHTML(g.nombre)}${esAdmin ? ` <button type="button" class="btn-quitar-gerente" data-usuario-id="${g.usuario_id}" title="Quitar como responsable" aria-label="Quitar a ${escapeHTML(g.nombre)} como responsable">✕</button>` : ""}`).join(", ")
           : "(nadie todavía)"}
-        <button type="button" id="btn-compartir-vacante" class="btn-mini">＋ Añadir</button>
+        ${esAdmin ? `<button type="button" id="btn-compartir-vacante" class="btn-mini">＋ Añadir</button>` : ""}
       </p>
       <p class="staff-hint" style="margin-top:-8px;">Un responsable ve TODOS los candidatos de esta solicitud, aunque se añadan después -- no hace falta compartirlos uno a uno.</p>` : ""}
       <div class="form-actions form-actions-compacta">
         <button type="button" id="btn-guardar-vacante" class="btn btn-primary">Guardar</button>
         ${v && v.candidatos.length ? `<button type="button" id="btn-whatsapp-vacante" class="btn btn-ghost" title="Mensaje a los candidatos de esta vacante">${ICONO_WHATSAPP}Mensaje</button>` : ""}
-        ${v ? `<button type="button" id="btn-fusionar-vacante" class="btn btn-ghost" title="Fusionar con otra solicitud...">🔗 Fusionar</button>` : ""}
+        ${v && esAdmin ? `<button type="button" id="btn-fusionar-vacante" class="btn btn-ghost" title="Fusionar con otra solicitud...">🔗 Fusionar</button>` : ""}
         ${v ? `<button type="button" id="btn-archivar-vacante" class="btn btn-ghost">${v.archivada ? "📤 Desarchivar" : "🗄️ Archivar"}</button>` : ""}
-        ${v ? `<button type="button" id="btn-eliminar-vacante" class="btn btn-ghost" title="Eliminar vacante">🗑 Eliminar</button>` : ""}
+        ${v && esAdmin ? `<button type="button" id="btn-eliminar-vacante" class="btn btn-ghost" title="Eliminar vacante">🗑 Eliminar</button>` : ""}
         <button type="button" id="btn-cerrar-vacante-form" class="btn btn-ghost">Cancelar</button>
       </div>
     </div>`;
@@ -811,10 +815,12 @@ function renderVacanteForm() {
   document.getElementById("btn-guardar-vacante").addEventListener("click", guardarVacante);
   document.getElementById("btn-cerrar-vacante-form").addEventListener("click", cerrarVacanteForm);
   if (vacanteEditando) {
-    document.getElementById("btn-eliminar-vacante").addEventListener("click", eliminarVacanteActual);
+    // Fusionar/Eliminar/gestionar Responsables solo existen en el HTML para
+    // admin (ver vacanteFormHTML) -- con optional chaining para el resto.
+    document.getElementById("btn-eliminar-vacante")?.addEventListener("click", eliminarVacanteActual);
     document.getElementById("btn-archivar-vacante").addEventListener("click", archivarVacanteActual);
-    document.getElementById("btn-fusionar-vacante").addEventListener("click", abrirModalFusionarVacante);
-    document.getElementById("btn-compartir-vacante").addEventListener("click", abrirModalCompartirVacante);
+    document.getElementById("btn-fusionar-vacante")?.addEventListener("click", abrirModalFusionarVacante);
+    document.getElementById("btn-compartir-vacante")?.addEventListener("click", abrirModalCompartirVacante);
     wrap.querySelectorAll(".btn-quitar-gerente").forEach((btn) => {
       btn.addEventListener("click", () => quitarGerenteVacante(Number(btn.dataset.usuarioId), btn));
     });
@@ -1463,7 +1469,7 @@ function renderForm() {
           <button type="button" id="btn-guardar-candidato" class="btn btn-primary">Guardar</button>
           ${descargarCvBotonHTML}
           ${esEdicion ? `<a class="btn btn-ghost" id="btn-whatsapp-candidato" href="https://wa.me/${numeroWhatsapp(candidatoEditando.telefono)}" target="_blank" rel="noopener" ${candidatoEditando.telefono ? "" : "hidden"}>${ICONO_WHATSAPP}WhatsApp</a>` : ""}
-          ${esEdicion ? `<button type="button" id="btn-eliminar-candidato" class="btn btn-ghost">Eliminar</button>` : ""}
+          ${esEdicion && usuarioActual?.rol === "admin" ? `<button type="button" id="btn-eliminar-candidato" class="btn btn-ghost">Eliminar</button>` : ""}
           <button type="button" id="btn-cerrar-form" class="btn btn-ghost">Cancelar</button>
         </div>
       </div>
@@ -1501,7 +1507,7 @@ function renderForm() {
   document.getElementById("btn-cerrar-ficha-x").addEventListener("click", cerrarForm);
   document.getElementById("btn-guardar-candidato").addEventListener("click", guardarCandidato);
   if (esEdicion) {
-    document.getElementById("btn-eliminar-candidato").addEventListener("click", eliminarCandidatoActual);
+    document.getElementById("btn-eliminar-candidato")?.addEventListener("click", eliminarCandidatoActual);
     wrap.querySelectorAll(".btn-reextraer-cv").forEach((btn) => {
       btn.addEventListener("click", () => reextraerCv(Number(btn.dataset.archivoId)));
     });

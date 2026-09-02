@@ -1400,6 +1400,32 @@ def get_candidato_compartido_por(candidato_id, usuario_id):
     return row["compartido_por"] if row else None
 
 
+def get_dueno_compartido_directo(candidato_id):
+    """Quién tiene ahora mismo el compartir DIRECTO de este candidato (por
+    cualquiera de los dos caminos, aquí o vía Informes) -- compartir directo
+    es EXCLUSIVO (ver compartir_candidatos_directo), así que hay como mucho
+    UNO a la vez. None si nadie lo tiene compartido de forma directa todavía
+    (primera vez, cualquiera con acceso puede compartirlo).
+
+    Para impedir que alguien le "robe" a un compañero un candidato que ya
+    compartió con un tercero -- sin esto, cualquiera con acceso al módulo (o
+    al que simplemente le compartieron ESE candidato) podía volver a
+    compartirlo con otra persona, quitándoselo de encima al que lo tenía
+    antes sin su permiso (ver _exigir_dueno_del_compartido en
+    informes_routes.py, que ya protegía esto mismo para Informes pero nunca
+    se aplicaba aquí)."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT compartido_por FROM candidato_compartidos WHERE candidato_id = ?", (candidato_id,)
+    ).fetchone()
+    if row is None:
+        row = conn.execute(
+            "SELECT compartido_por FROM informe_compartidos WHERE candidato_id = ?", (candidato_id,)
+        ).fetchone()
+    conn.close()
+    return row["compartido_por"] if row else None
+
+
 def cambiar_destinatario_directo(pares, nuevo_usuario_id, compartido_en):
     """pares = [(candidato_id, usuario_id_actual), ...]. Mueve cada share
     directo a `nuevo_usuario_id`, re-estampando `compartido_en` con la

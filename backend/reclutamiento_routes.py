@@ -18,8 +18,8 @@ import cv_extraction
 import cv_pdf
 import notificaciones as notificaciones_module
 import reclutamiento as reclutamiento_module
-from auth_routes import get_current_user
-from informes_routes import require_informes_o_reclutamiento
+from auth_routes import get_current_user, require_admin
+from informes_routes import _exigir_dueno_del_compartido, require_informes_o_reclutamiento
 from utils import rows_to_xlsx
 
 router = APIRouter()
@@ -99,6 +99,19 @@ def require_acceso_vacante(vacante_id: int, user: dict = Depends(get_current_use
     if any(auth_module.tiene_modulo(user, m) for m in _modulos_para_empresa(empresa)):
         return user
     raise HTTPException(status_code=403, detail="No tienes acceso a esta solicitud")
+
+
+def _exigir_modulo_empresas_candidatos(candidato_ids: list[int], user: dict) -> None:
+    """Para acciones en lote que reciben candidato_ids directamente y no
+    filtran por empresa antes (a diferencia de _candidatos_accesibles, que
+    deja pasar en silencio a quien solo tiene un compartido suelto): esto es
+    para acciones que exigen el módulo completo, así que basta con exigir
+    el módulo de CADA empresa real involucrada -- si alguno de los ids es
+    de una empresa a la que este usuario no tiene acceso, 403 en bloque en
+    vez de tocar solo los que sí puede (edición en lote no debería aplicarse
+    a medias sin que quien lo pidió se entere)."""
+    for empresa in set(reclutamiento_module.get_empresas_candidatos(candidato_ids).values()):
+        _exigir_modulo_empresa(empresa, user)
 
 
 def _candidatos_accesibles(user: dict, candidato_ids: list[int]) -> list[int]:
@@ -202,8 +215,13 @@ class CandidatoUpdateIn(BaseModel):
 @router.get("/vacantes")
 def list_vacantes_route(
     empresa: str | None = None, estado: str | None = None, archivadas: bool = False,
-    _user: dict = Depends(require_informes_o_reclutamiento),
+    user: dict = Depends(require_informes_o_reclutamiento),
 ):
+    # Sin esto, tener el módulo de UNA marca bastaba para listar (y leer) las
+    # vacantes de la otra con solo cambiar el parámetro `empresa` -- ver
+    # crear_vacante_route más abajo, que sí lo exige desde siempre.
+    if empresa:
+        _exigir_modulo_empresa(empresa, user)
     return reclutamiento_module.list_vacantes(empresa=empresa, estado=estado, archivadas=archivadas)
 
 
@@ -236,7 +254,7 @@ def actualizar_vacante_route(vacante_id: int, body: VacanteUpdateIn, _user: dict
 
 
 @router.delete("/vacantes/{vacante_id}")
-def eliminar_vacante_route(vacante_id: int, _user: dict = Depends(require_acceso_vacante)):
+def eliminar_vacante_route(vacante_id: int, _user: dict = Depends(require_admin)):
     if reclutamiento_module.get_vacante(vacante_id) is None:
         raise HTTPException(status_code=404, detail="Vacante no encontrada")
     reclutamiento_module.eliminar_vacante(vacante_id)
@@ -248,7 +266,7 @@ class FusionarVacanteIn(BaseModel):
 
 
 @router.post("/vacantes/{vacante_id}/fusionar")
-def fusionar_vacantes_route(vacante_id: int, body: FusionarVacanteIn, user: dict = Depends(require_acceso_vacante)):
+def fusionar_vacantes_route(vacante_id: int, body: FusionarVacanteIn, _user: dict = Depends(require_admin)):
     empresa_origen = reclutamiento_module.get_empresa_vacante(vacante_id)
     empresa_destino = reclutamiento_module.get_empresa_vacante(body.destino_id)
     if empresa_origen is None or empresa_destino is None:
@@ -257,10 +275,6 @@ def fusionar_vacantes_route(vacante_id: int, body: FusionarVacanteIn, user: dict
         raise HTTPException(status_code=400, detail="Elige una solicitud distinta como destino")
     if empresa_origen != empresa_destino:
         raise HTTPException(status_code=400, detail="Solo se pueden fusionar solicitudes de la misma empresa")
-    # el permiso sobre vacante_id ya lo valida require_acceso_vacante (path);
-    # falta comprobar el mismo permiso sobre la vacante destino, que llega
-    # por el cuerpo y no pasa por esa dependencia.
-    _exigir_modulo_empresa(empresa_destino, user)
     reclutamiento_module.fusionar_vacantes(vacante_id, body.destino_id)
     return {"ok": True}
 
@@ -270,10 +284,15 @@ class CompartirVacanteIn(BaseModel):
 
 
 @router.post("/vacantes/{vacante_id}/compartir")
-def compartir_vacante_route(vacante_id: int, body: CompartirVacanteIn, user: dict = Depends(require_acceso_vacante)):
+def compartir_vacante_route(vacante_id: int, body: CompartirVacanteIn, user: dict = Depends(require_admin)):
     """Asigna uno o más gerentes/responsables a TODA la solicitud -- a
     diferencia de /candidatos/compartir (candidato a candidato), esto da
-    acceso a todos sus candidatos de una vez, presentes y futuros."""
+    acceso a todos sus candidatos de una vez, presentes y futuros. Solo
+    admin (pedido explícito del usuario): a diferencia de compartir un
+    candidato suelto (que puede hacer cualquier responsable, para cubrirse
+    entre gerentes), gestionar quién es responsable de una solicitud entera
+    es una decisión de más peso -- afecta a todos sus candidatos, presentes
+    y futuros."""
     if reclutamiento_module.get_vacante(vacante_id) is None:
         raise HTTPException(status_code=404, detail="Vacante no encontrada")
     for usuario_id in body.usuario_ids:
@@ -284,7 +303,7 @@ def compartir_vacante_route(vacante_id: int, body: CompartirVacanteIn, user: dic
 
 
 @router.delete("/vacantes/{vacante_id}/compartir/{usuario_id}")
-def dejar_de_compartir_vacante_route(vacante_id: int, usuario_id: int, _user: dict = Depends(require_acceso_vacante)):
+def dejar_de_compartir_vacante_route(vacante_id: int, usuario_id: int, _user: dict = Depends(require_admin)):
     reclutamiento_module.dejar_de_compartir_vacante(vacante_id, usuario_id)
     return {"ok": True}
 
@@ -372,8 +391,13 @@ def list_candidatos_route(
     q: str | None = None,
     vacante_id: int | None = None,
     sin_vacante: bool = False,
-    _user: dict = Depends(require_informes_o_reclutamiento),
+    user: dict = Depends(require_informes_o_reclutamiento),
 ):
+    # Tener el módulo de UNA marca bastaba para listar/buscar candidatos de
+    # la otra con solo cambiar `empresa` (o dejarlo vacío -- ver
+    # list_vacantes_route más arriba, mismo motivo).
+    if empresa:
+        _exigir_modulo_empresa(empresa, user)
     return reclutamiento_module.list_candidatos(empresa=empresa, estado=estado, q=q, vacante_id=vacante_id, sin_vacante=sin_vacante)
 
 
@@ -400,15 +424,18 @@ def conteo_por_estado_route(
     q: str | None = None,
     vacante_id: int | None = None,
     sin_vacante: bool = False,
-    _user: dict = Depends(require_informes_o_reclutamiento),
+    user: dict = Depends(require_informes_o_reclutamiento),
 ):
+    if empresa:
+        _exigir_modulo_empresa(empresa, user)
     return reclutamiento_module.contar_por_estado(empresa=empresa, q=q, vacante_id=vacante_id, sin_vacante=sin_vacante)
 
 
 @router.put("/candidatos/estado-multiple")
-def actualizar_estado_multiple_route(body: EstadoMultipleIn, _user: dict = Depends(require_informes_o_reclutamiento)):
+def actualizar_estado_multiple_route(body: EstadoMultipleIn, user: dict = Depends(require_informes_o_reclutamiento)):
     if body.estado not in reclutamiento_module.ESTADOS:
         raise HTTPException(status_code=400, detail=f"Estado inválido: {body.estado}")
+    _exigir_modulo_empresas_candidatos(body.candidato_ids, user)
     reclutamiento_module.actualizar_estado_multiple(body.candidato_ids, body.estado)
     return {"ok": True}
 
@@ -456,7 +483,8 @@ class MarcarInvitadosTestIn(BaseModel):
 
 
 @router.post("/candidatos/marcar-invitados-test")
-def marcar_invitados_test_route(body: MarcarInvitadosTestIn, _user: dict = Depends(require_informes_o_reclutamiento)):
+def marcar_invitados_test_route(body: MarcarInvitadosTestIn, user: dict = Depends(require_informes_o_reclutamiento)):
+    _exigir_modulo_empresas_candidatos(body.candidato_ids, user)
     reclutamiento_module.marcar_invitados_test(body.candidato_ids, body.encuesta_id)
     return {"ok": True}
 
@@ -467,18 +495,33 @@ def compartir_candidatos_route(body: CompartirCandidatosIn, user: dict = Depends
     vacante (o al que le compartieron un candidato suelto) también puede
     compartirlo con otro gerente, p.ej. para cubrirse mutuamente. Se filtra
     con _candidatos_accesibles para que solo pueda compartir candidatos a
-    los que él mismo tiene acceso, nunca cualquiera de la base entera."""
+    los que él mismo tiene acceso, nunca cualquiera de la base entera.
+
+    Compartir directo es EXCLUSIVO (ver compartir_candidatos_directo): quita
+    el acceso a quien lo tuviera antes. Por eso, de los ya accesibles, se
+    descartan en silencio los que ya tiene compartido DIRECTAMENTE otra
+    persona (ver get_dueno_compartido_directo) -- si no, cualquiera con
+    acceso podría "robarle" a un compañero un candidato que él ya compartió
+    con un tercero, sin su permiso."""
     if not auth_module.usuario_existe(body.usuario_id):
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     ids_accesibles = _candidatos_accesibles(user, body.candidato_ids)
-    if not ids_accesibles:
-        raise HTTPException(status_code=403, detail="No tienes acceso a ninguno de estos candidatos")
-    reclutamiento_module.compartir_candidatos_directo(ids_accesibles, body.usuario_id, user["username"])
-    return {"ok": True, "compartidos": len(ids_accesibles)}
+    es_admin = user.get("rol") == "admin"
+    ids_permitidos = ids_accesibles if es_admin else [
+        cid for cid in ids_accesibles
+        if (dueno := reclutamiento_module.get_dueno_compartido_directo(cid)) is None or dueno == user["username"]
+    ]
+    if not ids_permitidos:
+        detalle = "No tienes acceso a ninguno de estos candidatos" if not ids_accesibles else \
+            "Ya están compartidos directamente por otra persona -- solo quien los compartió (o un admin) puede reasignarlos"
+        raise HTTPException(status_code=403, detail=detalle)
+    reclutamiento_module.compartir_candidatos_directo(ids_permitidos, body.usuario_id, user["username"])
+    return {"ok": True, "compartidos": len(ids_permitidos)}
 
 
 @router.delete("/candidatos/{candidato_id}/compartir/{usuario_id}")
-def dejar_de_compartir_candidato_route(candidato_id: int, usuario_id: int, _user: dict = Depends(require_informes_o_reclutamiento)):
+def dejar_de_compartir_candidato_route(candidato_id: int, usuario_id: int, user: dict = Depends(require_informes_o_reclutamiento)):
+    _exigir_dueno_del_compartido(reclutamiento_module.get_candidato_compartido_por(candidato_id, usuario_id), user)
     reclutamiento_module.dejar_de_compartir_candidato(candidato_id, usuario_id)
     return {"ok": True}
 
@@ -500,7 +543,7 @@ def lotes_en_progreso_route(user: dict = Depends(get_current_user)):
 
 
 @router.get("/candidatos/fotos-duplicadas")
-def fotos_duplicadas_route(empresa: str = "kk", _user: dict = Depends(require_informes_o_reclutamiento)):
+def fotos_duplicadas_route(empresa: str = "kk", user: dict = Depends(require_informes_o_reclutamiento)):
     """Diagnóstico de solo lectura: agrupa a todos los candidatos con foto
     por el CONTENIDO real del archivo (hash), no por si su PDF vuelve a
     analizarse como una o varias personas -- esa segunda vía es la que usa
@@ -516,6 +559,7 @@ def fotos_duplicadas_route(empresa: str = "kk", _user: dict = Depends(require_in
     Definida ANTES de /candidatos/{candidato_id} a propósito -- mismo motivo
     que /candidatos/lotes-en-progreso un poco más arriba: si fuera después,
     "fotos-duplicadas" se colaría como candidato_id de esa otra ruta."""
+    _exigir_modulo_empresa(empresa, user)
     candidatos = reclutamiento_module.candidatos_con_foto(empresa=empresa)
     por_hash: dict[str, list[dict]] = {}
     sin_archivo = []
@@ -548,8 +592,12 @@ def get_candidato_route(candidato_id: int, _user: dict = Depends(require_acceso_
 @router.post("/candidatos")
 def crear_candidato_route(body: CandidatoIn, user: dict = Depends(require_informes_o_reclutamiento)):
     _exigir_modulo_empresa(body.empresa, user)
-    if body.vacante_id is not None and reclutamiento_module.get_vacante(body.vacante_id) is None:
-        raise HTTPException(status_code=404, detail="Vacante no encontrada")
+    if body.vacante_id is not None:
+        empresa_vacante = reclutamiento_module.get_empresa_vacante(body.vacante_id)
+        if empresa_vacante is None:
+            raise HTTPException(status_code=404, detail="Vacante no encontrada")
+        if empresa_vacante != body.empresa:
+            raise HTTPException(status_code=400, detail="Esa vacante es de otra empresa")
     campos = body.model_dump(exclude={"empresa", "vacante_id"})
     candidato_id = reclutamiento_module.crear_candidato(
         campos, empresa=body.empresa, origen="manual", creado_por=user["username"], vacante_id=body.vacante_id
@@ -568,8 +616,12 @@ def actualizar_candidato_route(candidato_id: int, body: CandidatoUpdateIn, user:
         raise HTTPException(status_code=400, detail=f"Estado inválido: {body.estado}")
     if body.contacto_estado is not None and body.contacto_estado not in reclutamiento_module.CONTACTO_ESTADOS:
         raise HTTPException(status_code=400, detail=f"Estado de contacto inválido: {body.contacto_estado}")
-    if body.vacante_id is not None and reclutamiento_module.get_vacante(body.vacante_id) is None:
-        raise HTTPException(status_code=404, detail="Vacante no encontrada")
+    if body.vacante_id is not None:
+        empresa_vacante = reclutamiento_module.get_empresa_vacante(body.vacante_id)
+        if empresa_vacante is None:
+            raise HTTPException(status_code=404, detail="Vacante no encontrada")
+        if empresa_vacante != reclutamiento_module.get_empresa_candidato(candidato_id):
+            raise HTTPException(status_code=400, detail="Esa vacante es de otra empresa")
     # exclude_unset (no "filtrar los None") para poder distinguir "el cliente
     # no mandó este campo, no lo toques" de "el cliente mandó explícitamente
     # null" — necesario para poder desasignar vacante_id (null explícito) sin
@@ -591,7 +643,7 @@ def actualizar_candidato_route(candidato_id: int, body: CandidatoUpdateIn, user:
 
 
 @router.delete("/candidatos/{candidato_id}")
-def eliminar_candidato_route(candidato_id: int, _user: dict = Depends(require_modulo_candidato)):
+def eliminar_candidato_route(candidato_id: int, _user: dict = Depends(require_admin)):
     if reclutamiento_module.get_candidato(candidato_id) is None:
         raise HTTPException(status_code=404, detail="Candidato no encontrado")
     reclutamiento_module.eliminar_candidato(candidato_id)
@@ -636,7 +688,7 @@ async def extraer_cv_route(file: UploadFile = File(...), _user: dict = Depends(r
 
 
 @router.post("/candidatos/adjuntar-pdf-lote")
-async def adjuntar_pdf_lote_route(empresa: str = "kk", file: UploadFile = File(...), _user: dict = Depends(require_informes_o_reclutamiento)):
+async def adjuntar_pdf_lote_route(empresa: str = "kk", file: UploadFile = File(...), user: dict = Depends(require_informes_o_reclutamiento)):
     """Vista previa para el caso de "subí un PDF con 50 CVs, se crearon las
     50 fichas, pero el PDF en sí nunca se guardó en ninguna" -- lee el mismo
     PDF, extrae los nombres, y por cada uno busca si YA existe una ficha con
@@ -647,6 +699,7 @@ async def adjuntar_pdf_lote_route(empresa: str = "kk", file: UploadFile = File(.
     extraídos, se marca division_disponible=false para ese caso y se deja
     que el frontend recorte a mano o adjunte el PDF completo como antes. No
     adjunta nada todavía: eso lo hace /candidatos/adjuntar-pdf-lote/confirmar."""
+    _exigir_modulo_empresa(empresa, user)
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Sube el PDF con todos los candidatos")
     contenido = await file.read()
@@ -837,6 +890,7 @@ def reextraer_todos_route(
     antes se re-extraía SIEMPRE a todo el mundo, algo que con miles de
     candidatos sería carísimo cada vez que hiciera falta corregir solo un
     puñado recién importado."""
+    _exigir_modulo_empresa(empresa, user)
     items = reclutamiento_module.candidatos_con_pdf(empresa=empresa, candidato_ids=body.candidato_ids)
     if not items:
         return {"ok": True, "lote_id": None, "total": 0}
@@ -915,6 +969,7 @@ def limpiar_fotos_de_lote_compartido_route(empresa: str = "kk", user: dict = Dep
     sí es de una sola persona -- su foto actual sigue siendo válida. Corre
     en segundo plano (ver _limpiar_fotos_en_segundo_plano) -- consulta el
     progreso con GET .../limpiar-fotos-de-lote-compartido/progreso/{id}."""
+    _exigir_modulo_empresa(empresa, user)
     items = reclutamiento_module.candidatos_con_pdf_y_foto(empresa=empresa)
     limpieza_id = secrets.token_hex(8)
     _limpiezas_fotos[limpieza_id] = {"total": len(items), "procesados": 0, "terminado": False}
