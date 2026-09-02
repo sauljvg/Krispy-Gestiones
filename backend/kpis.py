@@ -254,6 +254,25 @@ def _es_nspp(motivo):
     return bool(motivo) and _MOTIVO_NSPP in motivo.lower()
 
 
+def marcar_baja_manual(codigo_empleado, fecha_baja, motivo_baja):
+    """Corrige a mano un registro de kpi_empleados que el Excel de GO todavía
+    trae como activo pero que Entrevista de Salida ya tiene registrado como
+    baja (el Excel es una foto puntual, puede ir por detrás). Se pierde en
+    la próxima importación -- si el Excel sigue sin traer la baja hay que
+    volver a aplicarla."""
+    conn = get_connection()
+    cur = conn.execute(
+        "UPDATE kpi_empleados SET fecha_baja = ?, motivo_baja = ? WHERE codigo_empleado = ?",
+        (fecha_baja, motivo_baja, str(codigo_empleado)),
+    )
+    conn.commit()
+    afectado = cur.rowcount
+    conn.close()
+    if not afectado:
+        raise ValueError(f"No se encontró ningún empleado con código {codigo_empleado}")
+    return {"ok": True}
+
+
 def _mes(fecha_iso):
     """'2026-03-15' -> '2026-03' -- agrupa por mes calendario. Tolera fechas
     en otros formatos sueltos (dd/mm/aaaa) que a veces se cuelan al registrar
