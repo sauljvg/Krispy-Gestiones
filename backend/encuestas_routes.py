@@ -13,8 +13,27 @@ router_publico = APIRouter()
 
 
 def require_tests(user: dict = Depends(get_current_user)) -> dict:
-    if not auth_module.tiene_modulo(user, "tests"):
+    if not (auth_module.tiene_modulo(user, "tests") or auth_module.tiene_modulo(user, "saona_tests")):
         raise HTTPException(status_code=403, detail="No tienes acceso a Test")
+    return user
+
+
+def _modulos_tests_empresa(empresa: str | None) -> tuple[str, ...]:
+    """KK y Saona tienen su propio módulo de Test -- tener el de una marca
+    no debe dar acceso a los tests de la otra. Si no se sabe la empresa (un
+    test suelto sin vincular a Informe/Entrevista/Clima, ver
+    encuestas.empresa_de_encuesta), se cae al conjunto amplio."""
+    if empresa == "saona":
+        return ("saona_tests",)
+    if empresa == "kk":
+        return ("tests",)
+    return ("tests", "saona_tests")
+
+
+def require_acceso_encuesta(encuesta_id: int, user: dict = Depends(get_current_user)) -> dict:
+    empresa = encuestas_module.get_empresa_encuesta(encuesta_id)
+    if not any(auth_module.tiene_modulo(user, m) for m in _modulos_tests_empresa(empresa)):
+        raise HTTPException(status_code=403, detail="No tienes acceso a Test de esa empresa")
     return user
 
 
@@ -97,8 +116,12 @@ def clima_oleadas_disponibles_route(_user: dict = Depends(require_tests)):
 
 
 @router.get("/encuestas")
-def list_encuestas_route(_user: dict = Depends(require_tests)):
-    return encuestas_module.list_encuestas()
+def list_encuestas_route(user: dict = Depends(require_tests)):
+    todas = encuestas_module.list_encuestas()
+    return [
+        e for e in todas
+        if any(auth_module.tiene_modulo(user, m) for m in _modulos_tests_empresa(encuestas_module.empresa_de_encuesta(e)))
+    ]
 
 
 @router.get("/encuestas/enlace-corto-entrevista/{empresa}")
@@ -118,21 +141,21 @@ def en_vivo_route(_user: dict = Depends(require_tests)):
 
 
 @router.get("/encuestas/{encuesta_id}/embudo")
-def embudo_route(encuesta_id: int, _user: dict = Depends(require_tests)):
+def embudo_route(encuesta_id: int, _user: dict = Depends(require_acceso_encuesta)):
     if not encuestas_module.get_encuesta(encuesta_id):
         raise HTTPException(status_code=404, detail="Encuesta no encontrada")
     return encuestas_module.get_embudo(encuesta_id)
 
 
 @router.get("/encuestas/{encuesta_id}/en-vivo-detalle")
-def en_vivo_detalle_route(encuesta_id: int, _user: dict = Depends(require_tests)):
+def en_vivo_detalle_route(encuesta_id: int, _user: dict = Depends(require_acceso_encuesta)):
     if not encuestas_module.get_encuesta(encuesta_id):
         raise HTTPException(status_code=404, detail="Encuesta no encontrada")
     return encuestas_module.get_en_vivo_detalle(encuesta_id)
 
 
 @router.delete("/encuestas/{encuesta_id}/sesiones")
-def borrar_sesiones_route(encuesta_id: int, _user: dict = Depends(require_tests)):
+def borrar_sesiones_route(encuesta_id: int, _user: dict = Depends(require_acceso_encuesta)):
     if not encuestas_module.get_encuesta(encuesta_id):
         raise HTTPException(status_code=404, detail="Encuesta no encontrada")
     encuestas_module.borrar_sesiones(encuesta_id)
@@ -140,7 +163,7 @@ def borrar_sesiones_route(encuesta_id: int, _user: dict = Depends(require_tests)
 
 
 @router.get("/encuestas/{encuesta_id}")
-def get_encuesta_route(encuesta_id: int, _user: dict = Depends(require_tests)):
+def get_encuesta_route(encuesta_id: int, _user: dict = Depends(require_acceso_encuesta)):
     encuesta = encuestas_module.get_encuesta(encuesta_id)
     if not encuesta:
         raise HTTPException(status_code=404, detail="Encuesta no encontrada")
@@ -156,7 +179,7 @@ def create_encuesta_route(body: EncuestaCrearIn, _user: dict = Depends(require_t
 
 
 @router.put("/encuestas/{encuesta_id}")
-def update_encuesta_route(encuesta_id: int, body: EncuestaEditarIn, _user: dict = Depends(require_tests)):
+def update_encuesta_route(encuesta_id: int, body: EncuestaEditarIn, _user: dict = Depends(require_acceso_encuesta)):
     if not encuestas_module.get_encuesta(encuesta_id):
         raise HTTPException(status_code=404, detail="Encuesta no encontrada")
     encuestas_module.update_encuesta(
@@ -168,7 +191,7 @@ def update_encuesta_route(encuesta_id: int, body: EncuestaEditarIn, _user: dict 
 
 
 @router.post("/encuestas/{encuesta_id}/publicar")
-def publicar_route(encuesta_id: int, _user: dict = Depends(require_tests)):
+def publicar_route(encuesta_id: int, _user: dict = Depends(require_acceso_encuesta)):
     if not encuestas_module.get_encuesta(encuesta_id):
         raise HTTPException(status_code=404, detail="Encuesta no encontrada")
     encuestas_module.set_estado(encuesta_id, True)
@@ -176,7 +199,7 @@ def publicar_route(encuesta_id: int, _user: dict = Depends(require_tests)):
 
 
 @router.post("/encuestas/{encuesta_id}/despublicar")
-def despublicar_route(encuesta_id: int, _user: dict = Depends(require_tests)):
+def despublicar_route(encuesta_id: int, _user: dict = Depends(require_acceso_encuesta)):
     if not encuestas_module.get_encuesta(encuesta_id):
         raise HTTPException(status_code=404, detail="Encuesta no encontrada")
     encuestas_module.set_estado(encuesta_id, False)
@@ -184,13 +207,13 @@ def despublicar_route(encuesta_id: int, _user: dict = Depends(require_tests)):
 
 
 @router.delete("/encuestas/{encuesta_id}")
-def delete_encuesta_route(encuesta_id: int, _user: dict = Depends(require_tests)):
+def delete_encuesta_route(encuesta_id: int, _user: dict = Depends(require_acceso_encuesta)):
     encuestas_module.delete_encuesta(encuesta_id)
     return {"ok": True}
 
 
 @router.post("/encuestas/{encuesta_id}/fondo")
-async def subir_fondo_route(encuesta_id: int, file: UploadFile = File(...), _user: dict = Depends(require_tests)):
+async def subir_fondo_route(encuesta_id: int, file: UploadFile = File(...), _user: dict = Depends(require_acceso_encuesta)):
     if not encuestas_module.get_encuesta(encuesta_id):
         raise HTTPException(status_code=404, detail="Encuesta no encontrada")
     ext = "." + file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ".jpg"
@@ -202,7 +225,7 @@ async def subir_fondo_route(encuesta_id: int, file: UploadFile = File(...), _use
 
 
 @router.get("/encuestas/{encuesta_id}/fondo")
-def descargar_fondo_route(encuesta_id: int, _user: dict = Depends(require_tests)):
+def descargar_fondo_route(encuesta_id: int, _user: dict = Depends(require_acceso_encuesta)):
     ruta = encuestas_module.get_fondo_ruta(encuesta_id)
     if not ruta:
         raise HTTPException(status_code=404, detail="Esta encuesta no tiene fondo")
@@ -210,7 +233,7 @@ def descargar_fondo_route(encuesta_id: int, _user: dict = Depends(require_tests)
 
 
 @router.get("/encuestas/{encuesta_id}/respuestas")
-def list_respuestas_route(encuesta_id: int, _user: dict = Depends(require_tests)):
+def list_respuestas_route(encuesta_id: int, _user: dict = Depends(require_acceso_encuesta)):
     if not encuestas_module.get_encuesta(encuesta_id):
         raise HTTPException(status_code=404, detail="Encuesta no encontrada")
     return encuestas_module.list_respuestas(encuesta_id)

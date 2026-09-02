@@ -495,6 +495,39 @@ def list_encuestas():
     return [_row_encuesta(r) for r in rows]
 
 
+def empresa_de_encuesta(encuesta: dict) -> str | None:
+    """A qué empresa (kk/saona) pertenece esta encuesta, resuelta por lo que
+    alimenta -- un test no tiene su propia columna "empresa", la hereda del
+    tipo de Informe, la Entrevista de Salida, o la oleada de Clima a la que
+    está vinculado. None si no está vinculada a nada de eso todavía (test
+    suelto, p.ej. para Reclutamiento) -- en ese caso no hay forma de saber
+    su empresa y se trata como accesible a cualquiera con el módulo Test."""
+    if encuesta.get("tipo_entrevista_empresa"):
+        return encuesta["tipo_entrevista_empresa"]
+    if encuesta.get("tipo_informe_clave"):
+        tipo = informes_module.get_tipo(encuesta["tipo_informe_clave"])
+        if tipo:
+            return tipo.get("empresa")
+    if encuesta.get("clima_oleada_id"):
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT empresa FROM clima_oleadas WHERE id = ?", (encuesta["clima_oleada_id"],)
+        ).fetchone()
+        conn.close()
+        if row:
+            return row["empresa"]
+    return None
+
+
+def get_empresa_encuesta(encuesta_id) -> str | None:
+    """Como empresa_de_encuesta, pero a partir del id -- para las rutas que
+    todavía no tienen la encuesta cargada."""
+    encuesta = get_encuesta(encuesta_id)
+    if encuesta is None:
+        return None
+    return empresa_de_encuesta(encuesta)
+
+
 def get_enlace_corto_entrevista(empresa):
     """El enlace corto (TinyURL) del test que alimenta la Entrevista de
     Salida de esta empresa — para el botón "Enviar Recordatorio" de

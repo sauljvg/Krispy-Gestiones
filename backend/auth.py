@@ -39,6 +39,7 @@ MODULOS = {
     "saona_clima": "SAONA · Clima Laboral",
     "saona_evaluaciones360": "SAONA · Evaluaciones 360°",
     "saona_reclutamiento": "SAONA · Reclutamiento",
+    "saona_tests": "SAONA · Test",
 }
 
 # Módulos que pertenecen al "hub" SAONA en Home — un usuario ve la tarjeta
