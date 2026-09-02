@@ -37,8 +37,21 @@ function formatMes(clave) {
   return `${nombres[parseInt(mes, 10) - 1]} ${anio.slice(2)}`;
 }
 
+function motivoCorto(motivo) {
+  // Los motivos son textos largos tipo SEPE ("02 Despido por causas
+  // objetivas. Amortización por causas económicas, técnicas..."). Para el
+  // gráfico basta con la primera frase -- si no hay punto, se recorta a un
+  // máximo razonable para que no se solape con las barras vecinas.
+  if (!motivo) return motivo;
+  const corte = motivo.indexOf(".");
+  let corto = corte > 0 ? motivo.slice(0, corte) : motivo;
+  if (corto.length > 45) corto = `${corto.slice(0, 42)}…`;
+  return corto;
+}
+
 let chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo;
 let usuarioActual = null;
+let ultimoResumen = null;
 
 function lineChart(canvasId, labels, valores) {
   const ctx = document.getElementById(canvasId).getContext("2d");
@@ -135,6 +148,10 @@ async function cargarResumen() {
   document.getElementById("kpi-nspp").textContent = d.bajas_ytd ? `${d.nspp_pct}%` : "--";
   document.getElementById("kpi-horas").textContent = `${d.horas_contratadas_totales} h/sem`;
 
+  document.getElementById("kpi-rotacion-sin-nspp").textContent = `${d.rotacion_sin_nspp_empresario_pct}%`;
+  document.getElementById("kpi-rotacion-sin-nspp-sub").textContent =
+    `${d.bajas_sin_nspp_empresario_ytd} de ${d.bajas_ytd} bajas del año -- sin los ceses en prueba a instancia del empresario`;
+
   destruirCharts();
   chartRotacionMensual = lineChart(
     "chart-rotacion-mensual",
@@ -148,11 +165,40 @@ async function cargarResumen() {
     chartHorasCentro = barChart("chart-horas-centro", d.horas_por_centro, { sufijo: "h" });
   }
 
-  const sinBajas = d.bajas_por_motivo_ytd.length === 0;
+  ultimoResumen = d;
+  poblarSelectorMesMotivo(d);
+  renderBajasMotivo(document.getElementById("kpi-bajas-motivo-mes").value);
+}
+
+function poblarSelectorMesMotivo(d) {
+  const select = document.getElementById("kpi-bajas-motivo-mes");
+  const valorPrevio = select.value;
+  select.innerHTML = '<option value="ytd">Año en curso</option>';
+  for (const m of d.rotacion_mensual) {
+    const opt = document.createElement("option");
+    opt.value = m.mes;
+    opt.textContent = formatMes(m.mes);
+    select.appendChild(opt);
+  }
+  const opciones = Array.from(select.options).map((o) => o.value);
+  select.value = opciones.includes(valorPrevio) ? valorPrevio : "ytd";
+}
+
+function renderBajasMotivo(seleccion) {
+  if (!ultimoResumen) return;
+  const d = ultimoResumen;
+  const esYtd = !seleccion || seleccion === "ytd";
+  const pares = esYtd ? d.bajas_por_motivo_ytd : (d.bajas_por_motivo_mensual[seleccion] || []);
+  document.getElementById("kpi-bajas-motivo-sub").textContent = esYtd
+    ? "Año en curso, según Entrevista de Salida."
+    : `${formatMes(seleccion)}, según Entrevista de Salida.`;
+
+  const sinBajas = pares.length === 0;
   document.getElementById("kpi-bajas-motivo-aviso").hidden = !sinBajas;
-  document.getElementById("chart-bajas-motivo").closest("div").style.display = sinBajas ? "none" : "";
+  document.getElementById("chart-bajas-motivo").style.display = sinBajas ? "none" : "";
+  chartBajasMotivo?.destroy();
   if (!sinBajas) {
-    chartBajasMotivo = barChart("chart-bajas-motivo", d.bajas_por_motivo_ytd);
+    chartBajasMotivo = barChart("chart-bajas-motivo", pares.map(([m, n]) => [motivoCorto(m), n]));
   }
 }
 
@@ -195,6 +241,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!file) return;
     importarExcel(file);
     e.target.value = "";
+  });
+  document.getElementById("kpi-bajas-motivo-mes").addEventListener("change", (e) => {
+    renderBajasMotivo(e.target.value);
   });
 
   await cargarUltimaImportacion();

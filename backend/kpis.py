@@ -259,6 +259,17 @@ def _es_nspp(motivo):
     return bool(motivo) and _MOTIVO_NSPP in motivo.lower()
 
 
+def _es_nspp_empresario(motivo):
+    """NSPP decidido por la empresa (motivo SEPE '07') -- el dato "malo" a
+    propósito que comentó el usuario, provocado por la propia empresa para
+    reducir horas, no una baja real de mercado. Se excluye para tener una
+    lectura de rotación sin ese ruido."""
+    if not motivo:
+        return False
+    m = motivo.lower()
+    return _MOTIVO_NSPP in m and "instancia del empresario" in m
+
+
 def marcar_baja_manual(codigo_empleado, fecha_baja, motivo_baja):
     """Corrige a mano un registro de kpi_empleados que el Excel de GO todavía
     trae como activo pero que Entrevista de Salida ya tiene registrado como
@@ -320,6 +331,7 @@ def compute_resumen(meses_historico=12):
         serie_meses.append(f"{anio:04d}-{mes:02d}")
     bajas_por_mes = {}
     bajas_centro_mes = {}
+    bajas_motivo_mes = {}
     for b in bajas:
         clave = _mes(b["fecha_baja"])
         if not clave:
@@ -328,6 +340,9 @@ def compute_resumen(meses_historico=12):
         centro = b["centro"] or "(sin centro)"
         bajas_centro_mes.setdefault(centro, {})
         bajas_centro_mes[centro][clave] = bajas_centro_mes[centro].get(clave, 0) + 1
+        motivo = b["motivo"] or "(sin dato)"
+        bajas_motivo_mes.setdefault(clave, {})
+        bajas_motivo_mes[clave][motivo] = bajas_motivo_mes[clave].get(motivo, 0) + 1
 
     rotacion_mensual = [
         {"mes": m, "bajas": bajas_por_mes.get(m, 0),
@@ -359,6 +374,16 @@ def compute_resumen(meses_historico=12):
     nspp_ytd = [b for b in bajas_ytd if _es_nspp(b["motivo"])]
     nspp_pct = round(len(nspp_ytd) / len(bajas_ytd) * 100, 1) if bajas_ytd else 0
 
+    # --- Rotación anual quitando los NSPP decididos por la empresa ---------
+    # Mismo acumulado anual, pero sin los "07 Cese en periodo de prueba a
+    # instancia del empresario" -- ese es el dato "malo a propósito" que
+    # comentó el usuario (provocado por la empresa para bajar horas), así se
+    # puede ver la rotación real sin ese ruido.
+    bajas_ytd_sin_empresario = [b for b in bajas_ytd if not _es_nspp_empresario(b["motivo"])]
+    rotacion_sin_nspp_empresario_pct = (
+        round(len(bajas_ytd_sin_empresario) / headcount_activo * 100, 1) if headcount_activo else 0
+    )
+
     # --- Horas contratadas por centro (Porcentaje Jornada -> horas reales) -
     horas_por_centro = {}
     for e in activos:
@@ -377,6 +402,14 @@ def compute_resumen(meses_historico=12):
             conteo[clave] = conteo.get(clave, 0) + 1
         return sorted(conteo.items(), key=lambda x: -x[1])
 
+    # Desglose de motivos mes a mes (mismos 12 meses de rotacion_mensual) --
+    # para poder ver cómo era la mezcla de motivos en un mes concreto
+    # (enero, febrero...), no solo el acumulado del año en curso.
+    bajas_por_motivo_mensual = {
+        m: sorted(bajas_motivo_mes.get(m, {}).items(), key=lambda x: -x[1])
+        for m in serie_meses
+    }
+
     return {
         "headcount_activo": headcount_activo,
         "horas_contratadas_totales": round(sum(horas_por_centro.values()), 1),
@@ -388,7 +421,10 @@ def compute_resumen(meses_historico=12):
         "bajas_ytd": len(bajas_ytd),
         "nspp_pct": nspp_pct,
         "nspp_ytd": len(nspp_ytd),
+        "rotacion_sin_nspp_empresario_pct": rotacion_sin_nspp_empresario_pct,
+        "bajas_sin_nspp_empresario_ytd": len(bajas_ytd_sin_empresario),
         "bajas_por_motivo_ytd": _contar_por("motivo", bajas_ytd),
+        "bajas_por_motivo_mensual": bajas_por_motivo_mensual,
         "horas_por_centro": horas_por_centro_lista,
         "sin_datos_plantilla": headcount_activo == 0,
         "sin_datos_bajas": len(bajas) == 0,

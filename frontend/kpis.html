@@ -107,6 +107,11 @@
           <div class="valor">Próximamente</div>
           <div class="sub">en cuanto haya una fuente de datos para calcularlo</div>
         </div>
+        <div class="kpi-stat-card">
+          <div class="label">Rotación del año sin NSPP de empresa</div>
+          <div class="valor" id="kpi-rotacion-sin-nspp">--</div>
+          <div class="sub" id="kpi-rotacion-sin-nspp-sub">quitando los ceses en periodo de prueba a instancia del empresario</div>
+        </div>
       </div>
 
       <div class="kpi-chart-card">
@@ -129,10 +134,17 @@
       </div>
 
       <div class="kpi-chart-card">
-        <h2>Bajas por motivo</h2>
-        <p class="sub">Año en curso, según Entrevista de Salida.</p>
-        <div id="kpi-bajas-motivo-aviso" class="kpi-aviso-bajas" hidden>Todavía no hay bajas registradas en Entrevista de Salida este año.</div>
-        <div style="position:relative; height:300px;"><canvas id="chart-bajas-motivo"></canvas></div>
+        <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
+          <div>
+            <h2 style="margin-bottom:0;">Bajas por motivo</h2>
+            <p class="sub" id="kpi-bajas-motivo-sub" style="margin-bottom:0;">Año en curso, según Entrevista de Salida.</p>
+          </div>
+          <select id="kpi-bajas-motivo-mes">
+            <option value="ytd" selected>Año en curso</option>
+          </select>
+        </div>
+        <div id="kpi-bajas-motivo-aviso" class="kpi-aviso-bajas" hidden>No hay bajas registradas en Entrevista de Salida para ese periodo.</div>
+        <div style="position:relative; height:360px; margin-top:12px;"><canvas id="chart-bajas-motivo"></canvas></div>
       </div>
     </div>
   </div>
@@ -143,6 +155,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/kpis.js?v=20260902f"></script>
+<script src="js/kpis.js?v=20260902g"></script>
 </body>
 </html>
