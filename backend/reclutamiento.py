@@ -1529,21 +1529,36 @@ def candidatos_compartidos_con(usuario_id, empresa=None, todas=False):
     clausula_usuario_vc = "" if todas else "vc.usuario_id = ? AND"
     params_usuario = () if todas else (usuario_id,)
     ids = set()
+    # Antes desde cuándo tiene acceso a cada candidato (compartido_en) -- para
+    # que "Compartidos conmigo" pueda mostrar cuánto tiempo lleva compartido
+    # (pedido explícito del usuario). Un candidato puede llegar por más de
+    # una vía (p.ej. compartido directo Y vacante entera) con fechas
+    # distintas -- se queda con la MÁS ANTIGUA, que es desde cuándo lo ve de
+    # verdad, sin importar por cuál de las vías fue.
+    fechas = {}
+
+    def _apuntar_fecha(candidato_id, compartido_en):
+        if compartido_en and (candidato_id not in fechas or compartido_en < fechas[candidato_id]):
+            fechas[candidato_id] = compartido_en
+
     for row in conn.execute(f"""
-        SELECT c.id FROM candidato_compartidos cc JOIN candidatos c ON c.id = cc.candidato_id
+        SELECT c.id, cc.compartido_en FROM candidato_compartidos cc JOIN candidatos c ON c.id = cc.candidato_id
         WHERE {clausula_usuario} 1=1 {clausula_empresa}
     """, (*params_usuario, *params_empresa)):
         ids.add(row["id"])
+        _apuntar_fecha(row["id"], row["compartido_en"])
     for row in conn.execute(f"""
-        SELECT c.id FROM informe_compartidos ic JOIN candidatos c ON c.id = ic.candidato_id
+        SELECT c.id, ic.compartido_en FROM informe_compartidos ic JOIN candidatos c ON c.id = ic.candidato_id
         WHERE {clausula_usuario_ic} 1=1 {clausula_empresa}
     """, (*params_usuario, *params_empresa)):
         ids.add(row["id"])
+        _apuntar_fecha(row["id"], row["compartido_en"])
     for row in conn.execute(f"""
-        SELECT c.id FROM candidatos c JOIN vacante_compartidos vc ON vc.vacante_id = c.vacante_id
+        SELECT c.id, vc.compartido_en FROM candidatos c JOIN vacante_compartidos vc ON vc.vacante_id = c.vacante_id
         WHERE {clausula_usuario_vc} 1=1 {clausula_empresa}
     """, (*params_usuario, *params_empresa)):
         ids.add(row["id"])
+        _apuntar_fecha(row["id"], row["compartido_en"])
     if not ids:
         conn.close()
         return []
@@ -1562,6 +1577,7 @@ def candidatos_compartidos_con(usuario_id, empresa=None, todas=False):
     conn.close()
     for c in candidatos:
         c["compartidos"] = mapa_compartidos.get(c["id"], [])
+        c["compartido_en"] = fechas.get(c["id"])
     return candidatos
 
 

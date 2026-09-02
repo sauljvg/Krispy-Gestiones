@@ -8,6 +8,22 @@ const ICONO_MAILTO = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none
 
 const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" ? "saona" : "kk";
 
+// "hace X días" para la fecha de compartido (ver candidato.compartido_en,
+// reclutamiento.candidatos_compartidos_con) -- pedido explícito del usuario:
+// que quien recibe una vacante compartida vea cuánto tiempo lleva así, no
+// solo la fecha seca.
+function tiempoDesdeCompartido(fechaStr) {
+  if (!fechaStr) return "";
+  const fecha = new Date(fechaStr.replace(" ", "T") + "Z");
+  if (isNaN(fecha)) return "";
+  const dias = Math.floor((Date.now() - fecha.getTime()) / 86400000);
+  if (dias <= 0) return "compartido hoy";
+  if (dias === 1) return "compartido ayer";
+  if (dias < 30) return `compartido hace ${dias} días`;
+  const meses = Math.floor(dias / 30);
+  return `compartido hace ${meses} mes${meses === 1 ? "" : "es"}`;
+}
+
 function aplicarBrandingEmpresa() {
   if (EMPRESA !== "saona") return;
   document.title = document.title.replace("Krispy Gestiones", "SAONA Gestiones");
@@ -562,7 +578,14 @@ function candidatosCompartidosConmigoSeccionHTML(candidatos, ocultosPorEstado) {
         candidatos: [],
       });
     }
-    grupos.get(clave).candidatos.push(c);
+    const grupo = grupos.get(clave);
+    grupo.candidatos.push(c);
+    // Fecha en la que este grupo empezó a estar compartido con quien mira
+    // esto -- la más antigua entre sus candidatos, así se refleja desde
+    // cuándo lo tiene visible de verdad (ver compartido_en, backend).
+    if (c.compartido_en && (!grupo.compartidoEn || c.compartido_en < grupo.compartidoEn)) {
+      grupo.compartidoEn = c.compartido_en;
+    }
   }
   // "Sin vacante" siempre al final -- el resto conserva el orden de
   // aparición (candidatos ya vienen ordenados por actualizado_en desc, así
@@ -579,7 +602,7 @@ function candidatosCompartidosConmigoSeccionHTML(candidatos, ocultosPorEstado) {
       <details class="tanda" data-clave="${clave}" ${tandasAbiertas.has(clave) ? "open" : ""}>
         <summary class="tanda-summary">
           <span class="tanda-fecha">${escapeHTML(g.titulo)}</span>
-          <span class="tanda-meta">${n} candidato${n === 1 ? "" : "s"}</span>
+          <span class="tanda-meta">${n} candidato${n === 1 ? "" : "s"}${g.compartidoEn ? ` · ${escapeHTML(tiempoDesdeCompartido(g.compartidoEn))}` : ""}</span>
         </summary>
         <div class="tanda-body">
           <div class="candidatos-grid ${candidatosVista !== "tarjetas" ? "candidatos-lista" : ""}">
