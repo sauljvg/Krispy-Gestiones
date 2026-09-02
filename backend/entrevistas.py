@@ -1210,14 +1210,28 @@ def compute_reporte(oleada_id, centro=None):
 
     satisfaccion_general = round(suma_global / cuenta_global, 2) if cuenta_global else None
 
+    # El motivo real (RRHH, ver entrevistas_salidas.motivo) en vez del que la
+    # propia persona marcó en su formulario de salida (roles["motivo_col"]) --
+    # ese autorreportado sigue existiendo y se puede corregir aparte (ver
+    # update_motivo/auditoria_g), pero para ESTE gráfico interesa el motivo
+    # oficial, no lo que cada quien quiso contar. Al venir de
+    # entrevistas_salidas en vez de las respuestas del test, esto cubre TODAS
+    # las salidas registradas del centro/oleada (hasta 90 en KK), no solo
+    # quienes respondieron la encuesta (n, más arriba, sigue siendo solo el
+    # total de respuestas para el resto del informe).
+    conn_motivos = get_connection()
+    salidas_motivos = _fetch_salidas(conn_motivos, oleada_id, centro)
+    conn_motivos.close()
     motivos_map = {}
-    if roles["motivo_col"]:
-        for fila in filas:
-            m = fila.get(roles["motivo_col"]) or "Sin dato"
-            m = str(m).strip() or "Sin dato"
-            motivos_map[m] = motivos_map.get(m, 0) + 1
+    for salida in salidas_motivos:
+        m = (salida.get("motivo") or "").strip() or "Sin dato"
+        motivos_map[m] = motivos_map.get(m, 0) + 1
+    total_motivos = len(salidas_motivos)
     motivos = sorted(
-        [{"motivo": m, "cantidad": c, "porcentaje": round(c / n * 100, 1)} for m, c in motivos_map.items()],
+        [
+            {"motivo": m, "cantidad": c, "porcentaje": round(c / total_motivos * 100, 1) if total_motivos else 0}
+            for m, c in motivos_map.items()
+        ],
         key=lambda x: -x["cantidad"],
     )
 
