@@ -36,6 +36,7 @@ MODULOS = {
     "evaluaciones360": "Evaluaciones 360°",
     "reclutamiento": "Reclutamiento",
     "manuales": "Manuales",
+    "kpis": "Dashboard KPI's",
     "saona_resenas": "SAONA · Reseñas",
     "saona_informes": "SAONA · Informes",
     "saona_clima": "SAONA · Clima Laboral",

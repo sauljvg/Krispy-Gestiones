@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krispy Gestiones · Dashboard KPI's</title>
+<link rel="icon" type="image/png" href="assets/favicon-kk.png">
+<script>
+  (function () {
+    var guardado = localStorage.getItem("kt-theme");
+    if (guardado === "light" || guardado === "dark") {
+      document.documentElement.dataset.theme = guardado;
+    }
+  })();
+</script>
+<link rel="stylesheet" href="css/styles.css?v=20260902d">
+<script src="js/vendor/chart.umd.min.js?v=20260723g"></script>
+<style>
+  .kpis-wrap { max-width: 1100px; margin: 0 auto; padding: 0 0 40px; }
+  .kpis-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 16px 0; }
+  .kpis-toolbar select { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 14px; }
+  .kpi-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .kpi-stat-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .kpi-stat-card .label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+  .kpi-stat-card .valor { font-size: 28px; font-weight: 700; }
+  .kpi-stat-card .sub { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+  .kpi-chart-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 18px; }
+  .kpi-chart-card h2 { margin: 0 0 12px; font-size: 16px; }
+  .kpi-charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 800px) { .kpi-charts-grid { grid-template-columns: 1fr; } }
+  .kpi-sin-datos { text-align: center; color: var(--text-secondary); padding: 60px 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">🍩</span>
+      <div>
+        <h1>Krispy Gestiones</h1>
+        <p class="subtitle">Dashboard KPI's</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="btn btn-ghost hamburger-btn" title="Atrás" aria-label="Atrás" onclick="history.back()">←</button>
+      <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
+      <div class="hamburger-wrap">
+        <button id="btn-hamburger" class="btn btn-ghost hamburger-btn" aria-label="Menú" aria-haspopup="true" aria-expanded="false">☰</button>
+        <div id="hamburger-menu" class="hamburger-menu" hidden>
+          <span id="topbar-user" class="topbar-user" hidden></span>
+          <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema">🌙 Cambiar tema</button>
+          <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="kpis-wrap">
+    <div class="hero-banner">
+      <span class="eyebrow">Portal interno</span>
+      <h1>Dashboard KPI's</h1>
+      <p>Plantilla, rotación y bajas -- a partir del informe de personal.</p>
+    </div>
+
+    <div class="kpis-toolbar">
+      <label for="kpi-periodo" class="staff-hint" style="margin:0;">Rotación de los últimos</label>
+      <select id="kpi-periodo">
+        <option value="90">90 días</option>
+        <option value="180">180 días</option>
+        <option value="365" selected>12 meses</option>
+      </select>
+      <span id="kpi-ultima-importacion" class="staff-hint"></span>
+      <label id="kpi-import-wrap" class="btn btn-ghost btn-upload" hidden style="margin-left:auto;">
+        ⬆ Importar Excel de plantilla
+        <input type="file" id="kpi-input-importar" accept=".xlsx,.xls" hidden>
+      </label>
+    </div>
+
+    <div id="kpi-contenido">
+      <div class="kpi-sin-datos" id="kpi-sin-datos" hidden>Todavía no se ha importado ningún informe de plantilla.</div>
+
+      <div class="kpi-stats-grid">
+        <div class="kpi-stat-card">
+          <div class="label">Plantilla activa</div>
+          <div class="valor" id="kpi-headcount">--</div>
+        </div>
+        <div class="kpi-stat-card">
+          <div class="label">Tasa de rotación</div>
+          <div class="valor" id="kpi-rotacion">--</div>
+          <div class="sub" id="kpi-rotacion-sub"></div>
+        </div>
+        <div class="kpi-stat-card">
+          <div class="label">Antigüedad media</div>
+          <div class="valor" id="kpi-antiguedad">--</div>
+        </div>
+        <div class="kpi-stat-card">
+          <div class="label">Altas (últimos 90 días)</div>
+          <div class="valor" id="kpi-altas">--</div>
+        </div>
+        <div class="kpi-stat-card">
+          <div class="label">Bajas en periodo de prueba</div>
+          <div class="valor" id="kpi-bajas-prueba">--</div>
+          <div class="sub">del total de bajas del periodo</div>
+        </div>
+      </div>
+
+      <div class="kpi-charts-grid">
+        <div class="kpi-chart-card">
+          <h2>Plantilla activa por centro</h2>
+          <div style="position:relative; height:280px;"><canvas id="chart-por-centro"></canvas></div>
+        </div>
+        <div class="kpi-chart-card">
+          <h2>Jornada completa vs. parcial</h2>
+          <div style="position:relative; height:280px;"><canvas id="chart-jornada"></canvas></div>
+        </div>
+        <div class="kpi-chart-card">
+          <h2>Bajas por motivo</h2>
+          <div style="position:relative; height:300px;"><canvas id="chart-bajas-motivo"></canvas></div>
+        </div>
+        <div class="kpi-chart-card">
+          <h2>Bajas por centro</h2>
+          <div style="position:relative; height:300px;"><canvas id="chart-bajas-centro"></canvas></div>
+        </div>
+      </div>
+
+      <div class="kpi-chart-card">
+        <h2>Plantilla activa por puesto</h2>
+        <div style="position:relative; height:340px;"><canvas id="chart-por-puesto"></canvas></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="js/theme.js?v=20260723f"></script>
+<script src="js/dialogs.js?v=20260818a"></script>
+<script src="js/icons.js?v=20260902b"></script>
+<script src="js/auth-common.js?v=20260824a"></script>
+<script src="js/topbar-menu.js?v=20260902a"></script>
+<script src="js/common.js?v=20260823a"></script>
+<script src="js/kpis.js?v=20260902a"></script>
+</body>
+</html>

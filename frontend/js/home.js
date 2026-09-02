@@ -59,6 +59,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // nada del backend ni de los datos ya creados. Para reactivarlo: volver
   // a `document.getElementById("card-manuales").hidden = !modulos.includes("manuales");`.
   document.getElementById("card-manuales").hidden = true;
+  document.getElementById("card-kpis").hidden = !modulos.includes("kpis");
   const tieneModuloSaona = ["saona_resenas", "saona_informes", "saona_clima", "saona_evaluaciones360", "saona_reclutamiento"].some((m) => modulos.includes(m));
   document.getElementById("card-saona").hidden = !tieneModuloSaona;
   if (user.rol === "admin") {

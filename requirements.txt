@@ -2,6 +2,7 @@ fastapi
 uvicorn[standard]
 geopy
 openpyxl
+xlrd
 python-multipart
 selenium
 reportlab

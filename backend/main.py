@@ -46,6 +46,7 @@ from encuestas_routes import router_publico as encuestas_router_publico
 from entrevistas_routes import router as entrevistas_router
 from evaluaciones360_routes import router as evaluaciones360_router
 from informes_routes import router as informes_router
+from kpis_routes import router as kpis_router
 from manuales_routes import router as manuales_router
 from notificaciones_routes import router as notificaciones_router
 import reclutamiento as reclutamiento_module
@@ -136,6 +137,7 @@ async def no_cachear_estaticos(request, call_next):
 app.include_router(auth_router, prefix="/api/auth")
 app.include_router(informes_router, prefix="/api/informes")
 app.include_router(manuales_router, prefix="/api/manuales")
+app.include_router(kpis_router, prefix="/api/kpis")
 app.include_router(reclutamiento_router, prefix="/api/reclutamiento")
 app.include_router(clima_router, prefix="/api/clima")
 app.include_router(entrevistas_router, prefix="/api/entrevistas")
