@@ -1,9 +1,12 @@
 // Dashboard de KPIs de personal -- todo se calcula en vivo en el backend
-// (ver backend/kpis.py) a partir de la última importación del informe de
-// plantilla; aquí solo se pinta. Importar es solo admin, ver el resto de
-// módulos de hoy (Entrevistas/Clima/Agregadores) para el mismo criterio.
+// (ver backend/kpis.py) a partir de dos fuentes: la última importación del
+// informe de plantilla (Excel de GO) y las bajas registradas en Entrevista
+// de Salida (en vivo, se actualiza sola). Aquí solo se pinta. Importar es
+// solo admin, ver el resto de módulos de hoy (Entrevistas/Clima/Agregadores)
+// para el mismo criterio.
 
 const MARCA_COLOR = "#006838";
+const COLOR_ALERTA = "#c23a72";
 const COLORES = ["#006838", "#c98a12", "#1d6fb8", "#c23a72", "#7b4fb0", "#0e8a86", "#e0641e", "#3d5a80"];
 
 function colorTextoActual() {
@@ -27,10 +30,48 @@ function wrapLabel(texto, maxLen = 18) {
   return lineas;
 }
 
-let chartPorCentro, chartJornada, chartBajasMotivo, chartBajasCentro, chartPorPuesto;
+function formatMes(clave) {
+  if (!clave) return "";
+  const [anio, mes] = clave.split("-");
+  const nombres = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+  return `${nombres[parseInt(mes, 10) - 1]} ${anio.slice(2)}`;
+}
+
+let chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo;
 let usuarioActual = null;
 
-function barChart(canvasId, pares, { horizontal = true } = {}) {
+function lineChart(canvasId, labels, valores) {
+  const ctx = document.getElementById(canvasId).getContext("2d");
+  const colorTexto = colorTextoActual();
+  return new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        data: valores,
+        borderColor: MARCA_COLOR,
+        backgroundColor: MARCA_COLOR,
+        tension: 0.3,
+        pointRadius: 4,
+        pointBackgroundColor: MARCA_COLOR,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: colorTexto }, grid: { display: false } },
+        y: { beginAtZero: true, ticks: { color: colorTexto, callback: (v) => `${v}%` }, grid: { color: "rgba(128,128,128,0.2)" } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (ctx2) => `${ctx2.parsed.y}%` } },
+      },
+    },
+  });
+}
+
+function barChart(canvasId, pares, { horizontal = true, sufijo = "" } = {}) {
   const el = document.getElementById(canvasId);
   const ctx = el.getContext("2d");
   const colorTexto = colorTextoActual();
@@ -38,7 +79,7 @@ function barChart(canvasId, pares, { horizontal = true } = {}) {
   const labels = pares.map(([nombre]) => wrapLabel(nombre, movil ? 16 : 20));
   const valores = pares.map(([, n]) => n);
   const eje = horizontal || movil ? "y" : "x";
-  const escalaValor = { beginAtZero: true, ticks: { color: colorTexto, precision: 0 }, grid: { color: "rgba(128,128,128,0.2)" } };
+  const escalaValor = { beginAtZero: true, ticks: { color: colorTexto, precision: 0, callback: (v) => `${v}${sufijo}` }, grid: { color: "rgba(128,128,128,0.2)" } };
   const escalaCategoria = { ticks: { color: colorTexto, autoSkip: false }, grid: { display: false } };
   return new Chart(ctx, {
     type: "bar",
@@ -48,7 +89,7 @@ function barChart(canvasId, pares, { horizontal = true } = {}) {
       responsive: true,
       maintainAspectRatio: false,
       scales: eje === "y" ? { x: escalaValor, y: escalaCategoria } : { y: escalaValor, x: escalaCategoria },
-      plugins: { legend: { display: false } },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx2) => `${ctx2.parsed[eje === "y" ? "x" : "y"]}${sufijo}` } } },
     },
   });
 }
@@ -67,35 +108,52 @@ function donutChart(canvasId, labels, valores) {
 }
 
 function destruirCharts() {
-  [chartPorCentro, chartJornada, chartBajasMotivo, chartBajasCentro, chartPorPuesto].forEach((c) => c?.destroy());
+  [chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo].forEach((c) => c?.destroy());
 }
 
 async function cargarResumen() {
-  const dias = document.getElementById("kpi-periodo").value;
-  const r = await fetch(`${AUTH_API_BASE}/kpis/resumen?dias=${dias}`);
+  const r = await fetch(`${AUTH_API_BASE}/kpis/resumen`);
   if (!r.ok) return;
   const d = await r.json();
 
-  const sinDatos = d.headcount_activo === 0 && d.bajas_totales_historico === 0;
-  document.getElementById("kpi-sin-datos").hidden = !sinDatos;
+  document.getElementById("kpi-sin-datos").hidden = !d.sin_datos_plantilla;
   document.getElementById("kpi-contenido").querySelectorAll(".kpi-stats-grid, .kpi-charts-grid, .kpi-chart-card").forEach((el) => {
-    el.style.display = sinDatos ? "none" : "";
+    el.style.display = d.sin_datos_plantilla ? "none" : "";
   });
-  if (sinDatos) return;
+  if (d.sin_datos_plantilla) return;
 
   document.getElementById("kpi-headcount").textContent = d.headcount_activo;
-  document.getElementById("kpi-rotacion").textContent = `${d.tasa_rotacion_pct}%`;
-  document.getElementById("kpi-rotacion-sub").textContent = `${d.bajas_periodo} bajas en el periodo`;
-  document.getElementById("kpi-antiguedad").textContent = d.antiguedad_media_meses != null ? `${d.antiguedad_media_meses} meses` : "--";
-  document.getElementById("kpi-altas").textContent = d.altas_ultimos_90_dias;
-  document.getElementById("kpi-bajas-prueba").textContent = `${d.bajas_prueba_pct}%`;
+  document.getElementById("kpi-rotacion-anual").textContent = `${d.acumulado_anual_pct}%`;
+  document.getElementById("kpi-rotacion-anual-sub").textContent = `${d.bajas_ytd} bajas en lo que va de año`;
+
+  const mesActualPct = d.rotacion_mensual.length ? d.rotacion_mensual[d.rotacion_mensual.length - 1].pct : 0;
+  const bajasMesActual = d.rotacion_mensual.length ? d.rotacion_mensual[d.rotacion_mensual.length - 1].bajas : 0;
+  document.getElementById("kpi-rotacion-mes").textContent = `${mesActualPct}%`;
+  document.getElementById("kpi-rotacion-mes-sub").textContent = `${bajasMesActual} bajas -- ${formatMes(d.mes_actual)}`;
+  document.getElementById("kpi-rotacion-centro-sub").textContent = `Mes en curso (${formatMes(d.mes_actual)}).`;
+
+  document.getElementById("kpi-nspp").textContent = d.bajas_ytd ? `${d.nspp_pct}%` : "--";
+  document.getElementById("kpi-horas").textContent = `${d.horas_contratadas_totales} h/sem`;
 
   destruirCharts();
-  chartPorCentro = barChart("chart-por-centro", d.por_centro);
-  chartJornada = donutChart("chart-jornada", ["Completa", "Parcial"], [d.jornada_completa, d.jornada_parcial]);
-  chartBajasMotivo = barChart("chart-bajas-motivo", d.bajas_por_motivo);
-  chartBajasCentro = barChart("chart-bajas-centro", d.bajas_por_centro);
-  chartPorPuesto = barChart("chart-por-puesto", d.por_puesto);
+  chartRotacionMensual = lineChart(
+    "chart-rotacion-mensual",
+    d.rotacion_mensual.map((m) => formatMes(m.mes)),
+    d.rotacion_mensual.map((m) => m.pct)
+  );
+  if (d.rotacion_por_centro_mes_actual.length) {
+    chartRotacionCentro = barChart("chart-rotacion-centro", d.rotacion_por_centro_mes_actual, { sufijo: "%" });
+  }
+  if (d.horas_por_centro.length) {
+    chartHorasCentro = barChart("chart-horas-centro", d.horas_por_centro, { sufijo: "h" });
+  }
+
+  const sinBajas = d.bajas_por_motivo_ytd.length === 0;
+  document.getElementById("kpi-bajas-motivo-aviso").hidden = !sinBajas;
+  document.getElementById("chart-bajas-motivo").closest("div").style.display = sinBajas ? "none" : "";
+  if (!sinBajas) {
+    chartBajasMotivo = barChart("chart-bajas-motivo", d.bajas_por_motivo_ytd);
+  }
 }
 
 async function cargarUltimaImportacion() {
@@ -103,7 +161,7 @@ async function cargarUltimaImportacion() {
   if (!r.ok) return;
   const info = await r.json();
   const el = document.getElementById("kpi-ultima-importacion");
-  el.textContent = info ? `Última importación: ${info.filas} empleados, ${info.importado_en}` : "";
+  el.textContent = info ? `Última importación de plantilla: ${info.filas} empleados, ${info.importado_en}` : "";
 }
 
 async function importarExcel(file) {
@@ -138,7 +196,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     importarExcel(file);
     e.target.value = "";
   });
-  document.getElementById("kpi-periodo").addEventListener("change", cargarResumen);
 
   await cargarUltimaImportacion();
   await cargarResumen();

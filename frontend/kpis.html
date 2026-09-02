@@ -25,10 +25,14 @@
   .kpi-stat-card .valor { font-size: 28px; font-weight: 700; }
   .kpi-stat-card .sub { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
   .kpi-chart-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 18px; }
-  .kpi-chart-card h2 { margin: 0 0 12px; font-size: 16px; }
+  .kpi-chart-card h2 { margin: 0 0 4px; font-size: 16px; }
+  .kpi-chart-card .sub { font-size: 12px; color: var(--text-secondary); margin: 0 0 12px; }
   .kpi-charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
   @media (max-width: 800px) { .kpi-charts-grid { grid-template-columns: 1fr; } }
   .kpi-sin-datos { text-align: center; color: var(--text-secondary); padding: 60px 0; }
+  .kpi-stat-card.placeholder { opacity: .6; border-style: dashed; }
+  .kpi-stat-card.placeholder .valor { font-size: 16px; font-weight: 600; }
+  .kpi-aviso-bajas { text-align: center; color: var(--text-secondary); padding: 24px 0; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -63,12 +67,6 @@
     </div>
 
     <div class="kpis-toolbar">
-      <label for="kpi-periodo" class="staff-hint" style="margin:0;">Rotación de los últimos</label>
-      <select id="kpi-periodo">
-        <option value="90">90 días</option>
-        <option value="180">180 días</option>
-        <option value="365" selected>12 meses</option>
-      </select>
       <span id="kpi-ultima-importacion" class="staff-hint"></span>
       <label id="kpi-import-wrap" class="btn btn-ghost btn-upload" hidden style="margin-left:auto;">
         ⬆ Importar Excel de plantilla
@@ -85,47 +83,56 @@
           <div class="valor" id="kpi-headcount">--</div>
         </div>
         <div class="kpi-stat-card">
-          <div class="label">Tasa de rotación</div>
-          <div class="valor" id="kpi-rotacion">--</div>
-          <div class="sub" id="kpi-rotacion-sub"></div>
+          <div class="label">Rotación acumulada del año</div>
+          <div class="valor" id="kpi-rotacion-anual">--</div>
+          <div class="sub" id="kpi-rotacion-anual-sub"></div>
         </div>
         <div class="kpi-stat-card">
-          <div class="label">Antigüedad media</div>
-          <div class="valor" id="kpi-antiguedad">--</div>
+          <div class="label">Rotación del mes en curso</div>
+          <div class="valor" id="kpi-rotacion-mes">--</div>
+          <div class="sub" id="kpi-rotacion-mes-sub"></div>
         </div>
         <div class="kpi-stat-card">
-          <div class="label">Altas (últimos 90 días)</div>
-          <div class="valor" id="kpi-altas">--</div>
+          <div class="label">% NSPP (no supera periodo de prueba)</div>
+          <div class="valor" id="kpi-nspp">--</div>
+          <div class="sub" id="kpi-nspp-sub">del total de bajas del año -- dato "malo" a propósito, por la reducción de horas</div>
         </div>
         <div class="kpi-stat-card">
-          <div class="label">Bajas en periodo de prueba</div>
-          <div class="valor" id="kpi-bajas-prueba">--</div>
-          <div class="sub">del total de bajas del periodo</div>
+          <div class="label">Horas contratadas (total)</div>
+          <div class="valor" id="kpi-horas">--</div>
+          <div class="sub">jornada completa = 40h/semana</div>
         </div>
-      </div>
-
-      <div class="kpi-charts-grid">
-        <div class="kpi-chart-card">
-          <h2>Plantilla activa por centro</h2>
-          <div style="position:relative; height:280px;"><canvas id="chart-por-centro"></canvas></div>
-        </div>
-        <div class="kpi-chart-card">
-          <h2>Jornada completa vs. parcial</h2>
-          <div style="position:relative; height:280px;"><canvas id="chart-jornada"></canvas></div>
-        </div>
-        <div class="kpi-chart-card">
-          <h2>Bajas por motivo</h2>
-          <div style="position:relative; height:300px;"><canvas id="chart-bajas-motivo"></canvas></div>
-        </div>
-        <div class="kpi-chart-card">
-          <h2>Bajas por centro</h2>
-          <div style="position:relative; height:300px;"><canvas id="chart-bajas-centro"></canvas></div>
+        <div class="kpi-stat-card placeholder">
+          <div class="label">% Promoción interna</div>
+          <div class="valor">Próximamente</div>
+          <div class="sub">en cuanto haya una fuente de datos para calcularlo</div>
         </div>
       </div>
 
       <div class="kpi-chart-card">
-        <h2>Plantilla activa por puesto</h2>
-        <div style="position:relative; height:340px;"><canvas id="chart-por-puesto"></canvas></div>
+        <h2>Rotación mensual global</h2>
+        <p class="sub">Últimos 12 meses -- % de bajas sobre la plantilla activa actual.</p>
+        <div style="position:relative; height:280px;"><canvas id="chart-rotacion-mensual"></canvas></div>
+      </div>
+
+      <div class="kpi-charts-grid">
+        <div class="kpi-chart-card">
+          <h2>Rotación por centro de trabajo</h2>
+          <p class="sub" id="kpi-rotacion-centro-sub">Mes en curso.</p>
+          <div style="position:relative; height:300px;"><canvas id="chart-rotacion-centro"></canvas></div>
+        </div>
+        <div class="kpi-chart-card">
+          <h2>Horas contratadas por centro</h2>
+          <p class="sub">Suma de horas/semana de la plantilla activa por centro.</p>
+          <div style="position:relative; height:300px;"><canvas id="chart-horas-centro"></canvas></div>
+        </div>
+      </div>
+
+      <div class="kpi-chart-card">
+        <h2>Bajas por motivo</h2>
+        <p class="sub">Año en curso, según Entrevista de Salida.</p>
+        <div id="kpi-bajas-motivo-aviso" class="kpi-aviso-bajas" hidden>Todavía no hay bajas registradas en Entrevista de Salida este año.</div>
+        <div style="position:relative; height:300px;"><canvas id="chart-bajas-motivo"></canvas></div>
       </div>
     </div>
   </div>
@@ -136,6 +143,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/kpis.js?v=20260902a"></script>
+<script src="js/kpis.js?v=20260902e"></script>
 </body>
 </html>

@@ -14,8 +14,8 @@ def require_kpis(user: dict = Depends(get_current_user)) -> dict:
 
 
 @router.get("/resumen")
-def resumen_route(dias: int = 365, _user: dict = Depends(require_kpis)):
-    return kpis_module.compute_resumen(dias_rotacion=dias)
+def resumen_route(_user: dict = Depends(require_kpis)):
+    return kpis_module.compute_resumen()
 
 
 @router.get("/ultima-importacion")

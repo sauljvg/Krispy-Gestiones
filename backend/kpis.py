@@ -1,27 +1,59 @@
-"""Dashboard de KPIs de personal -- se alimenta del informe de plantilla que
-exporta GO (columnas: Centro, Código Empleado, Nombre, Fecha Antigüedad,
-Puesto, % Jornada, Fecha de baja, Motivo de baja). Cada fila puede ser un
-empleado ACTIVO (sin fecha de baja) o ya DADO DE BAJA (con fecha y motivo) --
-el propio informe trae la plantilla completa, así que cada importación
-reemplaza los datos anteriores por completo (no hace falta llevar un
-histórico de "oleadas" como en Entrevista de Salida/Clima, esto es una foto
-del estado actual, no una encuesta)."""
+"""Dashboard de KPIs de personal -- dos fuentes de datos distintas, a
+propósito (pedido explícito del usuario):
+
+1. Plantilla ACTIVA y horas contratadas: el informe que exporta GO
+   (importación puntual, ver import_excel/kpi_empleados) -- es una foto de
+   "quién está en nómina ahora mismo", no cambia sola.
+2. Bajas (para rotación mensual/anual y % NSPP): la tabla EN VIVO de
+   Entrevista de Salida (entrevistas_salidas), que crece cada vez que RRHH
+   da de alta una salida ahí -- así el dashboard se mantiene al día solo,
+   sin depender de reimportar el Excel cada vez que se va alguien.
+
+% de promoción interna: NO se calcula todavía -- no hay ninguna fuente de
+datos con el historial de cambios de puesto (el usuario lo confirmó: "por
+ahora no lo tenemos"). Se deja como placeholder en el frontend en vez de
+inventar un número."""
 import datetime
 import io
 import re
+import sqlite3
 
 import xlrd
 from openpyxl import load_workbook
 
 from db import get_connection
 
-COLUMNAS_ESPERADAS = (
-    "centro", "codigo_empleado", "nombre", "fecha_antiguedad",
-    "puesto", "porcentaje_jornada", "fecha_baja", "motivo_baja",
-)
+# Los dos sistemas nombran los mismos centros de forma distinta (el Excel de
+# GO trae "GO - TIENDA CALEIDO", Entrevista de Salida usa "Caleido") --
+# normalizamos el nombre de GO a la forma corta al importar, para poder
+# cruzar plantilla (Excel) con bajas (Entrevista de Salida) por el mismo
+# nombre de centro. Confirmado 1 a 1 contra los centros reales en producción.
+CENTROS_GO_A_CORTO = {
+    "GO - FABRICA PARQUE SUR": "ParqueSur Fabrica",
+    "GO - TIENDA PARQUE SUR": "ParqueSur Tienda",
+    "GO - ADMIN CENTRAL": "Oficina Central",
+    "GO - TIENDA LA GAVIA": "La Gavia",
+    "GO - TIENDA PLENILUNIO": "Plenilunio",
+    "GO - TIENDA PRINCESA": "Princesa",
+    "GO - TIENDA CALEIDO": "Caleido",
+    "GO - TIENDA GRANPLAZA2": "Gran Plaza 2",
+}
 
-# Nombre de columna del Excel (normalizado: sin tildes/mayúsculas) -> clave
-# interna -- para no depender de que el orden de columnas sea exacto.
+HORAS_JORNADA_COMPLETA = 40  # pedido explícito del usuario
+
+# Motivos SEPE de "no superó el periodo de prueba" -- por iniciativa de la
+# empresa o del propio trabajador cuentan igual para este KPI (NSPP no
+# distingue quién lo decidió, solo que la baja fue en periodo de prueba).
+_MOTIVO_NSPP = "periodo de prueba"
+
+
+def _normaliza(s):
+    s = (s or "").strip().lower()
+    for a, b in (("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u"), ("ü", "u"), ("ñ", "n")):
+        s = s.replace(a, b)
+    return s
+
+
 _ALIAS_COLUMNAS = {
     "nombre del centro": "centro",
     "codigo empleado": "codigo_empleado",
@@ -32,17 +64,6 @@ _ALIAS_COLUMNAS = {
     "fecha de baja en compania": "fecha_baja",
     "motivo de baja de la compania": "motivo_baja",
 }
-
-
-def _normaliza(s):
-    s = (s or "").strip().lower()
-    # "Antigüedad" lleva ü (diéresis), no una vocal con tilde normal -- sin
-    # esto la columna "Fecha Antigüedad" nunca hacía match con el alias y la
-    # fecha de antigüedad se perdía en silencio para TODOS los activos
-    # (confirmado con el archivo real: 89/89 sin fecha_antiguedad).
-    for a, b in (("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u"), ("ü", "u"), ("ñ", "n")):
-        s = s.replace(a, b)
-    return s
 
 
 def ensure_kpis_tables():
@@ -74,9 +95,6 @@ def ensure_kpis_tables():
 
 
 def _fecha_a_iso(valor):
-    """Acepta datetime/date (celdas de fecha reales) o texto dd/mm/aaaa
-    (lo habitual cuando la fecha llega como texto plano) -- None si está
-    vacía o no se puede interpretar."""
     if valor is None:
         return None
     if isinstance(valor, (datetime.datetime, datetime.date)):
@@ -114,14 +132,17 @@ def _texto(valor):
 
 
 def _codigo_empleado(valor):
-    """xlrd (y a veces openpyxl) lee una celda numérica como float de
-    Python, así que un código "40004" llega como 40004.0 -- sin esto se
-    guardaría el ".0" pegado, rompiendo cualquier futuro cruce por código
-    con otro archivo."""
     texto = _texto(valor)
     if texto and texto.endswith(".0") and texto[:-2].isdigit():
         return texto[:-2]
     return texto
+
+
+def _centro_normalizado(valor):
+    texto = _texto(valor)
+    if texto is None:
+        return None
+    return CENTROS_GO_A_CORTO.get(texto, texto)
 
 
 def _leer_filas_xlsx(contenido):
@@ -178,7 +199,7 @@ def import_excel(contenido, nombre_archivo, subido_por):
         if not codigo:
             continue
         registros.append((
-            codigo, _texto(val("centro")), _texto(val("nombre")),
+            codigo, _centro_normalizado(val("centro")), _texto(val("nombre")),
             _fecha_a_iso(val("fecha_antiguedad")), _texto(val("puesto")),
             _numero(val("porcentaje_jornada")), _fecha_a_iso(val("fecha_baja")),
             _texto(val("motivo_baja")),
@@ -204,50 +225,123 @@ def import_excel(contenido, nombre_archivo, subido_por):
 
 def get_ultima_importacion():
     conn = get_connection()
-    row = conn.execute(
-        "SELECT * FROM kpi_importaciones ORDER BY id DESC LIMIT 1"
-    ).fetchone()
+    row = conn.execute("SELECT * FROM kpi_importaciones ORDER BY id DESC LIMIT 1").fetchone()
     conn.close()
     return dict(row) if row else None
 
 
-def _edad_dias(fecha_iso, hasta_iso=None):
+def _tabla_existe(conn, nombre):
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (nombre,)
+    ).fetchone() is not None
+
+
+def _get_bajas(conn, empresa="kk"):
+    """Todas las bajas registradas en Entrevista de Salida (cualquier oleada
+    de esa empresa) -- fuente EN VIVO, crece sola cada vez que RRHH da de
+    alta una salida ahí, sin depender de reimportar ningún Excel."""
+    if not _tabla_existe(conn, "entrevistas_salidas") or not _tabla_existe(conn, "entrevistas_oleadas"):
+        return []
+    rows = conn.execute("""
+        SELECT s.centro, s.fecha_baja, s.motivo
+        FROM entrevistas_salidas s JOIN entrevistas_oleadas o ON o.id = s.oleada_id
+        WHERE o.empresa = ? AND s.fecha_baja IS NOT NULL AND s.fecha_baja != ''
+    """, (empresa,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _es_nspp(motivo):
+    return bool(motivo) and _MOTIVO_NSPP in motivo.lower()
+
+
+def _mes(fecha_iso):
+    """'2026-03-15' -> '2026-03' -- agrupa por mes calendario. Tolera fechas
+    en otros formatos sueltos (dd/mm/aaaa) que a veces se cuelan al registrar
+    una salida a mano."""
     if not fecha_iso:
         return None
-    inicio = datetime.date.fromisoformat(fecha_iso)
-    fin = datetime.date.fromisoformat(hasta_iso) if hasta_iso else datetime.date.today()
-    return (fin - inicio).days
+    if re.match(r"^\d{4}-\d{2}", fecha_iso):
+        return fecha_iso[:7]
+    m = re.match(r"^\d{1,2}/(\d{1,2})/(\d{4})$", fecha_iso)
+    if m:
+        mth, y = m.groups()
+        return f"{y}-{int(mth):02d}"
+    return None
 
 
-def compute_resumen(dias_rotacion=365):
-    """Calcula todos los KPIs de golpe a partir de la foto actual de
-    kpi_empleados -- nada se guarda calculado, siempre en vivo sobre los
-    datos de la última importación."""
+def compute_resumen(meses_historico=12):
     conn = get_connection()
-    filas = [dict(r) for r in conn.execute("SELECT * FROM kpi_empleados").fetchall()]
+    empleados = [dict(r) for r in conn.execute("SELECT * FROM kpi_empleados").fetchall()]
+    bajas = _get_bajas(conn)
     conn.close()
 
-    activos = [f for f in filas if not f["fecha_baja"]]
-    bajas = [f for f in filas if f["fecha_baja"]]
+    activos = [e for e in empleados if not e["fecha_baja"]]
+    headcount_activo = len(activos)
 
     hoy = datetime.date.today()
-    limite_rotacion = (hoy - datetime.timedelta(days=dias_rotacion)).isoformat()
-    bajas_periodo = [f for f in bajas if f["fecha_baja"] >= limite_rotacion]
 
-    # Antigüedad media de la plantilla activa (en meses, más legible que días).
-    antig_dias = [_edad_dias(f["fecha_antiguedad"]) for f in activos if f["fecha_antiguedad"]]
-    antig_media_meses = round((sum(antig_dias) / len(antig_dias)) / 30.44, 1) if antig_dias else None
+    # --- Rotación mensual (global): últimos `meses_historico` meses -------
+    # Denominador simplificado a propósito: la plantilla activa ACTUAL, no
+    # una reconstrucción histórica mes a mes (para eso haría falta un
+    # histórico diario de headcount que hoy no existe) -- documentado tal
+    # cual en el frontend, es la misma aproximación que usan la mayoría de
+    # cuadros de mando de rotación cuando no hay ese histórico.
+    serie_meses = []
+    for i in range(meses_historico - 1, -1, -1):
+        anio = hoy.year + (hoy.month - 1 - i) // 12
+        mes = (hoy.month - 1 - i) % 12 + 1
+        serie_meses.append(f"{anio:04d}-{mes:02d}")
+    bajas_por_mes = {}
+    bajas_centro_mes = {}
+    for b in bajas:
+        clave = _mes(b["fecha_baja"])
+        if not clave:
+            continue
+        bajas_por_mes[clave] = bajas_por_mes.get(clave, 0) + 1
+        centro = b["centro"] or "(sin centro)"
+        bajas_centro_mes.setdefault(centro, {})
+        bajas_centro_mes[centro][clave] = bajas_centro_mes[centro].get(clave, 0) + 1
 
-    # Tasa de rotación simple: bajas en el periodo / headcount medio del
-    # periodo (activos ahora + bajas del periodo, como aproximación del
-    # tamaño de plantilla durante esa ventana -- sin un histórico diario de
-    # headcount no se puede calcular la media exacta día a día).
-    headcount_medio = len(activos) + len(bajas_periodo)
-    tasa_rotacion = round(len(bajas_periodo) / headcount_medio * 100, 1) if headcount_medio else 0
+    rotacion_mensual = [
+        {"mes": m, "bajas": bajas_por_mes.get(m, 0),
+         "pct": round(bajas_por_mes.get(m, 0) / headcount_activo * 100, 1) if headcount_activo else 0}
+        for m in serie_meses
+    ]
 
-    # Bajas en periodo de prueba (motivos SEPE 07/09, ver el Excel real) vs
-    # el resto -- para separar "no encajó" de rotación en plantilla asentada.
-    bajas_prueba = [f for f in bajas_periodo if f["motivo_baja"] and "periodo de prueba" in f["motivo_baja"].lower()]
+    # --- Rotación del mes en curso, por centro -----------------------------
+    mes_actual = serie_meses[-1]
+    headcount_por_centro = {}
+    for e in activos:
+        c = e["centro"] or "(sin centro)"
+        headcount_por_centro[c] = headcount_por_centro.get(c, 0) + 1
+    rotacion_por_centro = []
+    for centro, meses in bajas_centro_mes.items():
+        n = meses.get(mes_actual, 0)
+        if n == 0 and centro not in headcount_por_centro:
+            continue
+        hc = headcount_por_centro.get(centro, 0)
+        rotacion_por_centro.append((centro, round(n / hc * 100, 1) if hc else 0))
+    rotacion_por_centro.sort(key=lambda x: -x[1])
+
+    # --- Acumulado anual (año natural, desde el 1 de enero) ----------------
+    inicio_anio = f"{hoy.year}-01-01"
+    bajas_ytd = [b for b in bajas if b["fecha_baja"] and b["fecha_baja"] >= inicio_anio]
+    acumulado_anual_pct = round(len(bajas_ytd) / headcount_activo * 100, 1) if headcount_activo else 0
+
+    # --- % NSPP (sobre las bajas del año en curso) --------------------------
+    nspp_ytd = [b for b in bajas_ytd if _es_nspp(b["motivo"])]
+    nspp_pct = round(len(nspp_ytd) / len(bajas_ytd) * 100, 1) if bajas_ytd else 0
+
+    # --- Horas contratadas por centro (Porcentaje Jornada -> horas reales) -
+    horas_por_centro = {}
+    for e in activos:
+        c = e["centro"] or "(sin centro)"
+        pct = e["porcentaje_jornada"]
+        horas = (pct / 100 * HORAS_JORNADA_COMPLETA) if pct is not None else HORAS_JORNADA_COMPLETA
+        horas_por_centro[c] = horas_por_centro.get(c, 0) + horas
+    horas_por_centro_lista = sorted(
+        [(c, round(h, 1)) for c, h in horas_por_centro.items()], key=lambda x: -x[1]
+    )
 
     def _contar_por(campo, lista):
         conteo = {}
@@ -256,34 +350,21 @@ def compute_resumen(dias_rotacion=365):
             conteo[clave] = conteo.get(clave, 0) + 1
         return sorted(conteo.items(), key=lambda x: -x[1])
 
-    por_centro = _contar_por("centro", activos)
-    bajas_por_centro = _contar_por("centro", bajas_periodo)
-    bajas_por_motivo = _contar_por("motivo_baja", bajas_periodo)
-    por_puesto = _contar_por("puesto", activos)
-
-    jornada_completa = len([f for f in activos if f["porcentaje_jornada"] is None or f["porcentaje_jornada"] >= 100])
-    jornada_parcial = len(activos) - jornada_completa
-
-    altas_recientes = len([
-        f for f in activos
-        if f["fecha_antiguedad"] and f["fecha_antiguedad"] >= (hoy - datetime.timedelta(days=90)).isoformat()
-    ])
-
     return {
-        "headcount_activo": len(activos),
-        "bajas_periodo": len(bajas_periodo),
-        "bajas_totales_historico": len(bajas),
-        "tasa_rotacion_pct": tasa_rotacion,
-        "dias_rotacion": dias_rotacion,
-        "antiguedad_media_meses": antig_media_meses,
-        "bajas_prueba_pct": round(len(bajas_prueba) / len(bajas_periodo) * 100, 1) if bajas_periodo else 0,
-        "altas_ultimos_90_dias": altas_recientes,
-        "jornada_completa": jornada_completa,
-        "jornada_parcial": jornada_parcial,
-        "por_centro": por_centro,
-        "bajas_por_centro": bajas_por_centro,
-        "bajas_por_motivo": bajas_por_motivo,
-        "por_puesto": por_puesto[:12],  # top 12, para no desbordar el gráfico
+        "headcount_activo": headcount_activo,
+        "horas_contratadas_totales": round(sum(horas_por_centro.values()), 1),
+        "horas_jornada_completa": HORAS_JORNADA_COMPLETA,
+        "rotacion_mensual": rotacion_mensual,
+        "rotacion_por_centro_mes_actual": rotacion_por_centro,
+        "mes_actual": mes_actual,
+        "acumulado_anual_pct": acumulado_anual_pct,
+        "bajas_ytd": len(bajas_ytd),
+        "nspp_pct": nspp_pct,
+        "nspp_ytd": len(nspp_ytd),
+        "bajas_por_motivo_ytd": _contar_por("motivo", bajas_ytd),
+        "horas_por_centro": horas_por_centro_lista,
+        "sin_datos_plantilla": headcount_activo == 0,
+        "sin_datos_bajas": len(bajas) == 0,
     }
 
 
