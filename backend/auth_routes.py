@@ -172,9 +172,41 @@ class SetClimaCentrosBody(BaseModel):
     centros: list[str] = []
 
 
+def _normalizar_rol(rol: str) -> str:
+    rol = (rol or "").strip()
+    if not rol:
+        raise HTTPException(status_code=400, detail="El rol no puede estar vacío")
+    if len(rol) > 60:
+        raise HTTPException(status_code=400, detail="El rol es demasiado largo (máximo 60 caracteres)")
+    # Si coincide (sin distinguir mayúsculas) con uno de los roles conocidos
+    # -- "admin" sobre todo, el único con permisos especiales de verdad, ver
+    # auth.tiene_modulo -- se ajusta a su forma exacta. Así escribir "Admin"
+    # no crea sin querer un rol nuevo "Admin" sin ningún permiso real,
+    # distinto del "admin" que sí los tiene.
+    for clave in auth_module.ROLES:
+        if rol.lower() == clave.lower():
+            return clave
+    return rol
+
+
 @router.get("/roles")
 def list_roles(_admin: dict = Depends(require_admin)):
-    return [{"value": k, "label": v} for k, v in auth_module.ROLES.items()]
+    """Los roles "de siempre" (auth.ROLES) más cualquier rol personalizado ya
+    en uso (ver NewUserBody/UpdateRoleBody -- el rol es texto libre desde
+    que se permitió escribir cualquier cosa, p.ej. "Marketing") -- para que
+    el desplegable/autocompletar de la web sugiera también los que ya
+    escribió alguien antes, no solo los seis de siempre."""
+    conocidos = [{"value": k, "label": v} for k, v in auth_module.ROLES.items()]
+    conn = get_connection()
+    personalizados = conn.execute("SELECT DISTINCT rol FROM usuarios").fetchall()
+    conn.close()
+    claves_conocidas = {k.lower() for k in auth_module.ROLES}
+    for row in personalizados:
+        rol = row["rol"]
+        if rol and rol.lower() not in claves_conocidas:
+            conocidos.append({"value": rol, "label": rol})
+            claves_conocidas.add(rol.lower())
+    return conocidos
 
 
 @router.get("/modulos")
@@ -213,8 +245,7 @@ def list_users(_admin: dict = Depends(require_admin)):
 
 @router.post("/users")
 def create_user_route(body: NewUserBody, _admin: dict = Depends(require_admin)):
-    if body.rol not in auth_module.ROLES:
-        raise HTTPException(status_code=400, detail=f"rol debe ser uno de: {', '.join(auth_module.ROLES)}")
+    body.rol = _normalizar_rol(body.rol)
     username_clean = body.username.strip().lower()
     if not auth_module.username_disponible(username_clean):
         raise HTTPException(status_code=400, detail="Ese usuario ya existe (el usuario no distingue mayúsculas de minúsculas)")
@@ -282,8 +313,7 @@ def set_clima_centros_route(user_id: int, body: SetClimaCentrosBody, _admin: dic
 
 @router.patch("/users/{user_id}/rol")
 def update_role_route(user_id: int, body: UpdateRoleBody, admin: dict = Depends(require_admin)):
-    if body.rol not in auth_module.ROLES:
-        raise HTTPException(status_code=400, detail=f"rol debe ser uno de: {', '.join(auth_module.ROLES)}")
+    body.rol = _normalizar_rol(body.rol)
     if user_id == admin["id"] and body.rol != "admin":
         raise HTTPException(status_code=400, detail="No puedes quitarte tu propio rol admin")
     conn = get_connection()

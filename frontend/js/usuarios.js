@@ -25,8 +25,7 @@ function fmtFecha(iso) {
 async function loadRoles() {
   const res = await fetch(`${AUTH_API_BASE}/auth/roles`);
   ROLES_CACHE = await res.json();
-  const select = document.getElementById("nu-rol");
-  select.innerHTML = ROLES_CACHE.map((r) => `<option value="${r.value}">${r.label}</option>`).join("");
+  document.getElementById("roles-datalist").innerHTML = ROLES_CACHE.map((r) => `<option value="${escapeHTML(r.value)}">${escapeHTML(r.label)}</option>`).join("");
 }
 
 async function loadModulos() {
@@ -149,12 +148,6 @@ function tiposInformeSeleccionadosNuevoUsuario() {
 
 // --- Tabla de usuarios existentes ---
 
-function rolSelectHTML(current) {
-  return ROLES_CACHE.map(
-    (r) => `<option value="${r.value}" ${r.value === current ? "selected" : ""}>${r.label}</option>`
-  ).join("");
-}
-
 function tiendasResumenHTML(tiendas) {
   if (!tiendas || tiendas.length === 0) return `<span class="staff-hint">Todas</span>`;
   return escapeHTML(tiendas.join(", "));
@@ -195,7 +188,7 @@ function filaUsuarioHTML(u, currentUserId) {
       <tr data-id="${u.id}">
         <td><input type="text" class="username-input" data-id="${u.id}" value="${escapeHTML(u.username)}" style="width:110px;"></td>
         <td>${escapeHTML(u.nombre)}</td>
-        <td><select class="rol-select" data-id="${u.id}" ${u.id === currentUserId ? "disabled" : ""}>${rolSelectHTML(u.rol)}</select></td>
+        <td><input type="text" class="rol-input" list="roles-datalist" data-id="${u.id}" value="${escapeHTML(u.rol)}" style="width:130px;" ${u.id === currentUserId ? "disabled" : ""}></td>
         <td>
           ${
             u.rol === "admin"
@@ -332,12 +325,6 @@ function empresaDeUsuario(u) {
   return "Krispy Kreme";
 }
 
-// Gerente y Area Manager son los roles con más gente y los que de verdad
-// están repartidos entre las dos marcas -- el resto (admin, rrhh, director
-// de operaciones, colaborador) suele ser gente que ya gestiona ambas o son
-// pocos, así que no compensa partirlos también.
-const ROLES_DIVIDIDOS_POR_EMPRESA = new Set(["gerente", "area_manager"]);
-
 async function loadUsers(currentUserId) {
   CURRENT_USER_ID = currentUserId;
   await loadTiposInformeSiHaceFalta();
@@ -359,19 +346,6 @@ function renderUsuariosFiltrados() {
     ? users.filter((u) => normalizarBusqueda(u.username).includes(q) || normalizarBusqueda(u.nombre).includes(q))
     : users;
 
-  const porRol = new Map();
-  filtrados.forEach((u) => {
-    if (!porRol.has(u.rol)) porRol.set(u.rol, []);
-    porRol.get(u.rol).push(u);
-  });
-  // Roles conocidos primero en el orden de ORDEN_ROLES_AGRUPADO, luego
-  // cualquier rol nuevo que no esté en esa lista (por si se añade uno sin
-  // acordarse de actualizarla aquí), para no perder usuarios de vista.
-  const rolesOrdenados = [
-    ...ORDEN_ROLES_AGRUPADO.filter((r) => porRol.has(r)),
-    ...[...porRol.keys()].filter((r) => !ORDEN_ROLES_AGRUPADO.includes(r)),
-  ];
-
   const cabecera = `<thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Módulos</th><th>Tiendas (Reseñas)</th><th>Informes</th><th>Clima Laboral</th><th>PIN</th><th>Creado</th><th></th></tr></thead>`;
 
   const tbody = document.getElementById("users-list");
@@ -379,39 +353,79 @@ function renderUsuariosFiltrados() {
     tbody.innerHTML = `<p class="staff-hint">Sin usuarios que coincidan con la búsqueda.</p>`;
     return;
   }
-  const ORDEN_EMPRESA = ["Krispy Kreme", "Saona", "Ambas"];
 
-  function subgrupoHTML(label, usuariosGrupo) {
+  function tablaHTML(usuariosGrupo) {
     return `
-        <details class="tabla-desplegable" open style="margin-bottom:14px;">
-          <summary style="cursor:pointer; font-weight:600; padding:6px 0;">${escapeHTML(label)} (${usuariosGrupo.length})</summary>
-          <div class="store-ranking-wrap">
-            <table class="staff-table">
-              ${cabecera}
-              <tbody>${usuariosGrupo.map((u) => filaUsuarioHTML(u, currentUserId)).join("")}</tbody>
-            </table>
-          </div>
+      <div class="store-ranking-wrap">
+        <table class="staff-table">
+          ${cabecera}
+          <tbody>${usuariosGrupo.map((u) => filaUsuarioHTML(u, currentUserId)).join("")}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function detailsHTML(label, usuariosGrupo, { anidado = false } = {}) {
+    const estilo = anidado
+      ? 'style="margin:10px 0 10px 16px; border-left:2px solid var(--border); padding-left:12px;"'
+      : 'style="margin-bottom:16px;"';
+    const tamanoTexto = anidado ? "font-size:14px;" : "font-size:16px;";
+    return `
+        <details class="tabla-desplegable" open ${estilo}>
+          <summary style="cursor:pointer; font-weight:600; padding:6px 0; ${tamanoTexto}">${escapeHTML(label)} (${usuariosGrupo.length})</summary>
+          ${tablaHTML(usuariosGrupo)}
         </details>`;
   }
 
-  tbody.innerHTML = rolesOrdenados
-    .map((rol) => {
-      const grupo = porRol.get(rol);
-      const label = (ROLES_CACHE.find((r) => r.value === rol) || {}).label || rol;
-      if (!ROLES_DIVIDIDOS_POR_EMPRESA.has(rol)) {
-        return subgrupoHTML(label, grupo);
-      }
-      const porEmpresa = new Map();
-      grupo.forEach((u) => {
-        const empresa = empresaDeUsuario(u);
-        if (!porEmpresa.has(empresa)) porEmpresa.set(empresa, []);
-        porEmpresa.get(empresa).push(u);
-      });
-      return ORDEN_EMPRESA.filter((e) => porEmpresa.has(e))
-        .map((empresa) => subgrupoHTML(`${label} · ${empresa}`, porEmpresa.get(empresa)))
-        .join("");
-    })
-    .join("");
+  function labelDeRol(rol) {
+    return (ROLES_CACHE.find((r) => r.value === rol) || {}).label || rol;
+  }
+
+  // Orden dentro de cada marca: roles conocidos en el orden de
+  // ORDEN_ROLES_AGRUPADO (sin admin, que va aparte arriba), luego cualquier
+  // rol escrito a mano (p.ej. "Marketing") alfabéticamente, para que uno
+  // nuevo no aparezca siempre al final sin criterio.
+  function rolesOrdenadosDe(usuariosGrupo) {
+    const porRol = new Map();
+    usuariosGrupo.forEach((u) => {
+      if (!porRol.has(u.rol)) porRol.set(u.rol, []);
+      porRol.get(u.rol).push(u);
+    });
+    const conocidos = ORDEN_ROLES_AGRUPADO.filter((r) => r !== "admin" && porRol.has(r));
+    const personalizados = [...porRol.keys()]
+      .filter((r) => r !== "admin" && !ORDEN_ROLES_AGRUPADO.includes(r))
+      .sort((a, b) => a.localeCompare(b));
+    return [...conocidos, ...personalizados].map((rol) => ({ rol, usuarios: porRol.get(rol) }));
+  }
+
+  // Admin arriba de todo, sin dividir por marca (un admin gestiona las dos) --
+  // luego Krispy Kreme y Saona, cada una con sus roles anidados dentro
+  // (Area Manager, Director de Operaciones, Gerente, y cualquier rol
+  // personalizado). "Ambas" (alguien con módulos de las dos marcas a la
+  // vez) se deja igual que las otras dos, al final.
+  const admins = filtrados.filter((u) => u.rol === "admin");
+  const resto = filtrados.filter((u) => u.rol !== "admin");
+  const porEmpresa = new Map();
+  resto.forEach((u) => {
+    const empresa = empresaDeUsuario(u);
+    if (!porEmpresa.has(empresa)) porEmpresa.set(empresa, []);
+    porEmpresa.get(empresa).push(u);
+  });
+
+  let html = "";
+  if (admins.length > 0) html += detailsHTML("Admin", admins);
+  for (const empresa of ["Krispy Kreme", "Saona", "Ambas"]) {
+    if (!porEmpresa.has(empresa)) continue;
+    const grupoEmpresa = porEmpresa.get(empresa);
+    const subgrupos = rolesOrdenadosDe(grupoEmpresa)
+      .map(({ rol, usuarios }) => detailsHTML(labelDeRol(rol), usuarios, { anidado: true }))
+      .join("");
+    html += `
+        <details class="tabla-desplegable-empresa" open style="margin-bottom:20px;">
+          <summary style="cursor:pointer; font-weight:700; font-size:17px; padding:8px 0;">${escapeHTML(empresa)} (${grupoEmpresa.length})</summary>
+          ${subgrupos}
+        </details>`;
+  }
+  tbody.innerHTML = html;
 
   function wirePopoverToggle(btnClass, popoverPrefix) {
     tbody.querySelectorAll(btnClass).forEach((btn) => {
@@ -546,13 +560,22 @@ function renderUsuariosFiltrados() {
     });
   });
 
-  tbody.querySelectorAll(".rol-select").forEach((sel) => {
-    sel.addEventListener("change", async () => {
-      const id = sel.dataset.id;
+  // Texto libre (antes un <select> cerrado a los 6 roles de siempre) -- se
+  // guarda solo al salir del campo (blur), igual que username-input, y solo
+  // si de verdad cambió.
+  tbody.querySelectorAll(".rol-input").forEach((input) => {
+    input.addEventListener("blur", async () => {
+      const id = input.dataset.id;
+      const valor = input.value.trim();
+      const original = users.find((u) => String(u.id) === String(id));
+      if (!valor || (original && original.rol === valor)) {
+        input.value = original ? original.rol : valor;
+        return;
+      }
       const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}/rol`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rol: sel.value }),
+        body: JSON.stringify({ rol: valor }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -737,7 +760,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   renderNuModulosChecklist();
   renderNuTiendasChecklist();
   actualizarVisibilidadPorRol();
-  document.getElementById("nu-rol").addEventListener("change", actualizarVisibilidadPorRol);
+  document.getElementById("nu-rol").addEventListener("input", actualizarVisibilidadPorRol);
 
   document.addEventListener("click", (e) => {
     if (!e.target.closest(".checklist-wrap")) {
