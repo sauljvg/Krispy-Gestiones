@@ -267,6 +267,29 @@ h3 {
 .en-linea-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .en-linea-lista li { font-size: 13px; color: var(--text-primary); padding: 4px 8px; }
 
+/* Historial de accesos (solo "saul", ver topbar-menu.js) -- overlay simple
+   propio (no depende de .cobertura-table/.table-scroll, que son locales de
+   páginas concretas), porque este widget se carga en TODAS las páginas. */
+.historial-accesos-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,0.4);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 40px 16px;
+}
+.historial-accesos-overlay[hidden] { display: none; }
+.historial-accesos-modal {
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+  padding: 18px 20px; width: 100%; max-width: 720px; max-height: 85vh; overflow-y: auto;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.25);
+}
+.historial-accesos-cabecera { display: flex; align-items: center; justify-content: space-between; }
+.historial-accesos-cabecera h3 { margin: 0; font-size: 16px; }
+.historial-accesos-modal h4 { font-size: 13px; color: var(--text-secondary); margin: 0 0 6px; }
+.historial-accesos-modal .table-scroll { overflow-x: auto; }
+.historial-accesos-modal table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.historial-accesos-modal th, .historial-accesos-modal td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+.historial-accesos-modal th { color: var(--text-secondary); font-weight: 600; }
+
 /* Popover de checklist genérico (elegir tiendas, columnas, etc.) — mismo
    patrón visual en toda la web para no reinventar la interacción cada vez. */
 .checklist-wrap { position: relative; display: inline-block; }

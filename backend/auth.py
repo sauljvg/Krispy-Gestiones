@@ -1,3 +1,4 @@
+import datetime
 import os
 import re
 import secrets
@@ -107,6 +108,24 @@ def ensure_auth_tables():
         conn.execute("ALTER TABLE sesiones ADD COLUMN ultima_actividad TEXT")
     except sqlite3.OperationalError:
         pass  # La columna ya existía
+    # Historial de a qué módulo entró cada usuario, un registro por
+    # (usuario, módulo, día) -- no una fila por request (sería enorme y puro
+    # ruido de polling/heartbeats), solo primera_vez/ultima_vez/veces de ESE
+    # día. Ver registrar_acceso_modulo, llamado desde el middleware de
+    # main.py en cada request autenticado. Solo lo consulta Saúl (ver
+    # historial_accesos_route en auth_routes.py), mismo criterio que
+    # usuarios-en-linea.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS accesos_modulos (
+            usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+            modulo TEXT NOT NULL,
+            fecha TEXT NOT NULL,
+            primera_vez TEXT NOT NULL,
+            ultima_vez TEXT NOT NULL,
+            veces INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (usuario_id, modulo, fecha)
+        )
+    """)
     # Sin filas = sin restricción (ve todas las tiendas en Reseñas). Con
     # filas = solo ve esas tiendas concretas — así "seleccionar todos" es
     # simplemente no guardar ninguna fila, y no hay que mantener una lista
@@ -414,6 +433,58 @@ def delete_session(token: str):
     conn.execute("DELETE FROM sesiones WHERE token = ?", (token,))
     conn.commit()
     conn.close()
+
+
+# (usuario_id, modulo, fecha) ya registrado en ESTE proceso -- para no
+# escribir en la base de datos en cada request autenticado (con
+# notificaciones/heartbeats de por medio serían cientos al día por usuario),
+# solo la primera vez que se ve esa combinación hoy. Si el proceso se
+# reinicia (redeploy) se vuelve a escribir la primera vez tras el reinicio,
+# pero el UPSERT de abajo ya deja primera_vez/ultima_vez correctos igualmente.
+_cache_accesos_modulo_hoy: set[tuple[int, str, str]] = set()
+
+
+def registrar_acceso_modulo(usuario_id: int, modulo: str):
+    hoy = datetime.date.today().isoformat()
+    clave = (usuario_id, modulo, hoy)
+    if clave in _cache_accesos_modulo_hoy:
+        return
+    _cache_accesos_modulo_hoy.add(clave)
+    conn = get_connection()
+    conn.execute("""
+        INSERT INTO accesos_modulos (usuario_id, modulo, fecha, primera_vez, ultima_vez, veces)
+        VALUES (?, ?, ?, datetime('now'), datetime('now'), 1)
+        ON CONFLICT(usuario_id, modulo, fecha)
+        DO UPDATE SET ultima_vez = datetime('now'), veces = veces + 1
+    """, (usuario_id, modulo, hoy))
+    conn.commit()
+    conn.close()
+
+
+def get_historial_accesos(dias: int = 30):
+    """Sesiones (login + última actividad) y módulos tocados por cada
+    usuario en los últimos `dias` días -- para el historial de accesos
+    (solo Saúl, ver historial_accesos_route)."""
+    conn = get_connection()
+    sesiones = conn.execute("""
+        SELECT u.username, u.nombre, s.creado AS login_en, s.ultima_actividad
+        FROM sesiones s JOIN usuarios u ON u.id = s.usuario_id
+        WHERE s.creado >= datetime('now', ?)
+        ORDER BY s.creado DESC
+        LIMIT 300
+    """, (f"-{dias} days",)).fetchall()
+    modulos = conn.execute("""
+        SELECT u.username, u.nombre, am.modulo, am.fecha, am.primera_vez, am.ultima_vez, am.veces
+        FROM accesos_modulos am JOIN usuarios u ON u.id = am.usuario_id
+        WHERE am.fecha >= date('now', ?)
+        ORDER BY am.ultima_vez DESC
+        LIMIT 1000
+    """, (f"-{dias} days",)).fetchall()
+    conn.close()
+    return {
+        "sesiones": [dict(r) for r in sesiones],
+        "modulos": [dict(r) for r in modulos],
+    }
 
 
 def get_user_by_token(token: str):

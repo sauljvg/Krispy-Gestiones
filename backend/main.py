@@ -87,6 +87,13 @@ async def restringir_tiendas_por_usuario(request, call_next):
         user = auth_module.get_user_by_token(token)
         if user:
             tiendas_usuario = auth_module.get_tiendas_permitidas(user["id"])
+            # Historial de accesos (solo lo consulta Saúl, ver
+            # historial_accesos_route) -- se aprovecha esta misma resolución
+            # de usuario (ya hecha en CADA request autenticado para lo de
+            # arriba) para no añadir una segunda consulta a la sesión.
+            partes = request.url.path.strip("/").split("/")
+            if len(partes) >= 2 and partes[0] == "api" and partes[1] not in ("auth", "notificaciones"):
+                auth_module.registrar_acceso_modulo(user["id"], partes[1])
     tiendas = [t for t in tiendas_usuario if t in tiendas_empresa] if tiendas_usuario else tiendas_empresa
 
     reset_token = tiendas_permitidas_actual.set(tiendas)

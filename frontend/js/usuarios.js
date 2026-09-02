@@ -306,7 +306,8 @@ async function loadUsers(currentUserId) {
           </div>
         </td>
         <td>
-          <input type="text" class="pin-input" data-id="${u.id}" value="${u.pin || ""}" placeholder="sin PIN" maxlength="4" style="width:60px; text-align:center;">
+          <input type="password" class="pin-input" data-id="${u.id}" value="${u.pin || ""}" placeholder="sin PIN" maxlength="4" style="width:60px; text-align:center;">
+          <button type="button" class="btn-mini btn-mostrar-pin" data-id="${u.id}" title="Mostrar/ocultar PIN" aria-label="Mostrar u ocultar el PIN">👁</button>
         </td>
         <td>${fmtFecha(u.creado)}</td>
         <td>
@@ -491,6 +492,13 @@ async function loadUsers(currentUserId) {
         return;
       }
       loadUsers(currentUserId);
+    });
+  });
+
+  tbody.querySelectorAll(".btn-mostrar-pin").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const input = tbody.querySelector(`.pin-input[data-id="${btn.dataset.id}"]`);
+      input.type = input.type === "password" ? "text" : "password";
     });
   });
 

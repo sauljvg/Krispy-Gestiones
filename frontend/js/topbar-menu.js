@@ -284,6 +284,62 @@ document.addEventListener("DOMContentLoaded", async () => {
     const data = await fetchEnLinea();
     if (data) renderEnLinea(data);
   }, 20000);
+
+  // Historial de accesos (mismo criterio "solo saul" que el badge de arriba
+  // -- si llegamos hasta aquí es porque el fetch de usuarios-en-linea ya
+  // tuvo éxito, así que no hace falta comprobar el usuario aparte). Botón
+  // aparte del badge de "en línea" porque es un historial, no algo "en
+  // vivo" -- se pide bajo demanda, no se refresca solo.
+  const btnHistorial = document.createElement("button");
+  btnHistorial.type = "button";
+  btnHistorial.className = "btn btn-ghost en-linea-badge-btn";
+  btnHistorial.title = "Historial de accesos";
+  btnHistorial.setAttribute("aria-label", "Historial de accesos");
+  btnHistorial.textContent = "🕒";
+  wrap.parentElement.insertBefore(btnHistorial, wrap);
+
+  const overlay = document.createElement("div");
+  overlay.className = "historial-accesos-overlay";
+  overlay.hidden = true;
+  overlay.innerHTML = `
+    <div class="historial-accesos-modal">
+      <div class="historial-accesos-cabecera">
+        <h3>Historial de accesos</h3>
+        <button type="button" class="btn-cerrar-ficha-x" id="btn-cerrar-historial-accesos" title="Cerrar">✕</button>
+      </div>
+      <p class="staff-hint">Últimos 30 días. Solo tú puedes ver esto.</p>
+      <h4>Inicios de sesión</h4>
+      <div class="table-scroll"><table class="cobertura-table">
+        <thead><tr><th>Usuario</th><th>Entró</th><th>Última actividad</th></tr></thead>
+        <tbody id="historial-sesiones-body"></tbody>
+      </table></div>
+      <h4 style="margin-top:16px;">Módulos tocados</h4>
+      <div class="table-scroll"><table class="cobertura-table">
+        <thead><tr><th>Usuario</th><th>Módulo</th><th>Día</th><th>Primera vez</th><th>Última vez</th><th>Veces</th></tr></thead>
+        <tbody id="historial-modulos-body"></tbody>
+      </table></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector("#btn-cerrar-historial-accesos").addEventListener("click", () => {
+    overlay.hidden = true;
+  });
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) overlay.hidden = true;
+  });
+
+  btnHistorial.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const res = await fetch(`${window.location.origin}/api/auth/historial-accesos`);
+    if (!res.ok) return;
+    const data = await res.json();
+    overlay.querySelector("#historial-sesiones-body").innerHTML = (data.sesiones || [])
+      .map((s) => `<tr><td>${escapeHTML(s.nombre)}</td><td>${escapeHTML(s.login_en)}</td><td>${escapeHTML(s.ultima_actividad || "—")}</td></tr>`)
+      .join("") || `<tr><td colspan="3" class="staff-hint">Sin datos</td></tr>`;
+    overlay.querySelector("#historial-modulos-body").innerHTML = (data.modulos || [])
+      .map((m) => `<tr><td>${escapeHTML(m.nombre)}</td><td>${escapeHTML(m.modulo)}</td><td>${escapeHTML(m.fecha)}</td><td>${escapeHTML(m.primera_vez)}</td><td>${escapeHTML(m.ultima_vez)}</td><td>${m.veces}</td></tr>`)
+      .join("") || `<tr><td colspan="6" class="staff-hint">Sin datos</td></tr>`;
+    overlay.hidden = false;
+  });
 });
 
 // Botones ⓘ genéricos (.info-tip-wrap): en desktop ya se ven con :hover, pero

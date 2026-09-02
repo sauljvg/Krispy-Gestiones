@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from pydantic import BaseModel
 
@@ -35,14 +37,26 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
+def _require_vista_personal(user: dict) -> None:
+    # A propósito atado a UN username, no a rol admin: es un vistazo
+    # personal, no una función general del portal para cualquier
+    # administrador. El username vive en una variable de entorno (no
+    # hardcodeado) para que, si algún día cambia, se actualice en Railway sin
+    # tener que tocar ni desplegar código.
+    if user["username"].lower() != os.environ.get("USUARIO_VISTA_EN_LINEA", "saul").lower():
+        raise HTTPException(status_code=403, detail="No disponible")
+
+
 @router.get("/usuarios-en-linea")
 def usuarios_en_linea_route(user: dict = Depends(get_current_user)):
-    # A propósito atado al username literal (no a rol admin): es un vistazo
-    # personal de Saúl, no una función general del portal para cualquier
-    # administrador.
-    if user["username"].lower() != "saul":
-        raise HTTPException(status_code=403, detail="No disponible")
+    _require_vista_personal(user)
     return {"usuarios": auth_module.get_usuarios_en_linea(excluir_usuario_id=user["id"])}
+
+
+@router.get("/historial-accesos")
+def historial_accesos_route(dias: int = 30, user: dict = Depends(get_current_user)):
+    _require_vista_personal(user)
+    return auth_module.get_historial_accesos(dias)
 
 
 def require_resenas(empresa: str = "kk", user: dict = Depends(get_current_user)) -> dict:

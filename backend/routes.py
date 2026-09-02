@@ -366,6 +366,12 @@ class TransactionsIn(BaseModel):
 
 
 @router.post("/transactions")
+# Solo exige require_resenas (heredado del router, no admin) a propósito:
+# cargar transacciones/reseñas de la propia tienda es una tarea operativa que
+# puede tocarle a cualquiera con el módulo, a diferencia de "Gestionar
+# personal" (más abajo, admin-only) porque esa sí toca la lista maestra de
+# nombres que alimenta el ranking de menciones de TODAS las tiendas, no solo
+# datos de la propia.
 def set_transactions(body: TransactionsIn):
     if body.transacciones < 0:
         raise HTTPException(400, "transacciones no puede ser negativo")
