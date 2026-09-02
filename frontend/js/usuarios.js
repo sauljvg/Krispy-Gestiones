@@ -319,6 +319,25 @@ function normalizarBusqueda(s) {
   return (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
 }
 
+// Un usuario no tiene una columna "empresa" propia -- se deduce de sus
+// módulos (cualquier "saona_*" lo marca como Saona). Alguien con módulos de
+// las dos marcas a la vez cuenta como "Ambas" -- caso raro pero real (p.ej.
+// admin-like sin serlo del todo), mejor mostrarlo así que forzarlo a una.
+function empresaDeUsuario(u) {
+  const modulos = u.modulos || [];
+  const tieneSaona = modulos.some((m) => m.startsWith("saona_"));
+  const tieneKK = modulos.some((m) => !m.startsWith("saona_"));
+  if (tieneSaona && tieneKK) return "Ambas";
+  if (tieneSaona) return "Saona";
+  return "Krispy Kreme";
+}
+
+// Gerente y Area Manager son los roles con más gente y los que de verdad
+// están repartidos entre las dos marcas -- el resto (admin, rrhh, director
+// de operaciones, colaborador) suele ser gente que ya gestiona ambas o son
+// pocos, así que no compensa partirlos también.
+const ROLES_DIVIDIDOS_POR_EMPRESA = new Set(["gerente", "area_manager"]);
+
 async function loadUsers(currentUserId) {
   CURRENT_USER_ID = currentUserId;
   await loadTiposInformeSiHaceFalta();
@@ -360,20 +379,37 @@ function renderUsuariosFiltrados() {
     tbody.innerHTML = `<p class="staff-hint">Sin usuarios que coincidan con la búsqueda.</p>`;
     return;
   }
+  const ORDEN_EMPRESA = ["Krispy Kreme", "Saona", "Ambas"];
+
+  function subgrupoHTML(label, usuariosGrupo) {
+    return `
+        <details class="tabla-desplegable" open style="margin-bottom:14px;">
+          <summary style="cursor:pointer; font-weight:600; padding:6px 0;">${escapeHTML(label)} (${usuariosGrupo.length})</summary>
+          <div class="store-ranking-wrap">
+            <table class="staff-table">
+              ${cabecera}
+              <tbody>${usuariosGrupo.map((u) => filaUsuarioHTML(u, currentUserId)).join("")}</tbody>
+            </table>
+          </div>
+        </details>`;
+  }
+
   tbody.innerHTML = rolesOrdenados
     .map((rol) => {
       const grupo = porRol.get(rol);
       const label = (ROLES_CACHE.find((r) => r.value === rol) || {}).label || rol;
-      return `
-        <details class="tabla-desplegable" open style="margin-bottom:14px;">
-          <summary style="cursor:pointer; font-weight:600; padding:6px 0;">${escapeHTML(label)} (${grupo.length})</summary>
-          <div class="store-ranking-wrap">
-            <table class="staff-table">
-              ${cabecera}
-              <tbody>${grupo.map((u) => filaUsuarioHTML(u, currentUserId)).join("")}</tbody>
-            </table>
-          </div>
-        </details>`;
+      if (!ROLES_DIVIDIDOS_POR_EMPRESA.has(rol)) {
+        return subgrupoHTML(label, grupo);
+      }
+      const porEmpresa = new Map();
+      grupo.forEach((u) => {
+        const empresa = empresaDeUsuario(u);
+        if (!porEmpresa.has(empresa)) porEmpresa.set(empresa, []);
+        porEmpresa.get(empresa).push(u);
+      });
+      return ORDEN_EMPRESA.filter((e) => porEmpresa.has(e))
+        .map((empresa) => subgrupoHTML(`${label} · ${empresa}`, porEmpresa.get(empresa)))
+        .join("");
     })
     .join("");
 
