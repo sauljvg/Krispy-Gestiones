@@ -429,21 +429,33 @@ def dejar_de_compartir_vacante(vacante_id, usuario_id):
     conn.close()
 
 
-def get_vacantes_compartidas_con(usuario_id, empresa=None):
+def get_vacantes_compartidas_con(usuario_id, empresa=None, todas=False):
     """Vacantes donde este usuario es responsable -- para "Compartidos
     conmigo", en vez de fichas sueltas agrupadas por cuándo se compartieron,
-    aquí se ve la solicitud completa con TODOS sus candidatos juntos."""
+    aquí se ve la solicitud completa con TODOS sus candidatos juntos.
+
+    `todas`: para Area Manager/Director de Operaciones -- ven TODAS las
+    vacantes compartidas con cualquier gerente de la empresa, no solo las
+    suyas (ver candidatos_compartidos_con, mismo motivo: están por encima de
+    los gerentes en la jerarquía)."""
     conn = get_connection()
-    clauses = ["vc.usuario_id = ?"]
-    params = [usuario_id]
+    if todas:
+        clauses = []
+        params = []
+    else:
+        clauses = ["vc.usuario_id = ?"]
+        params = [usuario_id]
     if empresa:
         clauses.append("v.empresa = ?")
         params.append(empresa)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    select_cols = "v.*" if todas else "v.*, vc.compartido_en, vc.compartido_por"
+    orden = "v.id DESC" if todas else "vc.compartido_en DESC"
     rows = conn.execute(f"""
-        SELECT v.*, vc.compartido_en, vc.compartido_por
+        SELECT DISTINCT {select_cols}
         FROM vacante_compartidos vc JOIN vacantes v ON v.id = vc.vacante_id
-        WHERE {' AND '.join(clauses)}
-        ORDER BY vc.compartido_en DESC
+        {where}
+        ORDER BY {orden}
     """, params).fetchall()
     resultado = []
     for r in rows:
@@ -1491,7 +1503,7 @@ def usuario_tiene_acceso_candidato(usuario_id, candidato_id):
     return row is not None
 
 
-def candidatos_compartidos_con(usuario_id, empresa=None):
+def candidatos_compartidos_con(usuario_id, empresa=None, todas=False):
     """Todos los candidatos a los que este usuario tiene acceso, por
     CUALQUIERA de las tres vías de usuario_tiene_acceso_candidato (directo,
     vía Informes, o por ser responsable de la vacante entera), como una
@@ -1502,25 +1514,35 @@ def candidatos_compartidos_con(usuario_id, empresa=None):
     en Reclutamiento (uno agrupado por vacante con fichas completas, otro
     agrupado por tanda con el formato de una respuesta de test) -- se
     unifican aquí para que la pantalla de "Compartidos" sea una sola lista,
-    sin duplicar ni la consulta ni el pintado."""
+    sin duplicar ni la consulta ni el pintado.
+
+    `todas`: para Area Manager/Director de Operaciones (ver
+    candidatos_compartidos_conmigo_route) -- están por encima de los
+    gerentes en la jerarquía, así que necesitan ver TODO lo compartido en la
+    empresa (con cualquier gerente), no solo lo compartido con ellos
+    directamente, para poder darle seguimiento si un gerente no actuó."""
     conn = get_connection()
     clausula_empresa = "AND c.empresa = ?" if empresa else ""
     params_empresa = (empresa,) if empresa else ()
+    clausula_usuario = "" if todas else "cc.usuario_id = ? AND"
+    clausula_usuario_ic = "" if todas else "ic.usuario_id = ? AND"
+    clausula_usuario_vc = "" if todas else "vc.usuario_id = ? AND"
+    params_usuario = () if todas else (usuario_id,)
     ids = set()
     for row in conn.execute(f"""
         SELECT c.id FROM candidato_compartidos cc JOIN candidatos c ON c.id = cc.candidato_id
-        WHERE cc.usuario_id = ? {clausula_empresa}
-    """, (usuario_id, *params_empresa)):
+        WHERE {clausula_usuario} 1=1 {clausula_empresa}
+    """, (*params_usuario, *params_empresa)):
         ids.add(row["id"])
     for row in conn.execute(f"""
         SELECT c.id FROM informe_compartidos ic JOIN candidatos c ON c.id = ic.candidato_id
-        WHERE ic.usuario_id = ? {clausula_empresa}
-    """, (usuario_id, *params_empresa)):
+        WHERE {clausula_usuario_ic} 1=1 {clausula_empresa}
+    """, (*params_usuario, *params_empresa)):
         ids.add(row["id"])
     for row in conn.execute(f"""
         SELECT c.id FROM candidatos c JOIN vacante_compartidos vc ON vc.vacante_id = c.vacante_id
-        WHERE vc.usuario_id = ? {clausula_empresa}
-    """, (usuario_id, *params_empresa)):
+        WHERE {clausula_usuario_vc} 1=1 {clausula_empresa}
+    """, (*params_usuario, *params_empresa)):
         ids.add(row["id"])
     if not ids:
         conn.close()

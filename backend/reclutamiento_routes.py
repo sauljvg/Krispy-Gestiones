@@ -289,12 +289,25 @@ def dejar_de_compartir_vacante_route(vacante_id: int, usuario_id: int, _user: di
     return {"ok": True}
 
 
+def _ve_todo_lo_compartido(user: dict) -> bool:
+    """Area Manager y Director de Operaciones están por encima de los
+    gerentes en la jerarquía -- si un gerente no atendió algo compartido, son
+    ellos quienes tienen que verlo para darle seguimiento, así que ven TODO
+    lo compartido en la empresa, no solo lo compartido con ellos en concreto
+    (pedido explícito del usuario: "area manager esta encima de los
+    gerentes... si un gerente no ha hecho algo el que jala las orejas es el
+    area o el director de operaciones")."""
+    return user["rol"] in ("area_manager", "director_operaciones")
+
+
 @router.get("/vacantes-compartidas-conmigo")
 def vacantes_compartidas_conmigo_route(empresa: str | None = None, user: dict = Depends(get_current_user)):
     """Igual que /candidatos/compartir a nivel de solicitud: vacantes de las
     que este usuario es responsable, con TODOS sus candidatos juntos --
     accesible sin el módulo completo, igual que /informes/compartidos."""
-    return reclutamiento_module.get_vacantes_compartidas_con(user["id"], empresa=empresa)
+    return reclutamiento_module.get_vacantes_compartidas_con(
+        user["id"], empresa=empresa, todas=_ve_todo_lo_compartido(user)
+    )
 
 
 @router.get("/vacantes-compartidas-por-mi")
@@ -309,7 +322,9 @@ def candidatos_compartidos_conmigo_route(empresa: str | None = None, user: dict 
     vacante entera) -- una única lista, para que "Compartidos" en
     Reclutamiento sea una sola pantalla en vez de dos con formato distinto.
     Accesible sin el módulo completo, igual que /vacantes-compartidas-conmigo."""
-    return reclutamiento_module.candidatos_compartidos_con(user["id"], empresa=empresa)
+    return reclutamiento_module.candidatos_compartidos_con(
+        user["id"], empresa=empresa, todas=_ve_todo_lo_compartido(user)
+    )
 
 
 @router.get("/candidatos/compartidos-por-mi")
