@@ -845,6 +845,7 @@ h3 {
 .icon-badge[data-c="slate"]  { background: color-mix(in srgb, #3d5a80 16%, var(--surface-1)); color: #3d5a80; }
 .icon-badge[data-c="cyan"]   { background: color-mix(in srgb, #0aa3a3 16%, var(--surface-1)); color: #0aa3a3; }
 .icon-badge[data-c="green"]  { background: color-mix(in srgb, var(--status-good) 16%, var(--surface-1)); color: var(--status-good); }
+.icon-badge[data-c="amber"]  { background: color-mix(in srgb, #b5760f 16%, var(--surface-1)); color: #b5760f; }
 
 /* Iconos SVG que sustituyen a los emojis sueltos del texto (ver
    js/icons.js) -- inline-flex + vertical-align para que se alineen con la

@@ -35,6 +35,7 @@ MODULOS = {
     "agregadores": "Agregadores",
     "evaluaciones360": "Evaluaciones 360°",
     "reclutamiento": "Reclutamiento",
+    "manuales": "Manuales",
     "saona_resenas": "SAONA · Reseñas",
     "saona_informes": "SAONA · Informes",
     "saona_clima": "SAONA · Clima Laboral",
