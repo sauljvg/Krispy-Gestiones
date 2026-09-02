@@ -175,6 +175,10 @@ function agrInitMap(lat, lng) {
 }
 
 function agrDistanciaKm(lat1, lng1, lat2, lng2) {
+  // OJO: la misma fórmula (Haversine) vive DUPLICADA en
+  // backend/agregadores.py (_distancia_y_angulo) -- si tocas el radio, la
+  // fórmula o el umbral de "más cercana" aquí, toca también ese lado, o los
+  // puntos del mapa dejan de coincidir con el dashboard (bug real ya visto).
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLng = ((lng2 - lng1) * Math.PI) / 180;

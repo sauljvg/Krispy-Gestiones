@@ -166,18 +166,12 @@ def ensure_tables():
         )
     """)
 
-    # El relleno automático entre vértices se quitó (ver agregadores.js,
-    # 10/08) porque no había forma fiable de distinguir un hueco real de uno
-    # con contaminación de otra sucursal -- pero el usuario SÍ puede verlo a
-    # ojo en el mapa ("estos dos dots verdes tienen un hueco entre medias, y
-    # sé que en realidad está todo cubierto"). Esta tabla guarda esa decisión
-    # manual: un puente entre dos puntos concretos (por lat/lng, no por
-    # direccion_id -- los vértices del borde ya calculados no siempre tienen
-    # una fila de dirección real detrás, ver resultado_punto/agregadores_limites,
-    # y el usuario también quiere poder unir esos, no solo los dots del grid),
-    # por tienda y agregador, para que el polígono conecte esos dos puntos en
-    # línea recta sin dejar que un vértice intermedio más corto cree un
-    # hueco/pico.
+    # Guarda el "puente" manual entre dos puntos que el usuario decide unir a
+    # ojo (el relleno automático entre vértices se quitó por poco fiable) --
+    # por qué existe esto y cómo se usa está explicado en el sitio canónico,
+    # crear_union_route (agregadores_routes.py), no lo repitas aquí si cambia.
+    # Por lat/lng en vez de direccion_id porque los vértices del borde ya
+    # calculados no siempre tienen una fila de dirección real detrás.
     cols_uniones = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_uniones)")}
     if cols_uniones and "lat_a" not in cols_uniones:
         # Esquema viejo (solo direccion_id, NOT NULL) de la primera versión
@@ -293,6 +287,12 @@ def _mover_punto(lat, lng, bearing_deg, distancia_km):
 
 
 def _distancia_y_angulo(lat_centro, lng_centro, lat, lng):
+    # OJO: la misma fórmula (Haversine) vive DUPLICADA en
+    # frontend/js/agregadores.js (agrDistanciaKm) para no depender de una
+    # llamada al servidor al arrastrar el mapa -- si tocas el radio, la
+    # fórmula o el umbral de "más cercana" aquí, toca también ese lado, o
+    # los puntos del mapa dejan de coincidir con el dashboard (bug real ya
+    # visto, ver comentario en get_resumen_estados_todas).
     R = 6371
     lat1, lng1, lat2, lng2 = map(math.radians, (lat_centro, lng_centro, lat, lng))
     dlat, dlng = lat2 - lat1, lng2 - lng1

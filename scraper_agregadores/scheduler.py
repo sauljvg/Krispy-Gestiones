@@ -35,6 +35,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 import config
+import reenviar_cola
 from main import chequear_tienda
 from utils import api_client
 
@@ -181,6 +182,20 @@ async def chequeo_completo():
     await _chequeo("completo", cercano=False)
 
 
+async def reintentar_cola_local():
+    """Si el backend estuvo caído/rechazando peticiones durante algún
+    chequeo, el dato real ya scrapeado queda guardado en disco (ver
+    utils/cola_local.py) hasta que alguien ejecute reenviar_cola.py A MANO --
+    sin este job, esos chequeos reales podían quedarse varados para siempre
+    si nadie se acordaba. reenviar_cola.main() ya es seguro de llamar aunque
+    la cola esté vacía (no hace nada) o el backend siga caído (cada archivo
+    se deja para el siguiente intento, no se pierde nada)."""
+    try:
+        await reenviar_cola.main()
+    except Exception as exc:
+        logger.warning("Fallo reintentando la cola local de chequeos pendientes: %r", exc)
+
+
 def crear_scheduler(worker_index: int = 0, worker_count: int = 1) -> AsyncIOScheduler:
     global _worker_index, _worker_count
     _worker_index = worker_index
@@ -199,6 +214,17 @@ def crear_scheduler(worker_index: int = 0, worker_count: int = 1) -> AsyncIOSche
         chequeo_completo,
         trigger=IntervalTrigger(minutes=config.FRECUENCIA_CHEQUEO_COMPLETO_MIN),
         id="chequeo-completo",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
+    )
+    # No depende de horario de apertura (a diferencia de los dos chequeos de
+    # arriba) -- si el backend estuvo caído de madrugada, mejor reenviar la
+    # cola en cuanto se pueda que esperar a que abra la primera tienda.
+    scheduler.add_job(
+        reintentar_cola_local,
+        trigger=IntervalTrigger(minutes=15),
+        id="reintentar-cola-local",
         max_instances=1,
         coalesce=True,
         misfire_grace_time=300,
