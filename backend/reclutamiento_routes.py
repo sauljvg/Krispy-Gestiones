@@ -313,8 +313,12 @@ def _empresa_de_usuario(user: dict) -> str | None:
     compartido de la empresa" (todas=True) se volvería "ver todo lo
     compartido de LAS DOS empresas" para ellos, que es justo lo que no
     queremos: un area manager de Saona (p.ej. Samuel, que solo tiene
-    saona_clima) no debe ver vacantes de Krispy Kreme."""
-    modulos = user.get("modulos") or []
+    saona_clima) no debe ver vacantes de Krispy Kreme.
+
+    OJO: `user` (de get_current_user) es la fila cruda de `usuarios` -- los
+    módulos viven en otra tabla (usuario_modulos) y solo se juntan a mano en
+    sitios como /auth/me, NO vienen en este dict. Hay que pedirlos aparte."""
+    modulos = auth_module.get_modulos_permitidos(user["id"])
     tiene_saona = any(m.startswith("saona_") for m in modulos)
     tiene_kk = any(not m.startswith("saona_") for m in modulos)
     if tiene_saona and not tiene_kk:
