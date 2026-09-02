@@ -61,11 +61,11 @@ function lineChart(canvasId, labels, valores) {
       maintainAspectRatio: false,
       scales: {
         x: { ticks: { color: colorTexto }, grid: { display: false } },
-        y: { beginAtZero: true, ticks: { color: colorTexto, callback: (v) => `${v}%` }, grid: { color: "rgba(128,128,128,0.2)" } },
+        y: { beginAtZero: true, ticks: { color: colorTexto, precision: 0 }, grid: { color: "rgba(128,128,128,0.2)" } },
       },
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: (ctx2) => `${ctx2.parsed.y}%` } },
+        tooltip: { callbacks: { label: (ctx2) => `${ctx2.parsed.y} baja${ctx2.parsed.y === 1 ? "" : "s"}` } },
       },
     },
   });
@@ -128,8 +128,8 @@ async function cargarResumen() {
 
   const mesActualPct = d.rotacion_mensual.length ? d.rotacion_mensual[d.rotacion_mensual.length - 1].pct : 0;
   const bajasMesActual = d.rotacion_mensual.length ? d.rotacion_mensual[d.rotacion_mensual.length - 1].bajas : 0;
-  document.getElementById("kpi-rotacion-mes").textContent = `${mesActualPct}%`;
-  document.getElementById("kpi-rotacion-mes-sub").textContent = `${bajasMesActual} bajas -- ${formatMes(d.mes_actual)}`;
+  document.getElementById("kpi-rotacion-mes").textContent = bajasMesActual;
+  document.getElementById("kpi-rotacion-mes-sub").textContent = `${formatMes(d.mes_actual)} -- ${mesActualPct}% sobre la plantilla activa`;
   document.getElementById("kpi-rotacion-centro-sub").textContent = `Mes en curso (${formatMes(d.mes_actual)}).`;
 
   document.getElementById("kpi-nspp").textContent = d.bajas_ytd ? `${d.nspp_pct}%` : "--";
@@ -139,7 +139,7 @@ async function cargarResumen() {
   chartRotacionMensual = lineChart(
     "chart-rotacion-mensual",
     d.rotacion_mensual.map((m) => formatMes(m.mes)),
-    d.rotacion_mensual.map((m) => m.pct)
+    d.rotacion_mensual.map((m) => m.bajas)
   );
   if (d.rotacion_por_centro_mes_actual.length) {
     chartRotacionCentro = barChart("chart-rotacion-centro", d.rotacion_por_centro_mes_actual, { sufijo: "%" });
