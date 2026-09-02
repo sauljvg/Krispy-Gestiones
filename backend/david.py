@@ -209,10 +209,14 @@ nada de Reclutamiento, y responde solo con la vista que le corresponde.
 
 "Vacantes": boton "+ Nueva vacante" (Puesto, Centro, notas, y opcionalmente subir ya el CV de una
 persona o un PDF con varios juntos para crearla con candidatos dentro). Cada tarjeta muestra cuantos
-dias lleva abierta y cuantos candidatos tiene. Al abrir una vacante: "Guardar", "Mensaje" (WhatsApp a
-todos sus candidatos de golpe), "Fusionar" con otra solicitud, "Archivar"/"Desarchivar", "Eliminar",
-y anadir mas "Responsables" (gerentes que veran TODOS los candidatos de esa vacante, incluidos los que
-se anadan despues, sin compartirlos uno a uno).
+dias lleva abierta y cuantos candidatos tiene, y un aviso ⚠️ junto al puesto si todavia no tiene NINGUN
+"Responsable" asignado (pasar el raton por encima dice "Esta vacante no tiene responsable asignado") --
+sin responsable, esa vacante no le aparece a NADIE en "Compartidos conmigo" (ni siquiera a area
+manager/director de operaciones, ver mas abajo), asi que es facil que se quede invisible sin que nadie
+lo note. Al abrir una vacante: "Guardar", "Mensaje" (WhatsApp a todos sus candidatos de golpe),
+"Fusionar" con otra solicitud, "Archivar"/"Desarchivar", "Eliminar", y anadir mas "Responsables"
+(gerentes que veran TODOS los candidatos de esa vacante, incluidos los que se anadan despues, sin
+compartirlos uno a uno).
 
 "Base de candidatos": buscador (nombre, telefono, email o puesto), filtro por vacante y por estado,
 "+ Nuevo candidato", "Buscar tests ya respondidos" (reintenta enlazar respuestas de test sueltas con
@@ -228,32 +232,51 @@ de Entrevista de Salida; NO se personaliza por persona, ese cuerpo lo ve todo el
 con..." (elegir un usuario del portal), "Asignar a solicitud..." (vacante), "Exportar a Excel..." y
 "Descargar PDFs..." (fusiona el CV de cada seleccionado en un solo PDF, en el orden en que se marcaron).
 
-Debajo, "Compartidos conmigo" (candidatos que otras personas te han compartido A TI, misma lista y
-misma barra de herramientas -- Seleccionar todos, Quitar seleccion, Exportar a Excel, Descargar PDFs --
-que la vista reducida de gerente descrita abajo) y, si alguna vez has compartido algo, "Compartidos por
-ti" (lo que TU has compartido con otros, agrupado por tanda y destinatario, con boton "Dejar de
-compartir" por candidato para quitarle el acceso a ESE destinatario en concreto sin borrar la ficha).
+Debajo, "Compartidos conmigo" (candidatos que otras personas te han compartido A TI -- o, si eres area
+manager/director de operaciones, TODO lo compartido con cualquier gerente de tu empresa, ver mas
+abajo -- misma lista y misma barra de herramientas -- Seleccionar todos, Quitar seleccion, Exportar a
+Excel, Descargar PDFs -- que la vista reducida de gerente descrita abajo) y, SOLO si alguna vez has
+compartido algo tu mismo, "Compartidos por ti" (lo que TU has compartido con otros, agrupado por tanda
+y destinatario, con boton "Dejar de compartir" por candidato para quitarle el acceso a ESE destinatario
+en concreto sin borrar la ficha) -- si nunca has compartido nada, esta segunda seccion directamente no
+aparece (ni su barra de herramientas).
 
-### Vista reducida de gerente/area manager (SIN el modulo, solo le comparten candidatos sueltos o una
-vacante entera)
+### Vista reducida de gerente/area manager/director de operaciones (SIN el modulo Informes/Reclutamiento
+completo, solo le comparten candidatos sueltos o una vacante entera)
 
 No ve "Vacantes" ni "Base de candidatos" -- solo una seccion, "Compartidos conmigo": un buscador
-(nombre, telefono, email o puesto) y la lista de TODOS los candidatos a los que tiene acceso (por
-vacante compartida entera, o candidatos sueltos), agrupada por vacante ("Sin vacante asignada" para
-los sueltos al final). IMPORTANTE: solo se ven los candidatos que RRHH ya marco con el estado
-"Entrevistado" (la senal de que estan listos para que el gerente los cite) -- los que siguen
-"Pendiente" (o cualquier otro estado) NO aparecen todavia, aunque ya esten en el proceso; si hay
-alguno asi, se avisa cuantos son sin listarlos ("X candidatos mas en el proceso, sin marcar
-'Entrevistado' todavia"). Cada ficha tiene su propio checkbox (siempre visible, no hace falta activar
-ningun modo) y un desplegable "Sin contactar"/"Contactado"/"Respondio" para marcar el seguimiento; con
-candidatos marcados: "Seleccionar todos", "Quitar seleccion", "Exportar a Excel...", "Descargar PDFs".
-Clic en la ficha (fuera del checkbox) abre su detalle completo (ver mas abajo).
+(nombre, telefono, email o puesto) y la lista agrupada por vacante ("Sin vacante asignada" para
+candidatos sueltos al final; cada grupo aparece CERRADO/colapsado por defecto, hay que abrirlo a mano, y
+muestra "N candidatos · compartido hace X dias/meses" -- la fecha desde que ese grupo se hizo visible
+para este usuario).
 
-Un gerente NO tiene ningun boton de "mensaje en grupo" ni "enviar email a todos" -- esas son
-acciones EXCLUSIVAS de la vista completa (viven en Base de candidatos, que un gerente ni ve). Para
-contactar a un candidato, la unica via de un gerente es abrir su ficha individual y usar el boton
-"WhatsApp" de ahi (ver "Ficha de un candidato" justo abajo) -- NO hay boton de WhatsApp en la propia
-tarjeta de la lista, solo dentro de la ficha.
+IMPORTANTE, quien ve QUE dentro de "Compartidos conmigo" depende del rol:
+- Gerente: solo los candidatos/vacantes que se compartieron CON EL en concreto (directo, via Informes, o
+  como responsable de la vacante entera).
+- Area manager / Director de operaciones: ven TODO lo que este compartido con CUALQUIER gerente de su
+  misma empresa (KK o SAONA, la que le toque segun sus modulos), no solo lo compartido con ellos
+  directamente -- estan por encima de los gerentes en la jerarquia, para poder darles seguimiento si un
+  gerente no atendio algo. Aun asi, una vacante que el admin todavia NO compartió con NINGUN gerente
+  (0 responsables, ver el aviso ⚠️ de "Vacantes" arriba) no aparece para nadie, ni siquiera para ellos --
+  "todo lo compartido" no incluye lo que aun no se ha compartido con nadie.
+
+En los tres casos, una vacante que ya se cerro (estado "Cubierta" o "Cancelada", o que el admin la
+archivo) deja de aparecer en "Compartidos conmigo" para todo el mundo -- solo se ven vacantes abiertas.
+
+Ademas, dentro de cada grupo solo se ven los candidatos que RRHH ya marco con el estado "Entrevistado"
+(la senal de que estan listos para que el gerente los cite) -- los que siguen "Pendiente" (o cualquier
+otro estado) NO aparecen todavia, aunque ya esten en el proceso, y ya no se avisa cuantos son (antes
+salia un texto "X candidatos mas en el proceso...", se quito). Cada ficha tiene su propio checkbox
+(siempre visible, no hace falta activar ningun modo) y un desplegable "Sin contactar"/"Contactado"/
+"Respondio" para marcar el seguimiento; con candidatos marcados: "Seleccionar todos", "Quitar seleccion",
+"Exportar a Excel...", "Descargar PDFs". Clic en la ficha (fuera del checkbox) abre su detalle completo
+(ver mas abajo).
+
+Nadie en esta vista tiene boton de "mensaje en grupo" ni "enviar email a todos" -- esas son
+acciones EXCLUSIVAS de la vista completa (viven en Base de candidatos, que aqui no se ve). Para
+contactar a un candidato, la unica via es abrir su ficha individual y usar el boton "WhatsApp" de ahi
+(ver "Ficha de un candidato" justo abajo) -- NO hay boton de WhatsApp en la propia tarjeta de la lista,
+solo dentro de la ficha.
 
 ### Ficha de un candidato (clic en su tarjeta, fuera del checkbox -- MISMA ficha en las dos vistas,
 con pocas diferencias)
