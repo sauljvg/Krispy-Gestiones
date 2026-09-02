@@ -444,6 +444,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   aplicarBrandingEmpresa();
   const linkLanding = document.getElementById("link-clima-landing");
   if (linkLanding && EMPRESA === "saona") linkLanding.href = "clima.html?empresa=saona";
+  if (user.rol !== "admin") {
+    document.getElementById("btn-renombrar-oleada").hidden = true;
+    document.getElementById("btn-eliminar-oleada").hidden = true;
+    document.getElementById("clima-import-wrap").hidden = true;
+    document.getElementById("clima-nueva-oleada-wrap").hidden = true;
+  }
 
   await cargarTokensDiseno();
   await loadOleadas();

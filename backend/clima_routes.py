@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 import auth as auth_module
 import clima as clima_module
-from auth_routes import get_current_user
+from auth_routes import get_current_user, require_admin
 from clima_pdf import generar_pdf
 
 router = APIRouter()
@@ -74,7 +74,7 @@ class RenombrarOleadaBody(BaseModel):
 
 
 @router.put("/{oleada_id}/etiqueta")
-def renombrar_oleada_route(oleada_id: int, body: RenombrarOleadaBody, _user: dict = Depends(require_clima_oleada)):
+def renombrar_oleada_route(oleada_id: int, body: RenombrarOleadaBody, _user: dict = Depends(require_admin)):
     if not body.etiqueta.strip():
         raise HTTPException(status_code=400, detail="Ponle un nombre a la oleada")
     clima_module.renombrar_oleada(oleada_id, body.etiqueta.strip())
@@ -82,7 +82,7 @@ def renombrar_oleada_route(oleada_id: int, body: RenombrarOleadaBody, _user: dic
 
 
 @router.delete("/{oleada_id}")
-def eliminar_oleada_route(oleada_id: int, _user: dict = Depends(require_clima_oleada)):
+def eliminar_oleada_route(oleada_id: int, _user: dict = Depends(require_admin)):
     try:
         clima_module.eliminar_oleada(oleada_id)
     except ValueError as exc:
@@ -116,10 +116,8 @@ async def importar_route(
     file: UploadFile = File(...),
     nueva_oleada: bool = Form(default=False),
     empresa: str = Form(default="kk"),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_admin),
 ):
-    if not auth_module.tiene_modulo(user, _modulo_para_empresa(empresa)):
-        raise HTTPException(status_code=403, detail="No tienes acceso a Clima Laboral")
     if not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="Sube un archivo Excel (.xlsx)")
     content = await file.read()

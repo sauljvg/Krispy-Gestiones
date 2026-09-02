@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 import auth as auth_module
 import entrevistas as entrevistas_module
-from auth_routes import get_current_user
+from auth_routes import get_current_user, require_admin
 from entrevistas_pdf import generar_pdf
 
 
@@ -92,10 +92,8 @@ async def importar_route(
     file: UploadFile = File(...),
     nueva_oleada: bool = Form(default=False),
     empresa: str = Form(default="kk"),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_admin),
 ):
-    if not auth_module.tiene_modulo(user, _modulo_para_empresa(empresa)):
-        raise HTTPException(status_code=403, detail="No tienes acceso a Entrevistas de Salida")
     if not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="Sube un archivo Excel (.xlsx)")
     content = await file.read()
@@ -141,7 +139,7 @@ def crear_salida_route(oleada_id: int, body: SalidaIn, _user: dict = Depends(req
 
 
 @router.delete("/{oleada_id}/salidas/{salida_id}")
-def borrar_salida_route(oleada_id: int, salida_id: int, _user: dict = Depends(require_entrevistas_oleada)):
+def borrar_salida_route(oleada_id: int, salida_id: int, _user: dict = Depends(require_admin)):
     _exigir_misma_oleada(oleada_id, salida_id=salida_id)
     entrevistas_module.delete_salida(salida_id)
     return {"ok": True}
@@ -175,14 +173,14 @@ def crear_match_route(oleada_id: int, body: MatchIn, _user: dict = Depends(requi
 
 
 @router.delete("/{oleada_id}/matches/{respuesta_id}")
-def borrar_match_route(oleada_id: int, respuesta_id: int, _user: dict = Depends(require_entrevistas_oleada)):
+def borrar_match_route(oleada_id: int, respuesta_id: int, _user: dict = Depends(require_admin)):
     _exigir_misma_oleada(oleada_id, respuesta_id=respuesta_id)
     entrevistas_module.quitar_match_manual(respuesta_id)
     return {"ok": True}
 
 
 @router.delete("/{oleada_id}/respuestas/{respuesta_id}")
-def borrar_respuesta_route(oleada_id: int, respuesta_id: int, _user: dict = Depends(require_entrevistas_oleada)):
+def borrar_respuesta_route(oleada_id: int, respuesta_id: int, _user: dict = Depends(require_admin)):
     _exigir_misma_oleada(oleada_id, respuesta_id=respuesta_id)
     entrevistas_module.borrar_respuesta(respuesta_id)
     return {"ok": True}
