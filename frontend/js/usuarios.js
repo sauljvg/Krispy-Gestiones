@@ -2,6 +2,23 @@ let ROLES_CACHE = [];
 let MODULOS_CACHE = [];
 let USUARIOS_CACHE = []; // último fetch de /auth/users -- para poder re-filtrar por búsqueda sin volver a pedirlo
 let CURRENT_USER_ID = null;
+// Popover visible (checklist-popover) -> botón "Editar" que lo abrió -- con
+// position:fixed el popover no se mueve solo con el scroll de la página, así
+// que hay que reposicionarlo a mano en cada scroll (ver listener global).
+const POPOVER_BOTON = new WeakMap();
+
+function posicionarPopover(popover, btn) {
+  const r = btn.getBoundingClientRect();
+  const anchoPopover = popover.offsetWidth || 220;
+  let left = r.left;
+  if (left + anchoPopover > window.innerWidth - 8) left = window.innerWidth - anchoPopover - 8;
+  if (left < 8) left = 8;
+  let top = r.bottom + 6;
+  const altoPopover = popover.offsetHeight || 300;
+  if (top + altoPopover > window.innerHeight - 8) top = Math.max(8, r.top - altoPopover - 6);
+  popover.style.left = `${left}px`;
+  popover.style.top = `${top}px`;
+}
 let TIPOS_INFORME_CACHE = null; // null = todavía no se ha pedido (se carga la primera vez que hace falta)
 let CLIMA_CENTROS_CACHE = null; // idem, para el checklist de restricción por centro de Clima Laboral
 
@@ -437,21 +454,12 @@ function renderUsuariosFiltrados() {
         const popover = document.getElementById(`${popoverPrefix}-${id}`);
         const abrir = !popover.classList.contains("visible");
         popover.classList.toggle("visible");
-        if (abrir) posicionarPopover(popover, btn);
+        if (abrir) {
+          POPOVER_BOTON.set(popover, btn);
+          posicionarPopover(popover, btn);
+        }
       });
     });
-  }
-  function posicionarPopover(popover, btn) {
-    const r = btn.getBoundingClientRect();
-    const anchoPopover = popover.offsetWidth || 220;
-    let left = r.left;
-    if (left + anchoPopover > window.innerWidth - 8) left = window.innerWidth - anchoPopover - 8;
-    if (left < 8) left = 8;
-    let top = r.bottom + 6;
-    const altoPopover = popover.offsetHeight || 300;
-    if (top + altoPopover > window.innerHeight - 8) top = Math.max(8, r.top - altoPopover - 6);
-    popover.style.left = `${left}px`;
-    popover.style.top = `${top}px`;
   }
   function wirePopoverClose(btnClass, popoverPrefix) {
     tbody.querySelectorAll(btnClass).forEach((btn) => {
@@ -783,7 +791,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
   window.addEventListener("scroll", () => {
-    document.querySelectorAll(".checklist-popover.visible").forEach((p) => p.classList.remove("visible"));
+    document.querySelectorAll(".checklist-popover.visible").forEach((p) => {
+      const btn = POPOVER_BOTON.get(p);
+      if (btn && document.contains(btn)) posicionarPopover(p, btn);
+      else p.classList.remove("visible");
+    });
   }, true);
 
   const errorEl = document.getElementById("new-user-error");
