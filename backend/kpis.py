@@ -514,6 +514,27 @@ def _headcount_y_horas_por_centro(empleados_activos, movimientos_por_codigo=None
     )
 
 
+def _por_jornada(empleados_activos):
+    """Cuántas personas hay en cada tipo de jornada (horas/semana) -- a
+    partir del "Porcentaje Jornada" real del Excel, no de valores fijos
+    inventados (25% -> 10h, 50% -> 20h, 60% -> 24h...). Cuando el Excel no
+    trae ese dato se sigue asumiendo jornada completa (40h, mismo criterio
+    que el resto del dashboard), pero se cuenta aparte para que quede claro
+    que es un supuesto, no un dato real."""
+    conteo = {}
+    sin_dato = 0
+    for e in empleados_activos:
+        pct = e["porcentaje_jornada"]
+        if pct is None:
+            sin_dato += 1
+            horas = HORAS_JORNADA_COMPLETA
+        else:
+            horas = round(pct / 100 * HORAS_JORNADA_COMPLETA, 1)
+        horas = int(horas) if horas == int(horas) else horas
+        conteo[horas] = conteo.get(horas, 0) + 1
+    return sorted(conteo.items(), key=lambda x: x[0]), sin_dato
+
+
 def compute_resumen():
     conn = get_connection()
     empleados = [dict(r) for r in conn.execute("SELECT * FROM kpi_empleados").fetchall()]
@@ -621,6 +642,7 @@ def compute_resumen():
         hc_centro_inicio_mes, _ = _headcount_y_horas_por_centro(
             activos_inicio_mes, movimientos_centro, _dia_antes_de_mes(clave)
         )
+        por_jornada_mes, sin_dato_jornada_mes = _por_jornada(activos_mes)
         headcount_promedio_mes = (len(activos_inicio_mes) + len(activos_mes)) / 2
         serie_mensual[clave] = {
             "bajas": n,
@@ -637,6 +659,8 @@ def compute_resumen():
             "sin_nspp_empresario": sin_empresario_por_mes.get(clave, 0),
             "promociones": promociones_por_mes.get(clave, 0),
             "altas": altas_por_mes.get(clave, 0),
+            "por_jornada": por_jornada_mes,
+            "sin_dato_jornada": sin_dato_jornada_mes,
         }
     anios_disponibles = sorted({m[:4] for m in meses_disponibles}) or [str(hoy.year)]
 

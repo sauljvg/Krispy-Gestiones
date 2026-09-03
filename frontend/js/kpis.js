@@ -55,16 +55,15 @@ function formatMesLargo(clave) {
 function motivoCorto(motivo) {
   // Los motivos son textos largos tipo SEPE ("02 Despido por causas
   // objetivas. Amortización por causas económicas, técnicas..."). Para el
-  // gráfico basta con la primera frase -- si no hay punto, se recorta a un
-  // máximo razonable para que no se solape con las barras vecinas.
+  // gráfico basta con la primera frase -- si no hay punto, se deja el texto
+  // completo (el gráfico ya lo envuelve en varias líneas, sin cortarlo con
+  // puntos suspensivos: mejor legible en varias líneas que ilegible en una).
   if (!motivo) return motivo;
   const corte = motivo.indexOf(".");
-  let corto = corte > 0 ? motivo.slice(0, corte) : motivo;
-  if (corto.length > 45) corto = `${corto.slice(0, 42)}…`;
-  return corto;
+  return corte > 0 ? motivo.slice(0, corte) : motivo;
 }
 
-let chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo;
+let chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo, chartJornada;
 let usuarioActual = null;
 let ultimoResumen = null;
 let unidadRotacionMensual = "numero"; // "numero" | "pct"
@@ -100,12 +99,13 @@ function lineChart(canvasId, labels, valores, { sufijo = "" } = {}) {
   });
 }
 
-function barChart(canvasId, pares, { horizontal = true, sufijo = "" } = {}) {
+function barChart(canvasId, pares, { horizontal = true, sufijo = "", maxLenLabel = null } = {}) {
   const el = document.getElementById(canvasId);
   const ctx = el.getContext("2d");
   const colorTexto = colorTextoActual();
   const movil = window.innerWidth < 700;
-  const labels = pares.map(([nombre]) => wrapLabel(nombre, movil ? 16 : 20));
+  const maxLen = maxLenLabel || (movil ? 16 : 20);
+  const labels = pares.map(([nombre]) => wrapLabel(nombre, maxLen));
   const valores = pares.map(([, n]) => n);
   const eje = horizontal || movil ? "y" : "x";
   const escalaValor = { beginAtZero: true, ticks: { color: colorTexto, precision: 0, callback: (v) => `${v}${sufijo}` }, grid: { color: "rgba(128,128,128,0.2)" } };
@@ -124,7 +124,7 @@ function barChart(canvasId, pares, { horizontal = true, sufijo = "" } = {}) {
 }
 
 function destruirCharts() {
-  [chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo].forEach((c) => c?.destroy());
+  [chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo, chartJornada].forEach((c) => c?.destroy());
 }
 
 async function cargarResumen() {
@@ -355,7 +355,7 @@ function renderGraficosFiltrados() {
   document.getElementById("chart-bajas-motivo").style.display = sinBajas ? "none" : "";
   chartBajasMotivo?.destroy();
   if (!sinBajas) {
-    chartBajasMotivo = barChart("chart-bajas-motivo", paresMotivo.map(([m, n]) => [motivoCorto(m), n]));
+    chartBajasMotivo = barChart("chart-bajas-motivo", paresMotivo.map(([m, n]) => [motivoCorto(m), n]), { maxLenLabel: 28 });
   }
 
   // --- Horas contratadas por centro (reconstruida a fecha de "Hasta") ----
@@ -366,6 +366,17 @@ function renderGraficosFiltrados() {
   document.getElementById("kpi-horas-centro-sub").textContent =
     hasta === d.mes_actual ? "A fecha de hoy." : `A fecha de fin de ${formatMes(hasta)}.`;
   document.getElementById("kpi-horas-centro-total").textContent = `Total: ${serieHasta.horas_totales} h/sem`;
+
+  // --- Plantilla por tipo de jornada (a fecha de "Hasta") -----------------
+  chartJornada?.destroy();
+  const paresJornada = (serieHasta.por_jornada || []).map(([horas, n]) => [`${horas}h`, n]);
+  if (paresJornada.length) {
+    chartJornada = barChart("chart-jornada", paresJornada, { horizontal: false });
+  }
+  const fechaJornada = hasta === d.mes_actual ? "hoy" : `fin de ${formatMes(hasta)}`;
+  document.getElementById("kpi-jornada-sub").textContent = serieHasta.sin_dato_jornada
+    ? `A fecha de ${fechaJornada} -- ${serieHasta.sin_dato_jornada} sin dato de jornada en el Excel, asumidas a ${d.horas_jornada_completa}h.`
+    : `A fecha de ${fechaJornada}.`;
 }
 
 // --- Movimientos internos (traslados de centro / promociones de puesto) ---
