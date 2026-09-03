@@ -254,10 +254,11 @@ function renderTarjetas(d, mesesFiltrados, hasta, etiquetaRango) {
   const headcountInicioRango = primerMes ? d.serie_mensual[primerMes].headcount_inicio : headcountHasta;
   const headcountPromedioRango = (headcountInicioRango + headcountHasta) / 2;
 
-  let bajas = 0, nspp = 0, sinEmpresario = 0, promociones = 0;
+  let bajas = 0, altas = 0, nspp = 0, sinEmpresario = 0, promociones = 0;
   for (const m of mesesFiltrados) {
     const s = d.serie_mensual[m];
     bajas += s.bajas;
+    altas += s.altas;
     nspp += s.nspp;
     sinEmpresario += s.sin_nspp_empresario;
     promociones += s.promociones;
@@ -270,7 +271,7 @@ function renderTarjetas(d, mesesFiltrados, hasta, etiquetaRango) {
   const nMeses = mesesFiltrados.length;
   const anualizado = nMeses && nMeses !== 12 ? Math.round(rotacionPeriodo * (12 / nMeses) * 10) / 10 : null;
   document.getElementById("kpi-rotacion-anual-sub").textContent =
-    `${bajas} bajas / plantilla media ${Math.round(headcountPromedioRango)} -- ${etiquetaRango}` +
+    `${bajas} bajas / ${altas} altas -- plantilla media ${Math.round(headcountPromedioRango)} -- ${etiquetaRango}` +
     (anualizado !== null ? ` (≈${anualizado}% anualizado a 12 meses)` : "");
 
   const ultimoMes = mesesFiltrados[mesesFiltrados.length - 1];

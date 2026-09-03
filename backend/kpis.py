@@ -574,6 +574,22 @@ def compute_resumen():
         if clave and _es_promocion(m["origen"], m["destino"]) is True:
             promociones_por_mes[clave] = promociones_por_mes.get(clave, 0) + 1
 
+    # Altas (contrataciones) -- reconstruidas con la fecha de antigüedad de
+    # cada empleado del Excel. OJO: el Excel es una foto de "quién está hoy
+    # en nómina" (más las bajas recientes que trae) -- si alguien entró y
+    # salió hace tiempo y ya no aparece en la última importación, esa alta
+    # no se cuenta aquí. Para gente activa ahora mismo (o de baja reciente,
+    # ya cubierta por el Excel) es fiable.
+    altas_por_mes = {}
+    for e in empleados:
+        clave = _mes(e.get("fecha_antiguedad"))
+        if clave:
+            altas_por_mes[clave] = altas_por_mes.get(clave, 0) + 1
+
+    # El rango del calendario sigue marcado solo por las bajas (no por las
+    # altas) -- si se incluyeran altas antiguas (alguien con muchísima
+    # antigüedad) el calendario se iría años atrás sin necesidad real, que
+    # es justo lo que se quería evitar con el selector tipo calendario.
     mes_actual = f"{hoy.year:04d}-{hoy.month:02d}"
     claves_con_datos = sorted(bajas_por_mes.keys())
     inicio = min(claves_con_datos[0], mes_actual) if claves_con_datos else mes_actual
@@ -620,6 +636,7 @@ def compute_resumen():
             "nspp": nspp_por_mes.get(clave, 0),
             "sin_nspp_empresario": sin_empresario_por_mes.get(clave, 0),
             "promociones": promociones_por_mes.get(clave, 0),
+            "altas": altas_por_mes.get(clave, 0),
         }
     anios_disponibles = sorted({m[:4] for m in meses_disponibles}) or [str(hoy.year)]
 
