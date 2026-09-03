@@ -33,6 +33,7 @@ async def chequear_tienda(
     permitir_reuso: bool = True,
     buffer_subida: list | None = None,
     ventana_slot: int | None = None,
+    scraper=None,
 ) -> list[dict]:
     """direcciones_override: si se pasa, se usa esta lista tal cual en vez de pedirle
     una nueva a la API (cercano/solo_sin_datos se ignoran en ese caso) -- para pasadas
@@ -94,9 +95,19 @@ async def chequear_tienda(
     if max_direcciones:
         direcciones = direcciones[:max_direcciones]
 
-    scraper = SCRAPERS[agregador_nombre](
-        timeout_seg=config.SCRAPER_TIMEOUT, retry_max=config.SCRAPER_RETRY_MAX
-    )
+    # scraper: normalmente se crea aquí (uno por llamada). Un caller que llame a esta
+    # función MUCHAS veces con una dirección cada vez (ver revalidar_completo.py, que
+    # reparte direcciones sueltas entre workers) DEBE pasar el suyo y reutilizarlo:
+    # Uber Eats y Glovo mantienen una sesión de navegador caliente entre direcciones
+    # (ver scrapers/ubereats.py y scrapers/glovo.py), y crear un scraper nuevo por
+    # dirección la tiraría y la volvería a calentar en cada punto -- perdiendo justo
+    # la optimización (y saliendo más caro que no tenerla). Si lo pasa el caller, es
+    # el caller quien debe cerrar la sesión al final (cerrar_sesion()).
+    scraper_propio = scraper is None
+    if scraper_propio:
+        scraper = SCRAPERS[agregador_nombre](
+            timeout_seg=config.SCRAPER_TIMEOUT, retry_max=config.SCRAPER_RETRY_MAX
+        )
     if ventana_slot is not None:
         posicion, tamano = calcular_posicion_ventana(ventana_slot)
         scraper.posicion_ventana_visible = posicion
@@ -270,7 +281,7 @@ async def chequear_tienda(
     # scrapers/ubereats.py: ahorra ~17s por dirección frente a relanzar el navegador
     # y repetir el flujo de dirección cada vez) -- hay que cerrarla al terminar con
     # esta tienda o quedaría un Chrome abierto por cada (tienda, agregador).
-    cerrar_sesion = getattr(scraper, "cerrar_sesion", None)
+    cerrar_sesion = getattr(scraper, "cerrar_sesion", None) if scraper_propio else None
     if cerrar_sesion is not None:
         try:
             await cerrar_sesion()

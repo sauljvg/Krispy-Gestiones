@@ -194,6 +194,14 @@ async def main(
         f" ({saltados} ya cubiertos por esta ronda -- reanudando)" if saltados else "",
     )
 
+    # UN solo scraper para todas las direcciones de este worker (03/09): Uber Eats y
+    # Glovo mantienen una sesión de navegador caliente entre direcciones (ver sus
+    # scrapers) y crear uno nuevo por punto la tiraría y la recalentaría cada vez,
+    # perdiendo la optimización entera. Se cierra al final (ver cerrar_sesion abajo).
+    scraper_reutilizado = SCRAPERS[agregador](
+        timeout_seg=config.SCRAPER_TIMEOUT, retry_max=config.SCRAPER_RETRY_MAX
+    )
+
     buffer_subida: list = []
     ultimo_flush = time.monotonic()
 
@@ -206,7 +214,7 @@ async def main(
             # mismo a 0m si ya tenía chequeo, confirmado en vivo 26/08).
             resultados = await chequear_tienda(
                 direccion["tienda"], agregador, direcciones_override=[direccion], permitir_reuso=False,
-                buffer_subida=buffer_subida,
+                buffer_subida=buffer_subida, scraper=scraper_reutilizado,
             )
             if resultados and resultados[0]["error_tecnico"]:
                 fallos_tecnicos.append(direccion)
@@ -240,7 +248,7 @@ async def main(
             try:
                 await chequear_tienda(
                     direccion["tienda"], agregador, direcciones_override=[direccion], permitir_reuso=False,
-                    buffer_subida=buffer_subida,
+                    buffer_subida=buffer_subida, scraper=scraper_reutilizado,
                 )
             except Exception as exc:
                 logger.error("Sigue fallando %s (intento extra %d/3): %r", direccion.get("direccion_text"), intentos_extra, exc)
@@ -275,7 +283,7 @@ async def main(
             try:
                 resultados = await chequear_tienda(
                     direccion["tienda"], agregador, direcciones_override=[direccion], permitir_reuso=False,
-                    buffer_subida=buffer_subida,
+                    buffer_subida=buffer_subida, scraper=scraper_reutilizado,
                 )
                 if resultados and resultados[0]["error_tecnico"]:
                     siguen_fallando_tecnico.append(direccion)
@@ -306,6 +314,15 @@ async def main(
                 "Worker %d/%d (%s): todos los fallos técnicos se recuperaron en la segunda pasada.",
                 worker_index, worker_count, agregador,
             )
+
+    # Cerrar la sesión de navegador reutilizada (Uber Eats/Glovo la mantienen caliente
+    # entre direcciones) -- si no, queda un Chrome vivo por worker al terminar.
+    cerrar_sesion = getattr(scraper_reutilizado, "cerrar_sesion", None)
+    if cerrar_sesion is not None:
+        try:
+            await cerrar_sesion()
+        except Exception as exc:
+            logger.warning("No se pudo cerrar la sesión reutilizada del scraper: %r", exc)
 
     # Red de seguridad: no debería quedar nada sin subir a estas alturas (cada
     # bucle ya hace su propio flush), pero por si acaso -- nunca cerrar la ronda
