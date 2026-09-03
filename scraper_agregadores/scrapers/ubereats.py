@@ -83,13 +83,23 @@ class UberEatsScraper(BaseAggregatorScraper):
     _sesion_context = None
     _sesion_page = None
 
-    # Cortacircuitos: si la ruta rápida falla varias veces seguidas (Cloudflare
-    # marcando la sesión, cambio en la web, etc.), se deja de intentar durante lo que
-    # quede de esta tienda y se va directo al flujo de siempre. Sin esto, un fallo
-    # sistemático costaría el intento fallido MÁS el flujo completo en CADA dirección
-    # -- peor que no haber optimizado nada.
+    # Cortacircuitos TEMPORAL: si la ruta rápida falla varias veces seguidas
+    # (Cloudflare marcando la sesión, cambio en la web, etc.), se deja de intentar
+    # durante los siguientes PUNTOS_ENFRIAMIENTO puntos y luego se vuelve a probar.
+    # Sin cortacircuitos, un fallo sistemático costaría el intento fallido MÁS el
+    # flujo completo en CADA dirección -- peor que no haber optimizado nada.
+    #
+    # OJO, error real cometido el 03/09 y corregido el 04/09: esto desactivaba la
+    # ruta rápida PARA SIEMPRE (mientras viviera el scraper). Cuando el scraper vivía
+    # una tienda daba igual, pero al reutilizarlo para TODO el worker (~98 puntos, ver
+    # revalidar_completo.py) bastaba una racha mala de 3 direcciones para que ese
+    # worker se quedara en el flujo lento el resto de la ronda. Medido en vivo: la
+    # ronda iba a 18 puntos/min los primeros 8 min y se desplomó a 2.2 puntos/min
+    # según los workers iban cayendo uno a uno. Por eso ahora el corte es temporal.
     _FALLOS_RAPIDOS_MAX = 3
+    _PUNTOS_ENFRIAMIENTO = 10
     _fallos_rapidos = 0
+    _enfriamiento_restante = 0
 
     @staticmethod
     def _construir_pl(direccion_texto: str, lat: float, lng: float) -> str:
@@ -152,7 +162,16 @@ class UberEatsScraper(BaseAggregatorScraper):
         """Ruta rápida (sesión caliente + URL directa) con caída automática al flujo
         de interfaz de siempre. Sin lat/lng no se puede construir el `pl`, así que
         esos casos van directos al flujo de siempre."""
-        if lat is None or lng is None or self._fallos_rapidos >= self._FALLOS_RAPIDOS_MAX:
+        if lat is None or lng is None:
+            return await super().verificar_disponibilidad(tienda_nombre, direccion, lat, lng)
+
+        if self._enfriamiento_restante > 0:
+            # En enfriamiento tras una racha de fallos: este punto va por el flujo de
+            # siempre, y cuando se agote el contador se vuelve a intentar la ruta rápida.
+            self._enfriamiento_restante -= 1
+            if self._enfriamiento_restante == 0:
+                self._fallos_rapidos = 0
+                logger.info("ubereats: fin del enfriamiento -- se vuelve a intentar la ruta rápida")
             return await super().verificar_disponibilidad(tienda_nombre, direccion, lat, lng)
 
         try:
@@ -163,12 +182,14 @@ class UberEatsScraper(BaseAggregatorScraper):
             return resultado
         except Exception as exc:
             self._fallos_rapidos += 1
+            if self._fallos_rapidos >= self._FALLOS_RAPIDOS_MAX:
+                self._enfriamiento_restante = self._PUNTOS_ENFRIAMIENTO
             logger.warning(
                 "ubereats: ruta rápida falló para '%s' (%r) -- se cae al flujo de interfaz de siempre%s",
                 direccion, exc,
                 f" (fallo {self._fallos_rapidos}/{self._FALLOS_RAPIDOS_MAX})"
                 if self._fallos_rapidos < self._FALLOS_RAPIDOS_MAX
-                else " -- DESACTIVADA para el resto de esta tienda",
+                else f" -- en pausa los próximos {self._PUNTOS_ENFRIAMIENTO} puntos",
             )
             await self.cerrar_sesion()
             return await super().verificar_disponibilidad(tienda_nombre, direccion, lat, lng)

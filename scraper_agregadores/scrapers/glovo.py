@@ -106,8 +106,13 @@ class GlovoScraper(BaseAggregatorScraper):
     # Umbral más alto que en Uber Eats a propósito: aquí los fallos suelen ser de
     # DIRECCIONES concretas (la página sale vacía para ese punto), no de la sesión,
     # así que una racha corta no debe desactivar el atajo para toda la tienda.
+    # Corte TEMPORAL (corregido el 04/09, mismo error que en ubereats.py): antes
+    # desactivaba la ruta rápida mientras viviera el scraper, y al reutilizarlo para
+    # todo el worker (~66 puntos) una racha mala la mataba para el resto de la ronda.
     _FALLOS_RAPIDOS_MAX = 8
+    _PUNTOS_ENFRIAMIENTO = 15
     _fallos_rapidos = 0
+    _enfriamiento_restante = 0
 
     @staticmethod
     def _cookie_direccion(direccion_texto: str, lat: float, lng: float) -> str:
@@ -166,7 +171,14 @@ class GlovoScraper(BaseAggregatorScraper):
     async def verificar_disponibilidad(self, tienda_nombre: str, direccion: str, lat=None, lng=None) -> ResultadoChequeo:
         """Ruta rápida (sesión caliente + cookie de dirección) con caída automática al
         flujo de interfaz de siempre. Sin lat/lng no se puede montar la cookie."""
-        if lat is None or lng is None or self._fallos_rapidos >= self._FALLOS_RAPIDOS_MAX:
+        if lat is None or lng is None:
+            return await super().verificar_disponibilidad(tienda_nombre, direccion, lat, lng)
+
+        if self._enfriamiento_restante > 0:
+            self._enfriamiento_restante -= 1
+            if self._enfriamiento_restante == 0:
+                self._fallos_rapidos = 0
+                logger.info("glovo: fin del enfriamiento -- se vuelve a intentar la ruta rápida")
             return await super().verificar_disponibilidad(tienda_nombre, direccion, lat, lng)
 
         try:
@@ -177,10 +189,13 @@ class GlovoScraper(BaseAggregatorScraper):
             return resultado
         except Exception as exc:
             self._fallos_rapidos += 1
+            if self._fallos_rapidos >= self._FALLOS_RAPIDOS_MAX:
+                self._enfriamiento_restante = self._PUNTOS_ENFRIAMIENTO
             logger.info(
                 "glovo: ruta rápida sin resultado para '%s' (%r) -- se resuelve por el flujo de siempre%s",
                 direccion, exc,
-                "" if self._fallos_rapidos < self._FALLOS_RAPIDOS_MAX else " -- DESACTIVADA para el resto de esta tienda",
+                "" if self._fallos_rapidos < self._FALLOS_RAPIDOS_MAX
+                else f" -- en pausa los próximos {self._PUNTOS_ENFRIAMIENTO} puntos",
             )
             if self._fallos_rapidos >= self._FALLOS_RAPIDOS_MAX:
                 await self.cerrar_sesion()
