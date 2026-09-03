@@ -164,7 +164,10 @@
           <div style="position:relative; height:300px;"><canvas id="chart-rotacion-centro"></canvas></div>
         </div>
         <div class="kpi-chart-card">
-          <h2>Horas contratadas por centro</h2>
+          <div style="display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:8px;">
+            <h2 style="margin-bottom:0;">Horas contratadas por centro</h2>
+            <span class="staff-hint" id="kpi-horas-centro-total" style="font-weight:600;"></span>
+          </div>
           <p class="sub" id="kpi-horas-centro-sub">Suma de horas/semana por centro.</p>
           <div style="position:relative; height:300px;"><canvas id="chart-horas-centro"></canvas></div>
         </div>
@@ -189,7 +192,10 @@
         <form id="kpi-mov-form" class="kpi-mov-form">
           <div class="campo">
             <label for="kpi-mov-codigo">Código de empleado</label>
-            <input type="text" id="kpi-mov-codigo" required>
+            <div style="display:flex; gap:6px;">
+              <input type="text" id="kpi-mov-codigo" required style="flex:1; min-width:0;">
+              <button type="button" id="kpi-mov-buscar" class="btn btn-ghost">Buscar</button>
+            </div>
           </div>
           <div class="campo">
             <label for="kpi-mov-origen">De</label>
@@ -205,6 +211,7 @@
           </div>
           <button type="submit" class="btn btn-primary">Registrar</button>
         </form>
+        <p class="staff-hint" id="kpi-mov-resultado" style="margin:-8px 0 16px;"></p>
 
         <div style="overflow-x:auto;">
           <table class="kpi-mov-tabla">
@@ -232,6 +239,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/kpis.js?v=20260903b"></script>
+<script src="js/kpis.js?v=20260903c"></script>
 </body>
 </html>

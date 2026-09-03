@@ -49,6 +49,14 @@ async def importar_route(file: UploadFile = File(...), user: dict = Depends(requ
     return {"ok": True, **resultado}
 
 
+@router.get("/empleados/{codigo_empleado}")
+def buscar_empleado_route(codigo_empleado: str, _user: dict = Depends(require_kpis)):
+    empleado = kpis_module.buscar_empleado(codigo_empleado)
+    if not empleado:
+        raise HTTPException(status_code=404, detail="No se encontró ningún empleado con ese código")
+    return empleado
+
+
 @router.patch("/empleados/{codigo_empleado}/baja")
 def marcar_baja_manual_route(codigo_empleado: str, body: BajaManualIn, _user: dict = Depends(require_admin)):
     """Corrige a mano un empleado que el Excel de plantilla todavía trae como

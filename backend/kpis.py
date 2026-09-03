@@ -293,6 +293,19 @@ def _es_nspp_empresario(motivo):
     return _MOTIVO_NSPP in m and "instancia del empresario" in m
 
 
+def buscar_empleado(codigo_empleado):
+    """Nombre/centro/puesto actuales de un empleado por su código -- para
+    que al registrar un movimiento se pueda confirmar que es la persona
+    correcta antes de guardar nada."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT codigo_empleado, nombre, centro, puesto, fecha_baja FROM kpi_empleados WHERE codigo_empleado = ?",
+        (str(codigo_empleado).strip(),),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def marcar_baja_manual(codigo_empleado, fecha_baja, motivo_baja):
     """Corrige a mano un registro de kpi_empleados que el Excel de GO todavía
     trae como activo pero que Entrevista de Salida ya tiene registrado como

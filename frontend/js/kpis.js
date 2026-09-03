@@ -242,6 +242,7 @@ function renderGraficosFiltrados() {
   }
   document.getElementById("kpi-horas-centro-sub").textContent =
     hasta === d.mes_actual ? "A fecha de hoy." : `A fecha de fin de ${formatMes(hasta)}.`;
+  document.getElementById("kpi-horas-centro-total").textContent = `Total: ${serieHasta.horas_totales} h/sem`;
 }
 
 // --- Movimientos internos (traslados de centro / promociones de puesto) ---
@@ -279,13 +280,46 @@ function cambiarTabMovimiento(tipo) {
   tipoMovimientoActivo = tipo;
   document.getElementById("kpi-mov-tab-centro").classList.toggle("active", tipo === "centro");
   document.getElementById("kpi-mov-tab-puesto").classList.toggle("active", tipo === "puesto");
+  document.getElementById("kpi-mov-resultado").textContent = "";
   poblarSelectMovimiento(tipo);
   cargarMovimientos();
+}
+
+async function buscarEmpleadoMovimiento() {
+  const codigo = document.getElementById("kpi-mov-codigo").value.trim();
+  const resultado = document.getElementById("kpi-mov-resultado");
+  if (!codigo) {
+    resultado.textContent = "";
+    return;
+  }
+  resultado.textContent = "Buscando...";
+  const r = await fetch(`${AUTH_API_BASE}/kpis/empleados/${encodeURIComponent(codigo)}`);
+  if (!r.ok) {
+    resultado.textContent = "⚠️ No se encontró ningún empleado con ese código.";
+    return;
+  }
+  const emp = await r.json();
+  const campo = tipoMovimientoActivo === "centro" ? "centro" : "puesto";
+  const actual = emp[campo];
+  resultado.textContent =
+    `✔ ${emp.nombre} -- ${campo} actual: ${actual || "(sin dato)"}${emp.fecha_baja ? " -- ya tiene baja registrada" : ""}`;
+  const selectOrigen = document.getElementById("kpi-mov-origen");
+  if (actual && Array.from(selectOrigen.options).some((o) => o.value === actual)) {
+    selectOrigen.value = actual;
+  }
 }
 
 function wireMovimientos() {
   document.getElementById("kpi-mov-tab-centro").addEventListener("click", () => cambiarTabMovimiento("centro"));
   document.getElementById("kpi-mov-tab-puesto").addEventListener("click", () => cambiarTabMovimiento("puesto"));
+
+  document.getElementById("kpi-mov-buscar").addEventListener("click", buscarEmpleadoMovimiento);
+  document.getElementById("kpi-mov-codigo").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      buscarEmpleadoMovimiento();
+    }
+  });
 
   document.getElementById("kpi-mov-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -305,6 +339,7 @@ function wireMovimientos() {
       return;
     }
     document.getElementById("kpi-mov-form").reset();
+    document.getElementById("kpi-mov-resultado").textContent = "";
     await cargarMovimientos();
     await cargarResumen();
   });
