@@ -63,7 +63,7 @@ function motivoCorto(motivo) {
   return corte > 0 ? motivo.slice(0, corte) : motivo;
 }
 
-let chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo, chartJornada;
+let chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo;
 let usuarioActual = null;
 let ultimoResumen = null;
 let unidadRotacionMensual = "numero"; // "numero" | "pct"
@@ -124,7 +124,7 @@ function barChart(canvasId, pares, { horizontal = true, sufijo = "", maxLenLabel
 }
 
 function destruirCharts() {
-  [chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo, chartJornada].forEach((c) => c?.destroy());
+  [chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo].forEach((c) => c?.destroy());
 }
 
 async function cargarResumen() {
@@ -367,16 +367,17 @@ function renderGraficosFiltrados() {
     hasta === d.mes_actual ? "A fecha de hoy." : `A fecha de fin de ${formatMes(hasta)}.`;
   document.getElementById("kpi-horas-centro-total").textContent = `Total: ${serieHasta.horas_totales} h/sem`;
 
-  // --- Plantilla por tipo de jornada (a fecha de "Hasta") -----------------
-  chartJornada?.destroy();
-  const paresJornada = (serieHasta.por_jornada || []).map(([horas, n]) => [`${horas}h`, n]);
-  if (paresJornada.length) {
-    chartJornada = barChart("chart-jornada", paresJornada, { horizontal: false });
+  // --- Plantilla por tipo de jornada (lista pequeña, a fecha de "Hasta") --
+  // Ojo: las personas sin dato de jornada ya están incluidas en el tramo de
+  // jornada completa (se asumen ahí, mismo criterio que el resto del
+  // dashboard) -- no se suman aparte para no contarlas dos veces.
+  const listaJornada = document.getElementById("kpi-jornada-lista");
+  listaJornada.innerHTML = (serieHasta.por_jornada || [])
+    .map(([horas, n]) => `<li><span>${horas}h/sem</span><span class="n">${n}</span></li>`)
+    .join("");
+  if (serieHasta.sin_dato_jornada) {
+    listaJornada.innerHTML += `<li><em>de esas, ${serieHasta.sin_dato_jornada} sin dato en el Excel (asumidas a ${d.horas_jornada_completa}h)</em></li>`;
   }
-  const fechaJornada = hasta === d.mes_actual ? "hoy" : `fin de ${formatMes(hasta)}`;
-  document.getElementById("kpi-jornada-sub").textContent = serieHasta.sin_dato_jornada
-    ? `A fecha de ${fechaJornada} -- ${serieHasta.sin_dato_jornada} sin dato de jornada en el Excel, asumidas a ${d.horas_jornada_completa}h.`
-    : `A fecha de ${fechaJornada}.`;
 }
 
 // --- Movimientos internos (traslados de centro / promociones de puesto) ---
