@@ -32,13 +32,18 @@
   .encuesta-titulo { font-family: "Gelica", system-ui, sans-serif; font-size: 24px; font-weight: 600; margin: 0 0 6px; color: #222; letter-spacing: -0.01em; }
   .encuesta-instrucciones { font-size: 14px; color: #555; margin: 0 0 22px; line-height: 1.5; white-space: pre-wrap; }
   .encuesta-obligatorio-nota { font-size: 12px; color: #900; margin-bottom: 16px; }
-  .encuesta-anticheat-banner { background: #fbf3e6; border: 1px solid #e8d3a8; border-radius: 10px; padding: 14px 16px; margin: 0 0 20px; font-size: 13px; color: #6b5228; line-height: 1.5; }
-  .encuesta-anticheat-banner p { margin: 0 0 6px; }
+  .encuesta-anticheat-banner { background: #fbf3e6; border: 1px solid #e8d3a8; border-radius: 12px; padding: 16px 18px; margin: 0 0 20px; font-size: 14px; color: #6b5228; line-height: 1.5; }
+  .encuesta-anticheat-banner p { margin: 0 0 8px; display: flex; align-items: center; gap: 10px; }
   .encuesta-anticheat-banner p:last-child { margin-bottom: 0; }
-  .encuesta-anticheat-intro { font-weight: 500; }
-  .encuesta-anticheat-aviso { font-weight: 600; margin-top: 4px; }
-  .encuesta-anticheat-lista { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-  .encuesta-anticheat-cierre { font-weight: 500; }
+  .encuesta-anticheat-intro { font-weight: 500; font-size: 15px; }
+  .encuesta-anticheat-aviso { font-weight: 700; margin-top: 6px; text-transform: uppercase; font-size: 12px; letter-spacing: .04em; color: #8a6a1f; }
+  .encuesta-anticheat-lista { list-style: none; margin: 4px 0 12px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .encuesta-anticheat-lista li { display: flex; align-items: center; gap: 12px; }
+  .encuesta-anticheat-icono { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; font-size: 17px; }
+  .encuesta-anticheat-icono.aviso { width: 22px; height: 22px; font-size: 13px; background: color-mix(in srgb, #c98a12 18%, #fff); color: #c98a12; }
+  .encuesta-anticheat-icono.tiempo { background: color-mix(in srgb, #c98a12 18%, #fff); color: #c98a12; }
+  .encuesta-anticheat-icono.restriccion { background: color-mix(in srgb, #d03b3b 16%, #fff); color: #d03b3b; }
+  .encuesta-anticheat-cierre { font-weight: 600; font-size: 15px; }
 
   .pregunta-bloque { margin-bottom: 26px; }
   .pregunta-label { font-size: 15px; font-weight: 600; color: #222; margin-bottom: 8px; display: block; }
@@ -145,6 +150,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/icons.js?v=20260903a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/encuesta.js?v=20260903b"></script>
+<script src="js/encuesta.js?v=20260903c"></script>
 </body>
 </html>
