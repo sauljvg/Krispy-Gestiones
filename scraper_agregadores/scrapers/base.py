@@ -76,9 +76,22 @@ _STEALTH = Stealth()
 # poder auditarlo, así que necesitan poder leerse.
 _RECURSOS_BLOQUEADOS = ("image", "media")
 
+# Peticiones de analítica/tracking (03/09, confirmado en vivo inspeccionando la red
+# real de Glovo): cada carga de página dispara decenas de llamadas a
+# "glovoapp.com/gtm-metrics/..." (Google Tag Manager, PROXIADO por su propio dominio,
+# no google.com) -- puro tracking, cero función para el scraper, pero SÍ carga real
+# contra los servidores de Glovo en cada chequeo. Con Glovo limitando por volumen/IP
+# (ver PaginaSobrecargadaError), cada petición de más cuenta. A diferencia de
+# _RECURSOS_BLOQUEADOS (por resource_type), esto es por URL -- gtm-metrics no tiene
+# un resource_type propio distinguible (llega como fetch/xhr, igual que las
+# peticiones reales que sí hacen falta), así que hay que mirar la URL.
+_URLS_TRACKING_BLOQUEADAS = ("gtm-metrics", "google-analytics.com", "doubleclick.net", "facebook.com/tr")
+
 
 async def _bloquear_recursos_pesados(route):
     if route.request.resource_type in _RECURSOS_BLOQUEADOS:
+        await route.abort()
+    elif any(patron in route.request.url for patron in _URLS_TRACKING_BLOQUEADAS):
         await route.abort()
     else:
         await route.continue_()
