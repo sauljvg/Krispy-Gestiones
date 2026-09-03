@@ -3,7 +3,17 @@ import logging
 import re
 import urllib.parse
 
-from scrapers.base import BaseAggregatorScraper, PaginaSobrecargadaError, ResultadoChequeo, _pagina_muestra_error_generico
+from playwright.async_api import async_playwright
+
+from scrapers.base import (
+    CHALLENGE_KEYWORDS,
+    BaseAggregatorScraper,
+    PaginaSobrecargadaError,
+    ResultadoChequeo,
+    _STEALTH,
+    _bloquear_recursos_pesados,
+    _pagina_muestra_error_generico,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +69,180 @@ MARCA_BUSQUEDA = "Krispy Kreme"
 # mismo motivo de fondo).
 MARCADORES_SIN_RESULTADOS = ("no se han encontrado resultados", "no results found")
 
+# Mismo texto que MARCADOR_PAGINA_SOBRECARGADA de base.py, en minúsculas para comparar
+# contra el innerText ya pasado a minúsculas en la ruta rápida.
+MARCADOR_PAGINA_SOBRECARGADA_LOWER = "oh, no!"
+
 
 class GlovoScraper(BaseAggregatorScraper):
     nombre_agregador = "glovo"
     url_base = URL_INICIO
+
+    # --- Sesión caliente + cookie de dirección (03/09) --------------------------
+    # Mismo hallazgo que en Uber Eats (ver scrapers/ubereats.py): el coste real por
+    # dirección no estaba en la búsqueda en sí, sino en repetir para CADA punto el
+    # lanzamiento del navegador + la carga de la portada + los ~7 pasos de la
+    # interfaz de dirección. Glovo guarda la dirección de entrega en una cookie de
+    # cliente en texto plano (`glovo_delivery_address`, descubierta el 27/08 -- ver
+    # _verificar_via_cookie), así que basta con cambiar esa cookie y volver a la URL
+    # de búsqueda para cambiar de punto.
+    #
+    # Por qué falló cuando se intentó el 27/08: se probó con un navegador NUEVO en
+    # cada chequeo y "la página de resultados se queda vacía siempre". La diferencia
+    # ahora es la SESIÓN CALIENTE -- se abre una vez (portada + cookies, ~8s) y se
+    # reutiliza para todas las direcciones de esa tienda.
+    #
+    # Comprobado en vivo 03/09: con la sesión caliente, 4/4 direcciones con cobertura
+    # real dieron "Krispy Kreme entre las 100 tiendas listadas", y los negativos se
+    # resuelven en ~1.4s (frente a 15-44s del flujo de interfaz). Hay direcciones
+    # sueltas (vistas en Getafe/Leganés) donde la página de resultados sigue saliendo
+    # vacía pese a la cookie -- esas caen solas al flujo de siempre, que sí las
+    # resuelve; no se pierde ningún punto por esto.
+    _sesion_pw = None
+    _sesion_browser = None
+    _sesion_context = None
+    _sesion_page = None
+
+    # Umbral más alto que en Uber Eats a propósito: aquí los fallos suelen ser de
+    # DIRECCIONES concretas (la página sale vacía para ese punto), no de la sesión,
+    # así que una racha corta no debe desactivar el atajo para toda la tienda.
+    _FALLOS_RAPIDOS_MAX = 8
+    _fallos_rapidos = 0
+
+    @staticmethod
+    def _cookie_direccion(direccion_texto: str, lat: float, lng: float) -> str:
+        """Valor de la cookie glovo_delivery_address: doble percent-encoding de un
+        JSON con lat/lng -- así es como lo escribe la propia web (confirmado
+        inspeccionando document.cookie en vivo). placeId puede ir vacío: el backend
+        no lo valida contra Google, solo lee lat/lng."""
+        valor = json.dumps(
+            {
+                "latitude": lat,
+                "longitude": lng,
+                "cityCode": "MAD",
+                "countryCode": "ES",
+                "cityName": "Madrid",
+                "text": direccion_texto,
+                "details": "",
+                "placeId": "",
+                "isVerified": True,
+                "postalCode": None,
+            },
+            separators=(",", ":"),
+        )
+        return urllib.parse.quote(urllib.parse.quote(valor, safe=""), safe="")
+
+    async def _abrir_sesion(self):
+        """Abre UNA sesión y la deja caliente (portada + banner de cookies) para
+        reutilizarla en todas las direcciones siguientes."""
+        self._sesion_pw = await async_playwright().start()
+        self._sesion_browser = await self._sesion_pw.chromium.launch(
+            headless=True, args=["--disable-blink-features=AutomationControlled"], proxy=self.proxy,
+        )
+        self._sesion_context = await self._sesion_browser.new_context(locale="es-ES")
+        await _STEALTH.apply_stealth_async(self._sesion_context)
+        if self.bloquear_recursos:
+            await self._sesion_context.route("**/*", _bloquear_recursos_pesados)
+        self._sesion_page = await self._sesion_context.new_page()
+
+        await self._sesion_page.goto(URL_INICIO, wait_until="domcontentloaded", timeout=45000)
+        await self._aceptar_cookies(self._sesion_page)
+
+    async def cerrar_sesion(self):
+        """Cierra la sesión caliente si está abierta (la llama chequear_tienda al
+        terminar con la tienda, ver main.py)."""
+        for cerrar in (
+            getattr(self._sesion_context, "close", None),
+            getattr(self._sesion_browser, "close", None),
+            getattr(self._sesion_pw, "stop", None),
+        ):
+            if cerrar is not None:
+                try:
+                    await cerrar()
+                except Exception:
+                    pass
+        self._sesion_pw = self._sesion_browser = self._sesion_context = self._sesion_page = None
+
+    async def verificar_disponibilidad(self, tienda_nombre: str, direccion: str, lat=None, lng=None) -> ResultadoChequeo:
+        """Ruta rápida (sesión caliente + cookie de dirección) con caída automática al
+        flujo de interfaz de siempre. Sin lat/lng no se puede montar la cookie."""
+        if lat is None or lng is None or self._fallos_rapidos >= self._FALLOS_RAPIDOS_MAX:
+            return await super().verificar_disponibilidad(tienda_nombre, direccion, lat, lng)
+
+        try:
+            if self._sesion_page is None:
+                await self._abrir_sesion()
+            resultado = await self._verificar_por_cookie(direccion, lat, lng)
+            self._fallos_rapidos = 0
+            return resultado
+        except Exception as exc:
+            self._fallos_rapidos += 1
+            logger.info(
+                "glovo: ruta rápida sin resultado para '%s' (%r) -- se resuelve por el flujo de siempre%s",
+                direccion, exc,
+                "" if self._fallos_rapidos < self._FALLOS_RAPIDOS_MAX else " -- DESACTIVADA para el resto de esta tienda",
+            )
+            if self._fallos_rapidos >= self._FALLOS_RAPIDOS_MAX:
+                await self.cerrar_sesion()
+            return await super().verificar_disponibilidad(tienda_nombre, direccion, lat, lng)
+
+    async def _verificar_por_cookie(self, direccion: str, lat: float, lng: float) -> ResultadoChequeo:
+        page = self._sesion_page
+        await self._sesion_context.clear_cookies(name="glovo_delivery_address")
+        await self._sesion_context.add_cookies([{
+            "name": "glovo_delivery_address",
+            "value": self._cookie_direccion(direccion, lat, lng),
+            "domain": "glovoapp.com",
+            "path": "/",
+        }])
+        await page.goto(
+            f"{URL_INICIO}/search?q={urllib.parse.quote(MARCA_BUSQUEDA)}",
+            wait_until="domcontentloaded", timeout=30000,
+        )
+
+        tarjeta_kk = page.locator(f'{SEL_STORE_CARD}:has-text("{MARCA_BUSQUEDA}")')
+        todas = page.locator(SEL_STORE_CARD)
+        conteo_anterior = -1
+        # Si a los ~5s la página no ha pintado NI UNA tarjeta ni el banner de "sin
+        # resultados", es el caso de "página vacía" (puntos sueltos de Getafe/Leganés):
+        # no va a resolverse esperando más, y cada segundo de más aquí se suma al
+        # flujo de siempre que va a tener que rehacerlo. Se corta pronto.
+        VUELTAS_SIN_NADA_MAX = 10  # 10 x 500ms
+        vueltas_sin_ninguna_tarjeta = 0
+        for _ in range(24):  # hasta ~12s si al menos hay tarjetas pintándose
+            texto = await page.evaluate("() => document.body.innerText")
+            bajo = texto.lower()
+            if any(clave in bajo for clave in CHALLENGE_KEYWORDS):
+                raise RuntimeError("challenge anti-bot en la ruta rápida")
+            if MARCADOR_PAGINA_SOBRECARGADA_LOWER in bajo:
+                raise PaginaSobrecargadaError("glovo")
+            if await tarjeta_kk.count() > 0:
+                return ResultadoChequeo(disponible=True, status_http=200)
+            if any(marcador in bajo for marcador in MARCADORES_SIN_RESULTADOS):
+                # Banner de "sin resultados": aquí no reparte nadie -- respuesta válida.
+                return ResultadoChequeo(
+                    disponible=False,
+                    mensaje_bloqueo="Sin resultados de reparto para esta dirección",
+                    status_http=200,
+                )
+            conteo = await todas.count()
+            if conteo > 0 and conteo == conteo_anterior:
+                # Listado ya estable con otras tiendas pero sin Krispy Kreme.
+                return ResultadoChequeo(
+                    disponible=False,
+                    mensaje_bloqueo="Tienda no aparece en resultados de búsqueda para esta dirección",
+                    status_http=200,
+                )
+            if conteo == 0:
+                vueltas_sin_ninguna_tarjeta += 1
+                if vueltas_sin_ninguna_tarjeta >= VUELTAS_SIN_NADA_MAX:
+                    break
+            conteo_anterior = conteo
+            await page.wait_for_timeout(500)
+
+        # Página de resultados vacía para esta dirección (visto en puntos sueltos de
+        # Getafe/Leganés): lo resuelve el flujo de interfaz de siempre.
+        raise TimeoutError("glovo: la búsqueda por cookie no devolvió resultados")
 
     async def _verificar(
         self, page, tienda_nombre: str, direccion: str,
