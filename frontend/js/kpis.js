@@ -144,6 +144,11 @@ async function cargarResumen() {
   document.getElementById("kpi-rotacion-sin-nspp-sub").textContent =
     `${d.bajas_sin_nspp_empresario_ytd} de ${d.bajas_ytd} bajas del año -- sin los ceses en prueba a instancia del empresario`;
 
+  document.getElementById("kpi-promocion").textContent = `${d.promocion_interna_pct}%`;
+  document.getElementById("kpi-promocion-sub").textContent = d.promociones_ytd
+    ? `${d.promociones_ytd} promociones registradas este año`
+    : "sin movimientos de puesto registrados este año";
+
   destruirCharts();
 
   ultimoResumen = d;
@@ -239,6 +244,86 @@ function renderGraficosFiltrados() {
     hasta === d.mes_actual ? "A fecha de hoy." : `A fecha de fin de ${formatMes(hasta)}.`;
 }
 
+// --- Movimientos internos (traslados de centro / promociones de puesto) ---
+let tipoMovimientoActivo = "centro";
+
+function poblarSelectMovimiento(tipo) {
+  const d = ultimoResumen;
+  if (!d) return;
+  const opciones = tipo === "centro" ? (d.centros_disponibles || []) : (d.puestos_jerarquia || []);
+  const optionsHtml = opciones.map((o) => `<option value="${o}">${o}</option>`).join("");
+  document.getElementById("kpi-mov-origen").innerHTML = `<option value="">(sin dato)</option>${optionsHtml}`;
+  document.getElementById("kpi-mov-destino").innerHTML = optionsHtml;
+}
+
+async function cargarMovimientos() {
+  const r = await fetch(`${AUTH_API_BASE}/kpis/movimientos?tipo=${tipoMovimientoActivo}`);
+  if (!r.ok) return;
+  const movs = await r.json();
+  const tbody = document.getElementById("kpi-mov-tbody");
+  document.getElementById("kpi-mov-vacio").hidden = movs.length > 0;
+  const esAdmin = usuarioActual?.rol === "admin";
+  tbody.innerHTML = movs.map((m) => `
+    <tr data-id="${m.id}">
+      <td>${m.codigo_empleado}</td>
+      <td>${m.origen || "--"}</td>
+      <td>${m.destino}</td>
+      <td>${m.fecha}</td>
+      <td>${m.registrado_por || "--"}</td>
+      <td>${esAdmin ? `<button type="button" class="btn btn-ghost btn-mini kpi-mov-borrar" data-id="${m.id}">✕</button>` : ""}</td>
+    </tr>
+  `).join("");
+}
+
+function cambiarTabMovimiento(tipo) {
+  tipoMovimientoActivo = tipo;
+  document.getElementById("kpi-mov-tab-centro").classList.toggle("active", tipo === "centro");
+  document.getElementById("kpi-mov-tab-puesto").classList.toggle("active", tipo === "puesto");
+  poblarSelectMovimiento(tipo);
+  cargarMovimientos();
+}
+
+function wireMovimientos() {
+  document.getElementById("kpi-mov-tab-centro").addEventListener("click", () => cambiarTabMovimiento("centro"));
+  document.getElementById("kpi-mov-tab-puesto").addEventListener("click", () => cambiarTabMovimiento("puesto"));
+
+  document.getElementById("kpi-mov-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const codigo = document.getElementById("kpi-mov-codigo").value.trim();
+    const origen = document.getElementById("kpi-mov-origen").value;
+    const destino = document.getElementById("kpi-mov-destino").value;
+    const fecha = document.getElementById("kpi-mov-fecha").value;
+    if (!codigo || !destino || !fecha) return;
+    const res = await fetch(`${AUTH_API_BASE}/kpis/movimientos`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ codigo_empleado: codigo, tipo: tipoMovimientoActivo, origen: origen || null, destino, fecha }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      mostrarAviso(err.detail || "No se pudo registrar el movimiento.");
+      return;
+    }
+    document.getElementById("kpi-mov-form").reset();
+    await cargarMovimientos();
+    await cargarResumen();
+  });
+
+  document.getElementById("kpi-mov-tbody").addEventListener("click", async (e) => {
+    const btn = e.target.closest(".kpi-mov-borrar");
+    if (!btn) return;
+    const ok = await pedirConfirmacion("¿Eliminar este movimiento?");
+    if (!ok) return;
+    const res = await fetch(`${AUTH_API_BASE}/kpis/movimientos/${btn.dataset.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      mostrarAviso("No se pudo eliminar el movimiento.");
+      return;
+    }
+    await cargarMovimientos();
+    await cargarResumen();
+  });
+}
+
 async function cargarUltimaImportacion() {
   const r = await fetch(`${AUTH_API_BASE}/kpis/ultima-importacion`);
   if (!r.ok) return;
@@ -290,14 +375,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderGraficosFiltrados();
   });
 
-  document.querySelectorAll(".kpi-toggle-btn").forEach((btn) => {
+  document.querySelectorAll("[data-unidad]").forEach((btn) => {
     btn.addEventListener("click", () => {
       unidadRotacionMensual = btn.dataset.unidad;
-      document.querySelectorAll(".kpi-toggle-btn").forEach((b) => b.classList.toggle("active", b === btn));
+      document.querySelectorAll("[data-unidad]").forEach((b) => b.classList.toggle("active", b === btn));
       renderGraficosFiltrados();
     });
   });
 
+  wireMovimientos();
+
   await cargarUltimaImportacion();
   await cargarResumen();
+  poblarSelectMovimiento(tipoMovimientoActivo);
+  await cargarMovimientos();
 });

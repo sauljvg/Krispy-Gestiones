@@ -40,6 +40,15 @@
   .kpi-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
   .kpi-toggle-btn { border: none; background: var(--surface-page); color: var(--text-secondary); padding: 6px 12px; font-size: 13px; cursor: pointer; }
   .kpi-toggle-btn.active { background: var(--brand, #006838); color: #fff; }
+  .kpi-mov-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; align-items: end; margin-bottom: 16px; }
+  .kpi-mov-form .campo { display: flex; flex-direction: column; gap: 4px; }
+  .kpi-mov-form label { font-size: 12px; color: var(--text-secondary); }
+  .kpi-mov-form input, .kpi-mov-form select { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 14px; }
+  .kpi-mov-tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .kpi-mov-tabla th, .kpi-mov-tabla td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .kpi-mov-tabla th { color: var(--text-secondary); font-weight: 600; }
+  .kpi-mov-tabla .btn-mini { padding: 3px 8px; font-size: 12px; }
+  .kpi-mov-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
 </style>
 </head>
 <body>
@@ -109,10 +118,10 @@
           <div class="valor" id="kpi-horas">--</div>
           <div class="sub">jornada completa = 40h/semana</div>
         </div>
-        <div class="kpi-stat-card placeholder">
+        <div class="kpi-stat-card">
           <div class="label">% Promoción interna</div>
-          <div class="valor">Próximamente</div>
-          <div class="sub">en cuanto haya una fuente de datos para calcularlo</div>
+          <div class="valor" id="kpi-promocion">--</div>
+          <div class="sub" id="kpi-promocion-sub"></div>
         </div>
         <div class="kpi-stat-card">
           <div class="label">Rotación del año sin NSPP de empresa</div>
@@ -167,6 +176,53 @@
         <div id="kpi-bajas-motivo-aviso" class="kpi-aviso-bajas" hidden>No hay bajas registradas en Entrevista de Salida para ese periodo.</div>
         <div style="position:relative; height:360px; margin-top:12px;"><canvas id="chart-bajas-motivo"></canvas></div>
       </div>
+
+      <div class="kpi-chart-card">
+        <h2>Movimientos internos</h2>
+        <p class="sub">Traslados de centro y promociones de puesto, por código de empleado -- de aquí sale el % de promoción interna. Los movimientos de personas que ya trabajaban aquí antes de hoy se ajustarán con un Excel aparte más adelante; esto sirve para registrar los que pasen de ahora en adelante.</p>
+
+        <div class="kpi-mov-tabs">
+          <button type="button" class="kpi-toggle-btn active" id="kpi-mov-tab-centro" data-tipo="centro">Traslados de centro</button>
+          <button type="button" class="kpi-toggle-btn" id="kpi-mov-tab-puesto" data-tipo="puesto">Promociones de puesto</button>
+        </div>
+
+        <form id="kpi-mov-form" class="kpi-mov-form">
+          <div class="campo">
+            <label for="kpi-mov-codigo">Código de empleado</label>
+            <input type="text" id="kpi-mov-codigo" required>
+          </div>
+          <div class="campo">
+            <label for="kpi-mov-origen">De</label>
+            <select id="kpi-mov-origen"></select>
+          </div>
+          <div class="campo">
+            <label for="kpi-mov-destino">A</label>
+            <select id="kpi-mov-destino" required></select>
+          </div>
+          <div class="campo">
+            <label for="kpi-mov-fecha">Fecha</label>
+            <input type="date" id="kpi-mov-fecha" required>
+          </div>
+          <button type="submit" class="btn btn-primary">Registrar</button>
+        </form>
+
+        <div style="overflow-x:auto;">
+          <table class="kpi-mov-tabla">
+            <thead>
+              <tr>
+                <th>Código</th>
+                <th>De</th>
+                <th>A</th>
+                <th>Fecha</th>
+                <th>Registrado por</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="kpi-mov-tbody"></tbody>
+          </table>
+          <p class="staff-hint" id="kpi-mov-vacio" hidden>Todavía no hay movimientos registrados.</p>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -176,6 +232,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/kpis.js?v=20260903a"></script>
+<script src="js/kpis.js?v=20260903b"></script>
 </body>
 </html>

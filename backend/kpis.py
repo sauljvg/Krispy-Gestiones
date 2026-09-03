@@ -9,10 +9,12 @@ propósito (pedido explícito del usuario):
    da de alta una salida ahí -- así el dashboard se mantiene al día solo,
    sin depender de reimportar el Excel cada vez que se va alguien.
 
-% de promoción interna: NO se calcula todavía -- no hay ninguna fuente de
-datos con el historial de cambios de puesto (el usuario lo confirmó: "por
-ahora no lo tenemos"). Se deja como placeholder en el frontend en vez de
-inventar un número."""
+3. Movimientos internos (kpi_movimientos): traslados de centro y
+   promociones de puesto, registrados a mano por código de empleado con
+   fecha -- de aquí sale el % de promoción interna real, y también se usan
+   para reconstruir con más precisión en qué centro estaba alguien en un
+   mes pasado (si esa persona tiene movimientos registrados; si no, se
+   sigue asumiendo su centro actual, la misma aproximación de siempre)."""
 import calendar
 import datetime
 import io
@@ -51,6 +53,14 @@ CENTROS_EXCLUIDOS = {"Oficina Central"}
 # empresa o del propio trabajador cuentan igual para este KPI (NSPP no
 # distingue quién lo decidió, solo que la baja fue en periodo de prueba).
 _MOTIVO_NSPP = "periodo de prueba"
+
+# Escalera de puestos, de menor a mayor -- pedida explícitamente por el
+# usuario para reconocer una promoción real (subir de nivel) frente a un
+# simple cambio de puesto lateral. Un puesto que no está en esta lista no
+# se puede clasificar como promoción/no-promoción (no se cuenta en el KPI).
+PUESTOS_JERARQUIA = ["Dependiente", "Krispy Coach", "Jefe de Turno", "Gerente"]
+
+TIPOS_MOVIMIENTO = ("centro", "puesto")
 
 
 def _normaliza(s):
@@ -94,6 +104,18 @@ def ensure_kpis_tables():
             importado_por TEXT,
             importado_en TEXT NOT NULL DEFAULT (datetime('now')),
             filas INTEGER
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS kpi_movimientos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo_empleado TEXT NOT NULL,
+            tipo TEXT NOT NULL,
+            origen TEXT,
+            destino TEXT NOT NULL,
+            fecha TEXT NOT NULL,
+            registrado_por TEXT,
+            creado_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
     conn.commit()
@@ -290,6 +312,101 @@ def marcar_baja_manual(codigo_empleado, fecha_baja, motivo_baja):
     return {"ok": True}
 
 
+def agregar_movimiento(codigo_empleado, tipo, origen, destino, fecha, registrado_por):
+    """Traslado de centro o promoción/cambio de puesto -- se registra a mano
+    por código de empleado (más preciso que por nombre). Con esto se
+    reconstruye mejor el centro histórico de esa persona y se puede calcular
+    el % de promoción interna real."""
+    codigo_empleado = (codigo_empleado or "").strip()
+    tipo = (tipo or "").strip().lower()
+    destino = (destino or "").strip()
+    fecha = (fecha or "").strip()
+    origen = (origen or "").strip() or None
+    if not codigo_empleado:
+        raise ValueError("Falta el código de empleado")
+    if tipo not in TIPOS_MOVIMIENTO:
+        raise ValueError("Tipo de movimiento no válido")
+    if not destino:
+        raise ValueError("Falta el destino")
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", fecha):
+        raise ValueError("Fecha no válida")
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO kpi_movimientos (codigo_empleado, tipo, origen, destino, fecha, registrado_por) VALUES (?, ?, ?, ?, ?, ?)",
+        (codigo_empleado, tipo, origen, destino, fecha, registrado_por),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+def listar_movimientos(tipo=None):
+    conn = get_connection()
+    if tipo:
+        rows = conn.execute(
+            "SELECT * FROM kpi_movimientos WHERE tipo = ? ORDER BY fecha DESC, id DESC", (tipo,)
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM kpi_movimientos ORDER BY fecha DESC, id DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def eliminar_movimiento(movimiento_id):
+    conn = get_connection()
+    cur = conn.execute("DELETE FROM kpi_movimientos WHERE id = ?", (movimiento_id,))
+    conn.commit()
+    afectado = cur.rowcount
+    conn.close()
+    if not afectado:
+        raise ValueError("No se encontró ese movimiento")
+    return {"ok": True}
+
+
+def _movimientos_centro_por_codigo(conn):
+    """{codigo_empleado: [{fecha, origen, destino}, ...]} ordenados por
+    fecha ascendente -- para poder ir "aplicando" cada traslado en orden y
+    saber en qué centro estaba alguien en una fecha concreta."""
+    if not _tabla_existe(conn, "kpi_movimientos"):
+        return {}
+    rows = conn.execute(
+        "SELECT codigo_empleado, origen, destino, fecha FROM kpi_movimientos WHERE tipo = 'centro' ORDER BY fecha ASC, id ASC"
+    ).fetchall()
+    por_codigo = {}
+    for r in rows:
+        por_codigo.setdefault(r["codigo_empleado"], []).append(dict(r))
+    return por_codigo
+
+
+def _centro_en_fecha(centro_actual, movimientos, fecha_corte):
+    if not movimientos:
+        return centro_actual
+    aplicados = [m for m in movimientos if m["fecha"] <= fecha_corte]
+    if not aplicados:
+        # El primer traslado registrado es posterior al corte -- antes de
+        # ese traslado, la persona estaba en su centro de origen.
+        return movimientos[0]["origen"] or centro_actual
+    return aplicados[-1]["destino"] or centro_actual
+
+
+def _nivel_puesto(puesto):
+    try:
+        return PUESTOS_JERARQUIA.index((puesto or "").strip())
+    except ValueError:
+        return None
+
+
+def _es_promocion(origen, destino):
+    """True si subió de nivel, False si fue lateral o bajó, None si alguno
+    de los dos puestos no está en PUESTOS_JERARQUIA (no se puede clasificar,
+    no cuenta ni a favor ni en contra del KPI)."""
+    nivel_origen = _nivel_puesto(origen)
+    nivel_destino = _nivel_puesto(destino)
+    if nivel_origen is None or nivel_destino is None:
+        return None
+    return nivel_destino > nivel_origen
+
+
 def _mes(fecha_iso):
     """'2026-03-15' -> '2026-03' -- agrupa por mes calendario. Tolera fechas
     en otros formatos sueltos (dd/mm/aaaa) que a veces se cuelan al registrar
@@ -330,11 +447,16 @@ def _activos_a_fecha(empleados, fecha_corte):
     return activos
 
 
-def _headcount_y_horas_por_centro(empleados_activos):
+def _headcount_y_horas_por_centro(empleados_activos, movimientos_por_codigo=None, fecha_corte=None):
     hc_centro = {}
     horas_centro = {}
     for e in empleados_activos:
-        c = e["centro"] or "(sin centro)"
+        centro_actual = e["centro"] or "(sin centro)"
+        if movimientos_por_codigo is not None and fecha_corte:
+            movs = movimientos_por_codigo.get(e["codigo_empleado"], [])
+            c = _centro_en_fecha(centro_actual, movs, fecha_corte) or "(sin centro)"
+        else:
+            c = centro_actual
         hc_centro[c] = hc_centro.get(c, 0) + 1
         pct = e["porcentaje_jornada"]
         horas = (pct / 100 * HORAS_JORNADA_COMPLETA) if pct is not None else HORAS_JORNADA_COMPLETA
@@ -349,17 +471,27 @@ def compute_resumen():
     conn = get_connection()
     empleados = [dict(r) for r in conn.execute("SELECT * FROM kpi_empleados").fetchall()]
     bajas = _get_bajas(conn)
+    movimientos_centro = _movimientos_centro_por_codigo(conn)
+    movimientos_puesto = (
+        conn.execute("SELECT * FROM kpi_movimientos WHERE tipo = 'puesto'").fetchall()
+        if _tabla_existe(conn, "kpi_movimientos") else []
+    )
+    movimientos_puesto = [dict(r) for r in movimientos_puesto]
     conn.close()
 
+    codigos_excluidos = {e["codigo_empleado"] for e in empleados if e["centro"] in CENTROS_EXCLUIDOS}
     empleados = [e for e in empleados if e["centro"] not in CENTROS_EXCLUIDOS]
     bajas = [b for b in bajas if b["centro"] not in CENTROS_EXCLUIDOS]
+    movimientos_puesto = [m for m in movimientos_puesto if m["codigo_empleado"] not in codigos_excluidos]
 
     hoy = datetime.date.today()
     hoy_str = hoy.isoformat()
 
     activos = _activos_a_fecha(empleados, hoy_str)
     headcount_activo = len(activos)
-    headcount_por_centro_lista, horas_por_centro_lista = _headcount_y_horas_por_centro(activos)
+    headcount_por_centro_lista, horas_por_centro_lista = _headcount_y_horas_por_centro(
+        activos, movimientos_centro, hoy_str
+    )
     headcount_por_centro = dict(headcount_por_centro_lista)
 
     # --- Serie mensual completa (todo el histórico de Entrevista de Salida) -
@@ -401,8 +533,11 @@ def compute_resumen():
     serie_mensual = {}
     for clave in meses_disponibles:
         n = bajas_por_mes.get(clave, 0)
-        activos_mes = _activos_a_fecha(empleados, _fin_de_mes(clave))
-        hc_centro_mes, horas_centro_mes = _headcount_y_horas_por_centro(activos_mes)
+        fecha_corte_mes = _fin_de_mes(clave)
+        activos_mes = _activos_a_fecha(empleados, fecha_corte_mes)
+        hc_centro_mes, horas_centro_mes = _headcount_y_horas_por_centro(
+            activos_mes, movimientos_centro, fecha_corte_mes
+        )
         serie_mensual[clave] = {
             "bajas": n,
             "pct": round(n / len(activos_mes) * 100, 1) if activos_mes else 0,
@@ -434,6 +569,17 @@ def compute_resumen():
         round(len(bajas_ytd_sin_empresario) / headcount_activo * 100, 1) if headcount_activo else 0
     )
 
+    # --- % de promoción interna (año en curso) ------------------------------
+    # Solo cuenta como promoción un movimiento de puesto que sube de nivel en
+    # PUESTOS_JERARQUIA -- un puesto que no está en esa lista no se puede
+    # clasificar (no suma ni resta). Requiere que alguien vaya registrando
+    # los movimientos en "Movimientos internos"; sin datos ahí, sale 0.
+    promociones_ytd = [
+        m for m in movimientos_puesto
+        if m["fecha"] and m["fecha"] >= inicio_anio and _es_promocion(m["origen"], m["destino"]) is True
+    ]
+    promocion_interna_pct = round(len(promociones_ytd) / headcount_activo * 100, 1) if headcount_activo else 0
+
     return {
         "headcount_activo": headcount_activo,
         "horas_contratadas_totales": round(sum(h for _, h in horas_por_centro_lista), 1),
@@ -449,6 +595,10 @@ def compute_resumen():
         "nspp_ytd": len(nspp_ytd),
         "rotacion_sin_nspp_empresario_pct": rotacion_sin_nspp_empresario_pct,
         "bajas_sin_nspp_empresario_ytd": len(bajas_ytd_sin_empresario),
+        "promocion_interna_pct": promocion_interna_pct,
+        "promociones_ytd": len(promociones_ytd),
+        "puestos_jerarquia": PUESTOS_JERARQUIA,
+        "centros_disponibles": sorted(set(CENTROS_GO_A_CORTO.values())),
         "horas_por_centro": horas_por_centro_lista,
         "sin_datos_plantilla": headcount_activo == 0,
         "sin_datos_bajas": len(bajas) == 0,
