@@ -362,7 +362,6 @@ function renderPagina(index) {
     ${index === 0 && encuesta.es_valores_competencias ? `
       <div class="encuesta-anticheat-banner">
         <p class="encuesta-anticheat-intro">Responde con sinceridad y sin pensarlo mucho.</p>
-        <p class="encuesta-anticheat-aviso"><span class="encuesta-anticheat-icono aviso">⚠️</span> Antes de empezar:</p>
         <ul class="encuesta-anticheat-lista">
           <li><span class="encuesta-anticheat-icono tiempo">⏱️</span><span><strong>Tiempo:</strong> Tienes ${ANTICHEAT_MINUTOS} minutos.</span></li>
           <li><span class="encuesta-anticheat-icono restriccion">🚫</span><span><strong>Navegación:</strong> No cambies de pestaña ni salgas de esta pantalla, o la prueba se invalidará.</span></li>
