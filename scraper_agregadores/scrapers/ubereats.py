@@ -68,9 +68,13 @@ class UberEatsScraper(BaseAggregatorScraper):
     # REUTILIZA para todas las direcciones siguientes: con la sesión ya caliente, 0
     # challenges en las pruebas (16 direcciones seguidas).
     #
-    # Medido en vivo 03/09 contra las mismas direcciones reales: 2.1-3.5s por
-    # dirección frente a ~20s del flujo de interfaz, con los positivos y los
-    # negativos bien detectados (8/8 con cobertura en el centro, 0/8 en la periferia).
+    # VALIDADO A/B en vivo 03/09. Lo que hay que comprobar NO es "lejos = no
+    # reparte" (Uber Eats reparte en el 91% de los puntos: 354 de 390) sino que las
+    # dos rutas digan LO MISMO: las MISMAS 6 direcciones de borde, por ruta rápida y
+    # por el flujo de interfaz, dieron resultado IDÉNTICO 6/6 -- 3 con cobertura y 3
+    # sin ella -- a 2.9s de media frente a 78.9s. Los negativos son los que más
+    # ganan: por el flujo de siempre costaban 137-140s porque agotaban los 3
+    # reintentos internos, y por aquí se resuelven en ~2s.
     # Si algo falla (challenge, timeout, sesión muerta), se cierra la sesión y se cae
     # al flujo de interfaz de siempre para esa dirección -- nunca se pierde un punto
     # por culpa de este atajo.
