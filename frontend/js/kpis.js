@@ -5,12 +5,14 @@
 // solo admin, ver el resto de módulos de hoy (Entrevistas/Clima/Agregadores)
 // para el mismo criterio.
 //
-// Las 7 tarjetas de arriba (plantilla, rotación anual, NSPP...) son métricas
-// fijas con su propio periodo (año en curso / mes en curso) y no cambian con
-// el filtro de fechas. El filtro Desde/Hasta sí afecta a los 4 gráficos de
-// abajo, incluida "Horas por centro": el backend reconstruye la plantilla
-// de cualquier mes pasado con la fecha de antigüedad/baja de cada empleado
-// (ver _activos_a_fecha en kpis.py), no es una foto fija.
+// El filtro Desde/Hasta afecta a TODO: las 7 tarjetas de arriba (se
+// recalculan sumando el rango filtrado, ver renderTarjetas) y los 4
+// gráficos de abajo, incluida "Horas por centro": el backend reconstruye
+// la plantilla de cualquier mes pasado con la fecha de antigüedad/baja de
+// cada empleado (ver _activos_a_fecha en kpis.py), no es una foto fija.
+// "Plantilla activa" y "Horas contratadas" siempre son "a fecha de Hasta"
+// (una foto en ese punto); el resto de tarjetas son sumas/porcentajes
+// acumulados de todo el rango Desde-Hasta.
 
 const MARCA_COLOR = "#006838";
 const COLORES = ["#006838", "#c98a12", "#1d6fb8", "#c23a72", "#7b4fb0", "#0e8a86", "#e0641e", "#3d5a80"];
@@ -129,26 +131,6 @@ async function cargarResumen() {
   });
   if (d.sin_datos_plantilla) return;
 
-  document.getElementById("kpi-headcount").textContent = d.headcount_activo;
-  document.getElementById("kpi-rotacion-anual").textContent = `${d.acumulado_anual_pct}%`;
-  document.getElementById("kpi-rotacion-anual-sub").textContent = `${d.bajas_ytd} bajas en lo que va de año`;
-
-  const mesActual = d.serie_mensual[d.mes_actual] || { bajas: 0, pct: 0 };
-  document.getElementById("kpi-rotacion-mes").textContent = mesActual.bajas;
-  document.getElementById("kpi-rotacion-mes-sub").textContent = `${formatMes(d.mes_actual)} -- ${mesActual.pct}% sobre la plantilla activa`;
-
-  document.getElementById("kpi-nspp").textContent = d.bajas_ytd ? `${d.nspp_pct}%` : "--";
-  document.getElementById("kpi-horas").textContent = `${d.horas_contratadas_totales} h/sem`;
-
-  document.getElementById("kpi-rotacion-sin-nspp").textContent = `${d.rotacion_sin_nspp_empresario_pct}%`;
-  document.getElementById("kpi-rotacion-sin-nspp-sub").textContent =
-    `${d.bajas_sin_nspp_empresario_ytd} de ${d.bajas_ytd} bajas del año -- sin los ceses en prueba a instancia del empresario`;
-
-  document.getElementById("kpi-promocion").textContent = `${d.promocion_interna_pct}%`;
-  document.getElementById("kpi-promocion-sub").textContent = d.promociones_ytd
-    ? `${d.promociones_ytd} promociones registradas este año`
-    : "sin movimientos de puesto registrados este año";
-
   destruirCharts();
 
   ultimoResumen = d;
@@ -172,6 +154,49 @@ function configurarFiltroFechas(d) {
   if (!inputHasta.value || !meses.includes(inputHasta.value)) inputHasta.value = finDefault;
 }
 
+function pct1(n, base) {
+  return base ? Math.round((n / base) * 1000) / 10 : 0;
+}
+
+function renderTarjetas(d, mesesFiltrados, hasta, etiquetaRango) {
+  const serieHasta = d.serie_mensual[hasta] || d.serie_mensual[d.mes_actual];
+  const headcountHasta = serieHasta.headcount_activo;
+
+  let bajas = 0, nspp = 0, sinEmpresario = 0, promociones = 0;
+  for (const m of mesesFiltrados) {
+    const s = d.serie_mensual[m];
+    bajas += s.bajas;
+    nspp += s.nspp;
+    sinEmpresario += s.sin_nspp_empresario;
+    promociones += s.promociones;
+  }
+
+  document.getElementById("kpi-headcount").textContent = headcountHasta;
+
+  document.getElementById("kpi-rotacion-anual").textContent = `${pct1(bajas, headcountHasta)}%`;
+  document.getElementById("kpi-rotacion-anual-sub").textContent = `${bajas} bajas -- ${etiquetaRango}`;
+
+  const ultimoMes = mesesFiltrados[mesesFiltrados.length - 1];
+  const sMes = ultimoMes ? d.serie_mensual[ultimoMes] : { bajas: 0, pct: 0 };
+  document.getElementById("kpi-rotacion-mes").textContent = sMes.bajas;
+  document.getElementById("kpi-rotacion-mes-sub").textContent = ultimoMes
+    ? `${formatMes(ultimoMes)} -- ${sMes.pct}% sobre la plantilla activa`
+    : "sin datos en ese rango";
+
+  document.getElementById("kpi-nspp").textContent = bajas ? `${pct1(nspp, bajas)}%` : "--";
+
+  document.getElementById("kpi-horas").textContent = `${serieHasta.horas_totales} h/sem`;
+
+  document.getElementById("kpi-rotacion-sin-nspp").textContent = `${pct1(sinEmpresario, headcountHasta)}%`;
+  document.getElementById("kpi-rotacion-sin-nspp-sub").textContent =
+    `${sinEmpresario} de ${bajas} bajas -- sin los ceses en prueba a instancia del empresario`;
+
+  document.getElementById("kpi-promocion").textContent = `${pct1(promociones, headcountHasta)}%`;
+  document.getElementById("kpi-promocion-sub").textContent = promociones
+    ? `${promociones} promociones -- ${etiquetaRango}`
+    : "sin movimientos de puesto registrados en este periodo";
+}
+
 function renderGraficosFiltrados() {
   if (!ultimoResumen) return;
   const d = ultimoResumen;
@@ -181,6 +206,8 @@ function renderGraficosFiltrados() {
   const etiquetaRango = mesesFiltrados.length
     ? (mesesFiltrados.length === 1 ? formatMes(mesesFiltrados[0]) : `${formatMes(mesesFiltrados[0])} -- ${formatMes(mesesFiltrados[mesesFiltrados.length - 1])}`)
     : "sin datos en ese rango";
+
+  renderTarjetas(d, mesesFiltrados, hasta, etiquetaRango);
 
   // --- Rotación mensual global (número o %, según el toggle) -------------
   chartRotacionMensual?.destroy();

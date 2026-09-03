@@ -99,19 +99,19 @@
           <div class="valor" id="kpi-headcount">--</div>
         </div>
         <div class="kpi-stat-card">
-          <div class="label">Rotación acumulada del año</div>
+          <div class="label">Rotación acumulada del periodo</div>
           <div class="valor" id="kpi-rotacion-anual">--</div>
           <div class="sub" id="kpi-rotacion-anual-sub"></div>
         </div>
         <div class="kpi-stat-card">
-          <div class="label">Rotación del mes en curso</div>
+          <div class="label">Rotación del último mes del rango</div>
           <div class="valor" id="kpi-rotacion-mes">--</div>
           <div class="sub" id="kpi-rotacion-mes-sub"></div>
         </div>
         <div class="kpi-stat-card">
           <div class="label">% NSPP (no supera periodo de prueba)</div>
           <div class="valor" id="kpi-nspp">--</div>
-          <div class="sub" id="kpi-nspp-sub">del total de bajas del año -- dato "malo" a propósito, por la reducción de horas</div>
+          <div class="sub" id="kpi-nspp-sub">del total de bajas del periodo -- dato "malo" a propósito, por la reducción de horas</div>
         </div>
         <div class="kpi-stat-card">
           <div class="label">Horas contratadas (total)</div>
@@ -124,7 +124,7 @@
           <div class="sub" id="kpi-promocion-sub"></div>
         </div>
         <div class="kpi-stat-card">
-          <div class="label">Rotación del año sin NSPP de empresa</div>
+          <div class="label">Rotación del periodo sin NSPP de empresa</div>
           <div class="valor" id="kpi-rotacion-sin-nspp">--</div>
           <div class="sub" id="kpi-rotacion-sin-nspp-sub">quitando los ceses en periodo de prueba a instancia del empresario</div>
         </div>
@@ -140,7 +140,7 @@
           <input type="month" id="kpi-filtro-hasta">
         </div>
         <button type="button" id="kpi-filtro-reset" class="btn btn-ghost">Últimos 12 meses</button>
-        <span class="staff-hint" style="margin-left:auto;">Filtra los gráficos de abajo: rotación, bajas por motivo y horas por centro.</span>
+        <span class="staff-hint" style="margin-left:auto;">Aplica a todo lo de abajo, incluidas las tarjetas de arriba.</span>
       </div>
 
       <div class="kpi-chart-card">
@@ -239,6 +239,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/kpis.js?v=20260903c"></script>
+<script src="js/kpis.js?v=20260903d"></script>
 </body>
 </html>

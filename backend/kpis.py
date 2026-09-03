@@ -54,11 +54,40 @@ CENTROS_EXCLUIDOS = {"Oficina Central"}
 # distingue quién lo decidió, solo que la baja fue en periodo de prueba).
 _MOTIVO_NSPP = "periodo de prueba"
 
-# Escalera de puestos, de menor a mayor -- pedida explícitamente por el
-# usuario para reconocer una promoción real (subir de nivel) frente a un
-# simple cambio de puesto lateral. Un puesto que no está en esta lista no
-# se puede clasificar como promoción/no-promoción (no se cuenta en el KPI).
-PUESTOS_JERARQUIA = ["Dependiente", "Krispy Coach", "Jefe de Turno", "Gerente"]
+# Escalera de puestos -- pedida explícitamente por el usuario para
+# reconocer una promoción real (subir de nivel) frente a un simple cambio
+# de puesto lateral. Un puesto que no está aquí no se puede clasificar
+# (no cuenta ni a favor ni en contra del KPI). Los nombres son los mismos
+# "Posición/Puesto de trabajo" tal cual salen en el Excel de GO (confirmado
+# 1 a 1 contra el archivo real) -- dos puestos con el mismo número son del
+# mismo nivel (un cambio entre ellos es lateral, no promoción). Los alias
+# al final son los nombres coloquiales que se usan hablando, por si alguien
+# los escribe así al registrar un movimiento.
+PUESTOS_NIVEL = {
+    # --- Fábrica / Producción (ParqueSur Fábrica) ---
+    "Auxiliar de Producción": 1,
+    "Auxiliar de Decoración": 1,
+    "Auxiliar de Limpieza": 1,
+    "Formador Producción": 2,
+    "Formador Decoración": 2,
+    "JefeTurno Producción": 3,
+    "Subgerente de Producción": 4,
+    "Gerente de Producción": 5,
+    # --- Tienda / Retail ---
+    "Vendedor Retail": 1,
+    "Formador Retail": 2,
+    "JefeTurno Retail": 3,
+    "Area Coach": 3,
+    "SubGerente de Tienda": 4,
+    "Gerente de Tienda": 5,
+    "Gerente Senior": 6,
+    # --- Alias coloquiales (tienda) ---
+    "Dependiente": 1,
+    "Krispy Coach": 2,
+    "Jefe de Turno": 3,
+    "Gerente": 5,
+}
+PUESTOS_JERARQUIA = list(PUESTOS_NIVEL.keys())
 
 TIPOS_MOVIMIENTO = ("centro", "puesto")
 
@@ -403,15 +432,12 @@ def _centro_en_fecha(centro_actual, movimientos, fecha_corte):
 
 
 def _nivel_puesto(puesto):
-    try:
-        return PUESTOS_JERARQUIA.index((puesto or "").strip())
-    except ValueError:
-        return None
+    return PUESTOS_NIVEL.get((puesto or "").strip())
 
 
 def _es_promocion(origen, destino):
     """True si subió de nivel, False si fue lateral o bajó, None si alguno
-    de los dos puestos no está en PUESTOS_JERARQUIA (no se puede clasificar,
+    de los dos puestos no está en PUESTOS_NIVEL (no se puede clasificar,
     no cuenta ni a favor ni en contra del KPI)."""
     nivel_origen = _nivel_puesto(origen)
     nivel_destino = _nivel_puesto(destino)
@@ -516,6 +542,8 @@ def compute_resumen():
     bajas_por_mes = {}
     bajas_centro_mes = {}
     bajas_motivo_mes = {}
+    nspp_por_mes = {}
+    sin_empresario_por_mes = {}
     for b in bajas:
         clave = _mes(b["fecha_baja"])
         if not clave:
@@ -527,6 +555,16 @@ def compute_resumen():
         motivo = b["motivo"] or "(sin dato)"
         bajas_motivo_mes.setdefault(clave, {})
         bajas_motivo_mes[clave][motivo] = bajas_motivo_mes[clave].get(motivo, 0) + 1
+        if _es_nspp(motivo):
+            nspp_por_mes[clave] = nspp_por_mes.get(clave, 0) + 1
+        if not _es_nspp_empresario(motivo):
+            sin_empresario_por_mes[clave] = sin_empresario_por_mes.get(clave, 0) + 1
+
+    promociones_por_mes = {}
+    for m in movimientos_puesto:
+        clave = _mes(m["fecha"])
+        if clave and _es_promocion(m["origen"], m["destino"]) is True:
+            promociones_por_mes[clave] = promociones_por_mes.get(clave, 0) + 1
 
     mes_actual = f"{hoy.year:04d}-{hoy.month:02d}"
     claves_con_datos = sorted(bajas_por_mes.keys())
@@ -560,6 +598,9 @@ def compute_resumen():
             "headcount_por_centro": hc_centro_mes,
             "horas_por_centro": horas_centro_mes,
             "horas_totales": round(sum(h for _, h in horas_centro_mes), 1),
+            "nspp": nspp_por_mes.get(clave, 0),
+            "sin_nspp_empresario": sin_empresario_por_mes.get(clave, 0),
+            "promociones": promociones_por_mes.get(clave, 0),
         }
     anios_disponibles = sorted({m[:4] for m in meses_disponibles}) or [str(hoy.year)]
 
