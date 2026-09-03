@@ -361,8 +361,13 @@ function renderPagina(index) {
     ${index === 0 ? `<h1 class="encuesta-titulo">${escapeHTML(encuesta.titulo)}</h1>` : ""}
     ${index === 0 && encuesta.es_valores_competencias ? `
       <div class="encuesta-anticheat-banner">
-        <span class="icono">🕐</span>
-        <span>Responde con sinceridad y sin pensarlo demasiado. En cuanto pases de esta página tendrás ${ANTICHEAT_MINUTOS} minutos para completar el test, y no podrás cambiar de pestaña ni salir de esta pantalla hasta terminar.</span>
+        <p class="encuesta-anticheat-intro">Responde con sinceridad y sin pensarlo mucho.</p>
+        <p class="encuesta-anticheat-aviso">⚠️ Antes de empezar:</p>
+        <ul class="encuesta-anticheat-lista">
+          <li>⏱️ <strong>Tiempo:</strong> Tienes ${ANTICHEAT_MINUTOS} minutos.</li>
+          <li>🚫 <strong>Navegación:</strong> No cambies de pestaña ni salgas de esta pantalla, o la prueba se invalidará.</li>
+        </ul>
+        <p class="encuesta-anticheat-cierre">¡Mucho éxito!</p>
       </div>
     ` : ""}
     ${pagina.instrucciones ? `<p class="encuesta-instrucciones">${escapeHTML(pagina.instrucciones)}</p>` : ""}
