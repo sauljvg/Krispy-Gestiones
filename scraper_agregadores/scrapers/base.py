@@ -383,6 +383,12 @@ class BaseAggregatorScraper:
                 # active, que solo pasa en el REINTENTO tras un ChallengeDetectedError).
                 if self.bloquear_recursos and not self._modo_resolucion_manual and not self.mantener_visible:
                     await context.route("**/*", _bloquear_recursos_pesados)
+                # Probado 03/09 aplicar también a mantener_visible=True (Uber Eats) el
+                # bloqueo de tracking de _bloquear_recursos_pesados (sin tocar imágenes) --
+                # descartado: prueba real de 6 chequeos dio 23.6s de media, IGUAL o peor que
+                # los ~19.9s sin ningún bloqueo (Uber Eats no tiene problema de volumen de
+                # peticiones como Glovo, su lentitud es la navegación en sí), y no vale la
+                # pena el riesgo de tocar el fingerprint de red de algo que hoy tiene 0 errores.
                 # Estos sitios tienen carruseles/banners promocionales en autoplay. Playwright
                 # espera a que un elemento esté "estable" (que deje de moverse) antes de hacer
                 # click/fill, así que una animación de fondo lo hace reintentar con scroll una
