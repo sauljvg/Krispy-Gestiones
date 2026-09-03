@@ -254,13 +254,11 @@ function renderTarjetas(d, mesesFiltrados, hasta, etiquetaRango) {
   const headcountInicioRango = primerMes ? d.serie_mensual[primerMes].headcount_inicio : headcountHasta;
   const headcountPromedioRango = (headcountInicioRango + headcountHasta) / 2;
 
-  let bajas = 0, altas = 0, nspp = 0, sinEmpresario = 0, promociones = 0;
+  let bajas = 0, altas = 0, promociones = 0;
   for (const m of mesesFiltrados) {
     const s = d.serie_mensual[m];
     bajas += s.bajas;
     altas += s.altas;
-    nspp += s.nspp;
-    sinEmpresario += s.sin_nspp_empresario;
     promociones += s.promociones;
   }
 
@@ -281,13 +279,7 @@ function renderTarjetas(d, mesesFiltrados, hasta, etiquetaRango) {
     ? `${formatMes(ultimoMes)} -- ${sMes.pct}% sobre la plantilla media de ese mes`
     : "sin datos en ese rango";
 
-  document.getElementById("kpi-nspp").textContent = bajas ? `${pct1(nspp, bajas)}%` : "--";
-
   document.getElementById("kpi-horas").textContent = `${serieHasta.horas_totales} h/sem`;
-
-  document.getElementById("kpi-rotacion-sin-nspp").textContent = `${pct1(sinEmpresario, headcountPromedioRango)}%`;
-  document.getElementById("kpi-rotacion-sin-nspp-sub").textContent =
-    `${sinEmpresario} de ${bajas} bajas -- sin los ceses en prueba a instancia del empresario`;
 
   document.getElementById("kpi-promocion").textContent = `${pct1(promociones, headcountPromedioRango)}%`;
   document.getElementById("kpi-promocion-sub").textContent = promociones
