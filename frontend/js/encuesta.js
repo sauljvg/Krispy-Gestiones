@@ -356,8 +356,21 @@ function renderPagina(index) {
   }
 
   const esUltima = posActual === totalPaginas - 1;
+  // Progreso "adelantado": raíz cuadrada en vez de lineal -- las primeras
+  // páginas ya muestran un % alto (motiva a seguir nada más empezar) y los
+  // incrementos se hacen mas pequeños según se acerca al final (pedido
+  // explícito del usuario, truco habitual en formularios largos tipo
+  // Typeform para que se sienta "ya casi" desde el principio).
+  const pctProgreso = Math.round(Math.sqrt((posActual + 1) / totalPaginas) * 100);
   const card = document.getElementById("encuesta-card");
   card.innerHTML = `
+    <div class="encuesta-progreso-sticky">
+      <div class="encuesta-progreso-header">
+        <span class="encuesta-progreso-pct">${pctProgreso}%</span>
+        <span class="encuesta-progreso-txt">Página ${posActual + 1} de ${totalPaginas}</span>
+      </div>
+      <div class="encuesta-progreso-barra"><div class="encuesta-progreso-fill" style="width:${pctProgreso}%"></div></div>
+    </div>
     ${index === 0 ? `<h1 class="encuesta-titulo">${escapeHTML(encuesta.titulo)}</h1>` : ""}
     ${index === 0 && encuesta.es_valores_competencias ? `
       <div class="encuesta-anticheat-banner">
@@ -377,10 +390,8 @@ function renderPagina(index) {
       <div class="spacer"></div>
       <div style="text-align:right;">
         <button type="button" class="encuesta-btn" id="btn-siguiente">${esUltima ? "Enviar" : "Siguiente"}</button>
-        <div class="encuesta-progreso-txt">Página ${posActual + 1} de ${totalPaginas}</div>
       </div>
     </div>
-    <div class="encuesta-progreso-barra"><div class="encuesta-progreso-fill" style="width:${((posActual + 1) / totalPaginas) * 100}%"></div></div>
     <p class="encuesta-privacidad-nota">
       Tus datos se usan solo para este proceso de selección/evaluación de Krispy Kreme España y SAONA.
       Más información en nuestra <a href="/privacidad.html" target="_blank" rel="noopener">política de privacidad</a>.
