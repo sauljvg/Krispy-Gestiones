@@ -45,6 +45,13 @@ function formatMes(clave) {
   return `${nombres[parseInt(mes, 10) - 1]} ${anio.slice(2)}`;
 }
 
+function formatMesLargo(clave) {
+  if (!clave) return "";
+  const [anio, mes] = clave.split("-");
+  const nombres = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  return `${nombres[parseInt(mes, 10) - 1]} ${anio}`;
+}
+
 function motivoCorto(motivo) {
   // Los motivos son textos largos tipo SEPE ("02 Despido por causas
   // objetivas. Amortización por causas económicas, técnicas..."). Para el
@@ -139,19 +146,22 @@ async function cargarResumen() {
 }
 
 function configurarFiltroFechas(d) {
-  const inputDesde = document.getElementById("kpi-filtro-desde");
-  const inputHasta = document.getElementById("kpi-filtro-hasta");
+  const selectDesde = document.getElementById("kpi-filtro-desde");
+  const selectHasta = document.getElementById("kpi-filtro-hasta");
   const meses = d.meses_disponibles;
   if (!meses.length) return;
 
-  inputDesde.min = inputHasta.min = meses[0];
-  inputDesde.max = inputHasta.max = meses[meses.length - 1];
+  const valorPrevioDesde = selectDesde.value;
+  const valorPrevioHasta = selectHasta.value;
+  const optionsHtml = meses.map((m) => `<option value="${m}">${formatMesLargo(m)}</option>`).join("");
+  selectDesde.innerHTML = optionsHtml;
+  selectHasta.innerHTML = optionsHtml;
 
   // Por defecto, últimos 12 meses (o todos los que haya si hay menos).
   const inicioDefault = meses[Math.max(0, meses.length - 12)];
   const finDefault = meses[meses.length - 1];
-  if (!inputDesde.value || !meses.includes(inputDesde.value)) inputDesde.value = inicioDefault;
-  if (!inputHasta.value || !meses.includes(inputHasta.value)) inputHasta.value = finDefault;
+  selectDesde.value = meses.includes(valorPrevioDesde) ? valorPrevioDesde : inicioDefault;
+  selectHasta.value = meses.includes(valorPrevioHasta) ? valorPrevioHasta : finDefault;
 }
 
 function pct1(n, base) {
