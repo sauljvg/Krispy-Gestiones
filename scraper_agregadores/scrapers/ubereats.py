@@ -78,6 +78,23 @@ class UberEatsScraper(BaseAggregatorScraper):
     # Si algo falla (challenge, timeout, sesión muerta), se cierra la sesión y se cae
     # al flujo de interfaz de siempre para esa dirección -- nunca se pierde un punto
     # por culpa de este atajo.
+    # LIMITACIÓN CONOCIDA de esta ruta (medido en vivo la noche del 03-04/09, tras
+    # ~600 navegaciones en el día): Cloudflare acaba marcando el patrón de "entrar de
+    # golpe a una URL profunda con `pl=`". No es bloqueo por volumen ni por número de
+    # workers -- comprobado con UN SOLO navegador y sin carga: la portada /es carga
+    # bien y el flujo de interfaz clásico sigue funcionando (18.7s, resultado correcto),
+    # pero /es/feed?pl=... y /es/search?q=...&pl=... devuelven el challenge. Un humano
+    # nunca llega a esas URLs pegándolas: navega DENTRO de la app.
+    #
+    # VÍA PENDIENTE DE PROBAR (encontrada esa misma noche, sin validar todavía): Uber
+    # Eats guarda la dirección de entrega en la cookie `uev2.loc` (dominio
+    # .ubereats.com, JSON percent-encodeado con address/latitude/longitude/
+    # addressComponents; el campo `reference` de Google Places puede ir vacío). Es el
+    # equivalente a lo que ya se hace en Glovo con glovo_delivery_address. Poniendo esa
+    # cookie y cargando solo la PORTADA (/es, sin parámetros), la app aplicó la
+    # ubicación ella sola (la URL pasó a /es?lat=...) -- o sea, sin meter ninguna señal
+    # rara en la URL. Falta validar en limpio: esa noche la sesión ya estaba marcada y
+    # a la segunda dirección volvía el challenge, así que no hay medición fiable.
     _sesion_pw = None
     _sesion_browser = None
     _sesion_context = None
