@@ -368,16 +368,12 @@ function renderGraficosFiltrados() {
   document.getElementById("kpi-horas-centro-total").textContent = `Total: ${serieHasta.horas_totales} h/sem`;
 
   // --- Plantilla por tipo de jornada (lista pequeña, a fecha de "Hasta") --
-  // Ojo: las personas sin dato de jornada ya están incluidas en el tramo de
-  // jornada completa (se asumen ahí, mismo criterio que el resto del
-  // dashboard) -- no se suman aparte para no contarlas dos veces.
+  // Sin dato de jornada en el Excel = jornada completa, sin más (mismo
+  // criterio que el resto del dashboard), ya incluido en el tramo de 40h.
   const listaJornada = document.getElementById("kpi-jornada-lista");
   listaJornada.innerHTML = (serieHasta.por_jornada || [])
     .map(([horas, n]) => `<li><span>${horas}h/sem</span><span class="n">${n}</span></li>`)
     .join("");
-  if (serieHasta.sin_dato_jornada) {
-    listaJornada.innerHTML += `<li><em>de esas, ${serieHasta.sin_dato_jornada} sin dato en el Excel (asumidas a ${d.horas_jornada_completa}h)</em></li>`;
-  }
 }
 
 // --- Movimientos internos (traslados de centro / promociones de puesto) ---
