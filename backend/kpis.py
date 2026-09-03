@@ -467,6 +467,14 @@ def _fin_de_mes(clave_mes):
     return f"{anio:04d}-{mes:02d}-{ultimo_dia:02d}"
 
 
+def _dia_antes_de_mes(clave_mes):
+    """Último día del mes anterior -- la plantilla "al inicio" de un mes es
+    la misma que "al final" del mes de antes."""
+    anio, mes = (int(x) for x in clave_mes.split("-"))
+    primer_dia = datetime.date(anio, mes, 1)
+    return (primer_dia - datetime.timedelta(days=1)).isoformat()
+
+
 def _activos_a_fecha(empleados, fecha_corte):
     """Quiénes estaban de alta en una fecha concreta -- se reconstruye con
     la fecha de antigüedad (alta) y la fecha de baja que ya trae el Excel de
@@ -581,21 +589,32 @@ def compute_resumen():
             mes_i = 1
             anio_i += 1
 
+    # Fórmula estándar de rotación: bajas / plantilla PROMEDIO del periodo
+    # (media entre la plantilla al inicio y al final), no solo la de "Hasta"
+    # -- usar solo el final infla mucho el % cuando la plantilla creció
+    # durante el periodo (p.ej. apertura de una tienda nueva).
     serie_mensual = {}
     for clave in meses_disponibles:
         n = bajas_por_mes.get(clave, 0)
         fecha_corte_mes = _fin_de_mes(clave)
         activos_mes = _activos_a_fecha(empleados, fecha_corte_mes)
+        activos_inicio_mes = _activos_a_fecha(empleados, _dia_antes_de_mes(clave))
         hc_centro_mes, horas_centro_mes = _headcount_y_horas_por_centro(
             activos_mes, movimientos_centro, fecha_corte_mes
         )
+        hc_centro_inicio_mes, _ = _headcount_y_horas_por_centro(
+            activos_inicio_mes, movimientos_centro, _dia_antes_de_mes(clave)
+        )
+        headcount_promedio_mes = (len(activos_inicio_mes) + len(activos_mes)) / 2
         serie_mensual[clave] = {
             "bajas": n,
-            "pct": round(n / len(activos_mes) * 100, 1) if activos_mes else 0,
+            "pct": round(n / headcount_promedio_mes * 100, 1) if headcount_promedio_mes else 0,
             "por_centro": sorted(bajas_centro_mes.get(clave, {}).items(), key=lambda x: -x[1]),
             "por_motivo": sorted(bajas_motivo_mes.get(clave, {}).items(), key=lambda x: -x[1]),
             "headcount_activo": len(activos_mes),
+            "headcount_inicio": len(activos_inicio_mes),
             "headcount_por_centro": hc_centro_mes,
+            "headcount_por_centro_inicio": hc_centro_inicio_mes,
             "horas_por_centro": horas_centro_mes,
             "horas_totales": round(sum(h for _, h in horas_centro_mes), 1),
             "nspp": nspp_por_mes.get(clave, 0),
