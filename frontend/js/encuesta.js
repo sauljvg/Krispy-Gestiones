@@ -21,8 +21,13 @@ let ultimaPaginaReportada = 1;
 // --- Anti-fraude (solo tests de "Valores y Competencias", pedido explícito
 // del usuario 28/08 -- ver es_valores_competencias en la respuesta pública
 // de backend/encuestas.py::get_encuesta_publica). Tres piezas:
-//  1. Aviso una sola vez, en la página 2 (justo después de los datos
-//     personales de la página 1), explicando la regla.
+//  1. Aviso -- desde el 03/09 vive como banner tranquilo en la página 1
+//     (junto a los datos de contacto, ver renderPagina), no como pop-up
+//     al entrar a la página 2: el embudo real mostraba que la mayor
+//     caída de todo el test pasaba justo ahí, muy probablemente por el
+//     tono de "control anti-fraude" + cronómetro apareciendo de sorpresa
+//     a mitad de camino. La restricción es exactamente la misma, solo
+//     cambia cuándo y cómo se avisa.
 //  2. Contador visual de 20 min hacia atrás -- solo de presión psicológica,
 //     al llegar a 0 sigue contando en NEGATIVO sin bloquear ni auto-enviar
 //     el test (pedido explícito: "deja que el candidato termine el test").
@@ -34,7 +39,6 @@ let ultimaPaginaReportada = 1;
 //     falta vigilar visibilitychange, no un mecanismo aparte para eso.
 const ANTICHEAT_MINUTOS = 20;
 let anticheatActivo = false; // true desde que se arma en la página 2 hasta el envío final
-let anticheatAvisado = false; // el aviso solo se muestra una vez por intento
 let anticheatSegundosRestantes = ANTICHEAT_MINUTOS * 60;
 let anticheatIntervalId = null;
 let anticheatTimerEl = null;
@@ -68,13 +72,6 @@ function iniciarAnticheat() {
     anticheatSegundosRestantes -= 1; // sigue bajando de 0 en adelante, a propósito
     actualizarTimerUI();
   }, 1000);
-  if (!anticheatAvisado) {
-    anticheatAvisado = true;
-    mostrarAviso(
-      "Este test tiene un control anti-fraude activo: no cambies de pestaña ni salgas de esta pantalla hasta terminar. " +
-      "Si lo haces, el test se reiniciará desde el principio. Tienes un tiempo para completarlo."
-    );
-  }
 }
 
 function detenerAnticheat() {
@@ -93,7 +90,6 @@ async function reiniciarPorSalida() {
   detenerAnticheat();
   respuestas = {};
   paginaActual = 0;
-  anticheatAvisado = false;
   SESION_TOKEN = nuevoTokenSesion();
   renderPagina(0);
   window.scrollTo({ top: 0 });
@@ -363,6 +359,12 @@ function renderPagina(index) {
   const card = document.getElementById("encuesta-card");
   card.innerHTML = `
     ${index === 0 ? `<h1 class="encuesta-titulo">${escapeHTML(encuesta.titulo)}</h1>` : ""}
+    ${index === 0 && encuesta.es_valores_competencias ? `
+      <div class="encuesta-anticheat-banner">
+        <span class="icono">🕐</span>
+        <span>Responde con sinceridad y sin pensarlo demasiado. En cuanto pases de esta página tendrás ${ANTICHEAT_MINUTOS} minutos para completar el test, y no podrás cambiar de pestaña ni salir de esta pantalla hasta terminar.</span>
+      </div>
+    ` : ""}
     ${pagina.instrucciones ? `<p class="encuesta-instrucciones">${escapeHTML(pagina.instrucciones)}</p>` : ""}
     ${index === 0 ? `<p class="encuesta-obligatorio-nota">* Obligatorio</p>` : ""}
     <div id="pagina-contenido">${bloquesHtml}</div>
