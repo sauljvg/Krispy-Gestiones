@@ -398,25 +398,20 @@ def compute_resumen():
             mes_i = 1
             anio_i += 1
 
-    # NOTA: solo se reconstruye el TOTAL de plantilla activa por mes (para el
-    # % de rotación), no el desglose por centro -- el Excel solo trae la
-    # fecha de antigüedad en la EMPRESA y el centro ACTUAL, no una fecha de
-    # alta por centro, así que no hay forma fiable de saber en qué tienda
-    # trabajaba alguien en el pasado si se trasladó entre centros (p.ej. una
-    # tienda que abrió después mostraría gente "trabajando" ahí antes de
-    # existir). Para eso haría falta un histórico de movimientos internos
-    # (puesto Y centro) que hoy no existe -- mismo caso que % promoción
-    # interna, pendiente de una fuente de datos futura.
     serie_mensual = {}
     for clave in meses_disponibles:
         n = bajas_por_mes.get(clave, 0)
-        headcount_mes = len(_activos_a_fecha(empleados, _fin_de_mes(clave)))
+        activos_mes = _activos_a_fecha(empleados, _fin_de_mes(clave))
+        hc_centro_mes, horas_centro_mes = _headcount_y_horas_por_centro(activos_mes)
         serie_mensual[clave] = {
             "bajas": n,
-            "pct": round(n / headcount_mes * 100, 1) if headcount_mes else 0,
+            "pct": round(n / len(activos_mes) * 100, 1) if activos_mes else 0,
             "por_centro": sorted(bajas_centro_mes.get(clave, {}).items(), key=lambda x: -x[1]),
             "por_motivo": sorted(bajas_motivo_mes.get(clave, {}).items(), key=lambda x: -x[1]),
-            "headcount_activo": headcount_mes,
+            "headcount_activo": len(activos_mes),
+            "headcount_por_centro": hc_centro_mes,
+            "horas_por_centro": horas_centro_mes,
+            "horas_totales": round(sum(h for _, h in horas_centro_mes), 1),
         }
     anios_disponibles = sorted({m[:4] for m in meses_disponibles}) or [str(hoy.year)]
 

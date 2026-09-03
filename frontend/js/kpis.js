@@ -7,14 +7,10 @@
 //
 // Las 7 tarjetas de arriba (plantilla, rotación anual, NSPP...) son métricas
 // fijas con su propio periodo (año en curso / mes en curso) y no cambian con
-// el filtro de fechas. El filtro Desde/Hasta afecta a rotación mensual,
-// rotación por centro (numerador) y bajas por motivo -- pero el DENOMINADOR
-// de rotación por centro y "Horas contratadas por centro" siempre usan la
-// plantilla ACTUAL: el Excel solo trae la fecha de antigüedad en la EMPRESA
-// y el centro de HOY, no una fecha de alta por centro, así que no hay forma
-// fiable de saber en qué tienda trabajaba alguien en el pasado si se
-// trasladó entre centros (haría falta un histórico de movimientos internos,
-// mismo caso pendiente que % promoción interna).
+// el filtro de fechas. El filtro Desde/Hasta sí afecta a los 4 gráficos de
+// abajo, incluida "Horas por centro": el backend reconstruye la plantilla
+// de cualquier mes pasado con la fecha de antigüedad/baja de cada empleado
+// (ver _activos_a_fecha en kpis.py), no es una foto fija.
 
 const MARCA_COLOR = "#006838";
 const COLORES = ["#006838", "#c98a12", "#1d6fb8", "#c23a72", "#7b4fb0", "#0e8a86", "#e0641e", "#3d5a80"];
@@ -149,9 +145,6 @@ async function cargarResumen() {
     `${d.bajas_sin_nspp_empresario_ytd} de ${d.bajas_ytd} bajas del año -- sin los ceses en prueba a instancia del empresario`;
 
   destruirCharts();
-  if (d.horas_por_centro.length) {
-    chartHorasCentro = barChart("chart-horas-centro", d.horas_por_centro, { sufijo: "h" });
-  }
 
   ultimoResumen = d;
   configurarFiltroFechas(d);
@@ -196,12 +189,9 @@ function renderGraficosFiltrados() {
   document.getElementById("kpi-rotacion-mensual-sub").textContent =
     `${etiquetaRango} -- ${esPct ? "% sobre la plantilla activa" : "número de bajas por mes"}.`;
 
-  // --- Rotación por centro (suma del rango / plantilla activa ACTUAL) ----
-  // El denominador usa siempre el centro de HOY, no reconstruido por fecha:
-  // el Excel no trae fecha de alta por centro (solo antigüedad en la
-  // empresa), así que no hay forma fiable de saber en qué tienda trabajaba
-  // alguien en el pasado si se trasladó entre centros.
-  const centroHc = Object.fromEntries(d.headcount_por_centro);
+  // --- Rotación por centro (suma del rango / plantilla activa al final del rango) --
+  const serieHasta = d.serie_mensual[hasta] || d.serie_mensual[d.mes_actual];
+  const centroHc = Object.fromEntries(serieHasta.headcount_por_centro);
   const centroBajas = {};
   for (const m of mesesFiltrados) {
     for (const [centro, n] of d.serie_mensual[m].por_centro) {
@@ -221,7 +211,7 @@ function renderGraficosFiltrados() {
   if (rotacionPorCentro.length) {
     chartRotacionCentro = barChart("chart-rotacion-centro", rotacionPorCentro, { sufijo: "%" });
   }
-  document.getElementById("kpi-rotacion-centro-sub").textContent = `${etiquetaRango} -- sobre la plantilla activa actual.`;
+  document.getElementById("kpi-rotacion-centro-sub").textContent = `${etiquetaRango}.`;
 
   // --- Bajas por motivo (suma del rango) ----------------------------------
   const motivos = {};
@@ -240,6 +230,13 @@ function renderGraficosFiltrados() {
     chartBajasMotivo = barChart("chart-bajas-motivo", paresMotivo.map(([m, n]) => [motivoCorto(m), n]));
   }
 
+  // --- Horas contratadas por centro (reconstruida a fecha de "Hasta") ----
+  chartHorasCentro?.destroy();
+  if (serieHasta.horas_por_centro.length) {
+    chartHorasCentro = barChart("chart-horas-centro", serieHasta.horas_por_centro, { sufijo: "h" });
+  }
+  document.getElementById("kpi-horas-centro-sub").textContent =
+    hasta === d.mes_actual ? "A fecha de hoy." : `A fecha de fin de ${formatMes(hasta)}.`;
 }
 
 async function cargarUltimaImportacion() {
