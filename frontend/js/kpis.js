@@ -258,8 +258,12 @@ function renderTarjetas(d, mesesFiltrados, hasta, etiquetaRango) {
 
   document.getElementById("kpi-headcount").textContent = headcountHasta;
 
-  document.getElementById("kpi-rotacion-anual").textContent = `${pct1(bajas, headcountHasta)}%`;
-  document.getElementById("kpi-rotacion-anual-sub").textContent = `${bajas} bajas -- ${etiquetaRango}`;
+  const rotacionPeriodo = pct1(bajas, headcountHasta);
+  document.getElementById("kpi-rotacion-anual").textContent = `${rotacionPeriodo}%`;
+  const nMeses = mesesFiltrados.length;
+  const anualizado = nMeses && nMeses !== 12 ? Math.round(rotacionPeriodo * (12 / nMeses) * 10) / 10 : null;
+  document.getElementById("kpi-rotacion-anual-sub").textContent =
+    `${bajas} bajas -- ${etiquetaRango}` + (anualizado !== null ? ` (≈${anualizado}% anualizado a 12 meses)` : "");
 
   const ultimoMes = mesesFiltrados[mesesFiltrados.length - 1];
   const sMes = ultimoMes ? d.serie_mensual[ultimoMes] : { bajas: 0, pct: 0 };
@@ -519,6 +523,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     const meses = ultimoResumen.meses_disponibles;
     mesPickerDesde.value = meses[Math.max(0, meses.length - 12)];
     mesPickerHasta.value = meses[meses.length - 1];
+    renderGraficosFiltrados();
+  });
+  document.getElementById("kpi-filtro-anio-actual").addEventListener("click", () => {
+    if (!ultimoResumen) return;
+    const meses = ultimoResumen.meses_disponibles;
+    const anio = ultimoResumen.mes_actual.slice(0, 4);
+    const inicioAnio = `${anio}-01`;
+    mesPickerDesde.value = meses.includes(inicioAnio) ? inicioAnio : meses[0];
+    mesPickerHasta.value = ultimoResumen.mes_actual;
     renderGraficosFiltrados();
   });
 
