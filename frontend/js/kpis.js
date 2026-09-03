@@ -222,7 +222,7 @@ function crearMesPicker(idPrefix, onSeleccion) {
 }
 
 document.addEventListener("click", () => {
-  document.querySelectorAll(".kpi-mespicker-panel").forEach((p) => { p.hidden = true; });
+  document.querySelectorAll(".kpi-mespicker-panel, .kpi-info-panel").forEach((p) => { p.hidden = true; });
 });
 
 let mesPickerDesde, mesPickerHasta;
@@ -530,6 +530,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     importarExcel(file);
     e.target.value = "";
   });
+
+  document.getElementById("kpi-jornada-info-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const panel = document.getElementById("kpi-jornada-panel");
+    const abrir = panel.hidden;
+    document.querySelectorAll(".kpi-mespicker-panel, .kpi-info-panel").forEach((p) => { p.hidden = true; });
+    panel.hidden = !abrir;
+  });
+  document.getElementById("kpi-jornada-panel").addEventListener("click", (e) => e.stopPropagation());
 
   mesPickerDesde = crearMesPicker("kpi-filtro-desde", renderGraficosFiltrados);
   mesPickerHasta = crearMesPicker("kpi-filtro-hasta", renderGraficosFiltrados);
