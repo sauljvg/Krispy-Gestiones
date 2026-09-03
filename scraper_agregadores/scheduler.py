@@ -14,9 +14,13 @@ vez el borde esté confirmado -- no de esta.
 
 Los agregadores de una misma pasada corren en paralelo (sitios distintos, sin
 rate-limit cruzado); dentro de cada agregador las direcciones van secuenciales con pausa.
-Cada llamada a la API (POST /chequeo, etc.) usa su propia sesión HTTP — no hay estado
-compartido entre tareas paralelas, así que aquí no hay nada equivalente a los líos de
-concurrencia de SQLite que tuvimos cuando esto escribía a una DB local.
+Desde el 02/09 las TIENDAS de una misma pasada también corren en paralelo entre sí
+(hasta config.MAX_TIENDAS_PARALELO a la vez, ver _chequeo) -- antes se procesaban una
+detrás de otra y, como Uber Eats (el agregador más lento, ventana visible real) iba
+dentro de cada tienda, el tiempo total de la pasada era ~6 x (tiempo de Uber Eats por
+tienda). Cada llamada a la API (POST /chequeo, etc.) usa su propia sesión HTTP — no hay
+estado compartido entre tareas paralelas, así que aquí no hay nada equivalente a los
+líos de concurrencia de SQLite que tuvimos cuando esto escribía a una DB local.
 
 Reparto entre varios procesos (worker_index/worker_count, ver daemon.py --worker-index):
 pensado para cuando el ordenador personal (OP) se enciende como "boost" en paralelo al
@@ -74,7 +78,11 @@ def es_horario_apertura(ahora: datetime = None) -> bool:
 
 
 async def _chequear_agregador_aislado(
-    tienda: str, agregador_nombre: str, cercano: bool, solo_sin_datos: bool = False
+    tienda: str,
+    agregador_nombre: str,
+    cercano: bool,
+    solo_sin_datos: bool = False,
+    ventana_slot: int | None = None,
 ) -> bool:
     try:
         await chequear_tienda(
@@ -83,6 +91,7 @@ async def _chequear_agregador_aislado(
             cercano=cercano,
             delay_seg=config.DELAY_ENTRE_CHEQUEOS_SEG,
             solo_sin_datos=solo_sin_datos,
+            ventana_slot=ventana_slot,
         )
         return True
     except Exception as exc:
@@ -152,14 +161,63 @@ async def _chequeo(modo: str, cercano: bool):
         # recorre las tiendas para las que tiene al menos un agregador
         # asignado (ver _agregadores_por_tienda) -- con worker_count=1 esto
         # son las 6 tiendas y los 3 agregadores de siempre.
-        for tienda, agregadores_asignados in _agregadores_por_tienda().items():
-            await api_client.actualizar_tienda_actual(sesion_id, tienda)
-            resultados = await asyncio.gather(
-                *(
-                    _chequear_agregador_aislado(tienda, agregador_nombre, cercano, solo_sin_datos=True)
-                    for agregador_nombre in agregadores_asignados
+        #
+        # Las TIENDAS de esta pasada corren en paralelo entre sí (hasta
+        # config.MAX_TIENDAS_PARALELO a la vez, ver semaforo_tiendas más abajo),
+        # no una detrás de otra como antes del 02/09 -- dentro de cada tienda,
+        # sus agregadores asignados ya corrían en paralelo desde antes (ver
+        # _chequear_agregador_aislado). Motivo: Uber Eats necesita una ventana
+        # de Chrome visible real (no headless, ver config.AGREGADORES) y es el
+        # más lento de los tres -- con las 6 tiendas en serie, el tiempo total
+        # de la pasada era ~6 x (tiempo de Uber Eats por tienda), ~33 min
+        # medidos en vivo por el usuario el 02/09. Cada tarea de tienda pide un
+        # slot de la rejilla compartida (utils/ventana.py) SOLO si tiene Uber
+        # Eats asignado, para que sus ventanas visibles no se apilen en la
+        # misma posición mientras corren a la vez (ver chequear_tienda,
+        # parámetro ventana_slot) -- Glovo/JustEat son headless, no lo necesitan.
+        #
+        # Esto se limita a _worker_count == 1 (el caso normal, portátil de trabajo
+        # 24/7 con un solo daemon -- ver daemon.py) a propósito: con varios workers
+        # en paralelo en la misma máquina (--worker-index, ver iniciar_daemon.bat),
+        # daemon.py YA le asigna a UberEatsScraper una celda FIJA de esta misma
+        # rejilla por proceso completo (mutando la clase, calcular_posicion_ventana
+        # (worker_index)); si aquí ADEMÁS repartiéramos slots por tienda dentro de
+        # cada worker, dos workers distintos volverían a pisarse en la misma celda
+        # (cada uno reempieza su contador de slots en 0) -- justo el problema que
+        # esa rejilla existe para evitar. Con un solo worker no hay ninguna posición
+        # de clase que pisar (daemon.py solo la fija si worker_count > 1), así que
+        # aquí es seguro reasignarla por instancia sin tocar daemon.py.
+        max_paralelo = config.MAX_TIENDAS_PARALELO if _worker_count == 1 else 1
+        semaforo_tiendas = asyncio.Semaphore(max_paralelo)
+        slot_ubereats_counter = {"n": 0}
+
+        async def _chequear_grupo_tienda(tienda: str, agregadores_asignados: list[str]) -> list[bool]:
+            async with semaforo_tiendas:
+                await api_client.actualizar_tienda_actual(sesion_id, tienda)
+                slot_ubereats = None
+                if _worker_count == 1 and "ubereats" in agregadores_asignados:
+                    slot_ubereats = slot_ubereats_counter["n"]
+                    slot_ubereats_counter["n"] += 1
+                return await asyncio.gather(
+                    *(
+                        _chequear_agregador_aislado(
+                            tienda,
+                            agregador_nombre,
+                            cercano,
+                            solo_sin_datos=True,
+                            ventana_slot=slot_ubereats if agregador_nombre == "ubereats" else None,
+                        )
+                        for agregador_nombre in agregadores_asignados
+                    )
                 )
+
+        resultados_por_tienda = await asyncio.gather(
+            *(
+                _chequear_grupo_tienda(tienda, agregadores_asignados)
+                for tienda, agregadores_asignados in _agregadores_por_tienda().items()
             )
+        )
+        for resultados in resultados_por_tienda:
             exitosos += sum(1 for r in resultados if r)
             fallidos += sum(1 for r in resultados if not r)
     except Exception as exc:

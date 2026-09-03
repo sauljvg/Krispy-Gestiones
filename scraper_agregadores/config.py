@@ -62,6 +62,24 @@ SCRAPER_LOG_LEVEL = os.getenv("SCRAPER_LOG_LEVEL", "INFO")
 SCRAPER_TIMEOUT = int(os.getenv("SCRAPER_TIMEOUT", "30"))
 SCRAPER_RETRY_MAX = int(os.getenv("SCRAPER_RETRY_MAX", "3"))
 
+# Cuántas tiendas corre el scheduler EN PARALELO dentro de una misma pasada (ver
+# scheduler.py::_chequeo) -- antes de 02/09 las 6 tiendas de TIENDAS_SCHEDULER se
+# procesaban una detrás de otra (solo los 3 agregadores DENTRO de cada tienda corrían a
+# la vez), y como Uber Eats es el más lento de los tres (ventana de Chrome visible real,
+# no headless -- ver AGREGADORES arriba), el tiempo total de una pasada completa era
+# aprox. 6 x (tiempo de Uber Eats por tienda) -- ~33 min medidos en vivo por el usuario
+# el 02/09. Con MAX_TIENDAS_PARALELO tiendas a la vez, el límite pasa a ser ~ceil(6 /
+# MAX_TIENDAS_PARALELO) x (tiempo de Uber Eats por tienda).
+#
+# Por defecto 3 (no las 6 de golpe): esto multiplica por hasta 3 el número de ventanas
+# de Chrome visibles de Uber Eats abiertas a la vez en el portátil que corre el daemon
+# 24/7 (ver docstring de scheduler.py) -- buscar_limite_cobertura.py ya probó en vivo
+# que 8 procesos Chrome en paralelo van bien de CPU/RAM (ver utils/ventana.py), pero
+# esos son procesos sueltos lanzados a mano, no algo desatendido 24/7. Subir esto a 6
+# (máximo paralelismo real, una tienda por celda de la rejilla) es seguro de probar si
+# el equipo aguanta bien con 3 sin problemas.
+MAX_TIENDAS_PARALELO = int(os.getenv("MAX_TIENDAS_PARALELO", "3"))
+
 KG_API_BASE_URL = os.getenv("KG_API_BASE_URL", "http://localhost:8000")
 KG_API_KEY = os.getenv("KG_API_KEY", "")
 

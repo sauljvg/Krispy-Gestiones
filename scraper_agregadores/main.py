@@ -9,6 +9,7 @@ from scrapers.glovo import GlovoScraper
 from scrapers.justeat import JustEatScraper
 from scrapers.ubereats import UberEatsScraper
 from utils import api_client, cola_local
+from utils.ventana import calcular_posicion_ventana
 
 logging.basicConfig(level=config.SCRAPER_LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("main")
@@ -31,6 +32,7 @@ async def chequear_tienda(
     radio_reuso_m: float = 100,
     permitir_reuso: bool = True,
     buffer_subida: list | None = None,
+    ventana_slot: int | None = None,
 ) -> list[dict]:
     """direcciones_override: si se pasa, se usa esta lista tal cual en vez de pedirle
     una nueva a la API (cercano/solo_sin_datos se ignoran en ese caso) -- para pasadas
@@ -59,6 +61,20 @@ async def chequear_tienda(
     siempre (sube cada punto al momento) -- esto es opt-in, no afecta al daemon
     normal (scheduler.py) ni a ningún otro uso existente de esta función.
 
+    ventana_slot: cuando el caller va a correr varios chequeos con ventana visible EN
+    PARALELO dentro del mismo proceso (ver scheduler.py, que ahora procesa varias
+    tiendas a la vez), asigna a la ventana de Chrome de ESTE chequeo una celda propia de
+    la rejilla compartida (ver utils/ventana.py) en vez de dejarla en la posición fija
+    por defecto de BaseAggregatorScraper -- si dos chequeos con ventana visible activa
+    (hoy solo Uber Eats, ver scrapers/ubereats.py) coinciden en el tiempo sin esto,
+    sus ventanas se apilan exactamente encima una de otra. Se aplica como atributo de
+    INSTANCIA (no de clase) sobre el `scraper` de abajo -- cada llamada a
+    chequear_tienda crea su propia instancia, así que esto no se pisa entre tareas
+    paralelas aunque compartan la misma clase de scraper (a diferencia de
+    buscar_limite_cobertura.py / daemon.py, que lo hacen a nivel de proceso completo
+    mutando la clase, porque ahí cada worker es un proceso Python distinto). Se ignora
+    para scrapers headless (Glovo/JustEat): no tienen ventana visible que posicionar.
+
     Devuelve una lista con un dict por dirección procesada:
     {"direccion_id", "error_tecnico"} -- error_tecnico=True solo cuando el SCRAPER
     en sí falló de verdad (bloqueo/timeout tras agotar sus reintentos internos, ver
@@ -81,6 +97,10 @@ async def chequear_tienda(
     scraper = SCRAPERS[agregador_nombre](
         timeout_seg=config.SCRAPER_TIMEOUT, retry_max=config.SCRAPER_RETRY_MAX
     )
+    if ventana_slot is not None:
+        posicion, tamano = calcular_posicion_ventana(ventana_slot)
+        scraper.posicion_ventana_visible = posicion
+        scraper.tamano_ventana_visible = tamano
 
     fallos_consecutivos = 0
 

@@ -14,7 +14,15 @@ logger = logging.getLogger(__name__)
 # así que fijar la ciudad en la URL no pierde cobertura.
 URL_INICIO = "https://glovoapp.com/es/es/madrid"
 
-SEL_COOKIE_DENY = 'button:has-text("Denegar")'
+# El banner de cookies es Usercentrics (confirmado en vivo 03/09 inspeccionando
+# el DOM real): expone id="deny"/clase "uc-deny-button" ESTABLES sin importar el
+# idioma con el que cargue el banner ese momento -- antes solo se buscaba el
+# texto "Denegar", que fallaba en silencio (el except Exception de
+# _aceptar_cookies se comía el error) las veces que el banner salía en inglés
+# ("Deny") pese al locale="es-ES" fijado en base.py, dejando el banner abierto
+# tapando el resto del flujo (causa raíz de un fallo real, ver captura
+# glovo_tienda_no_confirmada_20260826_123213). Se prueban los dos por si acaso.
+SEL_COOKIE_DENY = '#deny, button.uc-deny-button, button:has-text("Denegar")'
 
 SEL_ADDRESS_CHANGE_BUTTON = 'button[class*="AddressPicker_addressButton"]'
 # El input inicial (home) es readonly: al pulsarlo abre un panel con el input real editable.
@@ -32,6 +40,24 @@ SEL_STORE_CARD = 'a[class*="StoreTile_wrapper"]'
 SEL_STORE_ETA_TEXT = '[class*="StoreEta_text"]'
 
 MARCA_BUSQUEDA = "Krispy Kreme"
+
+# CAUSA RAÍZ real de la inmensa mayoría de "tienda no confirmada" (confirmado
+# 03/09 revisando TODAS las capturas de un día real de fallos -- ~49 de 50
+# mostraban exactamente este banner, ninguna un bloqueo/challenge de verdad, y
+# reproducido en vivo en una dirección real sin cobertura, en español e
+# inglés): cuando la dirección buscada no tiene NINGUNA tienda repartiendo ahí
+# (ni Krispy Kreme ni ninguna otra), Glovo no deja la página en blanco ni
+# rota -- muestra este banner de "sin resultados", una respuesta VÁLIDA de
+# "aquí no llega nadie", igual de fiable que ver otras tiendas sin Krispy
+# Kreme entre ellas. El código de antes solo confiaba en "hay otras tarjetas
+# listadas" como prueba de que la búsqueda funcionó; cuando el banner de sin
+# resultados aparecía (total_tarjetas=0 siempre en ese caso), lo trataba como
+# fallo técnico -- captura, reintento, backoff -- por algo que en realidad ya
+# era el dato bueno. En minúsculas y sin tilde para comparar tolerante a
+# mayúsculas; cubre español e inglés porque el idioma de la interfaz no
+# siempre es español pese a locale="es-ES" (ver SEL_COOKIE_DENY más arriba,
+# mismo motivo de fondo).
+MARCADORES_SIN_RESULTADOS = ("no se han encontrado resultados", "no results found")
 
 
 class GlovoScraper(BaseAggregatorScraper):
@@ -259,14 +285,31 @@ class GlovoScraper(BaseAggregatorScraper):
         try:
             await tarjeta.wait_for(state="visible", timeout=8000)
         except Exception:
-            # Antes de asumir fallo técnico: si SÍ hay otras tiendas listadas, la
-            # búsqueda funcionó de verdad (página cargada, resultados reales) y
-            # Krispy Kreme simplemente no está entre ellas -- confirmado con un
-            # HTML de diagnóstico real (14 tarjetas de otras tiendas, ninguna de
-            # Krispy Kreme). Ahí sí es un "no disponible" fiable, no ambiguo.
-            # Solo se trata como fallo técnico (con reintentos, ver
-            # _verificar_con_retry) cuando no hay NINGUNA tarjeta -- eso sí puede
-            # ser una carga rota/a medias, mismo motivo que en Uber Eats.
+            # Primero: ¿es el banner de "sin resultados"? (ver MARCADORES_SIN_RESULTADOS
+            # arriba -- causa raíz confirmada de la inmensa mayoría de estos fallos).
+            # Esto es una respuesta VÁLIDA, no un fallo técnico -- se devuelve
+            # directamente, sin capturas ni reintentos.
+            try:
+                texto_pagina = (await page.evaluate("() => document.body.innerText")).lower()
+            except Exception:
+                texto_pagina = ""
+            if any(marcador in texto_pagina for marcador in MARCADORES_SIN_RESULTADOS):
+                logger.info(
+                    "glovo: banner de \"sin resultados\" -- ninguna tienda reparte en esta "
+                    "dirección (ni Krispy Kreme ni ninguna otra), respuesta válida de Glovo, url=%s",
+                    page.url,
+                )
+                return False
+
+            # Si no es el banner de sin resultados: antes de asumir fallo técnico,
+            # ¿SÍ hay otras tiendas listadas? -- la búsqueda funcionó de verdad
+            # (página cargada, resultados reales) y Krispy Kreme simplemente no
+            # está entre ellas -- confirmado con un HTML de diagnóstico real (14
+            # tarjetas de otras tiendas, ninguna de Krispy Kreme). Ahí también es
+            # un "no disponible" fiable, no ambiguo. Solo se trata como fallo
+            # técnico (con reintentos, ver _verificar_con_retry) cuando no hay
+            # NINGUNA tarjeta Y tampoco el banner de sin resultados -- eso sí
+            # puede ser una carga rota/a medias, mismo motivo que en Uber Eats.
             total_tarjetas = await page.locator(SEL_STORE_CARD).count()
             if total_tarjetas > 0:
                 logger.info(
