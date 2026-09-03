@@ -145,23 +145,98 @@ async function cargarResumen() {
   renderGraficosFiltrados();
 }
 
+// --- Selector de mes "tipo calendario" (año + rejilla de 12 meses) -------
+// Con un <select> plano la lista crece para siempre (dentro de un par de
+// años sería eterna) -- esto en cambio siempre son 12 botones + un año que
+// se navega con flechas, sin importar cuántos años de datos haya.
+const MESES_CORTOS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+
+function crearMesPicker(idPrefix, onSeleccion) {
+  const btn = document.getElementById(`${idPrefix}-btn`);
+  const panel = document.getElementById(`${idPrefix}-panel`);
+  const anioEl = panel.querySelector(".kpi-mespicker-anio-actual");
+  const grid = panel.querySelector(".kpi-mespicker-grid");
+  const navPrev = panel.querySelector('[data-dir="-1"]');
+  const navNext = panel.querySelector('[data-dir="1"]');
+
+  let mesesDisponibles = [];
+  let valorActual = null;
+  let anioMostrado = null;
+
+  function anioMinMax() {
+    const anios = mesesDisponibles.map((m) => parseInt(m.slice(0, 4), 10));
+    return [Math.min(...anios), Math.max(...anios)];
+  }
+
+  function render() {
+    anioEl.textContent = anioMostrado;
+    const [anioMin, anioMax] = anioMinMax();
+    navPrev.disabled = anioMostrado <= anioMin;
+    navNext.disabled = anioMostrado >= anioMax;
+    grid.innerHTML = "";
+    for (let m = 1; m <= 12; m++) {
+      const clave = `${anioMostrado}-${String(m).padStart(2, "0")}`;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "kpi-mespicker-mes" + (clave === valorActual ? " active" : "");
+      b.textContent = MESES_CORTOS[m - 1];
+      b.disabled = !mesesDisponibles.includes(clave);
+      b.addEventListener("click", () => {
+        valorActual = clave;
+        btn.textContent = formatMesLargo(clave);
+        panel.hidden = true;
+        onSeleccion(clave);
+      });
+      grid.appendChild(b);
+    }
+  }
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const abrir = panel.hidden;
+    document.querySelectorAll(".kpi-mespicker-panel").forEach((p) => { p.hidden = true; });
+    if (abrir) {
+      anioMostrado = valorActual ? parseInt(valorActual.slice(0, 4), 10) : anioMostrado;
+      render();
+      panel.hidden = false;
+    }
+  });
+  panel.addEventListener("click", (e) => e.stopPropagation());
+  navPrev.addEventListener("click", () => { anioMostrado--; render(); });
+  navNext.addEventListener("click", () => { anioMostrado++; render(); });
+
+  return {
+    set(meses, valorInicial) {
+      mesesDisponibles = meses;
+      valorActual = valorInicial;
+      anioMostrado = parseInt(valorInicial.slice(0, 4), 10);
+      btn.textContent = formatMesLargo(valorInicial);
+    },
+    get value() { return valorActual; },
+    set value(v) {
+      valorActual = v;
+      anioMostrado = parseInt(v.slice(0, 4), 10);
+      btn.textContent = formatMesLargo(v);
+    },
+  };
+}
+
+document.addEventListener("click", () => {
+  document.querySelectorAll(".kpi-mespicker-panel").forEach((p) => { p.hidden = true; });
+});
+
+let mesPickerDesde, mesPickerHasta;
+
 function configurarFiltroFechas(d) {
-  const selectDesde = document.getElementById("kpi-filtro-desde");
-  const selectHasta = document.getElementById("kpi-filtro-hasta");
   const meses = d.meses_disponibles;
   if (!meses.length) return;
 
-  const valorPrevioDesde = selectDesde.value;
-  const valorPrevioHasta = selectHasta.value;
-  const optionsHtml = meses.map((m) => `<option value="${m}">${formatMesLargo(m)}</option>`).join("");
-  selectDesde.innerHTML = optionsHtml;
-  selectHasta.innerHTML = optionsHtml;
-
-  // Por defecto, últimos 12 meses (o todos los que haya si hay menos).
   const inicioDefault = meses[Math.max(0, meses.length - 12)];
   const finDefault = meses[meses.length - 1];
-  selectDesde.value = meses.includes(valorPrevioDesde) ? valorPrevioDesde : inicioDefault;
-  selectHasta.value = meses.includes(valorPrevioHasta) ? valorPrevioHasta : finDefault;
+  const valorDesde = mesPickerDesde.value && meses.includes(mesPickerDesde.value) ? mesPickerDesde.value : inicioDefault;
+  const valorHasta = mesPickerHasta.value && meses.includes(mesPickerHasta.value) ? mesPickerHasta.value : finDefault;
+  mesPickerDesde.set(meses, valorDesde);
+  mesPickerHasta.set(meses, valorHasta);
 }
 
 function pct1(n, base) {
@@ -210,8 +285,8 @@ function renderTarjetas(d, mesesFiltrados, hasta, etiquetaRango) {
 function renderGraficosFiltrados() {
   if (!ultimoResumen) return;
   const d = ultimoResumen;
-  const desde = document.getElementById("kpi-filtro-desde").value || d.meses_disponibles[0];
-  const hasta = document.getElementById("kpi-filtro-hasta").value || d.meses_disponibles[d.meses_disponibles.length - 1];
+  const desde = mesPickerDesde.value || d.meses_disponibles[0];
+  const hasta = mesPickerHasta.value || d.meses_disponibles[d.meses_disponibles.length - 1];
   const mesesFiltrados = d.meses_disponibles.filter((m) => m >= desde && m <= hasta);
   const etiquetaRango = mesesFiltrados.length
     ? (mesesFiltrados.length === 1 ? formatMes(mesesFiltrados[0]) : `${formatMes(mesesFiltrados[0])} -- ${formatMes(mesesFiltrados[mesesFiltrados.length - 1])}`)
@@ -437,13 +512,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     e.target.value = "";
   });
 
-  document.getElementById("kpi-filtro-desde").addEventListener("change", renderGraficosFiltrados);
-  document.getElementById("kpi-filtro-hasta").addEventListener("change", renderGraficosFiltrados);
+  mesPickerDesde = crearMesPicker("kpi-filtro-desde", renderGraficosFiltrados);
+  mesPickerHasta = crearMesPicker("kpi-filtro-hasta", renderGraficosFiltrados);
   document.getElementById("kpi-filtro-reset").addEventListener("click", () => {
     if (!ultimoResumen) return;
     const meses = ultimoResumen.meses_disponibles;
-    document.getElementById("kpi-filtro-desde").value = meses[Math.max(0, meses.length - 12)];
-    document.getElementById("kpi-filtro-hasta").value = meses[meses.length - 1];
+    mesPickerDesde.value = meses[Math.max(0, meses.length - 12)];
+    mesPickerHasta.value = meses[meses.length - 1];
     renderGraficosFiltrados();
   });
 
