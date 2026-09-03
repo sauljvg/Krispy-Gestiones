@@ -80,6 +80,12 @@ class GlovoScraper(BaseAggregatorScraper):
         await page.goto(URL_INICIO, wait_until="domcontentloaded")
         await self._comprobar_challenge(page)
         await self._aceptar_cookies(page)
+        # Segunda comprobación, barata (timeout corto -- no añade espera si el banner
+        # ya no está, que es el caso normal): por si el banner de cookies llegó
+        # incluso más tarde de los 15s de arriba (03/09, ver comentario en
+        # _aceptar_cookies) -- red de seguridad extra antes del paso que de verdad
+        # se bloquea si el banner sigue abierto (escribir la dirección).
+        await self._aceptar_cookies_rapido(page)
         await self._establecer_direccion(page, direccion)
         encontrado = await self._buscar_tienda(page)
 
@@ -160,9 +166,37 @@ class GlovoScraper(BaseAggregatorScraper):
         await locator.evaluate("e => e.click()")
 
     async def _aceptar_cookies(self, page):
+        # Timeout subido de 8s a 15s (03/09, confirmado en vivo bajo carga real con
+        # varios Chrome a la vez -- ver captura glovo_tienda_no_confirmada_20260903_185202):
+        # el banner de Usercentrics es asíncrono (se inyecta tras cargar su propio
+        # script) y bajo contención de CPU/red (varios scrapers corriendo a la vez en
+        # la misma máquina) a veces tarda más de 8s en aparecer. Con el timeout viejo,
+        # el wait_for expiraba, el except lo tragaba en silencio, y el código seguía
+        # como si ya estuviera aceptado -- pero el banner aparecía IGUAL unos
+        # instantes después y se quedaba ahí tapando el resto del flujo (dirección,
+        # búsqueda) para todo el resto del chequeo, que entonces fallaba como
+        # "tienda no confirmada" ambiguo (con sus 3 reintentos) por una causa que no
+        # tenía nada que ver con la tienda. Confirmado que esto explica una parte
+        # importante del tiempo real de una ronda de Glovo bajo carga (revalidar_completo.py
+        # con 20 workers), no solo un caso aislado.
         try:
             boton = page.locator(SEL_COOKIE_DENY).first
-            await boton.wait_for(state="visible", timeout=8000)
+            await boton.wait_for(state="visible", timeout=15000)
+            await boton.click()
+        except Exception as exc:
+            # Antes "except Exception: pass" sin ningún rastro -- si el banner de
+            # verdad nunca aparece (o tarda más de 15s incluso), ahora queda constancia
+            # en el log en vez de desaparecer en silencio como el bug de arriba.
+            logger.debug("glovo: no se pudo aceptar/denegar cookies (se sigue igualmente): %r", exc)
+
+    async def _aceptar_cookies_rapido(self, page):
+        """Igual que _aceptar_cookies pero con timeout corto (1.5s) -- red de
+        seguridad barata para el caso, más raro todavía, de que el banner llegue
+        incluso después de los 15s de la comprobación principal. Con timeout corto no
+        penaliza el caso normal (banner ya aceptado o nunca llegó a aparecer)."""
+        try:
+            boton = page.locator(SEL_COOKIE_DENY).first
+            await boton.wait_for(state="visible", timeout=1500)
             await boton.click()
         except Exception:
             pass
