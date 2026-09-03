@@ -63,9 +63,20 @@
   .likert-tabla-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .likert-tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
   .likert-tabla th { font-weight: 500; color: #555; padding: 6px 4px; text-align: center; vertical-align: bottom; width: 15%; }
-  .likert-tabla td { padding: 10px 4px; border-top: 1px solid #eee; text-align: center; }
-  .likert-tabla td.likert-etiqueta { text-align: left; font-size: 14px; color: #222; padding-right: 10px; width: 25%; }
-  .likert-tabla input[type="radio"] { width: 18px; height: 18px; cursor: pointer; }
+  .likert-tabla td { padding: 4px; border-top: 1px solid #eee; text-align: center; }
+  .likert-tabla td.likert-etiqueta { text-align: left; font-size: 14px; color: #222; padding: 10px 10px 10px 4px; width: 25%; }
+  .likert-tabla input[type="radio"] { width: 18px; height: 18px; cursor: pointer; accent-color: var(--color-boton, #5b2a2a); }
+  /* La celda entera es clicable (no solo el circulo) -- el <label> ocupa
+     todo el <td> y resalta al pasar el raton/seleccionar, para que el
+     objetivo de clic sea todo el cuadro, no un punto de 18px. */
+  .likert-celda {
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; height: 100%; padding: 10px 4px; cursor: pointer;
+    border-radius: 8px; transition: background .15s ease;
+  }
+  .likert-celda:hover { background: color-mix(in srgb, var(--color-boton, #5b2a2a) 8%, transparent); }
+  .likert-tabla td:has(input:checked) .likert-celda { background: color-mix(in srgb, var(--color-boton, #5b2a2a) 14%, transparent); }
+  .likert-etiqueta-movil { display: none; }
 
   /* En pantallas estrechas no caben 5 columnas + etiqueta sin aplastar el
      texto ("Totalmente en desacuerdo" quedaba cortado fuera de la tarjeta,
@@ -81,16 +92,14 @@
     .likert-tabla tr { padding: 14px 0; border-top: 1px solid #eee; }
     .likert-tabla tr:first-child { border-top: none; padding-top: 0; }
     .likert-tabla td { border-top: none; padding: 0; text-align: left; }
-    .likert-tabla td.likert-etiqueta { width: 100%; padding-bottom: 10px; font-weight: 600; }
-    .likert-tabla td:not(.likert-etiqueta) {
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
-      padding: 10px 2px; border-top: 1px solid #f2f2f2;
-    }
-    .likert-tabla td:not(.likert-etiqueta)::before { content: attr(data-label); font-size: 13px; color: #333; }
+    .likert-tabla td.likert-etiqueta { width: 100%; padding: 0 0 10px; font-weight: 600; }
+    .likert-tabla td:not(.likert-etiqueta) { border-top: 1px solid #f2f2f2; }
+    .likert-celda { justify-content: space-between; gap: 12px; padding: 10px 2px; border-radius: 0; }
+    .likert-etiqueta-movil { display: block; font-size: 13px; color: #333; }
   }
 
   .opcion-multiple-lista label { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 8px; cursor: pointer; }
-  .opcion-multiple-lista input[type="radio"], .opcion-multiple-lista input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; flex-shrink: 0; }
+  .opcion-multiple-lista input[type="radio"], .opcion-multiple-lista input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; flex-shrink: 0; accent-color: var(--color-boton, #5b2a2a); }
 
   .prioridad-ayuda { font-size: 12px; color: #777; margin: 0 0 10px; }
   .prioridad-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -166,6 +175,6 @@
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/icons.js?v=20260903a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/encuesta.js?v=20260903e"></script>
+<script src="js/encuesta.js?v=20260903f"></script>
 </body>
 </html>

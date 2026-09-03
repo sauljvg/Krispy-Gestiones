@@ -312,7 +312,7 @@ function renderGrupoLikert(preguntas) {
     <tr data-pregunta-id="${q.id}">
       <td class="likert-etiqueta">${escapeHTML(etiquetaVisible(q))}${q.obligatoria ? ' <span class="req">*</span>' : ""}</td>
       ${ordenVisual.map(
-        (i) => `<td data-label="${escapeHTML(escala[i])}"><input type="radio" name="pregunta-${q.id}" value="${i + 1}" ${respuestas[q.id] === String(i + 1) ? "checked" : ""}></td>`
+        (i) => `<td><label class="likert-celda"><span class="likert-etiqueta-movil">${escapeHTML(escala[i])}</span><input type="radio" name="pregunta-${q.id}" value="${i + 1}" ${respuestas[q.id] === String(i + 1) ? "checked" : ""}></label></td>`
       ).join("")}
     </tr>`
     )
