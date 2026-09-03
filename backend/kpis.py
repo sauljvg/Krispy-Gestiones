@@ -13,6 +13,7 @@ propósito (pedido explícito del usuario):
 datos con el historial de cambios de puesto (el usuario lo confirmó: "por
 ahora no lo tenemos"). Se deja como placeholder en el frontend en vez de
 inventar un número."""
+import calendar
 import datetime
 import io
 import re
@@ -304,6 +305,46 @@ def _mes(fecha_iso):
     return None
 
 
+def _fin_de_mes(clave_mes):
+    anio, mes = (int(x) for x in clave_mes.split("-"))
+    ultimo_dia = calendar.monthrange(anio, mes)[1]
+    return f"{anio:04d}-{mes:02d}-{ultimo_dia:02d}"
+
+
+def _activos_a_fecha(empleados, fecha_corte):
+    """Quiénes estaban de alta en una fecha concreta -- se reconstruye con
+    la fecha de antigüedad (alta) y la fecha de baja que ya trae el Excel de
+    plantilla para cada empleado, así se puede saber la plantilla/horas de
+    cualquier mes pasado, no solo la de ahora mismo. Un empleado sin fecha
+    de antigüedad se asume de alta desde siempre (dato que a veces falta en
+    el Excel) en vez de excluirlo."""
+    activos = []
+    for e in empleados:
+        antiguedad = e.get("fecha_antiguedad")
+        baja = e.get("fecha_baja")
+        if antiguedad and antiguedad > fecha_corte:
+            continue
+        if baja and baja <= fecha_corte:
+            continue
+        activos.append(e)
+    return activos
+
+
+def _headcount_y_horas_por_centro(empleados_activos):
+    hc_centro = {}
+    horas_centro = {}
+    for e in empleados_activos:
+        c = e["centro"] or "(sin centro)"
+        hc_centro[c] = hc_centro.get(c, 0) + 1
+        pct = e["porcentaje_jornada"]
+        horas = (pct / 100 * HORAS_JORNADA_COMPLETA) if pct is not None else HORAS_JORNADA_COMPLETA
+        horas_centro[c] = horas_centro.get(c, 0) + horas
+    return (
+        sorted(hc_centro.items(), key=lambda x: -x[1]),
+        sorted([(c, round(h, 1)) for c, h in horas_centro.items()], key=lambda x: -x[1]),
+    )
+
+
 def compute_resumen():
     conn = get_connection()
     empleados = [dict(r) for r in conn.execute("SELECT * FROM kpi_empleados").fetchall()]
@@ -313,24 +354,20 @@ def compute_resumen():
     empleados = [e for e in empleados if e["centro"] not in CENTROS_EXCLUIDOS]
     bajas = [b for b in bajas if b["centro"] not in CENTROS_EXCLUIDOS]
 
-    activos = [e for e in empleados if not e["fecha_baja"]]
-    headcount_activo = len(activos)
-
-    headcount_por_centro = {}
-    for e in activos:
-        c = e["centro"] or "(sin centro)"
-        headcount_por_centro[c] = headcount_por_centro.get(c, 0) + 1
-
     hoy = datetime.date.today()
+    hoy_str = hoy.isoformat()
+
+    activos = _activos_a_fecha(empleados, hoy_str)
+    headcount_activo = len(activos)
+    headcount_por_centro_lista, horas_por_centro_lista = _headcount_y_horas_por_centro(activos)
+    headcount_por_centro = dict(headcount_por_centro_lista)
 
     # --- Serie mensual completa (todo el histórico de Entrevista de Salida) -
-    # Denominador simplificado a propósito: la plantilla activa ACTUAL, no
-    # una reconstrucción histórica mes a mes (para eso haría falta un
-    # histórico diario de headcount que hoy no existe) -- documentado tal
-    # cual en el frontend, es la misma aproximación que usan la mayoría de
-    # cuadros de mando de rotación cuando no hay ese histórico. Se calcula
-    # para TODOS los meses con datos (no solo los últimos 12) para que el
-    # frontend pueda filtrar por un rango de fechas cualquiera.
+    # Se calcula para TODOS los meses con datos (no solo los últimos 12) para
+    # que el frontend pueda filtrar por un rango de fechas cualquiera. Cada
+    # mes recalcula también su propia plantilla/horas "a fecha de fin de ese
+    # mes" (con fecha_antiguedad/fecha_baja) -- no es una foto fija, así el
+    # gráfico de horas por centro también responde al filtro de fechas.
     bajas_por_mes = {}
     bajas_centro_mes = {}
     bajas_motivo_mes = {}
@@ -364,11 +401,17 @@ def compute_resumen():
     serie_mensual = {}
     for clave in meses_disponibles:
         n = bajas_por_mes.get(clave, 0)
+        activos_mes = _activos_a_fecha(empleados, _fin_de_mes(clave))
+        hc_centro_mes, horas_centro_mes = _headcount_y_horas_por_centro(activos_mes)
         serie_mensual[clave] = {
             "bajas": n,
-            "pct": round(n / headcount_activo * 100, 1) if headcount_activo else 0,
+            "pct": round(n / len(activos_mes) * 100, 1) if activos_mes else 0,
             "por_centro": sorted(bajas_centro_mes.get(clave, {}).items(), key=lambda x: -x[1]),
             "por_motivo": sorted(bajas_motivo_mes.get(clave, {}).items(), key=lambda x: -x[1]),
+            "headcount_activo": len(activos_mes),
+            "headcount_por_centro": hc_centro_mes,
+            "horas_por_centro": horas_centro_mes,
+            "horas_totales": round(sum(h for _, h in horas_centro_mes), 1),
         }
     anios_disponibles = sorted({m[:4] for m in meses_disponibles}) or [str(hoy.year)]
 
@@ -391,26 +434,15 @@ def compute_resumen():
         round(len(bajas_ytd_sin_empresario) / headcount_activo * 100, 1) if headcount_activo else 0
     )
 
-    # --- Horas contratadas por centro (Porcentaje Jornada -> horas reales) -
-    horas_por_centro = {}
-    for e in activos:
-        c = e["centro"] or "(sin centro)"
-        pct = e["porcentaje_jornada"]
-        horas = (pct / 100 * HORAS_JORNADA_COMPLETA) if pct is not None else HORAS_JORNADA_COMPLETA
-        horas_por_centro[c] = horas_por_centro.get(c, 0) + horas
-    horas_por_centro_lista = sorted(
-        [(c, round(h, 1)) for c, h in horas_por_centro.items()], key=lambda x: -x[1]
-    )
-
     return {
         "headcount_activo": headcount_activo,
-        "horas_contratadas_totales": round(sum(horas_por_centro.values()), 1),
+        "horas_contratadas_totales": round(sum(h for _, h in horas_por_centro_lista), 1),
         "horas_jornada_completa": HORAS_JORNADA_COMPLETA,
         "mes_actual": mes_actual,
         "serie_mensual": serie_mensual,
         "meses_disponibles": meses_disponibles,
         "anios_disponibles": anios_disponibles,
-        "headcount_por_centro": sorted(headcount_por_centro.items(), key=lambda x: -x[1]),
+        "headcount_por_centro": headcount_por_centro_lista,
         "acumulado_anual_pct": acumulado_anual_pct,
         "bajas_ytd": len(bajas_ytd),
         "nspp_pct": nspp_pct,
