@@ -1,7 +1,12 @@
+import base64
+import json
 import logging
 import re
+import urllib.parse
 
-from scrapers.base import BaseAggregatorScraper, ResultadoChequeo
+from playwright.async_api import async_playwright
+
+from scrapers.base import CHALLENGE_KEYWORDS, _STEALTH, BaseAggregatorScraper, ResultadoChequeo
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +49,188 @@ class UberEatsScraper(BaseAggregatorScraper):
     # Uber Eats seguía bloqueando con challenge el 100% de las veces. Con la ventana
     # genuinamente en pantalla, dejó de bloquear.
     mantener_visible = True
+
+    # --- Sesión caliente + URL directa (03/09) ---------------------------------
+    # El modelo de "navegador nuevo por cada chequeo" costaba ~20s por dirección:
+    # lanzar Chromium + cargar la portada entera + los ~6 pasos de la interfaz de
+    # dirección (escribir, esperar sugerencias, elegir, confirmar), TODO repetido
+    # para cada punto. Confirmado en vivo 03/09 que Uber Eats acepta la dirección
+    # de entrega COMO PARÁMETRO DE URL (`pl=`, un base64 del JSON de dirección
+    # percent-encodeado, con lat/lng -- el placeId puede ir vacío, no lo valida),
+    # así que se puede ir directo a /es/search?q=Krispy%20Kreme&pl=... y leer el
+    # resultado sin tocar la interfaz.
+    #
+    # OJO -- por qué esto no funcionó cuando se intentó el 08/08 (ver comentario en
+    # _verificar): entrar directo a una URL profunda con una sesión FRÍA dispara el
+    # challenge anti-bot ("Espera mientras completamos una comprobación de seguridad
+    # automatizada", reproducido en vivo 03/09). La diferencia ahora es que la sesión
+    # se CALIENTA una sola vez (una visita normal a la portada, ~1.5s) y luego se
+    # REUTILIZA para todas las direcciones siguientes: con la sesión ya caliente, 0
+    # challenges en las pruebas (16 direcciones seguidas).
+    #
+    # Medido en vivo 03/09 contra las mismas direcciones reales: 2.1-3.5s por
+    # dirección frente a ~20s del flujo de interfaz, con los positivos y los
+    # negativos bien detectados (8/8 con cobertura en el centro, 0/8 en la periferia).
+    # Si algo falla (challenge, timeout, sesión muerta), se cierra la sesión y se cae
+    # al flujo de interfaz de siempre para esa dirección -- nunca se pierde un punto
+    # por culpa de este atajo.
+    _sesion_pw = None
+    _sesion_browser = None
+    _sesion_context = None
+    _sesion_page = None
+
+    # Cortacircuitos: si la ruta rápida falla varias veces seguidas (Cloudflare
+    # marcando la sesión, cambio en la web, etc.), se deja de intentar durante lo que
+    # quede de esta tienda y se va directo al flujo de siempre. Sin esto, un fallo
+    # sistemático costaría el intento fallido MÁS el flujo completo en CADA dirección
+    # -- peor que no haber optimizado nada.
+    _FALLOS_RAPIDOS_MAX = 3
+    _fallos_rapidos = 0
+
+    @staticmethod
+    def _construir_pl(direccion_texto: str, lat: float, lng: float) -> str:
+        """Parámetro `pl` de Uber Eats: base64(percent-encode(JSON de la dirección)).
+        Formato sacado de una URL real del propio sitio (03/09)."""
+        payload = {
+            "address": direccion_texto,
+            "reference": "",
+            "referenceType": "google_places",
+            "latitude": lat,
+            "longitude": lng,
+        }
+        crudo = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+        return base64.b64encode(urllib.parse.quote(crudo, safe="").encode()).decode()
+
+    async def _abrir_sesion(self):
+        """Lanza UNA ventana y la deja caliente (visita normal a la portada) para
+        reutilizarla en todas las direcciones siguientes."""
+        args = [
+            "--disable-blink-features=AutomationControlled",
+            f"--window-position={self.posicion_ventana_visible}",
+            f"--window-size={self.tamano_ventana_visible}",
+        ]
+        self._sesion_pw = await async_playwright().start()
+        self._sesion_browser = await self._sesion_pw.chromium.launch(headless=False, args=args, proxy=self.proxy)
+        self._sesion_context = await self._sesion_browser.new_context(locale="es-ES")
+        await _STEALTH.apply_stealth_async(self._sesion_context)
+        self._sesion_page = await self._sesion_context.new_page()
+
+        await self._sesion_page.goto(BASE_URL + "/es", wait_until="domcontentloaded", timeout=45000)
+        # Espera a que la portada cargue de verdad (y a que pase el challenge si sale
+        # en el calentamiento, que es el único momento donde es esperable).
+        for _ in range(30):
+            texto = await self._sesion_page.evaluate("() => document.body.innerText")
+            bajo = texto.lower()
+            if not any(clave in bajo for clave in CHALLENGE_KEYWORDS) and len(texto) > 500:
+                return
+            await self._sesion_page.wait_for_timeout(1000)
+        # Si tras 30s la portada sigue en un challenge, la sesión no sirve -- que el
+        # llamador caiga al flujo de siempre en vez de arrastrar una sesión marcada.
+        raise RuntimeError("ubereats: no se pudo calentar la sesión (challenge persistente)")
+
+    async def cerrar_sesion(self):
+        """Cierra la sesión caliente si está abierta. Lo llama chequear_tienda al
+        terminar con una tienda (ver main.py) -- también se llama solo si un chequeo
+        falla y hay que caer al flujo de siempre."""
+        for cerrar in (
+            getattr(self._sesion_context, "close", None),
+            getattr(self._sesion_browser, "close", None),
+            getattr(self._sesion_pw, "stop", None),
+        ):
+            if cerrar is not None:
+                try:
+                    await cerrar()
+                except Exception:
+                    pass
+        self._sesion_pw = self._sesion_browser = self._sesion_context = self._sesion_page = None
+
+    async def verificar_disponibilidad(self, tienda_nombre: str, direccion: str, lat=None, lng=None) -> ResultadoChequeo:
+        """Ruta rápida (sesión caliente + URL directa) con caída automática al flujo
+        de interfaz de siempre. Sin lat/lng no se puede construir el `pl`, así que
+        esos casos van directos al flujo de siempre."""
+        if lat is None or lng is None or self._fallos_rapidos >= self._FALLOS_RAPIDOS_MAX:
+            return await super().verificar_disponibilidad(tienda_nombre, direccion, lat, lng)
+
+        try:
+            if self._sesion_page is None:
+                await self._abrir_sesion()
+            resultado = await self._verificar_por_url(direccion, lat, lng)
+            self._fallos_rapidos = 0  # una buena reinicia la racha
+            return resultado
+        except Exception as exc:
+            self._fallos_rapidos += 1
+            logger.warning(
+                "ubereats: ruta rápida falló para '%s' (%r) -- se cae al flujo de interfaz de siempre%s",
+                direccion, exc,
+                f" (fallo {self._fallos_rapidos}/{self._FALLOS_RAPIDOS_MAX})"
+                if self._fallos_rapidos < self._FALLOS_RAPIDOS_MAX
+                else " -- DESACTIVADA para el resto de esta tienda",
+            )
+            await self.cerrar_sesion()
+            return await super().verificar_disponibilidad(tienda_nombre, direccion, lat, lng)
+
+    async def _verificar_por_url(self, direccion: str, lat: float, lng: float) -> ResultadoChequeo:
+        page = self._sesion_page
+        pl = self._construir_pl(direccion, lat, lng)
+        url = f"{BASE_URL}/es/search?q={urllib.parse.quote(MARCA_BUSQUEDA)}&pl={urllib.parse.quote(pl)}&diningMode=DELIVERY"
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
+        enlace_kk = page.locator(f'{SEL_STORE_LINK}:has-text("{MARCA_BUSQUEDA}")').first
+        otras_tiendas = page.locator(SEL_STORE_LINK)
+
+        # El listado se pinta de forma incremental, así que ni decidir al primer
+        # vistazo ni esperar un tiempo fijo valen (probado en vivo: decidir demasiado
+        # pronto da falsos negativos porque la tarjeta de Krispy Kreme aparece algo
+        # después que las demás; esperar de más da falsos positivos porque Uber Eats
+        # acaba añadiendo sugerencias de fuera de la zona). Se espera a que el propio
+        # listado se ESTABILICE (mismo número de tarjetas en dos vistazos seguidos) y
+        # se decide entonces -- salvo que Krispy Kreme aparezca antes, que ahí ya no
+        # hay nada que esperar.
+        conteo_anterior = -1
+        for _ in range(30):  # hasta ~15s
+            texto = await page.evaluate("() => document.body.innerText")
+            bajo = texto.lower()
+            if any(clave in bajo for clave in CHALLENGE_KEYWORDS):
+                # Cloudflare/anti-bot: la sesión se ha marcado. Que lo resuelva el
+                # flujo de siempre (ventana visible + navegación normal), que es el
+                # que sabe manejarlo.
+                raise RuntimeError("challenge anti-bot en la ruta rápida")
+            if await enlace_kk.count() > 0:
+                # Krispy Kreme aparece en la búsqueda de ESTA dirección (con
+                # diningMode=DELIVERY y el `pl` fijado) -> hay reparto aquí. Es el
+                # mismo criterio que ya se usa en Glovo ("solo lista tiendas que
+                # reparten en la dirección buscada"), y quedó confirmado en vivo
+                # 03/09: 8/8 direcciones del centro la encuentran, 0/8 de la
+                # periferia -- separa cobertura de no-cobertura limpiamente.
+                #
+                # NO se entra a la ficha de la tienda a propósito: el click en la
+                # tarjeta se comía 30s de timeout de actionability (tarjeta tapada
+                # por overlays del propio listado) y luego caía al flujo lento --
+                # medido en vivo, ~55s por dirección positiva. El ETA se lee de la
+                # propia tarjeta, que ya lo trae. Una tienda cerrada pero
+                # programable también sale listada, y cuenta como disponible igual
+                # que en el flujo de siempre (es prueba de zona de reparto).
+                texto_tarjeta = await enlace_kk.inner_text()
+                numeros = re.findall(r"(\d+)\s*min", texto_tarjeta)
+                return ResultadoChequeo(
+                    disponible=True,
+                    tiempo_entrega_min=int(numeros[-1]) if numeros else None,
+                    status_http=200,
+                )
+            conteo = await otras_tiendas.count()
+            if conteo > 0 and conteo == conteo_anterior:
+                # El listado ya no cambia y Krispy Kreme no está: la búsqueda funcionó
+                # de verdad y aquí no reparte -- negativo fiable, mismo criterio que
+                # Glovo ("hay otras tiendas listadas, la nuestra no").
+                return ResultadoChequeo(
+                    disponible=False,
+                    mensaje_bloqueo="Tienda no aparece en resultados de búsqueda para esta dirección",
+                    status_http=200,
+                )
+            conteo_anterior = conteo
+            await page.wait_for_timeout(500)
+
+        raise TimeoutError("ubereats: la búsqueda por URL no devolvió ninguna tienda")
 
     async def _verificar(self, page, tienda_nombre: str, direccion: str, lat: float | None = None, lng: float | None = None) -> ResultadoChequeo:
         # Confirmado en vivo 08/08: /feed nunca trae chip de ubicación aquí porque

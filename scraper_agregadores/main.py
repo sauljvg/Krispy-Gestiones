@@ -266,6 +266,17 @@ async def chequear_tienda(
         if delay_seg and i < len(direcciones) - 1:
             await asyncio.sleep(delay_seg)
 
+    # Uber Eats mantiene UNA ventana caliente reutilizada entre direcciones (ver
+    # scrapers/ubereats.py: ahorra ~17s por dirección frente a relanzar el navegador
+    # y repetir el flujo de dirección cada vez) -- hay que cerrarla al terminar con
+    # esta tienda o quedaría un Chrome abierto por cada (tienda, agregador).
+    cerrar_sesion = getattr(scraper, "cerrar_sesion", None)
+    if cerrar_sesion is not None:
+        try:
+            await cerrar_sesion()
+        except Exception as exc:
+            logger.warning("  no se pudo cerrar la sesión reutilizada del scraper: %r", exc)
+
     return resultados_por_punto
 
 
