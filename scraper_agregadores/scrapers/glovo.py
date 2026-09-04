@@ -340,15 +340,10 @@ class GlovoScraper(BaseAggregatorScraper):
     async def _verificar_por_cookie(self, direccion: str, lat: float, lng: float) -> ResultadoChequeo:
         """Lee la disponibilidad de la RESPUESTA DE LA API, no del DOM.
 
-        CADA punto recarga la pagina de resultados (page.goto) -- ya no se repite la
-        busqueda dentro de la app sin recargar. Se probo lo contrario (04/09) y era mas
-        barato por punto (~0.3s en teoria) pero NO fiable: la busqueda interna no
-        disparaba la peticion en 7-11% de los puntos (medido en rondas reales, no en el
-        sondeo de 8 direcciones que si funciono 8/8), y cada fallo caia al flujo de
-        interfaz completo, ~45-50s -- se comia toda la ganancia. Recargar SIEMPRE
-        cuesta mas por punto (~1.8-2.6s, medido 8/8 sin fallos en las 4 zonas) pero sin
-        ese 7-11% de puntos carísimos el balance total sale mejor. Las coordenadas se
-        inyectan interceptando la peticion (ver _abrir_sesion)."""
+        La primera direccion carga la pagina de resultados; las siguientes solo repiten
+        la busqueda DENTRO de la app, sin recargar -- que es lo que hace barata esta
+        ruta (~150 peticiones por punto recargando, unas pocas repitiendo la busqueda).
+        Las coordenadas se inyectan interceptando la peticion (ver _abrir_sesion)."""
         page = self._sesion_page
         self._api_destino = {"lat": lat, "lng": lng}
         self._api_respuesta = None
@@ -365,22 +360,37 @@ class GlovoScraper(BaseAggregatorScraper):
 
         zona = zona_de(direccion)
         url_zona = f"https://glovoapp.com/es/es/{zona[1]}/search?q={urllib.parse.quote(MARCA_BUSQUEDA)}"
-        if self._api_zona is not None and zona != self._api_zona:
-            logger.info("glovo: cambio de zona %s -> %s", self._api_zona[0], zona[0])
-        self._api_zona = zona
-        self._api_lista = True
 
-        await page.goto(url_zona, wait_until="domcontentloaded", timeout=30000)
+        if not self._api_lista or zona != self._api_zona:
+            # Primera direccion, o cambio de zona: hay que cargar la pagina de LA ZONA que
+            # toca. Consultar coordenadas de una zona desde otra devuelve 422 (ver
+            # comentario de ZONAS). Es una recarga por cambio de zona, no por punto.
+            if zona != self._api_zona and self._api_zona is not None:
+                logger.info("glovo: cambio de zona %s -> %s", self._api_zona[0], zona[0])
+            await page.goto(url_zona, wait_until="domcontentloaded", timeout=30000)
+            self._api_lista = True
+            self._api_zona = zona
+        else:
+            # Repetir la busqueda sin recargar. Se pasa por otro termino primero para
+            # forzar una peticion nueva: repetir el mismo texto no siempre la dispara.
+            campo = page.locator(SEL_SEARCH_PANEL_INPUT).first
+            await campo.wait_for(state="visible", timeout=10000)
+            await campo.fill("donuts")
+            await campo.press("Enter")
+            await page.wait_for_timeout(800)
+            self._api_respuesta = None
+            await campo.fill(MARCA_BUSQUEDA)
+            await campo.press("Enter")
 
-        # Muy rara vez ni la carga inicial dispara la peticion -- un solo intento de
-        # rescate antes de rendirse al flujo de interfaz (antes esto pasaba en el 7-11%
-        # de los puntos porque no se recargaba; ahora deberia ser raro de verdad).
-        recargado_de_rescate = False
+        # Si la busqueda interna no dispara la peticion (visto sobre todo en direcciones
+        # de Getafe/Leganes), se recarga la pagina, que si la dispara siempre. Antes se
+        # esperaba 15s en balde y se caia al flujo de interfaz: 55s por punto en vez de 3.
+        recarga_de_rescate = self._api_lista
         reintentos_429 = 0
         for intento in range(30):  # hasta ~15s
-            if intento == 16 and self._api_respuesta is None and not recargado_de_rescate:
-                recargado_de_rescate = True
-                logger.info("glovo: la carga inicial no disparo la API -- recargando una vez mas")
+            if recarga_de_rescate and intento == 10 and self._api_respuesta is None:
+                recarga_de_rescate = False
+                logger.info("glovo: la busqueda interna no disparo la API -- recargando la pagina")
                 await page.goto(url_zona, wait_until="domcontentloaded", timeout=30000)
             if self._api_respuesta is not None:
                 estado, cuerpo = self._api_respuesta
