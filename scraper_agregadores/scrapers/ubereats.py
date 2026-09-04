@@ -104,6 +104,28 @@ class UberEatsScraper(BaseAggregatorScraper):
     # ubicación ella sola (la URL pasó a /es?lat=...) -- o sea, sin meter ninguna señal
     # rara en la URL. Falta validar en limpio: esa noche la sesión ya estaba marcada y
     # a la segunda dirección volvía el challenge, así que no hay medición fiable.
+    # PRESUPUESTO DE LA RUTA RÁPIDA (~200 puntos), medido el 04/09. El parámetro
+    # `pl=` funciona muy bien pero se "gasta": Cloudflare acaba marcando el patrón de
+    # meter la dirección en la URL. Tres rondas seguidas se cortaron SIEMPRE entre el
+    # punto 145 y el 235 (145, 234 y 200), mientras que las rondas históricas por el
+    # flujo de interfaz hacían los 390 puntos sin cortarse (390/390, 34 min, Error: 0
+    # con 20 workers). O sea: no se agota por tiempo ni por volumen total, sino por
+    # número de navegaciones de ESTE tipo.
+    #
+    # Consecuencia práctica: esta ruta es ideal para el DAEMON (cada pasada revisa unos
+    # pocos puntos sin datos, nunca se acerca al presupuesto) y NO sirve tal cual para
+    # una vuelta completa de 390 puntos, que lo agota a mitad. Para vueltas completas,
+    # el flujo de interfaz sigue siendo el único camino probado de extremo a extremo.
+    #
+    # Se intentó sustituir `pl=` por la cookie `uev2.loc` (que es donde Uber Eats guarda
+    # de verdad la dirección) para quitar la señal de la URL: la app SÍ lee la cookie
+    # (la URL pasa a /es?lat=...&lng=...) pero se queda en la landing de marketing y
+    # /es/feed rebota a /es?next=%2Fes%2Ffeed -- con la cookie sintética no da el feed.
+    # Probado también hacer el flujo clásico una vez y luego solo cambiar la cookie: el
+    # feed carga pero los selectores del buscador no aparecen. Sin resolver; la
+    # diferencia con una cookie real está en `reference` (placeId de Google) vacío y
+    # varios campos sin rellenar. Queda documentado por si se retoma.
+
     _sesion_pw = None
     _sesion_browser = None
     _sesion_context = None
