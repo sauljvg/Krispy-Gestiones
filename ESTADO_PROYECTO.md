@@ -486,3 +486,26 @@ De paso esta sesión:
     contenido para cualquier dirección (7 de 7 direcciones, incluidas 4 sin cobertura,
     daban "Krispy Kreme" presente) -- es el armazón de la página, no los resultados.
     No sirve: seria una maquina de falsos positivos.
+
+- **04/09 -- Glovo, avance sobre la API interna: el 404 RESUELTO (idea del usuario).**
+  Replicar la llamada a `api.glovoapp.com/v1/web/store_wall/search` desde fuera de la
+  pagina siempre daba 404. La solucion: NO replicarla, sino **dejar que la haga la
+  propia pagina e interceptarla con `context.route()` reescribiendo al vuelo las
+  cabeceras** `glovo-delivery-location-latitude` / `-longitude`. Asi la peticion sale
+  del contexto legitimo (sin 404, sin CORS) pero con NUESTRAS coordenadas.
+  - **Confirmado que funciona**: las respuestas cambian de tamano segun la direccion
+    (351 KB / 105 KB / 234 KB), o sea que la API respeta las coordenadas inyectadas.
+    Con el endpoint RSC pasaba lo contrario (mismo contenido siempre) y por eso se
+    descarto.
+  - **Falta 1 -- leer bien la disponibilidad**: "Krispy Kreme" aparece en los metadatos
+    de analitica del JSON (junto a `shopAvailabilityStatus`, `promisedDeliveryTimeRange*`,
+    `searchTerm`), pero buscar su entrada de tienda por las claves `name`/`storeName` no
+    la encuentra -- el campo se llama de otra forma. Hay que mapear la estructura del
+    JSON antes de fiarse de nada: comprobar el texto en bruto da FALSOS POSITIVOS
+    (direcciones sin cobertura salian como disponibles).
+  - **Falta 2 -- que compense de verdad**: tal como se probo, se sigue cargando la
+    pagina de busqueda en cada punto (1.8-2.6s), asi que NO gana nada frente a la ruta
+    rapida actual. La ganancia real solo llega cargando la pagina UNA vez y disparando
+    despues las busquedas desde dentro (client-side), que vuelven a llamar a la API sin
+    recargar: ahi serian ~0.3s y UNA peticion por punto, que es lo que de verdad
+    atacaria el limite por IP.
