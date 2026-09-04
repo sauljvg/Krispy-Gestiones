@@ -102,6 +102,16 @@ def _debe_flush(buffer_subida: list, ultimo_flush: float) -> bool:
     return len(buffer_subida) >= TAMANO_LOTE or (time.monotonic() - ultimo_flush) >= FLUSH_INTERVALO_SEG
 
 
+# Espera tras un punto resuelto por la RUTA RÁPIDA (API/cookie). La espera normal
+# (DELAY_ENTRE_CHEQUEOS_SEG = 4s) se calibró cuando cada chequeo eran 140-190
+# peticiones: espaciarlas era lo único que evitaba el límite por IP de CloudFront.
+# Un punto por API son 1-3 peticiones, así que ese mismo delay ya no protege de nada
+# y sí domina la ronda: medido el 04/09 con 1 worker, 1,9s de chequeo + ~4,5s de
+# espera = el 70% del tiempo esperando. Con 1s la ronda sigue emitiendo MUCHAS menos
+# peticiones por segundo que la configuración de 5 workers ya validada.
+DELAY_RUTA_RAPIDA_SEG = 1.0
+
+
 def _delay_con_jitter() -> float:
     # Antes un delay FIJO (siempre 4s) entre chequeos -- con varios workers
     # arrancando casi a la vez (0.5s de diferencia, ver más abajo) y el mismo delay
@@ -279,7 +289,10 @@ async def main(
             if cerrar is not None:
                 await cerrar()  # sesión nueva al volver
         elif i < len(asignados) - 1:
-            await asyncio.sleep(_delay_con_jitter())
+            if getattr(scraper_reutilizado, "ultima_ruta_rapida", False):
+                await asyncio.sleep(DELAY_RUTA_RAPIDA_SEG)
+            else:
+                await asyncio.sleep(_delay_con_jitter())
 
     await flush_buffer_subida(buffer_subida)  # lo que quede sin llegar a TAMANO_LOTE
 

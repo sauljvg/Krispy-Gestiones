@@ -245,6 +245,13 @@ class BaseAggregatorScraper:
         # parecer un bot, sin nadie mirando, así que esa ventana se manda fuera de
         # pantalla en vez de interrumpir al usuario mientras trabaja.
         self._modo_resolucion_manual = False
+        # Lo pone a True el scraper que acaba de resolver un punto por su RUTA RÁPIDA
+        # (API/cookie, 1-3 peticiones) en vez de por el flujo de interfaz (~150
+        # peticiones). Lo lee revalidar_completo para decidir cuánto esperar antes del
+        # siguiente punto: la espera de DELAY_ENTRE_CHEQUEOS_SEG se calibró para el
+        # flujo caro, y aplicada a la ruta rápida pasa a ser el 70% del tiempo de la
+        # ronda (medido 04/09: 1,9s de chequeo + ~4,5s de espera por punto).
+        self.ultima_ruta_rapida = False
         SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
     async def verificar_disponibilidad(
@@ -260,6 +267,10 @@ class BaseAggregatorScraper:
         directamente -- confirmado en vivo que Glovo guarda la dirección de entrega
         en una cookie de cliente en texto plano (`glovo_delivery_address`), no en el
         servidor. Otros scrapers ignoran estos parámetros sin más."""
+        # Este es el flujo CARO (portada + interacciones): si se llega aquí, el punto
+        # no se resolvió por la ruta rápida -- ni siquiera si el scraper la intentó
+        # antes y cayó aquí, porque entonces se han pagado las dos.
+        self.ultima_ruta_rapida = False
         try:
             return await self._verificar_con_retry(tienda_nombre, direccion, lat, lng)
         except Exception as exc:

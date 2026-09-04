@@ -417,6 +417,7 @@ class GlovoScraper(BaseAggregatorScraper):
                     if disponible is None:
                         raise TimeoutError(f"glovo: respuesta de API no interpretable ({detalle})")
                     logger.info("glovo: por API -> disponible=%s (%s)", disponible, detalle)
+                    self.ultima_ruta_rapida = True
                     return ResultadoChequeo(
                         disponible=disponible,
                         mensaje_bloqueo=None if disponible else "Tienda no aparece en resultados para esta direccion",
@@ -438,6 +439,7 @@ class GlovoScraper(BaseAggregatorScraper):
                 # unos 55s, para una respuesta que la pagina daba desde el primer
                 # segundo. Es un no disponible VALIDO, igual que en el flujo de siempre.
                 logger.info("glovo: banner de \"sin resultados\" -- aqui no reparte nadie")
+                self.ultima_ruta_rapida = True
                 return ResultadoChequeo(
                     disponible=False,
                     mensaje_bloqueo="Sin resultados de reparto para esta direccion",
