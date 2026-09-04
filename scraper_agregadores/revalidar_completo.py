@@ -77,6 +77,17 @@ TAMANO_LOTE = 10
 # del usuario 27/08).
 FLUSH_INTERVALO_SEG = 60
 
+# Pausa al detectar bloqueo sostenido (04/09). Cuando el sitio nos corta (visto dos
+# veces en Uber Eats a los ~13-15 min), el flujo actual REACCIONA MACHACANDO: la ruta
+# rápida falla, se cae al flujo de interfaz, y ese reintenta 4 veces con timeouts de
+# 15s -- unas 5 cargas de página POR PUNTO, en paralelo en cada worker, contra un
+# sitio que ya nos está rechazando. Es plausible que eso mismo prolongue el bloqueo
+# (medido: dura >10 min tras parar). Con esto, tras FALLOS_SEGUIDOS_PARA_PAUSA fallos
+# técnicos consecutivos el worker se calla MINUTOS_PAUSA_BLOQUEO minutos y luego sigue
+# donde estaba, en vez de quemar la vuelta entera a base de timeouts.
+FALLOS_SEGUIDOS_PARA_PAUSA = 5
+MINUTOS_PAUSA_BLOQUEO = 6
+
 
 def _debe_flush(buffer_subida: list, ultimo_flush: float) -> bool:
     if not buffer_subida:
@@ -207,6 +218,7 @@ async def main(
 
     fallidos = []
     fallos_tecnicos = []
+    fallos_seguidos = 0
     for i, direccion in enumerate(asignados):
         try:
             # permitir_reuso=False: nunca reutiliza, siempre scrapea de verdad -- es una
@@ -218,6 +230,9 @@ async def main(
             )
             if resultados and resultados[0]["error_tecnico"]:
                 fallos_tecnicos.append(direccion)
+                fallos_seguidos += 1
+            else:
+                fallos_seguidos = 0
         except Exception as exc:
             # No se descarta sin más -- si esto fue un fallo de CONEXIÓN a nuestro
             # propio backend, el punto queda sin dato para siempre si no se
@@ -231,7 +246,24 @@ async def main(
         if _debe_flush(buffer_subida, ultimo_flush):
             await flush_buffer_subida(buffer_subida)
             ultimo_flush = time.monotonic()
-        if i < len(asignados) - 1:
+
+        if fallos_seguidos >= FALLOS_SEGUIDOS_PARA_PAUSA:
+            # El sitio nos está cortando: dejar de golpearlo y darle tiempo a soltar
+            # (ver FALLOS_SEGUIDOS_PARA_PAUSA). Se sube lo que haya antes de callarse.
+            await flush_buffer_subida(buffer_subida)
+            ultimo_flush = time.monotonic()
+            logger.warning(
+                "Worker %d/%d (%s): %d fallos técnicos seguidos -- el sitio nos está "
+                "cortando. Pausa de %d min antes de seguir (punto %d de %d).",
+                worker_index, worker_count, agregador, fallos_seguidos,
+                MINUTOS_PAUSA_BLOQUEO, i + 1, len(asignados),
+            )
+            await asyncio.sleep(MINUTOS_PAUSA_BLOQUEO * 60)
+            fallos_seguidos = 0
+            cerrar = getattr(scraper_reutilizado, "cerrar_sesion", None)
+            if cerrar is not None:
+                await cerrar()  # sesión nueva al volver
+        elif i < len(asignados) - 1:
             await asyncio.sleep(_delay_con_jitter())
 
     await flush_buffer_subida(buffer_subida)  # lo que quede sin llegar a TAMANO_LOTE
