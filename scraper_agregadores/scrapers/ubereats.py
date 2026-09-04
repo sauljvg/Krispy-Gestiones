@@ -139,18 +139,35 @@ class UberEatsScraper(BaseAggregatorScraper):
     _enfriamiento_restante = 0
 
     @staticmethod
-    def _construir_pl(direccion_texto: str, lat: float, lng: float) -> str:
-        """Parámetro `pl` de Uber Eats: base64(percent-encode(JSON de la dirección)).
-        Formato sacado de una URL real del propio sitio (03/09)."""
-        payload = {
-            "address": direccion_texto,
-            "reference": "",
-            "referenceType": "google_places",
-            "latitude": lat,
-            "longitude": lng,
+    def _cookie_ubicacion(direccion_texto: str, lat: float, lng: float) -> str:
+        """Valor de la cookie `uev2.loc`, que es donde Uber Eats guarda la dirección de
+        entrega (estructura sacada en vivo el 03/09 poniendo una dirección a mano por la
+        interfaz y leyendo la cookie resultante). El `reference` de Google Places puede
+        ir vacío: la app se apaña con lat/lng.
+
+        Sustituye al parámetro de URL `pl=` que se usaba antes (ver historial): ese
+        funcionaba igual de bien pero METÍA LA SEÑAL EN LA URL, y Cloudflare acababa
+        marcando el patrón tras ~200 navegaciones de ese tipo (medido tres veces: las
+        rondas se cortaban siempre entre el punto 145 y el 235, mientras que las rondas
+        históricas por el flujo de interfaz hacían los 390 puntos sin cortarse). Con la
+        cookie no hay nada raro en la URL: se carga la portada normal y la app se
+        enruta ella sola al feed."""
+        valor = {
+            "address": {
+                "address1": direccion_texto, "address2": "", "aptOrSuite": "",
+                "eaterFormattedAddress": direccion_texto, "subtitle": "",
+                "title": direccion_texto, "uuid": "",
+            },
+            "latitude": lat, "longitude": lng,
+            "reference": "", "referenceType": "google_places", "type": "google_places",
+            "addressComponents": {
+                "city": "Madrid", "countryCode": "ES",
+                "firstLevelSubdivisionCode": "MD", "postalCode": "",
+            },
+            "categories": ["address_point"], "originType": "user_autocomplete",
+            "source": "manual_auto_complete", "userState": "Unknown", "residenceType": "",
         }
-        crudo = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
-        return base64.b64encode(urllib.parse.quote(crudo, safe="").encode()).decode()
+        return urllib.parse.quote(json.dumps(valor, separators=(",", ":"), ensure_ascii=False), safe="")
 
     async def _abrir_sesion(self):
         """Lanza UNA ventana y la deja caliente (visita normal a la portada) para
@@ -238,7 +255,7 @@ class UberEatsScraper(BaseAggregatorScraper):
                 await self.cerrar_sesion()
             if self._sesion_page is None:
                 await self._abrir_sesion()
-            resultado = await self._verificar_por_url(direccion, lat, lng)
+            resultado = await self._verificar_por_cookie(direccion, lat, lng)
             self._fallos_rapidos = 0  # una buena reinicia la racha
             return resultado
         except Exception as exc:
@@ -255,47 +272,51 @@ class UberEatsScraper(BaseAggregatorScraper):
             await self.cerrar_sesion()
             return await super().verificar_disponibilidad(tienda_nombre, direccion, lat, lng)
 
-    async def _verificar_por_url(self, direccion: str, lat: float, lng: float) -> ResultadoChequeo:
+    async def _verificar_por_cookie(self, direccion: str, lat: float, lng: float) -> ResultadoChequeo:
+        """Fija la dirección por cookie y busca DENTRO de la app, sin URLs profundas."""
         page = self._sesion_page
-        pl = self._construir_pl(direccion, lat, lng)
-        url = f"{BASE_URL}/es/search?q={urllib.parse.quote(MARCA_BUSQUEDA)}&pl={urllib.parse.quote(pl)}&diningMode=DELIVERY"
-        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        await self._sesion_context.clear_cookies(name="uev2.loc")
+        await self._sesion_context.add_cookies([{
+            "name": "uev2.loc",
+            "value": self._cookie_ubicacion(direccion, lat, lng),
+            "domain": ".ubereats.com",
+            "path": "/",
+        }])
+        # Portada normal, sin parámetros: la app lee la cookie y se enruta sola al feed.
+        await page.goto(f"{BASE_URL}/es", wait_until="domcontentloaded", timeout=30000)
+
+        async def _sin_challenge():
+            texto = await page.evaluate("() => document.body.innerText")
+            if any(clave in texto.lower() for clave in CHALLENGE_KEYWORDS):
+                raise RuntimeError("challenge anti-bot en la ruta rápida")
+
+        # Esperar a que aparezca el buscador del feed (señal de que la ubicación se aplicó).
+        boton = page.locator(SEL_SEARCH_BUTTON)
+        campo = page.locator(SEL_SEARCH_INPUT + ":visible")
+        for _ in range(24):  # hasta ~12s
+            await _sin_challenge()
+            if await boton.count() or await campo.count():
+                break
+            await page.wait_for_timeout(500)
+        else:
+            raise TimeoutError("ubereats: la portada no llegó al feed con la cookie puesta")
+
+        if await boton.count():
+            await boton.first.click()
+        entrada = campo.first
+        await entrada.wait_for(state="visible", timeout=10000)
+        await entrada.fill(MARCA_BUSQUEDA)
+        await entrada.press("Enter")
 
         enlace_kk = page.locator(f'{SEL_STORE_LINK}:has-text("{MARCA_BUSQUEDA}")').first
-        otras_tiendas = page.locator(SEL_STORE_LINK)
-
-        # El listado se pinta de forma incremental, así que ni decidir al primer
-        # vistazo ni esperar un tiempo fijo valen (probado en vivo: decidir demasiado
-        # pronto da falsos negativos porque la tarjeta de Krispy Kreme aparece algo
-        # después que las demás; esperar de más da falsos positivos porque Uber Eats
-        # acaba añadiendo sugerencias de fuera de la zona). Se espera a que el propio
-        # listado se ESTABILICE (mismo número de tarjetas en dos vistazos seguidos) y
-        # se decide entonces -- salvo que Krispy Kreme aparezca antes, que ahí ya no
-        # hay nada que esperar.
+        otras = page.locator(SEL_STORE_LINK)
         conteo_anterior = -1
         for _ in range(30):  # hasta ~15s
-            texto = await page.evaluate("() => document.body.innerText")
-            bajo = texto.lower()
-            if any(clave in bajo for clave in CHALLENGE_KEYWORDS):
-                # Cloudflare/anti-bot: la sesión se ha marcado. Que lo resuelva el
-                # flujo de siempre (ventana visible + navegación normal), que es el
-                # que sabe manejarlo.
-                raise RuntimeError("challenge anti-bot en la ruta rápida")
+            await _sin_challenge()
             if await enlace_kk.count() > 0:
-                # Krispy Kreme aparece en la búsqueda de ESTA dirección (con
-                # diningMode=DELIVERY y el `pl` fijado) -> hay reparto aquí. Es el
-                # mismo criterio que ya se usa en Glovo ("solo lista tiendas que
-                # reparten en la dirección buscada"), y quedó confirmado en vivo
-                # 03/09: 8/8 direcciones del centro la encuentran, 0/8 de la
-                # periferia -- separa cobertura de no-cobertura limpiamente.
-                #
-                # NO se entra a la ficha de la tienda a propósito: el click en la
-                # tarjeta se comía 30s de timeout de actionability (tarjeta tapada
-                # por overlays del propio listado) y luego caía al flujo lento --
-                # medido en vivo, ~55s por dirección positiva. El ETA se lee de la
-                # propia tarjeta, que ya lo trae. Una tienda cerrada pero
-                # programable también sale listada, y cuenta como disponible igual
-                # que en el flujo de siempre (es prueba de zona de reparto).
+                # Aparece en la búsqueda de ESTA dirección -> reparte aquí. Mismo criterio
+                # que antes; el ETA se lee de la propia tarjeta sin abrir la ficha (el
+                # click se comía 30s de timeout de actionability, medido el 03/09).
                 texto_tarjeta = await enlace_kk.inner_text()
                 numeros = re.findall(r"(\d+)\s*min", texto_tarjeta)
                 return ResultadoChequeo(
@@ -303,11 +324,8 @@ class UberEatsScraper(BaseAggregatorScraper):
                     tiempo_entrega_min=int(numeros[-1]) if numeros else None,
                     status_http=200,
                 )
-            conteo = await otras_tiendas.count()
+            conteo = await otras.count()
             if conteo > 0 and conteo == conteo_anterior:
-                # El listado ya no cambia y Krispy Kreme no está: la búsqueda funcionó
-                # de verdad y aquí no reparte -- negativo fiable, mismo criterio que
-                # Glovo ("hay otras tiendas listadas, la nuestra no").
                 return ResultadoChequeo(
                     disponible=False,
                     mensaje_bloqueo="Tienda no aparece en resultados de búsqueda para esta dirección",
@@ -316,7 +334,7 @@ class UberEatsScraper(BaseAggregatorScraper):
             conteo_anterior = conteo
             await page.wait_for_timeout(500)
 
-        raise TimeoutError("ubereats: la búsqueda por URL no devolvió ninguna tienda")
+        raise TimeoutError("ubereats: la búsqueda no devolvió ninguna tienda")
 
     async def _verificar(self, page, tienda_nombre: str, direccion: str, lat: float | None = None, lng: float | None = None) -> ResultadoChequeo:
         # Confirmado en vivo 08/08: /feed nunca trae chip de ubicación aquí porque
