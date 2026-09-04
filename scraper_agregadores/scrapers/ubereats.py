@@ -155,6 +155,20 @@ class UberEatsScraper(BaseAggregatorScraper):
     _MINUTOS_MAX_SESION = 8
     _sesion_abierta_en = None
 
+    # Tope de puntos por ruta rápida (04/09). Como el presupuesto se agota a las ~200
+    # navegaciones con `pl=` (ver arriba) y una vuelta completa son 390 puntos, la ruta
+    # rápida NO puede cubrirla entera: siempre se cortaba a mitad y el resto de la ronda
+    # se perdía en timeouts. En vez de pelear contra el límite, se gasta hasta donde es
+    # seguro y se cambia al flujo de interfaz ANTES de agotarlo, así la ronda completa
+    # los 390 sin cortarse nunca.
+    #
+    # El presupuesto es global (misma IP), pero los workers son procesos separados que
+    # no comparten estado, así que el reparto lo hace el caller: revalidar_completo.py
+    # pone _max_puntos_rapida = PRESUPUESTO_RUTA_RAPIDA // worker_count. None = sin tope
+    # (lo que quiere el daemon, que hace pocos puntos por pasada y nunca se acerca).
+    _max_puntos_rapida = None
+    _puntos_rapida_usados = 0
+
     _FALLOS_RAPIDOS_MAX = 3
     _PUNTOS_ENFRIAMIENTO = 10
     _fallos_rapidos = 0
@@ -236,6 +250,13 @@ class UberEatsScraper(BaseAggregatorScraper):
         """Ruta rápida (sesión caliente + URL directa) con caída automática al flujo
         de interfaz de siempre. Sin lat/lng no se puede construir el `pl`, así que
         esos casos van directos al flujo de siempre."""
+        if (
+            self._max_puntos_rapida is not None
+            and self._puntos_rapida_usados >= self._max_puntos_rapida
+        ):
+            # Presupuesto agotado a propósito, antes de que el sitio nos corte.
+            return await super().verificar_disponibilidad(tienda_nombre, direccion, lat, lng)
+
         if lat is None or lng is None:
             return await super().verificar_disponibilidad(tienda_nombre, direccion, lat, lng)
 
@@ -261,6 +282,7 @@ class UberEatsScraper(BaseAggregatorScraper):
             if self._sesion_page is None:
                 await self._abrir_sesion()
             resultado = await self._verificar_por_url(direccion, lat, lng)
+            self._puntos_rapida_usados += 1
             self._fallos_rapidos = 0  # una buena reinicia la racha
             return resultado
         except Exception as exc:

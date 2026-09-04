@@ -85,6 +85,13 @@ FLUSH_INTERVALO_SEG = 60
 # (medido: dura >10 min tras parar). Con esto, tras FALLOS_SEGUIDOS_PARA_PAUSA fallos
 # técnicos consecutivos el worker se calla MINUTOS_PAUSA_BLOQUEO minutos y luego sigue
 # donde estaba, en vez de quemar la vuelta entera a base de timeouts.
+# Presupuesto TOTAL de puntos por ruta rápida en una vuelta (04/09, ver el comentario
+# largo en scrapers/ubereats.py). Medido: la ruta rápida de Uber Eats se agota a las
+# ~200 navegaciones y a partir de ahí el sitio corta y el resto de la ronda se pierde
+# en timeouts (tres rondas cortadas en el punto 145, 234 y 200). Se deja margen y se
+# reparte entre los workers, que son procesos separados y no comparten contador.
+PRESUPUESTO_RUTA_RAPIDA = 150
+
 FALLOS_SEGUIDOS_PARA_PAUSA = 5
 MINUTOS_PAUSA_BLOQUEO = 6
 
@@ -212,6 +219,14 @@ async def main(
     scraper_reutilizado = SCRAPERS[agregador](
         timeout_seg=config.SCRAPER_TIMEOUT, retry_max=config.SCRAPER_RETRY_MAX
     )
+    if hasattr(scraper_reutilizado, "_max_puntos_rapida"):
+        scraper_reutilizado._max_puntos_rapida = max(1, PRESUPUESTO_RUTA_RAPIDA // worker_count)
+        logger.info(
+            "Worker %d/%d (%s): ruta rápida limitada a %d puntos (presupuesto total %d entre %d workers); "
+            "el resto se resuelve por el flujo de interfaz para que la vuelta no se corte.",
+            worker_index, worker_count, agregador,
+            scraper_reutilizado._max_puntos_rapida, PRESUPUESTO_RUTA_RAPIDA, worker_count,
+        )
 
     buffer_subida: list = []
     ultimo_flush = time.monotonic()
