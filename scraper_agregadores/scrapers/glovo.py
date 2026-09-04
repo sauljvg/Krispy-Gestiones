@@ -334,18 +334,35 @@ class GlovoScraper(BaseAggregatorScraper):
             await campo.fill(MARCA_BUSQUEDA)
             await campo.press("Enter")
 
-        for _ in range(30):  # hasta ~15s
+        # Si la busqueda interna no dispara la peticion (visto sobre todo en direcciones
+        # de Getafe/Leganes), se recarga la pagina, que si la dispara siempre. Antes se
+        # esperaba 15s en balde y se caia al flujo de interfaz: 55s por punto en vez de 3.
+        recarga_de_rescate = self._api_lista
+        for intento in range(30):  # hasta ~15s
+            if recarga_de_rescate and intento == 10 and self._api_respuesta is None:
+                recarga_de_rescate = False
+                logger.info("glovo: la busqueda interna no disparo la API -- recargando la pagina")
+                await page.goto(
+                    f"{URL_INICIO}/search?q={urllib.parse.quote(MARCA_BUSQUEDA)}",
+                    wait_until="domcontentloaded", timeout=30000,
+                )
             if self._api_respuesta is not None:
                 estado, cuerpo = self._api_respuesta
                 if estado == 422:
-                    # Glovo responde 422 cuando la ubicacion queda fuera de su zona de
-                    # servicio (comprobado en los dos puntos de Leganes que el flujo de
-                    # interfaz tambien daba como no disponibles). Es un no fiable.
-                    return ResultadoChequeo(
-                        disponible=False,
-                        mensaje_bloqueo="Glovo no da servicio en esta ubicacion (422)",
-                        status_http=422,
-                    )
+                    # OJO: 422 NO significa "no reparte aqui". Se interpreto asi con solo
+                    # dos casos de evidencia y produjo FALSOS NEGATIVOS reales (Avenida
+                    # de Salvador Allende y Calle de Brasil, ambas en Getafe/Leganes:
+                    # esta ruta decia False y el flujo de interfaz decia True). Lo que
+                    # significa es que la ubicacion NO PERTENECE AL CONTEXTO DE CIUDAD de
+                    # la peticion: la sesion se calienta en /es/es/madrid y al inyectar
+                    # coordenadas de otra zona (leganes-getafe) Glovo rechaza la consulta,
+                    # aunque alli SI reparta desde esa otra zona.
+                    #
+                    # Hasta que se resuelva el cambio de ciudad, estos puntos se mandan al
+                    # flujo de interfaz de siempre, que los resuelve bien. Es mas lento
+                    # pero CORRECTO, que es lo que importa: un falso negativo marcaria
+                    # como sin cobertura una zona que si reparte.
+                    raise TimeoutError("glovo: 422 -- direccion fuera del contexto de ciudad de la sesion")
                 if estado == 200:
                     disponible, detalle = self._leer_respuesta_api(cuerpo)
                     if disponible is None:
@@ -364,6 +381,19 @@ class GlovoScraper(BaseAggregatorScraper):
                 raise RuntimeError("challenge anti-bot en la ruta rapida")
             if MARCADOR_PAGINA_SOBRECARGADA_LOWER in bajo:
                 raise PaginaSobrecargadaError("glovo")
+            if any(marcador in bajo for marcador in MARCADORES_SIN_RESULTADOS):
+                # La pagina ya ha respondido: aqui no reparte NADIE. En estas
+                # direcciones la app puede ni llegar a llamar a la API (no hay nada que
+                # buscar), asi que esperar su respuesta es esperar algo que no va a
+                # llegar -- eso costaba 15s de espera + recarga + flujo de interfaz,
+                # unos 55s, para una respuesta que la pagina daba desde el primer
+                # segundo. Es un no disponible VALIDO, igual que en el flujo de siempre.
+                logger.info("glovo: banner de \"sin resultados\" -- aqui no reparte nadie")
+                return ResultadoChequeo(
+                    disponible=False,
+                    mensaje_bloqueo="Sin resultados de reparto para esta direccion",
+                    status_http=200,
+                )
             await page.wait_for_timeout(500)
 
         # Sin respuesta de la API: la sesion puede haberse quedado tocada -> que la
