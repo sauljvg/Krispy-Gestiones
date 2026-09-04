@@ -463,3 +463,26 @@ De paso esta sesión:
   verdad, así que haría falta probar Xvfb (display virtual) antes de contar con
   ello -- sin probar, no se sabe si Cloudflare lo acepta. Son dos incógnitas
   independientes.
+
+- **04/09 -- Glovo: encontrada su API interna (pista fuerte, sin explotar todavía).**
+  Investigando cómo bajar las peticiones por punto -- que es lo único que mueve la
+  aguja con un límite por IP -- se localizó el endpoint real de datos:
+  `https://api.glovoapp.com/v1/web/store_wall/search?searchQuery=Krispy+Kreme`,
+  y **la ubicación se le pasa POR CABECERAS**, no por URL ni cookie:
+  `glovo-delivery-location-latitude` / `-longitude`, `glovo-location-city-code`,
+  más cabeceras de sesión (`glovo-device-urn`, `glovo-dynamic-session-id`,
+  `glovo-perseus-*`). Cambiar de dirección seria cambiar dos cabeceras.
+  - Impacto potencial: **1 petición por punto en vez de ~50** (página completa con
+    su bundle). Contra un limitador que cuenta peticiones por IP, es el ataque
+    correcto al cuello de botella real.
+  - **Lo que falta**: replicar esa llamada desde fuera de la página da **404**, tanto
+    con las cabeceras `glovo-*` como mandando las 30 capturadas. Desde dentro de la
+    página con `fetch` falla por CORS (su propio JS envuelve `fetch`). Hay que
+    averiguar qué valida el backend (probablemente Origin/Referer, o alguna cabecera
+    que Playwright no reproduce). Si se resuelve, la vuelta de Glovo pasaría de 57 min
+    a minutos.
+  - Descartado por el camino: el endpoint RSC de Next.js
+    (`/search?q=...&_rsc=...`) responde 200 y es ligero, pero devuelve el MISMO
+    contenido para cualquier dirección (7 de 7 direcciones, incluidas 4 sin cobertura,
+    daban "Krispy Kreme" presente) -- es el armazón de la página, no los resultados.
+    No sirve: seria una maquina de falsos positivos.
