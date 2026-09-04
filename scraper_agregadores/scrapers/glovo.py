@@ -386,6 +386,7 @@ class GlovoScraper(BaseAggregatorScraper):
         # de Getafe/Leganes), se recarga la pagina, que si la dispara siempre. Antes se
         # esperaba 15s en balde y se caia al flujo de interfaz: 55s por punto en vez de 3.
         recarga_de_rescate = self._api_lista
+        reintentos_429 = 0
         for intento in range(30):  # hasta ~15s
             if recarga_de_rescate and intento == 10 and self._api_respuesta is None:
                 recarga_de_rescate = False
@@ -423,6 +424,22 @@ class GlovoScraper(BaseAggregatorScraper):
                         mensaje_bloqueo=None if disponible else "Tienda no aparece en resultados para esta direccion",
                         status_http=200,
                     )
+                if estado == 429 and reintentos_429 < 2:
+                    # 429 = "vas demasiado rapido", NO "esta via no sirve". Caer al
+                    # flujo de interfaz aqui cuesta ~45s por un problema que se arregla
+                    # esperando 3s (medido 04/09: con 1s de espera entre puntos salen
+                    # ~8% de 429, y cada uno se comia la ganancia de 15 puntos rapidos).
+                    # Se respira y se repite la busqueda, sin salir de la ruta rapida.
+                    # Acotado a 2: si insiste, es que el corte va en serio y el
+                    # flujo de siempre (mas lento pero por otra via) tiene mas opciones
+                    # que seguir insistiendo aqui.
+                    reintentos_429 += 1
+                    self._api_respuesta = None
+                    await page.wait_for_timeout(3000)
+                    campo = page.locator(SEL_SEARCH_PANEL_INPUT).first
+                    await campo.fill(MARCA_BUSQUEDA)
+                    await campo.press("Enter")
+                    continue
                 raise TimeoutError(f"glovo: la API respondio {estado}")
 
             texto = await page.evaluate("() => document.body.innerText")
