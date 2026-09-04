@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 import re
+import time
 import urllib.parse
 
 from playwright.async_api import async_playwright
@@ -113,6 +114,17 @@ class UberEatsScraper(BaseAggregatorScraper):
     # worker se quedara en el flujo lento el resto de la ronda. Medido en vivo: la
     # ronda iba a 18 puntos/min los primeros 8 min y se desplomó a 2.2 puntos/min
     # según los workers iban cayendo uno a uno. Por eso ahora el corte es temporal.
+    # Reciclaje de la sesión (04/09). Medido DOS veces con distinta concurrencia (10
+    # workers de noche, 4 de mañana) y a distinta hora: la ronda va fina ~13-15 min y
+    # entonces Uber Eats deja de responder de golpe -- a partir de ahí TODO son fallos
+    # técnicos (anoche desde el punto ~145, hoy desde el ~234). No depende del número
+    # de workers. La hipótesis que mejor encaja con esa ventana tan constante es la
+    # EDAD DE LA SESIÓN del navegador, que desde el 03/09 se reutiliza durante toda la
+    # ronda. Se recicla antes de llegar ahí: cerrar y reabrir cuesta ~2s (una visita a
+    # la portada) y se amortiza de sobra si evita perder el resto de la vuelta.
+    _MINUTOS_MAX_SESION = 8
+    _sesion_abierta_en = None
+
     _FALLOS_RAPIDOS_MAX = 3
     _PUNTOS_ENFRIAMIENTO = 10
     _fallos_rapidos = 0
@@ -145,6 +157,7 @@ class UberEatsScraper(BaseAggregatorScraper):
         self._sesion_context = await self._sesion_browser.new_context(locale="es-ES")
         await _STEALTH.apply_stealth_async(self._sesion_context)
         self._sesion_page = await self._sesion_context.new_page()
+        self._sesion_abierta_en = time.monotonic()
 
         await self._sesion_page.goto(BASE_URL + "/es", wait_until="domcontentloaded", timeout=45000)
         # Espera a que la portada cargue de verdad (y a que pase el challenge si sale
@@ -174,6 +187,7 @@ class UberEatsScraper(BaseAggregatorScraper):
                 except Exception:
                     pass
         self._sesion_pw = self._sesion_browser = self._sesion_context = self._sesion_page = None
+        self._sesion_abierta_en = None
 
     async def verificar_disponibilidad(self, tienda_nombre: str, direccion: str, lat=None, lng=None) -> ResultadoChequeo:
         """Ruta rápida (sesión caliente + URL directa) con caída automática al flujo
@@ -192,6 +206,15 @@ class UberEatsScraper(BaseAggregatorScraper):
             return await super().verificar_disponibilidad(tienda_nombre, direccion, lat, lng)
 
         try:
+            if (
+                self._sesion_abierta_en is not None
+                and time.monotonic() - self._sesion_abierta_en > self._MINUTOS_MAX_SESION * 60
+            ):
+                logger.info(
+                    "ubereats: reciclando la sesión (lleva más de %d min abierta) -- ver _MINUTOS_MAX_SESION",
+                    self._MINUTOS_MAX_SESION,
+                )
+                await self.cerrar_sesion()
             if self._sesion_page is None:
                 await self._abrir_sesion()
             resultado = await self._verificar_por_url(direccion, lat, lng)
