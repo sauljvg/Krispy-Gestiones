@@ -342,6 +342,7 @@ class UberEatsScraper(BaseAggregatorScraper):
                 # que en el flujo de siempre (es prueba de zona de reparto).
                 texto_tarjeta = await enlace_kk.inner_text()
                 numeros = re.findall(r"(\d+)\s*min", texto_tarjeta)
+                self.ultima_ruta_rapida = True
                 return ResultadoChequeo(
                     disponible=True,
                     tiempo_entrega_min=int(numeros[-1]) if numeros else None,
@@ -352,6 +353,7 @@ class UberEatsScraper(BaseAggregatorScraper):
                 # El listado ya no cambia y Krispy Kreme no está: la búsqueda funcionó
                 # de verdad y aquí no reparte -- negativo fiable, mismo criterio que
                 # Glovo ("hay otras tiendas listadas, la nuestra no").
+                self.ultima_ruta_rapida = True
                 return ResultadoChequeo(
                     disponible=False,
                     mensaje_bloqueo="Tienda no aparece en resultados de búsqueda para esta dirección",
