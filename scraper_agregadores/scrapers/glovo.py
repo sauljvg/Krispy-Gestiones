@@ -74,6 +74,34 @@ API_STORE_WALL = "store_wall"
 # elementos y mirar su slug/titulo.
 RUTA_ELEMENTS = ("data", "body", "data", "elements")
 
+# ZONAS de Glovo (04/09). Glovo no tiene una sola "Madrid": divide el area en zonas, y
+# cada consulta esta atada a UNA. Si se le inyectan coordenadas de otra zona, responde
+# 422 -- y eso NO significa que no reparta: significa que la peticion va con la ciudad
+# equivocada. Interpretarlo mal produjo falsos negativos reales en Getafe/Leganes.
+#
+# El codigo de ciudad NO es deducible (Getafe es "SOM", Las Rozas "NOM"), asi que este
+# mapa se saco preguntandoselo a Glovo: una direccion de cada municipio por el flujo de
+# interfaz, leyendo el cityCode que el mismo asigna. Ojo con Pozuelo: Glovo lo mete en
+# leganes-getafe aunque geograficamente no pegue.
+ZONAS = {
+    "Getafe":                  ("SOM", "leganes-getafe"),
+    "Leganés":                 ("SOM", "leganes-getafe"),
+    "Pozuelo de Alarcón":      ("SOM", "leganes-getafe"),
+    "Las Rozas de Madrid":     ("NOM", "madrid-norte-majadahonda-las-rozas-boadilla-torrelodones-galapagar"),
+    "Majadahonda":             ("NOM", "madrid-norte-majadahonda-las-rozas-boadilla-torrelodones-galapagar"),
+    "Rivas-Vaciamadrid":       ("RAR", "rivas-arganda"),
+}
+ZONA_POR_DEFECTO = ("MAD", "madrid")  # Madrid y los municipios que Glovo mete con ella
+                                      # (Alcobendas, Coslada, San Fernando de Henares)
+
+
+def zona_de(direccion_texto: str):
+    """(cityCode, slug) de la zona de Glovo a la que pertenece esta direccion."""
+    for municipio, zona in ZONAS.items():
+        if municipio.lower() in direccion_texto.lower():
+            return zona
+    return ZONA_POR_DEFECTO
+
 # CAUSA RAÍZ real de la inmensa mayoría de "tienda no confirmada" (confirmado
 # 03/09 revisando TODAS las capturas de un día real de fallos -- ~49 de 50
 # mostraban exactamente este banner, ninguna un bloqueo/challenge de verdad, y
@@ -131,6 +159,7 @@ class GlovoScraper(BaseAggregatorScraper):
     _api_destino = None      # {"lat":…, "lng":…} que se inyecta en la peticion
     _api_respuesta = None    # ultimo JSON devuelto por la API
     _api_lista = False       # ya se cargo una vez la pagina de resultados
+    _api_zona = None         # (cityCode, slug) que tiene cargada la sesion ahora mismo
 
     _sesion_pw = None
     _sesion_browser = None
@@ -158,7 +187,7 @@ class GlovoScraper(BaseAggregatorScraper):
             {
                 "latitude": lat,
                 "longitude": lng,
-                "cityCode": "MAD",
+                "cityCode": zona_de(direccion_texto)[0],
                 "countryCode": "ES",
                 "cityName": "Madrid",
                 "text": direccion_texto,
@@ -233,8 +262,21 @@ class GlovoScraper(BaseAggregatorScraper):
 
         await self._sesion_context.route("**/api.glovoapp.com/**", _inyectar)
 
+        # Solo se acepta la respuesta de NUESTRA busqueda. Sin este filtro habia una
+        # condicion de carrera real: para forzar una peticion nueva se busca primero otro
+        # termino ("donuts") y luego la marca, y la respuesta del primero podia llegar
+        # despues de limpiar la variable -- se leia el listado de donuts, donde
+        # logicamente no hay ningun Krispy Kreme, y salia un FALSO NEGATIVO intermitente
+        # (visto en Calle Granada 21: la API devolvia krispy-kreme-madrid-norte como
+        # primer resultado y aun asi se marcaba como no disponible).
+        marca_en_url = urllib.parse.quote_plus(MARCA_BUSQUEDA).lower()
+
         async def _guardar(respuesta):
-            if API_STORE_WALL in respuesta.url and "search" in respuesta.url:
+            if (
+                API_STORE_WALL in respuesta.url
+                and "search" in respuesta.url
+                and marca_en_url in respuesta.url.lower().replace("%20", "+")
+            ):
                 try:
                     self._api_respuesta = (respuesta.status, await respuesta.text())
                 except Exception:
@@ -316,12 +358,18 @@ class GlovoScraper(BaseAggregatorScraper):
             "path": "/",
         }])
 
-        if not self._api_lista:
-            await page.goto(
-                f"{URL_INICIO}/search?q={urllib.parse.quote(MARCA_BUSQUEDA)}",
-                wait_until="domcontentloaded", timeout=30000,
-            )
+        zona = zona_de(direccion)
+        url_zona = f"https://glovoapp.com/es/es/{zona[1]}/search?q={urllib.parse.quote(MARCA_BUSQUEDA)}"
+
+        if not self._api_lista or zona != self._api_zona:
+            # Primera direccion, o cambio de zona: hay que cargar la pagina de LA ZONA que
+            # toca. Consultar coordenadas de una zona desde otra devuelve 422 (ver
+            # comentario de ZONAS). Es una recarga por cambio de zona, no por punto.
+            if zona != self._api_zona and self._api_zona is not None:
+                logger.info("glovo: cambio de zona %s -> %s", self._api_zona[0], zona[0])
+            await page.goto(url_zona, wait_until="domcontentloaded", timeout=30000)
             self._api_lista = True
+            self._api_zona = zona
         else:
             # Repetir la busqueda sin recargar. Se pasa por otro termino primero para
             # forzar una peticion nueva: repetir el mismo texto no siempre la dispara.
@@ -342,10 +390,7 @@ class GlovoScraper(BaseAggregatorScraper):
             if recarga_de_rescate and intento == 10 and self._api_respuesta is None:
                 recarga_de_rescate = False
                 logger.info("glovo: la busqueda interna no disparo la API -- recargando la pagina")
-                await page.goto(
-                    f"{URL_INICIO}/search?q={urllib.parse.quote(MARCA_BUSQUEDA)}",
-                    wait_until="domcontentloaded", timeout=30000,
-                )
+                await page.goto(url_zona, wait_until="domcontentloaded", timeout=30000)
             if self._api_respuesta is not None:
                 estado, cuerpo = self._api_respuesta
                 if estado == 422:
@@ -362,7 +407,11 @@ class GlovoScraper(BaseAggregatorScraper):
                     # flujo de interfaz de siempre, que los resuelve bien. Es mas lento
                     # pero CORRECTO, que es lo que importa: un falso negativo marcaria
                     # como sin cobertura una zona que si reparte.
-                    raise TimeoutError("glovo: 422 -- direccion fuera del contexto de ciudad de la sesion")
+                    self._api_lista = False
+                    self._api_zona = None
+                    raise TimeoutError(
+                        f"glovo: 422 con la zona {zona[0]} -- la sesion se recarga en la siguiente"
+                    )
                 if estado == 200:
                     disponible, detalle = self._leer_respuesta_api(cuerpo)
                     if disponible is None:
@@ -458,7 +507,7 @@ class GlovoScraper(BaseAggregatorScraper):
             {
                 "latitude": lat,
                 "longitude": lng,
-                "cityCode": "MAD",
+                "cityCode": zona_de(direccion_texto)[0],
                 "countryCode": "ES",
                 "cityName": "Madrid",
                 "text": direccion,
