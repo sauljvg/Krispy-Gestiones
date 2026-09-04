@@ -488,7 +488,7 @@ def read_workbook_sheets(file_bytes):
     return resultado
 
 
-def _quiza_calcular_scoring(hojas, columnas_extra=None, empresa=None):
+def _quiza_calcular_scoring(hojas, columnas_extra=None, empresa=None, forzar=False):
     """Si el Excel trae una hoja "Respuestas" cruda (export directo de Forms,
     sin Dashboard ya calculado) y se reconoce como de Valores y Competencias
     por sus preguntas, calculamos aquí el Scoring/Dashboard — así el usuario
@@ -498,13 +498,26 @@ def _quiza_calcular_scoring(hojas, columnas_extra=None, empresa=None):
     el cuestionario por su contenido, no por el nombre del tipo -- salvo el
     umbral de apto, que sí depende de la empresa (ver scoring_valores.calcular).
 
+    forzar: se salta el detector heurístico (parece_valores_competencias) y
+    puntúa igualmente. Solo lo pide ingest_fila_directa cuando la respuesta
+    viene del módulo de Test y el admin ya vinculó ese test a un tipo de
+    Informe "de valores" al montarlo -- ahí el tipo es una elección explícita,
+    no una suposición sobre un Excel de origen desconocido, así que no hace
+    falta reconocer el cuestionario por sus preguntas para confiar en que
+    toca puntuarlo (y sin esto, un test con menos preguntas reconocidas que
+    el umbral de la heurística se quedaba sin RESULTADO aunque sí era de
+    Valores y Competencias). La importación manual de Excel nunca pasa
+    forzar=True: ahí si el archivo subido no es realmente de Valores y
+    Competencias, puntuarlo a la fuerza generaría un "No apto" falso por
+    columnas sin reconocer, así que sigue protegida por la heurística.
+
     columnas_extra se reenvía tal cual a scoring_valores.calcular() — ver ahí
     su propósito (solo lo usa el módulo de Test, nunca la importación manual
     de Excel)."""
     respuestas = hojas.get("Respuestas")
     if not respuestas or "Dashboard" in hojas:
         return hojas
-    if not scoring_valores.parece_valores_competencias(respuestas):
+    if not forzar and not scoring_valores.parece_valores_competencias(respuestas):
         return hojas
     scoring_rows, dashboard_rows = scoring_valores.calcular(respuestas, columnas_extra, empresa=empresa)
     nuevas = dict(hojas)
@@ -596,7 +609,14 @@ def ingest_fila_directa(tipo_clave, fila, origen="Formulario web", columnas_extr
     if tipo is None:
         raise ValueError(f"Tipo de informe desconocido: {tipo_clave}")
 
-    hojas = _quiza_calcular_scoring({"Respuestas": [fila]}, columnas_extra, empresa=tipo.get("empresa"))
+    # "valores" en la clave (valores_tiendas, valores_oficina,
+    # saona_valores_restaurantes, saona_valores_oficina...) es la misma
+    # convención de nombres que ya usan los 4 tipos existentes -- suficiente
+    # para forzar el scoring sin necesitar un campo aparte en informe_tipos.
+    es_de_valores = "valores" in (tipo_clave or "")
+    hojas = _quiza_calcular_scoring(
+        {"Respuestas": [fila]}, columnas_extra, empresa=tipo.get("empresa"), forzar=es_de_valores
+    )
 
     conn = get_connection()
     cur = conn.execute(
@@ -621,6 +641,44 @@ def ingest_fila_directa(tipo_clave, fila, origen="Formulario web", columnas_extr
         "hoja": hoja_destino,
         "respuesta_id": ids_por_hoja.get(hoja_destino),
     }
+
+
+def recalcular_resultados_pendientes():
+    """Backfill: respuestas de tests "de valores" (ver es_de_valores en
+    ingest_fila_directa) que quedaron sin RESULTADO porque llegaron ANTES de
+    que ingest_fila_directa forzara el scoring -- se quedaban con solo la
+    hoja "Respuestas" cruda, sin Dashboard/Scoring, así que en Reclutamiento
+    se veía "Respondió al test" pero nunca el apto/no apto. Recalcula sobre
+    la fila ya guardada (datos_json) y la escribe con json_set, igual que
+    forzar_no_apto -- sin insertar filas nuevas ni tocar qué candidato queda
+    enlazado a qué respuesta."""
+    conn = get_connection()
+    filas = conn.execute("""
+        SELECT r.id, r.datos_json, t.empresa
+        FROM informe_respuestas r
+        JOIN informe_tipos t ON t.id = r.tipo_id
+        WHERE t.clave LIKE '%valores%'
+          AND json_extract(r.datos_json, '$.RESULTADO') IS NULL
+    """).fetchall()
+    actualizadas = 0
+    for fila in filas:
+        datos = json.loads(fila["datos_json"])
+        if len(datos) < 5:
+            # Fila casi vacía (p.ej. un test abandonado a medias) -- ni
+            # siquiera vale la pena puntuarla, se deja tal cual.
+            continue
+        _scoring_rows, dashboard_rows = scoring_valores.calcular([datos], empresa=fila["empresa"])
+        resultado = dashboard_rows[0]["RESULTADO"] if dashboard_rows else None
+        if not resultado:
+            continue
+        conn.execute(
+            "UPDATE informe_respuestas SET datos_json = json_set(datos_json, '$.RESULTADO', ?) WHERE id = ?",
+            (resultado, fila["id"]),
+        )
+        actualizadas += 1
+    conn.commit()
+    conn.close()
+    return {"revisadas": len(filas), "actualizadas": actualizadas}
 
 
 def forzar_no_apto(respuesta_id):

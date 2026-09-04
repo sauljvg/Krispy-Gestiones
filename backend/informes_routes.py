@@ -164,6 +164,15 @@ def eliminar_tipo_route(tipo_clave: str, _user: dict = Depends(require_tipo_acce
     return {"ok": True}
 
 
+@router.post("/recalcular-resultados-pendientes")
+def recalcular_resultados_pendientes_route(user: dict = Depends(require_informes)):
+    """Backfill puntual: respuestas de tests de valores que quedaron sin
+    RESULTADO (apto/no apto) por haber llegado antes de que
+    ingest_fila_directa empezara a forzar el scoring -- ver
+    recalcular_resultados_pendientes en informes.py."""
+    return informes_module.recalcular_resultados_pendientes()
+
+
 @router.get("/usuarios-para-compartir")
 def usuarios_para_compartir_route(_user: dict = Depends(get_current_user)):
     # Cualquiera logueado puede pedir esta lista (nombre/usuario/rol, nada
