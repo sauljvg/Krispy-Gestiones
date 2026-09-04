@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import random
@@ -50,9 +51,28 @@ SEL_SEARCH_INPUT = 'input[placeholder="¿Qué necesitas?"]'
 SEL_SEARCH_BUTTON = 'button:has-text("Buscar")'
 SEL_STORE_CARD = 'a[class*="StoreTile_wrapper"]'
 
+# Buscador de la pagina de RESULTADOS (04/09). OJO: no es el de la portada
+# (SEL_SEARCH_INPUT); aqui hay DOS con el mismo placeholder y uno esta oculto, de ahi
+# el :visible.
+SEL_SEARCH_PANEL_INPUT = '[data-testid="search-panel-input"]:visible'
+
 SEL_STORE_ETA_TEXT = '[class*="StoreEta_text"]'
 
 MARCA_BUSQUEDA = "Krispy Kreme"
+
+# API interna de Glovo (04/09). Es la que de verdad devuelve el listado de tiendas; la
+# pagina solo la envuelve. La UBICACION le llega por CABECERAS, no por URL ni cookie:
+# glovo-delivery-location-latitude/-longitude. No se puede llamar desde fuera (da 404,
+# probado con las 30 cabeceras capturadas) ni desde dentro con fetch (su propio JS
+# envuelve fetch y salta CORS) -- pero SI se puede dejar que la haga la pagina e
+# interceptarla con context.route() para reescribirle las coordenadas al vuelo.
+API_STORE_WALL = "store_wall"
+
+# Donde vive el listado REAL de tiendas dentro del JSON. Buscar "krispy kreme" en el
+# texto en bruto NO vale: la marca aparece 184 veces en metadatos de analitica y da
+# falsos positivos en direcciones sin cobertura (comprobado). Hay que leer los
+# elementos y mirar su slug/titulo.
+RUTA_ELEMENTS = ("data", "body", "data", "elements")
 
 # CAUSA RAÍZ real de la inmensa mayoría de "tienda no confirmada" (confirmado
 # 03/09 revisando TODAS las capturas de un día real de fallos -- ~49 de 50
@@ -101,6 +121,17 @@ class GlovoScraper(BaseAggregatorScraper):
     # sueltas (vistas en Getafe/Leganés) donde la página de resultados sigue saliendo
     # vacía pese a la cookie -- esas caen solas al flujo de siempre, que sí las
     # resuelve; no se pierde ningún punto por esto.
+    # Ruta por API (04/09): en vez de leer el DOM, se lee la respuesta JSON de la
+    # propia API de Glovo, interceptando su peticion para inyectarle las coordenadas de
+    # cada direccion. Ventaja decisiva: recargar la pagina de busqueda cuesta ~150
+    # peticiones por punto (medido), y con 5 workers eso son ~100 peticiones/segundo
+    # contra Glovo -- de ahi que su limitador por IP saltara constantemente y que
+    # acelerar por punto no sirviera de nada. Repitiendo la busqueda DENTRO de la app,
+    # sin recargar, cada punto cuesta unas pocas peticiones.
+    _api_destino = None      # {"lat":…, "lng":…} que se inyecta en la peticion
+    _api_respuesta = None    # ultimo JSON devuelto por la API
+    _api_lista = False       # ya se cargo una vez la pagina de resultados
+
     _sesion_pw = None
     _sesion_browser = None
     _sesion_context = None
@@ -140,6 +171,30 @@ class GlovoScraper(BaseAggregatorScraper):
         )
         return urllib.parse.quote(urllib.parse.quote(valor, safe=""), safe="")
 
+    @staticmethod
+    def _leer_respuesta_api(texto: str):
+        """(disponible, detalle) leyendo el listado REAL de tiendas del JSON.
+        None si la respuesta no es interpretable (el caller cae al flujo de siempre)."""
+        try:
+            datos = json.loads(texto)
+        except Exception:
+            return None, "json ilegible"
+        elementos = datos
+        for clave in RUTA_ELEMENTS:
+            elementos = elementos.get(clave) if isinstance(elementos, dict) else None
+            if elementos is None:
+                return None, "estructura inesperada"
+        if not isinstance(elementos, list):
+            return None, "sin listado de tiendas"
+        for elemento in elementos:
+            datos_el = elemento.get("data", {}) if isinstance(elemento, dict) else {}
+            slug = str(datos_el.get("slug", "")).lower()
+            titulo = datos_el.get("title") or {}
+            texto_titulo = str(titulo.get("text", "")).lower() if isinstance(titulo, dict) else ""
+            if "krispy-kreme" in slug or MARCA_BUSQUEDA.lower() in texto_titulo:
+                return True, "Krispy Kreme en el listado"
+        return False, f"{len(elementos)} tiendas, ninguna Krispy Kreme"
+
     async def _abrir_sesion(self):
         """Abre UNA sesión y la deja caliente (portada + banner de cookies) para
         reutilizarla en todas las direcciones siguientes."""
@@ -164,7 +219,30 @@ class GlovoScraper(BaseAggregatorScraper):
         await _STEALTH.apply_stealth_async(self._sesion_context)
         if self.bloquear_recursos:
             await self._sesion_context.route("**/*", _bloquear_recursos_pesados)
+        # Interceptar la peticion a la API para inyectar las coordenadas del punto que
+        # toque, y quedarnos con su respuesta (ver comentario de _api_destino).
+        async def _inyectar(route):
+            peticion = route.request
+            if API_STORE_WALL in peticion.url and self._api_destino:
+                cabeceras = dict(peticion.headers)
+                cabeceras["glovo-delivery-location-latitude"] = str(self._api_destino["lat"])
+                cabeceras["glovo-delivery-location-longitude"] = str(self._api_destino["lng"])
+                await route.continue_(headers=cabeceras)
+            else:
+                await route.continue_()
+
+        await self._sesion_context.route("**/api.glovoapp.com/**", _inyectar)
+
+        async def _guardar(respuesta):
+            if API_STORE_WALL in respuesta.url and "search" in respuesta.url:
+                try:
+                    self._api_respuesta = (respuesta.status, await respuesta.text())
+                except Exception:
+                    pass
+
         self._sesion_page = await self._sesion_context.new_page()
+        self._sesion_page.on("response", lambda r: asyncio.create_task(_guardar(r)))
+        self._api_lista = False
 
         await self._sesion_page.goto(URL_INICIO, wait_until="domcontentloaded", timeout=45000)
         await self._aceptar_cookies(self._sesion_page)
@@ -218,7 +296,18 @@ class GlovoScraper(BaseAggregatorScraper):
             return await super().verificar_disponibilidad(tienda_nombre, direccion, lat, lng)
 
     async def _verificar_por_cookie(self, direccion: str, lat: float, lng: float) -> ResultadoChequeo:
+        """Lee la disponibilidad de la RESPUESTA DE LA API, no del DOM.
+
+        La primera direccion carga la pagina de resultados; las siguientes solo repiten
+        la busqueda DENTRO de la app, sin recargar -- que es lo que hace barata esta
+        ruta (~150 peticiones por punto recargando, unas pocas repitiendo la busqueda).
+        Las coordenadas se inyectan interceptando la peticion (ver _abrir_sesion)."""
         page = self._sesion_page
+        self._api_destino = {"lat": lat, "lng": lng}
+        self._api_respuesta = None
+
+        # La cookie se mantiene por coherencia con lo que la app muestra en pantalla;
+        # quien manda de verdad para la API son las cabeceras inyectadas.
         await self._sesion_context.clear_cookies(name="glovo_delivery_address")
         await self._sesion_context.add_cookies([{
             "name": "glovo_delivery_address",
@@ -226,54 +315,61 @@ class GlovoScraper(BaseAggregatorScraper):
             "domain": "glovoapp.com",
             "path": "/",
         }])
-        await page.goto(
-            f"{URL_INICIO}/search?q={urllib.parse.quote(MARCA_BUSQUEDA)}",
-            wait_until="domcontentloaded", timeout=30000,
-        )
 
-        tarjeta_kk = page.locator(f'{SEL_STORE_CARD}:has-text("{MARCA_BUSQUEDA}")')
-        todas = page.locator(SEL_STORE_CARD)
-        conteo_anterior = -1
-        # Si a los ~5s la página no ha pintado NI UNA tarjeta ni el banner de "sin
-        # resultados", es el caso de "página vacía" (puntos sueltos de Getafe/Leganés):
-        # no va a resolverse esperando más, y cada segundo de más aquí se suma al
-        # flujo de siempre que va a tener que rehacerlo. Se corta pronto.
-        VUELTAS_SIN_NADA_MAX = 10  # 10 x 500ms
-        vueltas_sin_ninguna_tarjeta = 0
-        for _ in range(24):  # hasta ~12s si al menos hay tarjetas pintándose
+        if not self._api_lista:
+            await page.goto(
+                f"{URL_INICIO}/search?q={urllib.parse.quote(MARCA_BUSQUEDA)}",
+                wait_until="domcontentloaded", timeout=30000,
+            )
+            self._api_lista = True
+        else:
+            # Repetir la busqueda sin recargar. Se pasa por otro termino primero para
+            # forzar una peticion nueva: repetir el mismo texto no siempre la dispara.
+            campo = page.locator(SEL_SEARCH_PANEL_INPUT).first
+            await campo.wait_for(state="visible", timeout=10000)
+            await campo.fill("donuts")
+            await campo.press("Enter")
+            await page.wait_for_timeout(800)
+            self._api_respuesta = None
+            await campo.fill(MARCA_BUSQUEDA)
+            await campo.press("Enter")
+
+        for _ in range(30):  # hasta ~15s
+            if self._api_respuesta is not None:
+                estado, cuerpo = self._api_respuesta
+                if estado == 422:
+                    # Glovo responde 422 cuando la ubicacion queda fuera de su zona de
+                    # servicio (comprobado en los dos puntos de Leganes que el flujo de
+                    # interfaz tambien daba como no disponibles). Es un no fiable.
+                    return ResultadoChequeo(
+                        disponible=False,
+                        mensaje_bloqueo="Glovo no da servicio en esta ubicacion (422)",
+                        status_http=422,
+                    )
+                if estado == 200:
+                    disponible, detalle = self._leer_respuesta_api(cuerpo)
+                    if disponible is None:
+                        raise TimeoutError(f"glovo: respuesta de API no interpretable ({detalle})")
+                    logger.info("glovo: por API -> disponible=%s (%s)", disponible, detalle)
+                    return ResultadoChequeo(
+                        disponible=disponible,
+                        mensaje_bloqueo=None if disponible else "Tienda no aparece en resultados para esta direccion",
+                        status_http=200,
+                    )
+                raise TimeoutError(f"glovo: la API respondio {estado}")
+
             texto = await page.evaluate("() => document.body.innerText")
             bajo = texto.lower()
             if any(clave in bajo for clave in CHALLENGE_KEYWORDS):
-                raise RuntimeError("challenge anti-bot en la ruta rápida")
+                raise RuntimeError("challenge anti-bot en la ruta rapida")
             if MARCADOR_PAGINA_SOBRECARGADA_LOWER in bajo:
                 raise PaginaSobrecargadaError("glovo")
-            if await tarjeta_kk.count() > 0:
-                return ResultadoChequeo(disponible=True, status_http=200)
-            if any(marcador in bajo for marcador in MARCADORES_SIN_RESULTADOS):
-                # Banner de "sin resultados": aquí no reparte nadie -- respuesta válida.
-                return ResultadoChequeo(
-                    disponible=False,
-                    mensaje_bloqueo="Sin resultados de reparto para esta dirección",
-                    status_http=200,
-                )
-            conteo = await todas.count()
-            if conteo > 0 and conteo == conteo_anterior:
-                # Listado ya estable con otras tiendas pero sin Krispy Kreme.
-                return ResultadoChequeo(
-                    disponible=False,
-                    mensaje_bloqueo="Tienda no aparece en resultados de búsqueda para esta dirección",
-                    status_http=200,
-                )
-            if conteo == 0:
-                vueltas_sin_ninguna_tarjeta += 1
-                if vueltas_sin_ninguna_tarjeta >= VUELTAS_SIN_NADA_MAX:
-                    break
-            conteo_anterior = conteo
             await page.wait_for_timeout(500)
 
-        # Página de resultados vacía para esta dirección (visto en puntos sueltos de
-        # Getafe/Leganés): lo resuelve el flujo de interfaz de siempre.
-        raise TimeoutError("glovo: la búsqueda por cookie no devolvió resultados")
+        # Sin respuesta de la API: la sesion puede haberse quedado tocada -> que la
+        # siguiente direccion recargue la pagina en vez de repetir la busqueda.
+        self._api_lista = False
+        raise TimeoutError("glovo: la API no respondio a tiempo")
 
     async def _verificar(
         self, page, tienda_nombre: str, direccion: str,
