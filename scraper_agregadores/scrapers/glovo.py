@@ -1,5 +1,6 @@
 import json
 import logging
+import random
 import re
 import urllib.parse
 
@@ -7,6 +8,8 @@ from playwright.async_api import async_playwright
 
 from scrapers.base import (
     CHALLENGE_KEYWORDS,
+    _USER_AGENTS,
+    _viewport_aleatorio,
     BaseAggregatorScraper,
     PaginaSobrecargadaError,
     ResultadoChequeo,
@@ -144,7 +147,20 @@ class GlovoScraper(BaseAggregatorScraper):
         self._sesion_browser = await self._sesion_pw.chromium.launch(
             headless=True, args=["--disable-blink-features=AutomationControlled"], proxy=self.proxy,
         )
-        self._sesion_context = await self._sesion_browser.new_context(locale="es-ES")
+        self._sesion_context = await self._sesion_browser.new_context(
+            # MISMA aleatorización de huella que el flujo de siempre (ver _run_once en
+            # base.py). Error real del 03/09, detectado el 04/09: la sesión caliente se
+            # creaba sin user_agent ni viewport, así que salía con los valores POR
+            # DEFECTO de Playwright -- y el UA por defecto anuncia la versión interna de
+            # Chromium ("Chrome/151.0.0.0", una versión que no existe en escritorio
+            # real), con viewport fijo 1280x720. Encima esa misma huella se mantenía
+            # durante TODOS los chequeos de la sesión (cientos), mientras que el flujo de
+            # siempre estrenaba una por chequeo. La aleatorización se añadió el 27/08
+            # justo como mitigación anti-detección y esta ruta se la saltaba sin querer.
+            user_agent=random.choice(_USER_AGENTS),
+            viewport=_viewport_aleatorio(),
+            locale="es-ES",
+        )
         await _STEALTH.apply_stealth_async(self._sesion_context)
         if self.bloquear_recursos:
             await self._sesion_context.route("**/*", _bloquear_recursos_pesados)

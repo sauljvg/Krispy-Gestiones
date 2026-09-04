@@ -1,13 +1,21 @@
 import base64
 import json
 import logging
+import random
 import re
 import time
 import urllib.parse
 
 from playwright.async_api import async_playwright
 
-from scrapers.base import CHALLENGE_KEYWORDS, _STEALTH, BaseAggregatorScraper, ResultadoChequeo
+from scrapers.base import (
+    CHALLENGE_KEYWORDS,
+    _STEALTH,
+    _USER_AGENTS,
+    _viewport_aleatorio,
+    BaseAggregatorScraper,
+    ResultadoChequeo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +162,20 @@ class UberEatsScraper(BaseAggregatorScraper):
         ]
         self._sesion_pw = await async_playwright().start()
         self._sesion_browser = await self._sesion_pw.chromium.launch(headless=False, args=args, proxy=self.proxy)
-        self._sesion_context = await self._sesion_browser.new_context(locale="es-ES")
+        self._sesion_context = await self._sesion_browser.new_context(
+            # MISMA aleatorización de huella que el flujo de siempre (ver _run_once en
+            # base.py). Error real del 03/09, detectado el 04/09: la sesión caliente se
+            # creaba sin user_agent ni viewport, así que salía con los valores POR
+            # DEFECTO de Playwright -- y el UA por defecto anuncia la versión interna de
+            # Chromium ("Chrome/151.0.0.0", una versión que no existe en escritorio
+            # real), con viewport fijo 1280x720. Encima esa misma huella se mantenía
+            # durante TODOS los chequeos de la sesión (cientos), mientras que el flujo de
+            # siempre estrenaba una por chequeo. La aleatorización se añadió el 27/08
+            # justo como mitigación anti-detección y esta ruta se la saltaba sin querer.
+            user_agent=random.choice(_USER_AGENTS),
+            viewport=_viewport_aleatorio(),
+            locale="es-ES",
+        )
         await _STEALTH.apply_stealth_async(self._sesion_context)
         self._sesion_page = await self._sesion_context.new_page()
         self._sesion_abierta_en = time.monotonic()
