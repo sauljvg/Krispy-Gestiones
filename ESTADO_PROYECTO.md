@@ -391,3 +391,75 @@ De paso esta sesión:
   consiguió y no parece alcanzable sin aceptar una tasa de fallo mucho más
   alta -- probado con 4 combinaciones de concurrencia/IP distintas, todas
   con el mismo techo.
+
+- **03-04/09 -- RUTAS RÁPIDAS: la dirección se fija por URL/cookie con la sesión
+  caliente, en vez de repetir la interfaz en cada punto.** El coste real por
+  dirección no estaba en la búsqueda sino en repetir para CADA punto: lanzar
+  Chromium + cargar la portada entera + los ~6-7 pasos del flujo de dirección.
+  - **Uber Eats**: acepta la dirección como parámetro de URL `pl` =
+    base64(percent-encode(JSON con address + lat/lng)); el placeId puede ir
+    vacío, no lo valida. Se va directo a
+    `/es/search?q=Krispy%20Kreme&pl=...&diningMode=DELIVERY`.
+  - **Glovo**: se reutiliza la cookie `glovo_delivery_address` ya conocida del
+    27/08, cambiándola entre direcciones sin tocar la interfaz.
+  - **Por qué habían fallado los dos intentos anteriores** (Uber 08/08, Glovo
+    27/08): se probaban con un navegador NUEVO en cada chequeo. Con sesión fría,
+    entrar directo a una URL profunda dispara el challenge y la página de
+    resultados sale vacía. La diferencia es CALENTAR la sesión una vez (visita
+    normal a la portada) y REUTILIZARLA para todas las direcciones de ese worker.
+  - **Validación A/B** (lo que importa no es "lejos = no reparte" -- Uber reparte
+    en el 91% de los puntos -- sino que las dos rutas digan LO MISMO): Uber Eats
+    6/6 idéntico al flujo de interfaz (2.9s vs 78.9s de media); Glovo 8/8
+    idéntico en dos pasadas seguidas (2.6s vs 30.4s en los puntos que resuelve).
+  - Ambas caen automáticamente al flujo de interfaz de siempre si fallan, con
+    cortacircuitos temporal, así que nunca se pierde ni se falsea un punto.
+
+- **04/09 -- RONDAS REALES, resultados medidos.**
+  - **Uber Eats: 18.1 puntos/min con SOLO 4 WORKERS** (234 puntos reales,
+    96.6% resueltos por la ruta rápida) -> ~22 min proyectados para los 390
+    puntos. La ronda de referencia hacía los 390 en 34 min **con 20 workers**:
+    son ~8x por worker. Es el mejor resultado conseguido hasta ahora.
+  - **Glovo: SIN MEJORA en tiempo de ronda.** Tres lecturas consistentes
+    (5.2-6.0 pts/min con 5 workers) dan los mismos ~57 min de siempre. La ruta
+    rápida funciona (12x en los puntos que resuelve), pero el **40% de los
+    puntos acaba en el flujo lento** por el "Oh, no!" (60 sobrecargas en 93
+    puntos). Quien marca el ritmo es el límite por IP de Glovo, no el código.
+    Confirma la conclusión del 27/08 desde otro ángulo.
+
+- **04/09 -- PROBLEMA ABIERTO: Uber Eats corta a los ~13-15 min.** Dos rondas
+  (23:41 y 10:39), AMBAS con 4 workers y ambas a 18.1 pts/min, se cortaron en esa
+  ventana: el contador de disponibles se congela y a partir de ahí TODO son
+  fallos técnicos (no ensucian datos -- se guardan con error_texto, no como
+  no_disponible). El bloqueo **persiste más de 10 minutos** tras parar (medido:
+  una ronda lanzada 10 min después venía rota desde el primer punto, 1 acierto
+  de 25). Esperar NO sirve como solución: el tiempo se dispararía.
+  - **OJO, aviso metodológico**: en una primera lectura se comparó "10 workers vs
+    4 workers" para concluir que el predictor era el TIEMPO y no el volumen. Esa
+    comparación era ERRÓNEA -- se mezcló el worker-count de una ronda que nunca
+    llegó a funcionar (lanzada sobre un bloqueo activo) con los puntos de otra.
+    **Las dos rondas buenas fueron de 4 workers.** Con misma configuración y
+    mismo ritmo, tiempo y volumen acumulado crecen juntos: con los datos que hay
+    NO se puede distinguir cuál dispara el corte.
+  - Hipótesis viva, SIN validar: la edad de la sesión del navegador (que desde
+    el 03/09 se reutiliza toda la ronda). Implementado el reciclaje cada 8 min
+    (`_MINUTOS_MAX_SESION` en scrapers/ubereats.py), pendiente de una prueba
+    limpia. La prueba debe confirmar que el contador de disponibles SIGUE
+    subiendo pasado el minuto 15.
+  - **SIEMPRE sondear antes de lanzar una ronda** (un solo chequeo, 30s): si no
+    devuelve un resultado bueno, el sitio sigue bloqueado y la ronda solo
+    generará errores. Saltarse este paso costó una prueba entera de 13 minutos.
+
+- **04/09 -- Otros arreglos de Glovo, todos validados en vivo**: el banner de
+  cookies tarda más de 8s en aparecer bajo carga y se quedaba abierto tapando el
+  flujo entero (55% -> 0% de fallos ambiguos al subir la espera a 15s); el banner
+  de "sin resultados" se trataba como fallo técnico cuando es una respuesta
+  válida; y se bloquean las llamadas de tracking (GTM, proxiadas por el propio
+  dominio) que solo añadían carga (15% -> 10% de fallo).
+
+- **04/09 -- Sobre llevar esto a un VPS**: Glovo y JustEat corren headless y
+  técnicamente irían, pero **la IP de datacenter de un VPS previsiblemente
+  empeora Glovo** (medido el 27/08: proxies de datacenter dieron 27.5% de fallo
+  frente al 8.4% de la IP de la oficina). Uber Eats necesita ventana visible de
+  verdad, así que haría falta probar Xvfb (display virtual) antes de contar con
+  ello -- sin probar, no se sabe si Cloudflare lo acepta. Son dos incógnitas
+  independientes.
