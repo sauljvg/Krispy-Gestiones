@@ -400,8 +400,25 @@ def _extraer_de_texto(texto_crudo: str) -> dict:
         # 4000 tampoco bastaba para alguien con varios puestos largos y
         # detallados (un historial real de 5 experiencias con descripción
         # extensa ocupaba ~5900 caracteres) -- 10000 deja margen de sobra.
-        limite = 10000 if campo in ("formacion", "experiencia") else 400
+        # "disponibilidad" (Buena/Media/etc a viajar, cambiar de residencia...)
+        # es siempre una respuesta corta -- pero si en este CV en concreto no
+        # vuelve a aparecer NINGUNA otra cabecera conocida DESPUÉS de
+        # "Disponibilidad" (p.ej. porque "Experiencia"/"Formación" solo
+        # aparecen una vez, antes, y no se repiten), _contenido_de_seccion no
+        # encuentra dónde parar y se va hasta el límite -- 400 caracteres eran
+        # de sobra para que se colara ahí el bloque de un puesto entero
+        # (título, fechas, descripción) que el orden real del PDF, por las
+        # columnas del ATS, dejó justo después en el texto. 150 acota el daño
+        # y, aparte, si aun así el trozo capturado contiene un rango de
+        # fechas tipo "agosto de 2022 - marzo de 2023" (nunca aparece en una
+        # respuesta real de disponibilidad, sí en Experiencia/Formación), se
+        # corta justo ahí -- señal clara de que ya no es disponibilidad.
+        limite = 10000 if campo in ("formacion", "experiencia") else (150 if campo == "disponibilidad" else 400)
         contenido = _contenido_de_seccion(texto, keywords, una_linea, limite)
+        if campo == "disponibilidad" and contenido:
+            m = RANGO_FECHAS_RE.search(contenido)
+            if m:
+                contenido = contenido[:m.start()].strip()
         if contenido:
             extraido[campo] = contenido
 

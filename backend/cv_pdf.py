@@ -8,6 +8,8 @@ import json
 import os
 from xml.sax.saxutils import escape as _esc_str
 
+from cv_extraction import RANGO_FECHAS_RE
+
 
 def _esc(valor):
     # Los campos de un candidato vienen de un CV leído por IA -- no siempre
@@ -72,9 +74,11 @@ def _estilos(color_marca):
     return {
         "nombre": ParagraphStyle("nombre", fontName=FUENTE_TITULO, fontSize=24, textColor=BLANCO, leading=28),
         "puesto": ParagraphStyle("puesto", fontName=FUENTE_CONTENIDO, fontSize=14, textColor=BLANCO, leading=18, spaceBefore=2),
-        "contacto_header": ParagraphStyle("contactoHeader", fontName=FUENTE_CONTENIDO, fontSize=10.5, textColor=BLANCO, leading=15, spaceBefore=8),
         "sidebar_titulo": ParagraphStyle("sidebarTitulo", fontName=FUENTE_TITULO, fontSize=12, textColor=color_marca, spaceBefore=14, spaceAfter=4),
-        "sidebar_texto": ParagraphStyle("sidebarTexto", fontName=FUENTE_CONTENIDO, fontSize=10, textColor=GRIS_TEXTO, leading=14),
+        # Antes 10 -- se veía pequeño comparado con el resto del CV (queja
+        # del usuario), sobre todo en "Contacto", que es de las primeras
+        # cosas que se leen.
+        "sidebar_texto": ParagraphStyle("sidebarTexto", fontName=FUENTE_CONTENIDO, fontSize=11.5, textColor=GRIS_TEXTO, leading=16),
         "seccion_titulo": ParagraphStyle("seccionTitulo", fontName=FUENTE_TITULO, fontSize=14, textColor=color_marca, spaceBefore=4, spaceAfter=8),
         "entrada_titulo": ParagraphStyle("entradaTitulo", fontName=FUENTE_TITULO, fontSize=11.5, textColor=colors.black, leading=14),
         "entrada_fechas": ParagraphStyle("entradaFechas", fontName=FUENTE_CONTENIDO, fontSize=9.5, textColor=GRIS_TEXTO, leading=13),
@@ -258,9 +262,22 @@ def _sidebar(candidato, estilos):
     if contacto:
         flow.append(Paragraph("Contacto", estilos["sidebar_titulo"]))
         flow.append(Paragraph("<br/>".join(contacto), estilos["sidebar_texto"]))
-    if candidato.get("disponibilidad"):
+    disponibilidad = candidato.get("disponibilidad")
+    if disponibilidad:
+        # Saneado igual que en la extracción (ver cv_extraction.py) -- para
+        # candidatos ya guardados ANTES de ese arreglo, que se quedaron con
+        # el campo lleno de texto de Experiencia/Formación colado por medio
+        # (columnas de ATS que pypdf lee en un orden raro). Sin esto, el PDF
+        # seguiría mostrando la basura aunque la extracción ya esté
+        # arreglada para los CV que se suban de aquí en adelante.
+        m = RANGO_FECHAS_RE.search(disponibilidad)
+        if m:
+            disponibilidad = disponibilidad[:m.start()].strip()
+        if len(disponibilidad) > 150:
+            disponibilidad = disponibilidad[:150].strip() + "…"
+    if disponibilidad:
         flow.append(Paragraph("Disponibilidad", estilos["sidebar_titulo"]))
-        flow.append(Paragraph(_esc(candidato["disponibilidad"]), estilos["sidebar_texto"]))
+        flow.append(Paragraph(_esc(disponibilidad), estilos["sidebar_texto"]))
     # extra_fields: cualquier otro dato suelto que sacó la IA del CV
     # (Idiomas, Conocimientos, Carnet de conducir, Situación laboral...) --
     # se muestra tal cual, en el mismo orden en que se guardó. Las preguntas
@@ -272,7 +289,9 @@ def _sidebar(candidato, estilos):
     # razonable, para que un campo inesperadamente largo no vuelva a tumbar
     # la maquetación (esto fue justo lo que rompía la generación del PDF:
     # LayoutError, contenido más alto que una página entera).
-    CAMPOS_EXTRA_EXCLUIDOS_CV = {"nota del cuestionario", "preguntas de selección", "preguntas de seleccion"}
+    # "Autónomo": pedido explícito del usuario -- dato de más que no aporta
+    # a la decisión de contratar, se omite en TODOS los CV.
+    CAMPOS_EXTRA_EXCLUIDOS_CV = {"nota del cuestionario", "preguntas de selección", "preguntas de seleccion", "autónomo", "autonomo"}
     LARGO_MAXIMO_VALOR = 600
     for clave, valor in (candidato.get("extra_fields") or {}).items():
         if not valor or clave.strip().lower() in CAMPOS_EXTRA_EXCLUIDOS_CV:
@@ -308,15 +327,12 @@ def generar_cv_pdf(candidato: dict, empresa="kk", foto_ruta=None) -> bytes:
         puesto = candidato["vacante_puesto"]
         if candidato.get("vacante_centro"):
             puesto += f" · {candidato['vacante_centro']}"
-    contacto_header = " &nbsp;·&nbsp; ".join(
-        _esc(v) for v in [candidato.get("telefono"), candidato.get("email")] if v
-    )
-
+    # Antes también se repetía tel/email aquí en la cabecera -- ya salen,
+    # con su etiqueta, en "Contacto" de la barra lateral justo debajo, así
+    # que quitarlo de aquí no pierde el dato, solo la duplicación.
     cabecera_textos = [Paragraph(_esc(nombre), estilos["nombre"])]
     if puesto:
         cabecera_textos.append(Paragraph(_esc(puesto), estilos["puesto"]))
-    if contacto_header:
-        cabecera_textos.append(Paragraph(contacto_header, estilos["contacto_header"]))
 
     if foto_ruta and os.path.exists(foto_ruta):
         foto = FotoCandidato(foto_ruta, 2.6 * cm)
