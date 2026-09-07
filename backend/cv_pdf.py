@@ -199,6 +199,50 @@ def _bloque_formacion(formacion, estilos):
     return flow
 
 
+# Campos "canónicos" de la fila Dashboard del test (puntuación, no
+# preguntas) -- candidato["respuesta_datos"] es esa misma fila (ver
+# get_candidato en reclutamiento.py), así que ya viene recortada a solo
+# RESULTADO/puntuación + las preguntas que el admin marcó "Mostrar en el
+# dashboard de resultados" (p.ej. disponibilidad, confirmación de las
+# condiciones de la oferta) -- exactamente lo que interesa aquí. Se
+# excluyen estos por nombre porque el PDF ya muestra "Resultado del test"
+# en la app misma; aquí interesan las PREGUNTAS, no la puntuación.
+CAMPOS_TEST_EXCLUIDOS_CV = {
+    "nombre", "correo", "total valores (50%)", "total comp (50%)",
+    "score global", "resultado", "alertas", "fecha del test",
+}
+
+
+def _bloque_test(respuesta_datos, estilos):
+    """Preguntas 'extra' del test ligado a esta ficha -- ver
+    CAMPOS_TEST_EXCLUIDOS_CV arriba. Devuelve [] (sección omitida entera en
+    generar_cv_pdf) si no hay test ligado o no tiene ninguna pregunta extra
+    marcada, en vez de un "Sin datos" -- a diferencia de Experiencia/
+    Formación, que son secciones siempre esperables de un CV, esta es
+    contenido de más que no todos los candidatos van a tener."""
+    if not respuesta_datos:
+        return []
+    entradas = [
+        (clave, valor) for clave, valor in respuesta_datos.items()
+        if valor not in (None, "") and clave.strip().lower() not in CAMPOS_TEST_EXCLUIDOS_CV
+    ]
+    if not entradas:
+        return []
+    # Mismo límite y mismo motivo que LARGO_MAXIMO_VALOR en _sidebar -- una
+    # pregunta abierta marcada "Mostrar en el dashboard" por error podría
+    # traer un párrafo largo y tumbar la maquetación.
+    largo_maximo = 600
+    flow = []
+    for clave, valor in entradas:
+        valor_txt = str(valor)
+        if len(valor_txt) > largo_maximo:
+            valor_txt = valor_txt[:largo_maximo] + "…"
+        flow.append(Paragraph(_esc(clave), estilos["entrada_titulo"]))
+        flow.append(Paragraph(_esc(valor_txt), estilos["entrada_desc"]))
+        flow.append(Spacer(1, 8))
+    return flow
+
+
 def _sidebar(candidato, estilos):
     # Etiquetas de texto en vez de emoji -- las fuentes de marca (Gelica/
     # BrandonGrotesque) no traen esos glifos y se veían como cuadros vacíos.
@@ -364,6 +408,14 @@ def generar_cv_pdf(candidato: dict, empresa="kk", foto_ruta=None) -> bytes:
         HRFlowable(width="100%", thickness=1.2, color=color_marca, spaceBefore=0, spaceAfter=8),
         *_bloque_formacion(candidato.get("formacion_json") or [], estilos),
     ]
+    bloque_test = _bloque_test(candidato.get("respuesta_datos"), estilos)
+    if bloque_test:
+        principal_flow += [
+            Spacer(1, 14),
+            Paragraph("Preguntas del test", estilos["seccion_titulo"]),
+            HRFlowable(width="100%", thickness=1.2, color=color_marca, spaceBefore=0, spaceAfter=8),
+            *bloque_test,
+        ]
 
     story = [
         NextPageTemplate("continuacion"),
