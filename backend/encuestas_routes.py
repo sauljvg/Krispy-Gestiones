@@ -54,6 +54,8 @@ class EncuestaEditarIn(BaseModel):
     usar_mensaje_no_apto: bool = True
     fecha_cierre: str | None = None
     pedir_cita_entrevista: bool = False
+    cita_condicion_pregunta_id: int | None = None
+    cita_condicion_valores: list[str] = []
 
 
 class PaginaIn(BaseModel):
@@ -187,7 +189,7 @@ def update_encuesta_route(encuesta_id: int, body: EncuestaEditarIn, _user: dict 
         encuesta_id, body.titulo, body.mensaje_final, body.color_boton,
         body.tipo_informe_clave, body.tipo_entrevista_empresa, body.enlace_corto, body.evitar_duplicados,
         body.mensaje_no_apto, body.clima_oleada_id, body.usar_mensaje_no_apto, body.fecha_cierre,
-        body.pedir_cita_entrevista,
+        body.pedir_cita_entrevista, body.cita_condicion_pregunta_id, body.cita_condicion_valores,
     )
     return {"ok": True}
 

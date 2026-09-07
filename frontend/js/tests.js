@@ -138,6 +138,72 @@ function actualizarVisibilidadCita() {
   document.getElementById("cita-guardar-primero-hint").hidden = !activo || !!currentTestId;
   if (activo) actualizarLinkBuscarMaps();
   if (activo && currentTestId) cargarFranjas();
+  if (activo) renderCitaCondicion();
+}
+
+// Preguntas de opción simple de TODO el test (no solo "antes de esta
+// página" como preguntasRamificablesAntesDe -- aquí no hay una página de
+// referencia, la condición aplica al test entero). Pensado para un mismo
+// test reciclado entre dos ofertas a la vez con una pregunta tipo "¿A qué
+// oferta aplicaste?": sin esto, pedir_cita_entrevista era un único
+// interruptor para TODO el test, así que quien elegía la oferta sin
+// entrevista presencial también veía el selector de franjas de la otra.
+function preguntasOpcionSimpleDelTest() {
+  if (!currentTest) return [];
+  const lista = [];
+  currentTest.paginas.forEach((pagina) => {
+    pagina.preguntas.forEach((q) => {
+      if (q.tipo === "opcion_simple") lista.push(q);
+    });
+  });
+  return lista;
+}
+
+function citaCondicionEditorHTML() {
+  const opciones = preguntasOpcionSimpleDelTest();
+  if (opciones.length === 0) return "";
+  const idSeleccionado = currentTest.cita_condicion_pregunta_id;
+  const valoresSeleccionados = currentTest.cita_condicion_valores || [];
+  const preguntaSeleccionada = opciones.find((q) => q.id === idSeleccionado);
+  return `
+    <div class="pagina-condicion" id="cita-condicion-editor">
+      <label>Ofrecer cita solo si la respuesta a...</label>
+      <select id="cita-condicion-pregunta">
+        <option value="">— Sin condición (aplica a todo el test) —</option>
+        ${opciones
+          .map((q) => `<option value="${q.id}" ${q.id === idSeleccionado ? "selected" : ""}>${escapeHTML(q.etiqueta.slice(0, 60))}</option>`)
+          .join("")}
+      </select>
+      <div class="pagina-condicion-valores" id="cita-condicion-valores">
+        ${
+          preguntaSeleccionada
+            ? preguntaSeleccionada.opciones
+                .map(
+                  (op) => `<label class="chk"><input type="checkbox" class="cita-condicion-valor" value="${escapeHTML(op)}" ${valoresSeleccionados.includes(op) ? "checked" : ""}> ${escapeHTML(op)}</label>`
+                )
+                .join("")
+            : ""
+        }
+      </div>
+    </div>`;
+}
+
+// A diferencia de guardarCondicionPagina (que tiene su propio PUT y guarda
+// al momento), esto es solo estado en memoria -- se lee en guardarTest()
+// junto con el resto de Ajustes, al pulsar el botón "Guardar" grande. El
+// select cambia qué pregunta está "seleccionada" en currentTest (para que
+// el próximo renderCitaCondicion() pinte sus opciones), sin tocar el
+// servidor todavía.
+function renderCitaCondicion() {
+  const wrap = document.getElementById("cita-condicion-wrap");
+  if (!wrap) return;
+  wrap.innerHTML = citaCondicionEditorHTML();
+  const select = document.getElementById("cita-condicion-pregunta");
+  select?.addEventListener("change", () => {
+    currentTest.cita_condicion_pregunta_id = select.value ? Number(select.value) : null;
+    currentTest.cita_condicion_valores = [];
+    renderCitaCondicion();
+  });
 }
 
 function franjaFilaHTML(f) {
@@ -484,6 +550,10 @@ async function guardarTest() {
     usar_mensaje_no_apto: destinoUsaConceptoNoApto(destino) && document.getElementById("test-usar-mensaje-no-apto").checked,
     fecha_cierre: document.getElementById("test-fecha-cierre").value || null,
     pedir_cita_entrevista: destinoUsaConceptoNoApto(destino) && document.getElementById("test-pedir-cita").checked,
+    cita_condicion_pregunta_id: document.getElementById("cita-condicion-pregunta")?.value
+      ? Number(document.getElementById("cita-condicion-pregunta").value)
+      : null,
+    cita_condicion_valores: Array.from(document.querySelectorAll(".cita-condicion-valor:checked")).map((el) => el.value),
   };
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}`, {
     method: "PUT",

@@ -131,6 +131,20 @@ def ensure_encuestas_tables():
         # entrevista_franjas (ver guardar_respuesta/reservar_cita). Quien
         # resulte "No apto" nunca ve el selector, da igual este interruptor.
         conn.execute("ALTER TABLE encuestas ADD COLUMN pedir_cita_entrevista INTEGER NOT NULL DEFAULT 0")
+    if "cita_condicion_pregunta_id" not in cols_encuestas:
+        # Un mismo test se reutiliza a veces para dos ofertas a la vez, con
+        # una pregunta de opción simple tipo "¿A qué oferta aplicaste?" que
+        # rama el resto del cuestionario (ver condicion_pregunta_id de
+        # encuesta_paginas, mismo patrón) -- pero pedir_cita_entrevista era
+        # un único interruptor para TODO el test, así que quien elegía la
+        # oferta que no tiene entrevista presencial (p.ej. Auxiliar de
+        # Producción) también veía el selector de franjas de la otra oferta.
+        # Estas dos columnas, opcionales, restringen el selector a solo
+        # quienes respondieron cierto valor en cierta pregunta -- si se
+        # dejan vacías (NULL/"[]"), pedir_cita_entrevista se comporta igual
+        # que antes, sin condición, para no romper los tests ya configurados.
+        conn.execute("ALTER TABLE encuestas ADD COLUMN cita_condicion_pregunta_id INTEGER")
+        conn.execute("ALTER TABLE encuestas ADD COLUMN cita_condicion_valores TEXT")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS entrevista_franjas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -525,6 +539,7 @@ def _row_encuesta(r):
     d["tiene_fondo"] = d.pop("fondo_ruta", None) is not None
     d["evitar_duplicados"] = bool(d["evitar_duplicados"])
     d["pedir_cita_entrevista"] = bool(d.get("pedir_cita_entrevista"))
+    d["cita_condicion_valores"] = json.loads(d.get("cita_condicion_valores") or "[]")
     d["vencido"] = _vencido(d.get("fecha_cierre"))
     return d
 
@@ -669,17 +684,19 @@ def create_encuesta(titulo):
     return encuesta_id
 
 
-def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None, evitar_duplicados=False, mensaje_no_apto=None, clima_oleada_id=None, usar_mensaje_no_apto=True, fecha_cierre=None, pedir_cita_entrevista=False):
+def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None, evitar_duplicados=False, mensaje_no_apto=None, clima_oleada_id=None, usar_mensaje_no_apto=True, fecha_cierre=None, pedir_cita_entrevista=False, cita_condicion_pregunta_id=None, cita_condicion_valores=None):
     conn = get_connection()
     conn.execute(
         "UPDATE encuestas SET titulo = ?, mensaje_final = ?, color_boton = ?, tipo_informe_clave = ?, "
         "tipo_entrevista_empresa = ?, enlace_corto = ?, evitar_duplicados = ?, mensaje_no_apto = ?, "
-        "clima_oleada_id = ?, usar_mensaje_no_apto = ?, fecha_cierre = ?, pedir_cita_entrevista = ? WHERE id = ?",
+        "clima_oleada_id = ?, usar_mensaje_no_apto = ?, fecha_cierre = ?, pedir_cita_entrevista = ?, "
+        "cita_condicion_pregunta_id = ?, cita_condicion_valores = ? WHERE id = ?",
         (titulo.strip(), mensaje_final.strip(), color_boton.strip(), tipo_informe_clave or None,
          tipo_entrevista_empresa or None, (enlace_corto or "").strip() or None,
          1 if evitar_duplicados else 0, (mensaje_no_apto or "").strip() or mensaje_final.strip(),
          clima_oleada_id or None, 1 if usar_mensaje_no_apto else 0, (fecha_cierre or "").strip() or None,
          1 if pedir_cita_entrevista else 0,
+         cita_condicion_pregunta_id or None, json.dumps(cita_condicion_valores or [], ensure_ascii=False),
          encuesta_id),
     )
     conn.commit()
@@ -1351,7 +1368,18 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
     # alta ninguna franja (o ya se llenaron todas), se cae al mensaje normal
     # en vez de mostrar un selector vacío que no lleva a ningún sitio (ver
     # franjas_disponibles).
-    if not es_no_apto and row["pedir_cita_entrevista"]:
+    # cita_condicion_pregunta_id: mismo patrón que la ramificación de páginas
+    # (condicion_pregunta_id de encuesta_paginas) -- pensado para un test
+    # reciclado entre dos ofertas a la vez (p.ej. "¿A qué oferta
+    # aplicaste?"), donde solo una de ellas tiene entrevista presencial. Sin
+    # condición configurada (NULL), se comporta igual que antes: aplica a
+    # todo el test.
+    cumple_condicion_cita = True
+    if row["cita_condicion_pregunta_id"]:
+        valores_permitidos = json.loads(row["cita_condicion_valores"] or "[]")
+        respuesta_condicion = respuestas_por_pregunta.get(str(row["cita_condicion_pregunta_id"]))
+        cumple_condicion_cita = respuesta_condicion in valores_permitidos
+    if not es_no_apto and row["pedir_cita_entrevista"] and cumple_condicion_cita:
         franjas = franjas_disponibles(encuesta_id)
         if franjas:
             return {"ok": True, "requiere_cita": True, "respuesta_id": respuesta_id, "franjas": franjas, "mensaje": mensaje}
