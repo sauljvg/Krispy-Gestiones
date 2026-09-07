@@ -751,26 +751,6 @@ def crear_franja(encuesta_id, fecha, hora, cupo, direccion=None, mapa_url=None):
     return franja_id
 
 
-def aplicar_direccion_a_franjas(encuesta_id, direccion, mapa_url):
-    """Escribir en el campo Dirección y darle a "Guardar" NO tocaba las
-    franjas ya creadas -- ese botón solo guarda los datos del propio test
-    (título, mensaje...), y crear_franja solo aplica la dirección a la
-    franja que se está dando de alta en ESE momento. Para franjas ya
-    existentes (típicamente todas las de un test reciclado, ver el botón
-    "Aplicar a todas" en tests.js) hace falta este UPDATE en bloque -- sin
-    esto, la única forma de corregir la dirección de una franja ya creada
-    era borrarla y crearla de nuevo, perdiendo su cupo/reservas."""
-    conn = get_connection()
-    cur = conn.execute(
-        "UPDATE entrevista_franjas SET direccion = ?, mapa_url = ? WHERE encuesta_id = ?",
-        ((direccion or "").strip() or None, (mapa_url or "").strip() or None, encuesta_id),
-    )
-    conn.commit()
-    actualizadas = cur.rowcount
-    conn.close()
-    return actualizadas
-
-
 def borrar_franja(franja_id):
     conn = get_connection()
     n_reservas = conn.execute(

@@ -64,6 +64,8 @@
   .cita-franja-fila .cita-franja-cupo-txt { color: var(--text-secondary); flex: 1; }
   .cita-franja-fila .cita-franja-direccion-txt { font-size: 12px; color: var(--text-secondary); }
   .cita-franja-fila .cita-franja-direccion-txt a { color: var(--acento); }
+  #cita-franjas-bloque > summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); padding: 6px 0; user-select: none; }
+  #cita-franjas-bloque > summary:hover { color: var(--text-primary); }
   .cita-franja-nueva-fila, .cita-franja-nueva-direccion-fila { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
   .cita-franja-nueva-fila input { width: auto; }
   #cita-franja-cupo { width: 70px; }
@@ -247,7 +249,8 @@
             <input type="checkbox" id="test-pedir-cita">
             Ofrecer reservar cita de entrevista a quien resulte apto (justo en la pantalla de confirmación)
           </label>
-          <div id="cita-franjas-bloque" hidden>
+          <details id="cita-franjas-bloque" hidden>
+            <summary>Configurar franjas, dirección y condición</summary>
             <div id="cita-condicion-wrap"></div>
             <p class="staff-hint">Franjas disponibles para reservar. Se guardan al momento, no hace falta pulsar "Guardar" para cada una.</p>
             <div id="cita-franjas-filas"></div>
@@ -256,16 +259,14 @@
               <a id="link-cita-buscar-maps" href="#" target="_blank" rel="noopener" class="btn btn-ghost">🔍 Buscarla en Google Maps</a>
               <input type="text" id="cita-franja-mapa-url" placeholder="Pega aquí el enlace de Google Maps (opcional)">
             </div>
-            <p class="staff-hint">El botón abre Google Maps en otra pestaña con esa dirección buscada -- copia el enlace de ahí y pégalo en el campo de al lado. Se mantiene para las siguientes franjas que añadas (normalmente es el mismo sitio todo el día) y, si este test se reutiliza más adelante, aquí verás la última dirección puesta -- cámbiala si esta vez toca en otro sitio.</p>
-            <button id="btn-cita-aplicar-direccion" class="btn btn-ghost" type="button">📍 Aplicar esta dirección a las franjas que ya tienes creadas</button>
-            <p class="staff-hint">Escribir aquí arriba y pulsar "Guardar" (el botón grande, más abajo) NO cambia las franjas que ya existen -- ese guarda solo los datos del test. Usa este botón para corregir de golpe la dirección de todas las franjas ya creadas (por ejemplo, si este test se recicló para otra tienda).</p>
+            <p class="staff-hint">Se mantiene para las siguientes franjas que añadas -- si este test se reutiliza más adelante, aquí verás la última dirección puesta.</p>
             <div class="cita-franja-nueva-fila">
               <input type="date" id="cita-franja-fecha" title="Fecha">
               <input type="time" id="cita-franja-hora" title="Hora">
               <input type="number" id="cita-franja-cupo" min="1" value="5" title="Cupo (personas)">
               <button id="btn-cita-franja-agregar" class="btn btn-ghost" type="button">＋ Añadir franja</button>
             </div>
-          </div>
+          </details>
           <p class="staff-hint" id="cita-guardar-primero-hint" hidden>Guarda el test primero (botón "Guardar" más abajo) para poder añadir franjas.</p>
         </div>
       </div>
@@ -317,6 +318,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/tests.js?v=20260907e"></script>
+<script src="js/tests.js?v=20260907f"></script>
 </body>
 </html>

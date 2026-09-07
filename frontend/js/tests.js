@@ -278,34 +278,6 @@ async function agregarFranja() {
   await cargarFranjas();
 }
 
-// "Guardar" (el botón grande del test) NO toca las franjas ya creadas --
-// crear_franja solo aplica la dirección a la franja que se da de alta en
-// ESE momento. Este botón corrige de golpe la dirección de TODAS las
-// franjas que ya existen -- pensado para cuando el test se recicla con
-// otra tienda y las franjas de antes se quedaron con el sitio anterior (o
-// sin dirección, si se crearon antes de que este campo existiera).
-async function aplicarDireccionATodas() {
-  const direccion = document.getElementById("cita-franja-direccion").value.trim();
-  const mapa_url = document.getElementById("cita-franja-mapa-url").value.trim();
-  if (!direccion) {
-    mostrarAviso("Escribe primero la dirección arriba.");
-    return;
-  }
-  const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/franjas/aplicar-direccion`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ direccion, mapa_url }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    mostrarAviso(err.detail || "No se pudo aplicar la dirección.");
-    return;
-  }
-  const data = await res.json();
-  await cargarFranjas();
-  mostrarAviso(`Dirección aplicada a ${data.actualizadas} franja${data.actualizadas === 1 ? "" : "s"}.`);
-}
-
 // El buscador de Google Maps no necesita API de pago: basta con un enlace
 // de búsqueda (?api=1&query=...) que Maps resuelve él solo, igual que si lo
 // escribieras a mano en la barra de Maps. Se actualiza en cada tecleo para
@@ -1369,6 +1341,5 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   document.getElementById("test-pedir-cita").addEventListener("change", actualizarVisibilidadCita);
   document.getElementById("btn-cita-franja-agregar").addEventListener("click", agregarFranja);
-  document.getElementById("btn-cita-aplicar-direccion").addEventListener("click", aplicarDireccionATodas);
   document.getElementById("cita-franja-direccion").addEventListener("input", actualizarLinkBuscarMaps);
 });
