@@ -136,6 +136,7 @@ function actualizarVisibilidadCita() {
   const activo = document.getElementById("test-pedir-cita").checked;
   document.getElementById("cita-franjas-bloque").hidden = !activo;
   document.getElementById("cita-guardar-primero-hint").hidden = !activo || !!currentTestId;
+  if (activo) actualizarLinkBuscarMaps();
   if (activo && currentTestId) cargarFranjas();
 }
 
@@ -145,11 +146,17 @@ function franjaFilaHTML(f) {
   const cupoTxt = f.reservas.length > 0
     ? `${f.reservas.length}/${f.cupo} reservadas${f.cupo_restante > 0 ? ` -- ${f.cupo_restante} libres` : " -- completa"}`
     : `${f.cupo} plaza${f.cupo === 1 ? "" : "s"} libres`;
+  const direccionHTML = f.direccion
+    ? `<span class="cita-franja-direccion-txt">📍 ${escapeHTML(f.direccion)}${f.mapa_url ? ` · <a href="${escapeHTML(f.mapa_url)}" target="_blank" rel="noopener">ver mapa</a>` : ""}</span>`
+    : "";
   return `
     <div class="cita-franja-fila" data-id="${f.id}">
-      <span class="cita-franja-fecha">${escapeHTML(fechaTxt)} · ${escapeHTML(f.hora)}</span>
-      <span class="cita-franja-cupo-txt">${escapeHTML(cupoTxt)}</span>
-      <button type="button" class="btn-mini btn-borrar-franja" data-id="${f.id}" ${f.reservas.length > 0 ? "disabled title=\"Ya tiene reservas, no se puede borrar\"" : ""}>Borrar</button>
+      <div class="cita-franja-fila-linea1">
+        <span class="cita-franja-fecha">${escapeHTML(fechaTxt)} · ${escapeHTML(f.hora)}</span>
+        <span class="cita-franja-cupo-txt">${escapeHTML(cupoTxt)}</span>
+        <button type="button" class="btn-mini btn-borrar-franja" data-id="${f.id}" ${f.reservas.length > 0 ? "disabled title=\"Ya tiene reservas, no se puede borrar\"" : ""}>Borrar</button>
+      </div>
+      ${direccionHTML}
     </div>`;
 }
 
@@ -169,6 +176,8 @@ async function agregarFranja() {
   const fecha = document.getElementById("cita-franja-fecha").value;
   const hora = document.getElementById("cita-franja-hora").value;
   const cupo = Number(document.getElementById("cita-franja-cupo").value) || 1;
+  const direccion = document.getElementById("cita-franja-direccion").value.trim();
+  const mapa_url = document.getElementById("cita-franja-mapa-url").value.trim();
   if (!fecha || !hora) {
     mostrarAviso("Elige fecha y hora para la franja.");
     return;
@@ -176,14 +185,31 @@ async function agregarFranja() {
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/franjas`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fecha, hora, cupo }),
+    body: JSON.stringify({ fecha, hora, cupo, direccion, mapa_url }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     mostrarAviso(err.detail || "No se pudo añadir la franja.");
     return;
   }
+  // Dirección y enlace de mapa NO se limpian -- normalmente todas las
+  // franjas de una misma tanda son en el mismo sitio, así que solo hace
+  // falta escribirlas una vez y añadir varias horas seguidas.
+  document.getElementById("cita-franja-fecha").value = "";
+  document.getElementById("cita-franja-hora").value = "";
   await cargarFranjas();
+}
+
+// El buscador de Google Maps no necesita API de pago: basta con un enlace
+// de búsqueda (?api=1&query=...) que Maps resuelve él solo, igual que si lo
+// escribieras a mano en la barra de Maps. Se actualiza en cada tecleo para
+// que el botón siempre abra la dirección que hay en el campo en ese momento.
+function actualizarLinkBuscarMaps() {
+  const direccion = document.getElementById("cita-franja-direccion").value.trim();
+  const link = document.getElementById("link-cita-buscar-maps");
+  link.href = direccion
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(direccion)}`
+    : "https://www.google.com/maps";
 }
 
 async function borrarFranja(franjaId) {
@@ -313,6 +339,8 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("test-mensaje-no-apto").value = currentTest.mensaje_no_apto;
     document.getElementById("test-usar-mensaje-no-apto").checked = currentTest.usar_mensaje_no_apto !== false;
     document.getElementById("test-pedir-cita").checked = !!currentTest.pedir_cita_entrevista;
+    document.getElementById("cita-franja-direccion").value = "";
+    document.getElementById("cita-franja-mapa-url").value = "";
     actualizarVisibilidadMensajeNoApto();
     document.getElementById("test-color-boton").value = currentTest.color_boton;
     if (currentTest.tipo_entrevista_empresa) {
@@ -352,6 +380,8 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("test-mensaje-no-apto").value = "Gracias por contestar nuestro test. En esta ocasión no has superado el proceso, pero te deseamos mucha suerte.";
     document.getElementById("test-usar-mensaje-no-apto").checked = true;
     document.getElementById("test-pedir-cita").checked = false;
+    document.getElementById("cita-franja-direccion").value = "";
+    document.getElementById("cita-franja-mapa-url").value = "";
     actualizarVisibilidadMensajeNoApto();
     document.getElementById("test-color-boton").value = "#5b2a2a";
     document.getElementById("test-tipo-informe").value = "";
@@ -1229,4 +1259,5 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   document.getElementById("test-pedir-cita").addEventListener("change", actualizarVisibilidadCita);
   document.getElementById("btn-cita-franja-agregar").addEventListener("click", agregarFranja);
+  document.getElementById("cita-franja-direccion").addEventListener("input", actualizarLinkBuscarMaps);
 });

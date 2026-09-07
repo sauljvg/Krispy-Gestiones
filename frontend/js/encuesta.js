@@ -490,12 +490,16 @@ async function enviarRespuestas() {
   mostrarPantallaFinal(data.mensaje || encuesta.mensaje_final);
 }
 
-function mostrarPantallaFinal(mensaje, notaCita) {
+// notaCitaHTML ya viene con su propio escapeHTML aplicado pieza a pieza por
+// quien llama (para poder colar el enlace "cómo llegar" como <a> real) --
+// a diferencia de mensaje, que sí se escapa aquí porque siempre es texto
+// plano tal cual lo escribió el admin.
+function mostrarPantallaFinal(mensaje, notaCitaHTML) {
   document.getElementById("encuesta-card").innerHTML = `
     <div class="encuesta-final">
       <div class="icono">✅</div>
       <p>${escapeHTML(mensaje)}</p>
-      ${notaCita ? `<p class="cita-confirmada">📅 ${escapeHTML(notaCita)}</p>` : ""}
+      ${notaCitaHTML ? `<p class="cita-confirmada">📅 ${notaCitaHTML}</p>` : ""}
     </div>`;
 }
 
@@ -526,10 +530,19 @@ function mostrarSelectorCita(respuestaId, franjas, mensajeFinal) {
     porFecha.get(f.fecha).push(f);
   }
   const gruposHTML = [...porFecha.entries()]
-    .map(
-      ([fecha, delDia]) => `
+    .map(([fecha, delDia]) => {
+      // La dirección se muestra una vez por día (debajo de la fecha), no en
+      // cada botón de hora -- lo normal es que todas las franjas de un
+      // mismo día sean en el mismo sitio. Se toma la de la primera franja
+      // del grupo que tenga una puesta; si algún hueco de ese día fuera a
+      // otra dirección distinta, no se refleja aquí (caso raro, no merece
+      // la pena la complejidad de agrupar también por dirección).
+      const direccion = delDia.find((f) => f.direccion)?.direccion;
+      const mapaUrl = delDia.find((f) => f.direccion)?.mapa_url;
+      return `
     <div class="cita-fecha-grupo">
       <p class="cita-fecha-label">${escapeHTML(fmtFechaCita(fecha))}</p>
+      ${direccion ? `<p class="cita-fecha-direccion">📍 ${escapeHTML(direccion)}${mapaUrl ? ` · <a href="${escapeHTML(mapaUrl)}" target="_blank" rel="noopener">cómo llegar</a>` : ""}</p>` : ""}
       <div class="cita-horas">
         ${delDia
           .map(
@@ -540,8 +553,8 @@ function mostrarSelectorCita(respuestaId, franjas, mensajeFinal) {
           )
           .join("")}
       </div>
-    </div>`
-    )
+    </div>`;
+    })
     .join("");
   document.getElementById("encuesta-card").innerHTML = `
     <div class="encuesta-final">
@@ -572,11 +585,14 @@ async function reservarCita(respuestaId, franja, mensajeFinal) {
     if (franjasActualizadas.length > 0) {
       mostrarSelectorCita(respuestaId, franjasActualizadas, mensajeFinal);
     } else {
-      mostrarPantallaFinal(mensajeFinal, "Ya no quedan franjas libres -- te contactaremos para agendar la entrevista.");
+      mostrarPantallaFinal(mensajeFinal, escapeHTML("Ya no quedan franjas libres -- te contactaremos para agendar la entrevista."));
     }
     return;
   }
-  mostrarPantallaFinal(mensajeFinal, `Cita confirmada: ${fmtFechaCita(franja.fecha)}, ${franja.hora}.`);
+  const direccionHTML = franja.direccion
+    ? ` -- 📍 ${escapeHTML(franja.direccion)}${franja.mapa_url ? ` (<a href="${escapeHTML(franja.mapa_url)}" target="_blank" rel="noopener">cómo llegar</a>)` : ""}`
+    : "";
+  mostrarPantallaFinal(mensajeFinal, `Cita confirmada: ${escapeHTML(fmtFechaCita(franja.fecha))}, ${escapeHTML(franja.hora)}.${direccionHTML}`);
 }
 
 async function init() {

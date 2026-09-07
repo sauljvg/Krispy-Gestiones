@@ -196,6 +196,8 @@ class FranjaIn(BaseModel):
     fecha: str
     hora: str
     cupo: int = 1
+    direccion: str | None = None
+    mapa_url: str | None = None
 
 
 @router.get("/encuestas/{encuesta_id}/franjas")
@@ -207,7 +209,7 @@ def list_franjas_route(encuesta_id: int, _user: dict = Depends(require_acceso_en
 def crear_franja_route(encuesta_id: int, body: FranjaIn, _user: dict = Depends(require_acceso_encuesta)):
     if not body.fecha.strip() or not body.hora.strip():
         raise HTTPException(status_code=400, detail="Falta la fecha o la hora")
-    franja_id = encuestas_module.crear_franja(encuesta_id, body.fecha, body.hora, body.cupo)
+    franja_id = encuestas_module.crear_franja(encuesta_id, body.fecha, body.hora, body.cupo, body.direccion, body.mapa_url)
     return {"ok": True, "id": franja_id}
 
 

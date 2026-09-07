@@ -58,12 +58,17 @@
   .clima-plantilla-fila input[type="number"] { flex: 1; min-width: 90px; }
   .clima-plantilla-fila button { flex: none; }
 
-  .cita-franja-fila { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; margin-bottom: 4px; background: var(--surface-1); font-size: 13px; }
+  .cita-franja-fila { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 6px; margin-bottom: 4px; background: var(--surface-1); font-size: 13px; }
+  .cita-franja-fila-linea1 { display: flex; align-items: center; gap: 10px; }
   .cita-franja-fila .cita-franja-fecha { font-weight: 600; min-width: 130px; }
   .cita-franja-fila .cita-franja-cupo-txt { color: var(--text-secondary); flex: 1; }
-  .cita-franja-nueva-fila { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  .cita-franja-fila .cita-franja-direccion-txt { font-size: 12px; color: var(--text-secondary); }
+  .cita-franja-fila .cita-franja-direccion-txt a { color: var(--acento); }
+  .cita-franja-nueva-fila, .cita-franja-nueva-direccion-fila { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
   .cita-franja-nueva-fila input { width: auto; }
   #cita-franja-cupo { width: 70px; }
+  #cita-franja-direccion { flex: 1; min-width: 220px; width: auto; }
+  #cita-franja-mapa-url { flex: 1; min-width: 220px; width: auto; }
 
   .pagina-card { background: var(--surface-page); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
   .pagina-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
@@ -245,6 +250,12 @@
           <div id="cita-franjas-bloque" hidden>
             <p class="staff-hint">Franjas disponibles para reservar. Se guardan al momento, no hace falta pulsar "Guardar" para cada una.</p>
             <div id="cita-franjas-filas"></div>
+            <div class="cita-franja-nueva-direccion-fila">
+              <input type="text" id="cita-franja-direccion" placeholder="Dirección (ej. Krispy Kreme La Gavia, Av. de la Democracia 1, Madrid)">
+              <a id="link-cita-buscar-maps" href="#" target="_blank" rel="noopener" class="btn btn-ghost">🔍 Buscarla en Google Maps</a>
+              <input type="text" id="cita-franja-mapa-url" placeholder="Pega aquí el enlace de Google Maps (opcional)">
+            </div>
+            <p class="staff-hint">El botón abre Google Maps en otra pestaña con esa dirección buscada -- copia el enlace de ahí y pégalo en el campo de al lado. Se mantiene para las siguientes franjas que añadas (normalmente es el mismo sitio todo el día).</p>
             <div class="cita-franja-nueva-fila">
               <input type="date" id="cita-franja-fecha" title="Fecha">
               <input type="time" id="cita-franja-hora" title="Hora">
@@ -303,6 +314,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/tests.js?v=20260907a"></script>
+<script src="js/tests.js?v=20260907b"></script>
 </body>
 </html>

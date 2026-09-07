@@ -141,6 +141,16 @@ def ensure_encuestas_tables():
             creado_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # direccion/mapa_url: dónde tiene que ir la persona a la entrevista --
+    # ambos opcionales (una franja sin dirección sigue funcionando igual que
+    # antes). mapa_url es un enlace de Google Maps puesto a mano por el
+    # admin (o generado por el buscador de la propia pantalla de Ajustes, ver
+    # tests.js) -- sin API de pago de por medio, a diferencia de un
+    # autocompletado de direcciones real.
+    cols_franjas = {row[1] for row in conn.execute("PRAGMA table_info(entrevista_franjas)")}
+    if "direccion" not in cols_franjas:
+        conn.execute("ALTER TABLE entrevista_franjas ADD COLUMN direccion TEXT")
+        conn.execute("ALTER TABLE entrevista_franjas ADD COLUMN mapa_url TEXT")
     # respuesta_id UNIQUE: una respuesta solo puede reservar una cita -- si
     # ya reservó y vuelve a intentarlo (doble clic, red lenta, F5 en la
     # pantalla final), reservar_cita lo detecta por esto y devuelve la misma
@@ -711,11 +721,12 @@ def list_franjas(encuesta_id):
     return resultado
 
 
-def crear_franja(encuesta_id, fecha, hora, cupo):
+def crear_franja(encuesta_id, fecha, hora, cupo, direccion=None, mapa_url=None):
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO entrevista_franjas (encuesta_id, fecha, hora, cupo) VALUES (?, ?, ?, ?)",
-        (encuesta_id, fecha.strip(), hora.strip(), max(1, int(cupo))),
+        "INSERT INTO entrevista_franjas (encuesta_id, fecha, hora, cupo, direccion, mapa_url) VALUES (?, ?, ?, ?, ?, ?)",
+        (encuesta_id, fecha.strip(), hora.strip(), max(1, int(cupo)),
+         (direccion or "").strip() or None, (mapa_url or "").strip() or None),
     )
     conn.commit()
     franja_id = cur.lastrowid
@@ -752,7 +763,10 @@ def franjas_disponibles(encuesta_id):
         ).fetchone()[0]
         restante = f["cupo"] - ocupadas
         if restante > 0:
-            resultado.append({"id": f["id"], "fecha": f["fecha"], "hora": f["hora"], "cupo_restante": restante})
+            resultado.append({
+                "id": f["id"], "fecha": f["fecha"], "hora": f["hora"], "cupo_restante": restante,
+                "direccion": f["direccion"], "mapa_url": f["mapa_url"],
+            })
     conn.close()
     return resultado
 
