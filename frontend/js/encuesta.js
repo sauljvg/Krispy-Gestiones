@@ -398,15 +398,50 @@ function renderPagina(index) {
     </p>
   `;
 
+  // refrescarNav: "Siguiente"/"Enviar" y el "Página X de Y" se calcularon
+  // arriba con las respuestas que había AL RENDERIZAR esta página -- si la
+  // pregunta que decide una ramificación está en esta misma página (p.ej.
+  // "¿A qué oferta aplicaste?" seguida de páginas condicionadas a esa
+  // respuesta), en el primer render esa pregunta todavía está sin
+  // contestar, así que la rama parece invisible y el botón se queda
+  // marcado "Enviar" aunque en realidad falten páginas por delante. Antes,
+  // el candidato contestaba, pulsaba ese "Enviar" (todavía con el texto
+  // viejo) y el test se enviaba de inmediato, saltándose la página
+  // siguiente sin más aviso -- así perdimos las respuestas de "¿Cuál es tu
+  // disponibilidad?" de Daniela Sequera (07/09). Se llama tras CADA
+  // respuesta que pueda mover la ramificación, para que el botón (y el
+  // contador de página) reflejen siempre el estado real, no una foto fija
+  // de cuando se pintó la página.
+  function refrescarNav() {
+    const visiblesAhora = indicesVisibles();
+    const posAhora = visiblesAhora.indexOf(index);
+    if (posAhora === -1) return; // esta página dejó de ser visible (se cambió la respuesta de la que depende)
+    const totalAhora = visiblesAhora.length;
+    const esUltimaAhora = posAhora === totalAhora - 1;
+    const btn = document.getElementById("btn-siguiente");
+    if (btn) btn.textContent = esUltimaAhora ? "Enviar" : "Siguiente";
+    const txtPagina = card.querySelector(".encuesta-progreso-txt");
+    if (txtPagina) txtPagina.textContent = `Página ${posAhora + 1} de ${totalAhora}`;
+    const pctEl = card.querySelector(".encuesta-progreso-pct");
+    const fillEl = card.querySelector(".encuesta-progreso-fill");
+    if (pctEl && fillEl) {
+      const pct = Math.round(Math.sqrt((posAhora + 1) / totalAhora) * 100);
+      pctEl.textContent = `${pct}%`;
+      fillEl.style.width = `${pct}%`;
+    }
+  }
+
   card.querySelectorAll("input[type='text'], input[type='email'], input[type='number'], input[type='date'], textarea").forEach((el) => {
     el.addEventListener("input", () => {
       respuestas[el.dataset.preguntaId] = el.value;
+      refrescarNav();
     });
   });
   card.querySelectorAll("input[type='radio']").forEach((el) => {
     el.addEventListener("change", () => {
       const tr = el.closest("[data-pregunta-id]");
       respuestas[tr.dataset.preguntaId] = el.value;
+      refrescarNav();
     });
   });
   card.querySelectorAll("input[type='checkbox']").forEach((el) => {
@@ -415,6 +450,7 @@ function renderPagina(index) {
       const qid = bloque.dataset.preguntaId;
       const marcadas = Array.from(bloque.querySelectorAll("input[type='checkbox']:checked")).map((c) => c.value);
       respuestas[qid] = marcadas;
+      refrescarNav();
     });
   });
   card.querySelectorAll(".prioridad-lista").forEach((ol) => bindPrioridadBotones(ol));
@@ -425,6 +461,7 @@ function renderPagina(index) {
         wrap.querySelectorAll(".btn-estrella").forEach((b) => {
           b.classList.toggle("activa", Number(b.dataset.valor) <= Number(btn.dataset.valor));
         });
+        refrescarNav();
       });
     });
   });
@@ -437,13 +474,18 @@ function renderPagina(index) {
   });
   document.getElementById("btn-siguiente").addEventListener("click", () => {
     if (!validarPagina(pagina)) return;
-    if (esUltima) {
+    // Se recalcula aquí (no se reutiliza "visibles"/"esUltima" de arriba)
+    // por el mismo motivo que refrescarNav(): la respuesta que se acaba de
+    // validar en esta misma página puede ser justo la que decide qué
+    // página de ramificación toca mostrar a continuación -- reusar el
+    // valor de cuando se pintó la página mandaba directo a enviarRespuestas()
+    // sin pasar por esa página nueva.
+    const visiblesAhora = indicesVisibles();
+    const posAhora = visiblesAhora.indexOf(index);
+    if (posAhora === visiblesAhora.length - 1) {
       enviarRespuestas();
     } else {
-      // Se recalcula aquí (no se reutiliza "visibles") porque la respuesta
-      // que se acaba de validar en esta misma página puede ser justo la que
-      // decide qué página de ramificación toca mostrar a continuación.
-      paginaActual = indicesVisibles()[posActual + 1];
+      paginaActual = visiblesAhora[posAhora + 1];
       renderPagina(paginaActual);
       window.scrollTo({ top: 0 });
     }
