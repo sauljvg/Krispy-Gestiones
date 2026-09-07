@@ -786,16 +786,23 @@ def list_vacantes_de_respuestas(tipo_clave, hoja=None):
     conn = get_connection()
     if hoja is None:
         hoja = _hoja_para_conteo(conn, tipo)
+    # archivada = 0: igual que Reclutamiento, una vacante archivada deja de
+    # verse por defecto (ahí también se archiva independientemente de si
+    # sigue abierta/cubierta/cancelada) -- no tiene sentido que reaparezca
+    # aquí solo porque tiene respuestas de test. ORDER BY ultima_respuesta
+    # DESC: la vacante con la respuesta más reciente primero, no la que más
+    # respuestas acumuladas tiene en total.
     vacantes = conn.execute("""
         SELECT v.id AS vacante_id, v.puesto, v.centro, v.estado,
                COUNT(r.id) AS total,
-               SUM(CASE WHEN json_extract(r.datos_json, '$.RESULTADO') LIKE '%No apto%' THEN 1 ELSE 0 END) AS no_aptos
+               SUM(CASE WHEN json_extract(r.datos_json, '$.RESULTADO') LIKE '%No apto%' THEN 1 ELSE 0 END) AS no_aptos,
+               MAX(r.creado_en) AS ultima_respuesta
         FROM informe_respuestas r
         JOIN candidatos cand ON cand.respuesta_id = r.id
         JOIN vacantes v ON v.id = cand.vacante_id
-        WHERE r.tipo_id = ? AND r.hoja = ?
+        WHERE r.tipo_id = ? AND r.hoja = ? AND v.archivada = 0
         GROUP BY v.id
-        ORDER BY total DESC
+        ORDER BY ultima_respuesta DESC
     """, (tipo["id"], hoja)).fetchall()
     sin_vacante = conn.execute("""
         SELECT COUNT(*) FROM informe_respuestas r
