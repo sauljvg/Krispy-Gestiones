@@ -169,7 +169,19 @@
         </div>
       </div>
 
-      <div class="filtros-row">
+      <div class="hoja-tabs" id="vista-tabs">
+        <button type="button" class="hoja-tab active" id="btn-vista-lista">Lista completa</button>
+        <button type="button" class="hoja-tab" id="btn-vista-vacantes">Por vacante</button>
+      </div>
+
+      <div class="home-grid" id="vacantes-grid" hidden></div>
+
+      <p class="staff-hint" id="vacante-filtro-chip" hidden>
+        Filtrando por: <strong id="vacante-filtro-nombre"></strong>
+        <button type="button" id="btn-quitar-filtro-vacante" class="btn btn-ghost" style="padding:2px 8px; font-size:11px; margin-left:8px;">✕ Quitar filtro</button>
+      </p>
+
+      <div class="filtros-row" id="filtros-row">
         <div class="campo campo-ancho">
           <label for="f-buscar">Buscar</label>
           <input type="text" id="f-buscar" placeholder="Nombre, correo, texto…">
@@ -218,17 +230,19 @@
         </div>
       </div>
 
-      <div class="compartir-bar" id="compartir-bar">
-        <span id="compartir-count"></span>
-        <button type="button" id="btn-compartir" class="btn btn-primary">Compartir seleccionados</button>
-        <button type="button" id="btn-limpiar-seleccion" class="btn btn-ghost">Quitar selección</button>
-      </div>
+      <div id="tabla-wrap">
+        <div class="compartir-bar" id="compartir-bar">
+          <span id="compartir-count"></span>
+          <button type="button" id="btn-compartir" class="btn btn-primary">Compartir seleccionados</button>
+          <button type="button" id="btn-limpiar-seleccion" class="btn btn-ghost">Quitar selección</button>
+        </div>
 
-      <div class="table-scroll">
-        <table class="staff-table" id="tipo-detail-table">
-          <thead><tr id="tipo-detail-thead"></tr></thead>
-          <tbody id="tipo-detail-tbody"></tbody>
-        </table>
+        <div class="table-scroll">
+          <table class="staff-table" id="tipo-detail-table">
+            <thead><tr id="tipo-detail-thead"></tr></thead>
+            <tbody id="tipo-detail-tbody"></tbody>
+          </table>
+        </div>
       </div>
     </section>
   </div>
@@ -251,6 +265,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/informes.js?v=20260901a"></script>
+<script src="js/informes.js?v=20260907a"></script>
 </body>
 </html>

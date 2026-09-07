@@ -256,6 +256,7 @@ def respuestas_route(
     fecha_desde: str | None = None,
     fecha_hasta: str | None = None,
     filtro_aptos: str = "todos",
+    vacante_id: int | None = None,
     _user: dict = Depends(require_tipo_acceso),
 ):
     try:
@@ -263,8 +264,16 @@ def respuestas_route(
             tipo_clave, hoja=hoja, page=page, page_size=page_size, q=q,
             orden=orden, orden_dir=orden_dir,
             fecha_col=fecha_col, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
-            filtro_aptos=filtro_aptos,
+            filtro_aptos=filtro_aptos, vacante_id=vacante_id,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/{tipo_clave}/vacantes")
+def vacantes_de_respuestas_route(tipo_clave: str, hoja: str | None = None, _user: dict = Depends(require_tipo_acceso)):
+    try:
+        return informes_module.list_vacantes_de_respuestas(tipo_clave, hoja=hoja)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 

@@ -6,6 +6,11 @@ let usuariosParaCompartir = [];
 let hiddenCols = new Set();
 let colOrder = [];
 let lastData = null;
+// vacanteFiltroId: null = sin filtrar por vacante (vista "Lista completa");
+// -1 = el filtro especial "Sin vacante asignada"; cualquier otro entero =
+// esa vacante en concreto (ver GET /informes/{tipo}/respuestas?vacante_id=).
+let vacanteFiltroId = null;
+let vacanteFiltroNombre = "";
 
 const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" ? "saona" : "kk";
 
@@ -255,6 +260,7 @@ function currentFiltros() {
   if (filtroAptos && filtroAptos !== "todos") {
     params.set("filtro_aptos", filtroAptos);
   }
+  if (vacanteFiltroId !== null) params.set("vacante_id", vacanteFiltroId);
   params.set("page_size", "500");
   return params;
 }
@@ -288,6 +294,7 @@ async function loadHojas() {
     btn.addEventListener("click", () => {
       currentHoja = btn.dataset.hoja;
       selectedIds.clear();
+      mostrarVistaLista({ resetFiltro: true });
       renderHojasPanel();
       loadRespuestas();
     });
@@ -371,6 +378,77 @@ function renderCompartirBar() {
   } else {
     bar.classList.remove("visible");
   }
+}
+
+// "Por vacante": tarjetas (una por vacante de Reclutamiento con alguna
+// respuesta de esta hoja, más "Sin vacante asignada") en vez de la tabla
+// completa -- para no tener que buscar a mano entre cientos de filas
+// cuando solo interesa ver las de una vacante concreta. Al elegir una
+// tarjeta, se vuelve a la vista de lista pero con vacante_id fijado (ver
+// currentFiltros), con un chip arriba para quitar el filtro sin tener que
+// volver a las tarjetas.
+function mostrarVistaLista({ resetFiltro = false } = {}) {
+  if (resetFiltro) {
+    vacanteFiltroId = null;
+    vacanteFiltroNombre = "";
+  }
+  document.getElementById("vacantes-grid").hidden = true;
+  document.getElementById("filtros-row").hidden = false;
+  document.getElementById("tabla-wrap").hidden = false;
+  document.getElementById("vacante-filtro-chip").hidden = vacanteFiltroId === null;
+  document.getElementById("vacante-filtro-nombre").textContent = vacanteFiltroNombre;
+  document.getElementById("btn-vista-lista").classList.add("active");
+  document.getElementById("btn-vista-vacantes").classList.remove("active");
+}
+
+async function mostrarVistaVacantes() {
+  vacanteFiltroId = null;
+  vacanteFiltroNombre = "";
+  document.getElementById("vacante-filtro-chip").hidden = true;
+  document.getElementById("filtros-row").hidden = true;
+  document.getElementById("tabla-wrap").hidden = true;
+  document.getElementById("vacantes-grid").hidden = false;
+  document.getElementById("btn-vista-lista").classList.remove("active");
+  document.getElementById("btn-vista-vacantes").classList.add("active");
+  await cargarVacantesGrid();
+}
+
+async function cargarVacantesGrid() {
+  const grid = document.getElementById("vacantes-grid");
+  grid.innerHTML = `<p class="staff-hint">Cargando...</p>`;
+  const params = new URLSearchParams();
+  if (currentHoja) params.set("hoja", currentHoja);
+  const res = await fetch(`${AUTH_API_BASE}/informes/${currentTipo}/vacantes?${params.toString()}`);
+  const data = await res.json();
+  const tarjetas = data.vacantes
+    .map(
+      (v) => `
+      <div class="home-card vacante-card" data-id="${v.vacante_id}" data-nombre="${escapeHTML(v.vacante_nombre)}">
+        <h2>${escapeHTML(v.vacante_nombre)}</h2>
+        <p>${v.total} respuesta${v.total === 1 ? "" : "s"}${v.no_aptos > 0 ? ` · ${v.no_aptos} no apto${v.no_aptos === 1 ? "" : "s"}` : ""}</p>
+      </div>`
+    )
+    .join("");
+  const sinVacanteCard =
+    data.sin_vacante > 0
+      ? `
+      <div class="home-card vacante-card" data-id="-1" data-nombre="Sin vacante asignada">
+        <h2>Sin vacante asignada</h2>
+        <p>${data.sin_vacante} respuesta${data.sin_vacante === 1 ? "" : "s"}</p>
+      </div>`
+      : "";
+  grid.innerHTML = tarjetas + sinVacanteCard || `<p class="staff-hint">Ninguna respuesta de esta hoja está ligada todavía a una vacante de Reclutamiento.</p>`;
+  grid.querySelectorAll(".vacante-card").forEach((card) => {
+    card.addEventListener("click", () => seleccionarVacante(Number(card.dataset.id), card.dataset.nombre));
+  });
+}
+
+function seleccionarVacante(id, nombre) {
+  vacanteFiltroId = id;
+  vacanteFiltroNombre = nombre;
+  selectedIds.clear();
+  mostrarVistaLista();
+  loadRespuestas();
 }
 
 async function loadRespuestas() {
@@ -536,6 +614,7 @@ async function openTipo(clave, nombre) {
   currentTipo = clave;
   currentHoja = null;
   selectedIds.clear();
+  mostrarVistaLista({ resetFiltro: true });
   document.getElementById("tipo-detail").hidden = false;
   document.getElementById("tipo-detail-title").textContent = nombre;
   await loadHojas();
@@ -652,6 +731,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   ["f-orden", "f-orden-dir", "f-fecha-desde", "f-fecha-hasta", "f-filtro-aptos"].forEach((id) => {
     document.getElementById(id).addEventListener("change", () => loadRespuestas());
+  });
+
+  document.getElementById("btn-vista-lista").addEventListener("click", () => {
+    mostrarVistaLista({ resetFiltro: true });
+    loadRespuestas();
+  });
+  document.getElementById("btn-vista-vacantes").addEventListener("click", () => mostrarVistaVacantes());
+  document.getElementById("btn-quitar-filtro-vacante").addEventListener("click", () => {
+    mostrarVistaLista({ resetFiltro: true });
+    loadRespuestas();
   });
 
   document.getElementById("btn-limpiar-filtros").addEventListener("click", () => {

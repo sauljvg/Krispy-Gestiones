@@ -702,8 +702,53 @@ def _detect_date_columns(columnas):
     return [c for c in columnas if any(hint in c.lower() for hint in DATE_HINTS)]
 
 
+def list_vacantes_de_respuestas(tipo_clave, hoja=None):
+    """Para las 'tarjetas de vacante' en Informes (una por cada vacante de
+    Reclutamiento que tenga alguna respuesta de este tipo, más un total de
+    las que no están ligadas a ninguna) -- se agrupa por el mismo enlace
+    candidatos.respuesta_id que ya usa get_respuestas para mostrar
+    vacante_nombre en cada fila, así que solo cuentan las respuestas que ya
+    están ligadas a un candidato (ver buscar_candidato_sin_respuesta_por_contacto/
+    buscar_respuesta_huerfana_por_contacto en reclutamiento.py -- ese enlace
+    es automático por teléfono/email, no hace falta nada aparte aquí)."""
+    tipo = get_tipo(tipo_clave)
+    if tipo is None:
+        raise ValueError(f"Tipo de informe desconocido: {tipo_clave}")
+    conn = get_connection()
+    if hoja is None:
+        hoja = _hoja_para_conteo(conn, tipo)
+    vacantes = conn.execute("""
+        SELECT v.id AS vacante_id, v.puesto, v.centro, v.estado,
+               COUNT(r.id) AS total,
+               SUM(CASE WHEN json_extract(r.datos_json, '$.RESULTADO') LIKE '%No apto%' THEN 1 ELSE 0 END) AS no_aptos
+        FROM informe_respuestas r
+        JOIN candidatos cand ON cand.respuesta_id = r.id
+        JOIN vacantes v ON v.id = cand.vacante_id
+        WHERE r.tipo_id = ? AND r.hoja = ?
+        GROUP BY v.id
+        ORDER BY total DESC
+    """, (tipo["id"], hoja)).fetchall()
+    sin_vacante = conn.execute("""
+        SELECT COUNT(*) FROM informe_respuestas r
+        WHERE r.tipo_id = ? AND r.hoja = ?
+          AND r.id NOT IN (SELECT respuesta_id FROM candidatos WHERE respuesta_id IS NOT NULL)
+    """, (tipo["id"], hoja)).fetchone()[0]
+    conn.close()
+    return {
+        "hoja": hoja,
+        "sin_vacante": sin_vacante,
+        "vacantes": [{
+            "vacante_id": r["vacante_id"],
+            "vacante_nombre": r["puesto"] + (f" · {r['centro']}" if r["centro"] else ""),
+            "estado": r["estado"],
+            "total": r["total"],
+            "no_aptos": r["no_aptos"],
+        } for r in vacantes],
+    }
+
+
 def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=None, orden_dir="asc",
-                    fecha_col=None, fecha_desde=None, fecha_hasta=None, filtro_aptos="todos"):
+                    fecha_col=None, fecha_desde=None, fecha_hasta=None, filtro_aptos="todos", vacante_id=None):
     tipo = get_tipo(tipo_clave)
     if tipo is None:
         raise ValueError(f"Tipo de informe desconocido: {tipo_clave}")
@@ -719,6 +764,15 @@ def get_respuestas(tipo_clave, hoja=None, page=1, page_size=200, q=None, orden=N
 
     clauses = ["tipo_id = ?", "hoja = ?"]
     params = [tipo["id"], hoja]
+    # vacante_id: -1 es el valor especial "Sin vacante asignada" (tarjeta
+    # aparte en el frontend, ver list_vacantes_de_respuestas) -- cualquier
+    # otro entero filtra a esa vacante en concreto, vía el mismo enlace
+    # candidatos.respuesta_id.
+    if vacante_id == -1:
+        clauses.append("id NOT IN (SELECT respuesta_id FROM candidatos WHERE respuesta_id IS NOT NULL)")
+    elif vacante_id is not None:
+        clauses.append("id IN (SELECT respuesta_id FROM candidatos WHERE vacante_id = ?)")
+        params.append(vacante_id)
     if q:
         clauses.append("datos_json LIKE ?")
         params.append(f"%{q}%")
