@@ -743,6 +743,19 @@ def get_candidato(candidato_id):
             # cual (pregunta -> respuesta) para mostrarla de forma
             # de solo lectura.
             candidato["respuesta_datos"] = json.loads(info["datos_json"])
+        # cita_fecha/hora/direccion -- ver el mismo join en list_candidatos.
+        cita = conn.execute("""
+            SELECT fr.fecha, fr.hora, fr.direccion, fr.mapa_url
+            FROM encuesta_respuestas er
+            JOIN entrevista_reservas res ON res.respuesta_id = er.id
+            JOIN entrevista_franjas fr ON fr.id = res.franja_id
+            WHERE er.informe_respuesta_id = ?
+        """, (candidato["respuesta_id"],)).fetchone()
+        if cita:
+            candidato["cita_fecha"] = cita["fecha"]
+            candidato["cita_hora"] = cita["hora"]
+            candidato["cita_direccion"] = cita["direccion"]
+            candidato["cita_mapa_url"] = cita["mapa_url"]
     conn.close()
     candidato["archivos"] = [dict(a) for a in archivos]
     return candidato
@@ -901,10 +914,23 @@ def list_candidatos(empresa=None, estado=None, q=None, vacante_id=None, sin_vaca
     # (si la hay) — así el listado puede mostrar el mismo check de apto/no
     # apto que ya se ve en Informes, sin que el frontend tenga que pedirlo
     # aparte candidato a candidato.
+    #
+    # cita_fecha/hora/direccion: si esa misma respuesta reservó una franja de
+    # entrevista (ver reservar_cita en encuestas.py), se resuelve aquí la
+    # cadena candidatos.respuesta_id (informe_respuestas) -> encuesta_respuestas
+    # (por informe_respuesta_id, el enlace que guardar_respuesta deja al
+    # ingestar en Informes) -> entrevista_reservas (por respuesta_id) ->
+    # entrevista_franjas -- así la ficha muestra qué día/hora eligió sin que
+    # el frontend tenga que ir a Test a buscarlo aparte.
     rows = conn.execute(f"""
-        SELECT c.*, json_extract(r.datos_json, '$.RESULTADO') AS test_resultado
+        SELECT c.*, json_extract(r.datos_json, '$.RESULTADO') AS test_resultado,
+               fr.fecha AS cita_fecha, fr.hora AS cita_hora,
+               fr.direccion AS cita_direccion, fr.mapa_url AS cita_mapa_url
         FROM candidatos c
         LEFT JOIN informe_respuestas r ON r.id = c.respuesta_id
+        LEFT JOIN encuesta_respuestas er ON er.informe_respuesta_id = c.respuesta_id
+        LEFT JOIN entrevista_reservas res ON res.respuesta_id = er.id
+        LEFT JOIN entrevista_franjas fr ON fr.id = res.franja_id
         {where}
         ORDER BY c.actualizado_en DESC
     """, params).fetchall()

@@ -289,6 +289,26 @@ function fmtFechaHora(iso) {
   return `${parseInt(d, 10)} ${MESES_CORTOS[parseInt(m, 10) - 1]} ${y}${hhmm ? `, ${hhmm}` : ""}`;
 }
 
+// "2026-09-07" -> "7 sep" (para la cita de entrevista -- ver
+// citaEntrevistaHTML). Sin año: es una cita cercana, no aporta y ocupa sitio
+// en una línea que ya de por sí va apretada en la tarjeta mini.
+function fmtFechaCorta(fecha) {
+  if (!fecha) return "";
+  const [y, m, d] = fecha.split("-");
+  return `${parseInt(d, 10)} ${MESES_CORTOS[parseInt(m, 10) - 1]}`;
+}
+
+// Franja de entrevista reservada al responder el test (ver reservar_cita en
+// encuestas.py / el JOIN en list_candidatos) -- cita_fecha/hora vienen ya
+// resueltas desde el backend, no hace falta ir a Test a buscarlas aparte.
+function citaEntrevistaHTML(c) {
+  if (!c.cita_fecha) return "";
+  const direccion = c.cita_direccion
+    ? ` · ${escapeHTML(c.cita_direccion)}${c.cita_mapa_url ? ` (<a href="${escapeHTML(c.cita_mapa_url)}" target="_blank" rel="noopener">mapa</a>)` : ""}`
+    : "";
+  return `<p class="candidato-mini-cita">📅 Entrevista: ${escapeHTML(fmtFechaCorta(c.cita_fecha))}, ${escapeHTML(c.cita_hora)}${direccion}</p>`;
+}
+
 // Búsqueda de "Compartidos" (Solicitudes compartidas contigo + Compartidos
 // conmigo) -- vive en un campo fuera de #compartidos-list (que loadCompartidos
 // regenera entero en cada repintado) para no perder lo escrito ni el foco
@@ -1462,11 +1482,13 @@ function renderForm() {
       })()
     : "";
 
+  const citaTestHTML = esEdicion ? citaEntrevistaHTML(candidatoEditando) : "";
+
   // Envuelto en un hueco de alto mínimo (ver .ficha-resultado-test-slot) y
   // SIEMPRE presente en el DOM, tenga o no tenga contenido -- sin esto, la
   // ficha de quien ya respondió el test salía más alta que la de quien no,
   // cambiando el tamaño del contenedor según el candidato.
-  const resultadoTestSlotHTML = `<div class="ficha-resultado-test-slot">${resultadoTestHTML}${respuestaTestHTML}</div>`;
+  const resultadoTestSlotHTML = `<div class="ficha-resultado-test-slot">${resultadoTestHTML}${citaTestHTML}${respuestaTestHTML}</div>`;
 
   // Ni la lista de ficheros ni "Añadir fichero"/"Re-extraer con IA" le
   // sirven a quien no tiene el módulo completo -- ver descargarCvBotonHTML,
@@ -2239,6 +2261,7 @@ function candidatoMiniCardHTML(c, opts = {}) {
           ${opts.ocultarVacante ? "" : `<p style="color:var(--text-muted);">${escapeHTML(vacanteTxt)}</p>`}
           ${compartidoHTML}
           ${testEstadoBadgeHTML(c)}
+          ${citaEntrevistaHTML(c)}
           <div class="candidato-mini-contacto-fila">${contactoEstadoSelectHTML(c.id, c.contacto_estado)}</div>
         </div>
       </div>
