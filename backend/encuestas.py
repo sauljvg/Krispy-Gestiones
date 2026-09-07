@@ -123,6 +123,39 @@ def ensure_encuestas_tables():
         # porque cada fase de Clima (encuesta completa, pulso...) es su
         # propia oleada con su propia plantilla de empleados esperados.
         conn.execute("ALTER TABLE encuestas ADD COLUMN clima_oleada_id INTEGER REFERENCES clima_oleadas(id)")
+    if "pedir_cita_entrevista" not in cols_encuestas:
+        # Interruptor en Ajustes (solo tiene sentido junto con un
+        # tipo_informe_clave de valores, igual que usar_mensaje_no_apto): si
+        # está activo, quien resulte APTO no ve directamente mensaje_final --
+        # antes elige una franja de las que el admin haya dado de alta en
+        # entrevista_franjas (ver guardar_respuesta/reservar_cita). Quien
+        # resulte "No apto" nunca ve el selector, da igual este interruptor.
+        conn.execute("ALTER TABLE encuestas ADD COLUMN pedir_cita_entrevista INTEGER NOT NULL DEFAULT 0")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entrevista_franjas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            encuesta_id INTEGER NOT NULL REFERENCES encuestas(id),
+            fecha TEXT NOT NULL,
+            hora TEXT NOT NULL,
+            cupo INTEGER NOT NULL DEFAULT 1,
+            creado_en TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    # respuesta_id UNIQUE: una respuesta solo puede reservar una cita -- si
+    # ya reservó y vuelve a intentarlo (doble clic, red lenta, F5 en la
+    # pantalla final), reservar_cita lo detecta por esto y devuelve la misma
+    # reserva en vez de duplicarla o consumir cupo de más.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entrevista_reservas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            franja_id INTEGER NOT NULL REFERENCES entrevista_franjas(id),
+            respuesta_id INTEGER NOT NULL UNIQUE REFERENCES encuesta_respuestas(id),
+            nombre TEXT,
+            telefono TEXT,
+            email TEXT,
+            creado_en TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS encuesta_paginas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -481,6 +514,7 @@ def _row_encuesta(r):
     d = dict(r)
     d["tiene_fondo"] = d.pop("fondo_ruta", None) is not None
     d["evitar_duplicados"] = bool(d["evitar_duplicados"])
+    d["pedir_cita_entrevista"] = bool(d.get("pedir_cita_entrevista"))
     d["vencido"] = _vencido(d.get("fecha_cierre"))
     return d
 
@@ -625,16 +659,17 @@ def create_encuesta(titulo):
     return encuesta_id
 
 
-def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None, evitar_duplicados=False, mensaje_no_apto=None, clima_oleada_id=None, usar_mensaje_no_apto=True, fecha_cierre=None):
+def update_encuesta(encuesta_id, titulo, mensaje_final, color_boton, tipo_informe_clave, tipo_entrevista_empresa=None, enlace_corto=None, evitar_duplicados=False, mensaje_no_apto=None, clima_oleada_id=None, usar_mensaje_no_apto=True, fecha_cierre=None, pedir_cita_entrevista=False):
     conn = get_connection()
     conn.execute(
         "UPDATE encuestas SET titulo = ?, mensaje_final = ?, color_boton = ?, tipo_informe_clave = ?, "
         "tipo_entrevista_empresa = ?, enlace_corto = ?, evitar_duplicados = ?, mensaje_no_apto = ?, "
-        "clima_oleada_id = ?, usar_mensaje_no_apto = ?, fecha_cierre = ? WHERE id = ?",
+        "clima_oleada_id = ?, usar_mensaje_no_apto = ?, fecha_cierre = ?, pedir_cita_entrevista = ? WHERE id = ?",
         (titulo.strip(), mensaje_final.strip(), color_boton.strip(), tipo_informe_clave or None,
          tipo_entrevista_empresa or None, (enlace_corto or "").strip() or None,
          1 if evitar_duplicados else 0, (mensaje_no_apto or "").strip() or mensaje_final.strip(),
          clima_oleada_id or None, 1 if usar_mensaje_no_apto else 0, (fecha_cierre or "").strip() or None,
+         1 if pedir_cita_entrevista else 0,
          encuesta_id),
     )
     conn.commit()
@@ -646,6 +681,141 @@ def set_estado(encuesta_id, abierta):
     conn.execute("UPDATE encuestas SET estado = ? WHERE id = ?", ("abierta" if abierta else "cerrada", encuesta_id))
     conn.commit()
     conn.close()
+
+
+# --------------------------- Citas de entrevista ---------------------------
+# Franjas (día+hora+cupo) que el admin da de alta en Ajustes del test, para
+# que quien resulte apto elija una en la propia pantalla de confirmación en
+# vez de que alguien tenga que llamarle luego a coordinar día y hora -- ver
+# pedir_cita_entrevista arriba y el paso final de guardar_respuesta.
+
+def list_franjas(encuesta_id):
+    """Para el admin: cada franja con su cupo restante y quién la ha
+    reservado (para poder llamar/confirmar sin tener que cruzar datos a
+    mano)."""
+    conn = get_connection()
+    franjas = conn.execute(
+        "SELECT * FROM entrevista_franjas WHERE encuesta_id = ? ORDER BY fecha, hora", (encuesta_id,)
+    ).fetchall()
+    resultado = []
+    for f in franjas:
+        reservas = conn.execute(
+            "SELECT nombre, telefono, email, creado_en FROM entrevista_reservas WHERE franja_id = ? ORDER BY creado_en",
+            (f["id"],),
+        ).fetchall()
+        d = dict(f)
+        d["reservas"] = [dict(r) for r in reservas]
+        d["cupo_restante"] = max(0, f["cupo"] - len(reservas))
+        resultado.append(d)
+    conn.close()
+    return resultado
+
+
+def crear_franja(encuesta_id, fecha, hora, cupo):
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO entrevista_franjas (encuesta_id, fecha, hora, cupo) VALUES (?, ?, ?, ?)",
+        (encuesta_id, fecha.strip(), hora.strip(), max(1, int(cupo))),
+    )
+    conn.commit()
+    franja_id = cur.lastrowid
+    conn.close()
+    return franja_id
+
+
+def borrar_franja(franja_id):
+    conn = get_connection()
+    n_reservas = conn.execute(
+        "SELECT COUNT(*) FROM entrevista_reservas WHERE franja_id = ?", (franja_id,)
+    ).fetchone()[0]
+    if n_reservas:
+        conn.close()
+        raise ValueError(f"Esta franja ya tiene {n_reservas} cita(s) reservada(s) -- no se puede borrar.")
+    conn.execute("DELETE FROM entrevista_franjas WHERE id = ?", (franja_id,))
+    conn.commit()
+    conn.close()
+
+
+def franjas_disponibles(encuesta_id):
+    """Para el candidato: solo franjas de hoy en adelante y con cupo libre,
+    sin exponer quién ha reservado cada una (eso es solo para el admin)."""
+    hoy = datetime.datetime.now(ZoneInfo("Europe/Madrid")).strftime("%Y-%m-%d")
+    conn = get_connection()
+    franjas = conn.execute(
+        "SELECT * FROM entrevista_franjas WHERE encuesta_id = ? AND fecha >= ? ORDER BY fecha, hora",
+        (encuesta_id, hoy),
+    ).fetchall()
+    resultado = []
+    for f in franjas:
+        ocupadas = conn.execute(
+            "SELECT COUNT(*) FROM entrevista_reservas WHERE franja_id = ?", (f["id"],)
+        ).fetchone()[0]
+        restante = f["cupo"] - ocupadas
+        if restante > 0:
+            resultado.append({"id": f["id"], "fecha": f["fecha"], "hora": f["hora"], "cupo_restante": restante})
+    conn.close()
+    return resultado
+
+
+def get_encuesta_id_de_respuesta(respuesta_id):
+    """Para el 409 de reservar_cita: con qué encuesta refrescar franjas_disponibles
+    cuando la franja elegida se acaba de llenar."""
+    conn = get_connection()
+    row = conn.execute("SELECT encuesta_id FROM encuesta_respuestas WHERE id = ?", (respuesta_id,)).fetchone()
+    conn.close()
+    return row["encuesta_id"] if row else None
+
+
+def reservar_cita(respuesta_id, franja_id):
+    """Reserva atómica: BEGIN IMMEDIATE toma el bloqueo de escritura ANTES de
+    contar cuántas reservas tiene ya la franja, así dos personas que acaban
+    el test casi a la vez y eligen el mismo último hueco no pueden colarse
+    las dos -- la segunda transacción espera a que la primera termine (o
+    falle) y vuelve a contar con el cupo ya actualizado. Devuelve la reserva
+    (o la ya existente, si esta respuesta ya había reservado -- ver UNIQUE en
+    entrevista_reservas.respuesta_id, así un doble clic o un F5 en la
+    pantalla final no consume cupo de más ni rompe con un error confuso)."""
+    conn = get_connection()
+    ya = conn.execute(
+        "SELECT franja_id FROM entrevista_reservas WHERE respuesta_id = ?", (respuesta_id,)
+    ).fetchone()
+    if ya:
+        conn.close()
+        return {"ya_reservada": True, "franja_id": ya["franja_id"]}
+
+    respuesta = conn.execute(
+        "SELECT encuesta_id, datos_json FROM encuesta_respuestas WHERE id = ?", (respuesta_id,)
+    ).fetchone()
+    if not respuesta:
+        conn.close()
+        raise ValueError("No se encuentra esa respuesta de test.")
+
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        franja = conn.execute(
+            "SELECT * FROM entrevista_franjas WHERE id = ? AND encuesta_id = ?",
+            (franja_id, respuesta["encuesta_id"]),
+        ).fetchone()
+        if not franja:
+            raise ValueError("Esa franja de entrevista ya no está disponible.")
+        ocupadas = conn.execute(
+            "SELECT COUNT(*) FROM entrevista_reservas WHERE franja_id = ?", (franja_id,)
+        ).fetchone()[0]
+        if ocupadas >= franja["cupo"]:
+            raise ValueError("Esa franja acaba de quedarse sin cupo -- elige otra, por favor.")
+        datos = json.loads(respuesta["datos_json"])
+        campos, _ = reclutamiento_module.mapear_datos_a_candidato(datos)
+        conn.execute(
+            "INSERT INTO entrevista_reservas (franja_id, respuesta_id, nombre, telefono, email) VALUES (?, ?, ?, ?, ?)",
+            (franja_id, respuesta_id, campos.get("nombre_completo"), campos.get("telefono"), campos.get("email")),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.close()
+        raise
+    conn.close()
+    return {"ya_reservada": False, "franja_id": franja_id}
 
 
 def guardar_fondo(encuesta_id, contenido, extension):
@@ -1137,7 +1307,21 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
 
     marcar_sesion_completada(token)
     mostrar_no_apto = es_no_apto and bool(row["usar_mensaje_no_apto"])
-    return {"ok": True, "mensaje": row["mensaje_no_apto"] if mostrar_no_apto else row["mensaje_final"]}
+    mensaje = row["mensaje_no_apto"] if mostrar_no_apto else row["mensaje_final"]
+    # Selector de cita: solo a quien NO salió "No apto" y solo si el admin
+    # activó pedir_cita_entrevista en Ajustes -- se mira es_no_apto (el
+    # resultado real), no mostrar_no_apto (que además depende de si el admin
+    # activó el mensaje distinto): si desactivó ese mensaje pero la persona
+    # sigue siendo "No apto" de verdad, tampoco debe verse el selector de
+    # cita, solo el mensaje normal. Si lo activó pero todavía no ha dado de
+    # alta ninguna franja (o ya se llenaron todas), se cae al mensaje normal
+    # en vez de mostrar un selector vacío que no lleva a ningún sitio (ver
+    # franjas_disponibles).
+    if not es_no_apto and row["pedir_cita_entrevista"]:
+        franjas = franjas_disponibles(encuesta_id)
+        if franjas:
+            return {"ok": True, "requiere_cita": True, "respuesta_id": respuesta_id, "franjas": franjas, "mensaje": mensaje}
+    return {"ok": True, "mensaje": mensaje}
 
 
 def list_respuestas(encuesta_id):

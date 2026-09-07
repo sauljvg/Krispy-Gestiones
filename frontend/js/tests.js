@@ -123,6 +123,79 @@ function actualizarVisibilidadMensajeNoApto() {
   document.getElementById("test-no-apto-seccion").hidden = !aplica;
   document.getElementById("test-mensaje-no-apto-wrap").hidden =
     !aplica || !document.getElementById("test-usar-mensaje-no-apto").checked;
+  actualizarVisibilidadCita();
+}
+
+// Igual que el mensaje de "No apto": solo tiene sentido reservar cita de
+// entrevista en tests que se evalúan (Informe o "sin destino" con opción
+// descalificatoria) -- Entrevista de Salida y Clima Laboral no tienen
+// concepto de apto/no apto, así que la sección entera se oculta para esos.
+function actualizarVisibilidadCita() {
+  const destino = document.getElementById("test-tipo-informe").value;
+  document.getElementById("test-pedir-cita-wrap").hidden = !destinoUsaConceptoNoApto(destino);
+  const activo = document.getElementById("test-pedir-cita").checked;
+  document.getElementById("cita-franjas-bloque").hidden = !activo;
+  document.getElementById("cita-guardar-primero-hint").hidden = !activo || !!currentTestId;
+  if (activo && currentTestId) cargarFranjas();
+}
+
+function franjaFilaHTML(f) {
+  const [y, m, d] = f.fecha.split("-").map(Number);
+  const fechaTxt = new Date(y, m - 1, d).toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" });
+  const cupoTxt = f.reservas.length > 0
+    ? `${f.reservas.length}/${f.cupo} reservadas${f.cupo_restante > 0 ? ` -- ${f.cupo_restante} libres` : " -- completa"}`
+    : `${f.cupo} plaza${f.cupo === 1 ? "" : "s"} libres`;
+  return `
+    <div class="cita-franja-fila" data-id="${f.id}">
+      <span class="cita-franja-fecha">${escapeHTML(fechaTxt)} · ${escapeHTML(f.hora)}</span>
+      <span class="cita-franja-cupo-txt">${escapeHTML(cupoTxt)}</span>
+      <button type="button" class="btn-mini btn-borrar-franja" data-id="${f.id}" ${f.reservas.length > 0 ? "disabled title=\"Ya tiene reservas, no se puede borrar\"" : ""}>Borrar</button>
+    </div>`;
+}
+
+async function cargarFranjas() {
+  const wrap = document.getElementById("cita-franjas-filas");
+  wrap.innerHTML = `<p class="staff-hint">Cargando franjas...</p>`;
+  const franjas = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/franjas`).then((r) => (r.ok ? r.json() : []));
+  wrap.innerHTML = franjas.length > 0
+    ? franjas.map(franjaFilaHTML).join("")
+    : `<p class="staff-hint">Todavía no hay franjas -- añade la primera abajo.</p>`;
+  wrap.querySelectorAll(".btn-borrar-franja").forEach((btn) => {
+    btn.addEventListener("click", () => borrarFranja(Number(btn.dataset.id)));
+  });
+}
+
+async function agregarFranja() {
+  const fecha = document.getElementById("cita-franja-fecha").value;
+  const hora = document.getElementById("cita-franja-hora").value;
+  const cupo = Number(document.getElementById("cita-franja-cupo").value) || 1;
+  if (!fecha || !hora) {
+    mostrarAviso("Elige fecha y hora para la franja.");
+    return;
+  }
+  const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}/franjas`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fecha, hora, cupo }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    mostrarAviso(err.detail || "No se pudo añadir la franja.");
+    return;
+  }
+  await cargarFranjas();
+}
+
+async function borrarFranja(franjaId) {
+  const ok = await pedirConfirmacion("¿Borrar esta franja?");
+  if (!ok) return;
+  const res = await fetch(`${AUTH_API_BASE}/encuestas/franjas/${franjaId}`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    mostrarAviso(err.detail || "No se pudo borrar la franja.");
+    return;
+  }
+  await cargarFranjas();
 }
 
 // Se llama cada vez que cambia el desplegable de destino (y al abrir un
@@ -239,6 +312,7 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("test-mensaje-final").value = currentTest.mensaje_final;
     document.getElementById("test-mensaje-no-apto").value = currentTest.mensaje_no_apto;
     document.getElementById("test-usar-mensaje-no-apto").checked = currentTest.usar_mensaje_no_apto !== false;
+    document.getElementById("test-pedir-cita").checked = !!currentTest.pedir_cita_entrevista;
     actualizarVisibilidadMensajeNoApto();
     document.getElementById("test-color-boton").value = currentTest.color_boton;
     if (currentTest.tipo_entrevista_empresa) {
@@ -277,6 +351,7 @@ async function abrirEditor(testId, { scroll = true } = {}) {
     document.getElementById("test-mensaje-final").value = "Gracias por completar el formulario.";
     document.getElementById("test-mensaje-no-apto").value = "Gracias por contestar nuestro test. En esta ocasión no has superado el proceso, pero te deseamos mucha suerte.";
     document.getElementById("test-usar-mensaje-no-apto").checked = true;
+    document.getElementById("test-pedir-cita").checked = false;
     actualizarVisibilidadMensajeNoApto();
     document.getElementById("test-color-boton").value = "#5b2a2a";
     document.getElementById("test-tipo-informe").value = "";
@@ -338,6 +413,7 @@ async function guardarTest() {
     evitar_duplicados: document.getElementById("test-evitar-duplicados").checked,
     usar_mensaje_no_apto: destinoUsaConceptoNoApto(destino) && document.getElementById("test-usar-mensaje-no-apto").checked,
     fecha_cierre: document.getElementById("test-fecha-cierre").value || null,
+    pedir_cita_entrevista: destinoUsaConceptoNoApto(destino) && document.getElementById("test-pedir-cita").checked,
   };
   const res = await fetch(`${AUTH_API_BASE}/encuestas/encuestas/${currentTestId}`, {
     method: "PUT",
@@ -1151,4 +1227,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("clima-plantilla-filas").insertAdjacentHTML("beforeend", filaClimaPlantillaHTML());
     wireClimaPlantillaFilas();
   });
+  document.getElementById("test-pedir-cita").addEventListener("change", actualizarVisibilidadCita);
+  document.getElementById("btn-cita-franja-agregar").addEventListener("click", agregarFranja);
 });

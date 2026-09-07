@@ -483,11 +483,100 @@ async function enviarRespuestas() {
     return;
   }
   detenerAnticheat(); // ya se envió de verdad -- ni el contador ni el bloqueo de salida tienen sentido después de esto
+  if (data.requiere_cita && data.franjas && data.franjas.length > 0) {
+    mostrarSelectorCita(data.respuesta_id, data.franjas, data.mensaje || encuesta.mensaje_final);
+    return;
+  }
+  mostrarPantallaFinal(data.mensaje || encuesta.mensaje_final);
+}
+
+function mostrarPantallaFinal(mensaje, notaCita) {
   document.getElementById("encuesta-card").innerHTML = `
     <div class="encuesta-final">
       <div class="icono">✅</div>
-      <p>${escapeHTML(data.mensaje || encuesta.mensaje_final)}</p>
+      <p>${escapeHTML(mensaje)}</p>
+      ${notaCita ? `<p class="cita-confirmada">📅 ${escapeHTML(notaCita)}</p>` : ""}
     </div>`;
+}
+
+const CITA_DIAS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+const CITA_MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+
+// fecha en formato 'YYYY-MM-DD' -- se arma el Date con año/mes/día sueltos
+// (no new Date(fecha) directo) para que quede en horario LOCAL del navegador
+// y no se desplace un día por la conversión UTC que hace el parseo de fechas
+// "puras" en JS.
+function fmtFechaCita(fecha) {
+  const [y, m, d] = fecha.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return `${CITA_DIAS[dt.getDay()]} ${d} de ${CITA_MESES[m - 1]}`;
+}
+
+// Misma pantalla de confirmación (el mensaje de "Gracias por completar el
+// formulario" ya se ve arriba) -- justo debajo, quien resultó apto elige
+// franja antes de que el proceso se dé por cerrado del todo. Igual que en
+// mostrarPantallaFinal, respuestaId/mensajeFinal se reenvían tal cual entre
+// llamadas para que un 409 (la franja se llenó justo antes) pueda repintar
+// el selector con las franjas ya actualizadas sin perder el mensaje ni tener
+// que volver a enviar el test.
+function mostrarSelectorCita(respuestaId, franjas, mensajeFinal) {
+  const porFecha = new Map();
+  for (const f of franjas) {
+    if (!porFecha.has(f.fecha)) porFecha.set(f.fecha, []);
+    porFecha.get(f.fecha).push(f);
+  }
+  const gruposHTML = [...porFecha.entries()]
+    .map(
+      ([fecha, delDia]) => `
+    <div class="cita-fecha-grupo">
+      <p class="cita-fecha-label">${escapeHTML(fmtFechaCita(fecha))}</p>
+      <div class="cita-horas">
+        ${delDia
+          .map(
+            (f) => `<button type="button" class="cita-hora-btn" data-franja-id="${f.id}">
+              ${escapeHTML(f.hora)}
+              <span class="cita-cupo">${f.cupo_restante} plaza${f.cupo_restante === 1 ? "" : "s"}</span>
+            </button>`
+          )
+          .join("")}
+      </div>
+    </div>`
+    )
+    .join("");
+  document.getElementById("encuesta-card").innerHTML = `
+    <div class="encuesta-final">
+      <div class="icono">🎉</div>
+      <p>${escapeHTML(mensajeFinal)}</p>
+      <div class="cita-selector">
+        <p class="cita-titulo">Elige día y hora para tu entrevista:</p>
+        ${gruposHTML}
+      </div>
+    </div>`;
+  document.querySelectorAll(".cita-hora-btn").forEach((btn) => {
+    const franja = franjas.find((f) => f.id === Number(btn.dataset.franjaId));
+    btn.addEventListener("click", () => reservarCita(respuestaId, franja, mensajeFinal));
+  });
+}
+
+async function reservarCita(respuestaId, franja, mensajeFinal) {
+  document.querySelectorAll(".cita-hora-btn").forEach((b) => (b.disabled = true));
+  const res = await fetch(`${API_BASE}/respuestas/${respuestaId}/reservar-cita`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ franja_id: franja.id }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const franjasActualizadas = data.detail?.franjas || [];
+    mostrarAviso(data.detail?.mensaje || "Esa franja ya no está disponible, elige otra.");
+    if (franjasActualizadas.length > 0) {
+      mostrarSelectorCita(respuestaId, franjasActualizadas, mensajeFinal);
+    } else {
+      mostrarPantallaFinal(mensajeFinal, "Ya no quedan franjas libres -- te contactaremos para agendar la entrevista.");
+    }
+    return;
+  }
+  mostrarPantallaFinal(mensajeFinal, `Cita confirmada: ${fmtFechaCita(franja.fecha)}, ${franja.hora}.`);
 }
 
 async function init() {

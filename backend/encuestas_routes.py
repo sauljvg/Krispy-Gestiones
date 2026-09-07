@@ -53,6 +53,7 @@ class EncuestaEditarIn(BaseModel):
     mensaje_no_apto: str = "Gracias por contestar nuestro test. En esta ocasión no has superado el proceso, pero te deseamos mucha suerte."
     usar_mensaje_no_apto: bool = True
     fecha_cierre: str | None = None
+    pedir_cita_entrevista: bool = False
 
 
 class PaginaIn(BaseModel):
@@ -186,7 +187,36 @@ def update_encuesta_route(encuesta_id: int, body: EncuestaEditarIn, _user: dict 
         encuesta_id, body.titulo, body.mensaje_final, body.color_boton,
         body.tipo_informe_clave, body.tipo_entrevista_empresa, body.enlace_corto, body.evitar_duplicados,
         body.mensaje_no_apto, body.clima_oleada_id, body.usar_mensaje_no_apto, body.fecha_cierre,
+        body.pedir_cita_entrevista,
     )
+    return {"ok": True}
+
+
+class FranjaIn(BaseModel):
+    fecha: str
+    hora: str
+    cupo: int = 1
+
+
+@router.get("/encuestas/{encuesta_id}/franjas")
+def list_franjas_route(encuesta_id: int, _user: dict = Depends(require_acceso_encuesta)):
+    return encuestas_module.list_franjas(encuesta_id)
+
+
+@router.post("/encuestas/{encuesta_id}/franjas")
+def crear_franja_route(encuesta_id: int, body: FranjaIn, _user: dict = Depends(require_acceso_encuesta)):
+    if not body.fecha.strip() or not body.hora.strip():
+        raise HTTPException(status_code=400, detail="Falta la fecha o la hora")
+    franja_id = encuestas_module.crear_franja(encuesta_id, body.fecha, body.hora, body.cupo)
+    return {"ok": True, "id": franja_id}
+
+
+@router.delete("/franjas/{franja_id}")
+def borrar_franja_route(franja_id: int, _user: dict = Depends(require_tests)):
+    try:
+        encuestas_module.borrar_franja(franja_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True}
 
 
@@ -373,6 +403,26 @@ def enviar_respuesta_route(slug: str, body: RespuestaIn, request: Request):
         return encuestas_module.guardar_respuesta(slug, body.respuestas, ip, user_agent, token=body.token)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+class ReservarCitaIn(BaseModel):
+    franja_id: int
+
+
+@router_publico.post("/respuestas/{respuesta_id}/reservar-cita")
+def reservar_cita_route(respuesta_id: int, body: ReservarCitaIn):
+    """Paso final para quien resultó apto y el test tiene pedir_cita_entrevista
+    activo -- ver encuestas.reservar_cita. Si la franja elegida se llenó justo
+    antes (dos personas a la vez, la última en enviar el test), devuelve 409
+    con la lista de franjas ya actualizada para que encuesta.js pinte el
+    selector de nuevo sin tener que recargar toda la página."""
+    try:
+        resultado = encuestas_module.reservar_cita(respuesta_id, body.franja_id)
+    except ValueError as exc:
+        encuesta_id = encuestas_module.get_encuesta_id_de_respuesta(respuesta_id)
+        franjas = encuestas_module.franjas_disponibles(encuesta_id) if encuesta_id else []
+        raise HTTPException(status_code=409, detail={"mensaje": str(exc), "franjas": franjas})
+    return {"ok": True, **resultado}
 
 
 @router_publico.post("/{slug}/sesion")

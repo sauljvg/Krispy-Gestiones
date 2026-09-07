@@ -58,6 +58,13 @@
   .clima-plantilla-fila input[type="number"] { flex: 1; min-width: 90px; }
   .clima-plantilla-fila button { flex: none; }
 
+  .cita-franja-fila { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; margin-bottom: 4px; background: var(--surface-1); font-size: 13px; }
+  .cita-franja-fila .cita-franja-fecha { font-weight: 600; min-width: 130px; }
+  .cita-franja-fila .cita-franja-cupo-txt { color: var(--text-secondary); flex: 1; }
+  .cita-franja-nueva-fila { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  .cita-franja-nueva-fila input { width: auto; }
+  #cita-franja-cupo { width: 70px; }
+
   .pagina-card { background: var(--surface-page); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
   .pagina-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
   .pagina-condicion { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 8px; margin-bottom: 10px; background: var(--surface-1); border: 1px dashed var(--border); border-radius: 8px; font-size: 12px; }
@@ -230,6 +237,23 @@
           <label for="test-mensaje-no-apto">Mensaje si el resultado es "No apto"</label>
           <textarea id="test-mensaje-no-apto" style="min-height:60px;">Gracias por contestar nuestro test. En esta ocasión no has superado el proceso, pero te deseamos mucha suerte.</textarea>
         </div>
+        <div class="editor-field" id="test-pedir-cita-wrap">
+          <label class="chk" id="test-pedir-cita-label">
+            <input type="checkbox" id="test-pedir-cita">
+            Ofrecer reservar cita de entrevista a quien resulte apto (justo en la pantalla de confirmación)
+          </label>
+          <div id="cita-franjas-bloque" hidden>
+            <p class="staff-hint">Franjas disponibles para reservar. Se guardan al momento, no hace falta pulsar "Guardar" para cada una.</p>
+            <div id="cita-franjas-filas"></div>
+            <div class="cita-franja-nueva-fila">
+              <input type="date" id="cita-franja-fecha" title="Fecha">
+              <input type="time" id="cita-franja-hora" title="Hora">
+              <input type="number" id="cita-franja-cupo" min="1" value="5" title="Cupo (personas)">
+              <button id="btn-cita-franja-agregar" class="btn btn-ghost" type="button">＋ Añadir franja</button>
+            </div>
+          </div>
+          <p class="staff-hint" id="cita-guardar-primero-hint" hidden>Guarda el test primero (botón "Guardar" más abajo) para poder añadir franjas.</p>
+        </div>
       </div>
       <div class="editor-field">
         <label>Imagen de fondo</label>
@@ -279,6 +303,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/tests.js?v=20260821i"></script>
+<script src="js/tests.js?v=20260907a"></script>
 </body>
 </html>
