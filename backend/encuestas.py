@@ -1044,13 +1044,36 @@ def crear_plantilla_clima_encuesta_completa(encuesta_id):
 
 def update_pregunta(pregunta_id, etiqueta, obligatoria, opciones=None, mostrar_dashboard=False, opciones_descarta=None):
     conn = get_connection()
+    # Se lee el estado ANTERIOR antes de tocar nada -- si mostrar_dashboard
+    # cambia de verdad (no en cada guardado, solo cuando de verdad se marca/
+    # desmarca la casilla), hay que reflejarlo también en las respuestas que
+    # YA se enviaron, no solo en las que lleguen a partir de ahora (ver
+    # informes.recalcular_columna_dashboard). Se usa la etiqueta VIEJA para
+    # esa búsqueda -- es la que quedó grabada en las respuestas ya guardadas;
+    # si en este mismo guardado también se renombra la pregunta, ese caso
+    # (renombrar Y marcar/desmarcar a la vez) no queda cubierto.
+    anterior = conn.execute(
+        "SELECT etiqueta, mostrar_dashboard, pagina_id FROM encuesta_preguntas WHERE id = ?", (pregunta_id,)
+    ).fetchone()
     conn.execute(
         "UPDATE encuesta_preguntas SET etiqueta = ?, obligatoria = ?, opciones_json = ?, mostrar_dashboard = ?, opciones_descarta_json = ? WHERE id = ?",
         (etiqueta.strip(), 1 if obligatoria else 0, json.dumps(opciones or [], ensure_ascii=False),
          1 if mostrar_dashboard else 0, json.dumps(opciones_descarta or [], ensure_ascii=False), pregunta_id),
     )
     conn.commit()
-    conn.close()
+    actualizadas = 0
+    if anterior and bool(anterior["mostrar_dashboard"]) != bool(mostrar_dashboard):
+        pagina = conn.execute("SELECT encuesta_id FROM encuesta_paginas WHERE id = ?", (anterior["pagina_id"],)).fetchone()
+        tipo_clave = None
+        if pagina:
+            enc = conn.execute("SELECT tipo_informe_clave FROM encuestas WHERE id = ?", (pagina["encuesta_id"],)).fetchone()
+            tipo_clave = enc["tipo_informe_clave"] if enc else None
+        conn.close()
+        if tipo_clave:
+            actualizadas = informes_module.recalcular_columna_dashboard(tipo_clave, anterior["etiqueta"], bool(mostrar_dashboard))
+    else:
+        conn.close()
+    return actualizadas
 
 
 def _renumerar_preguntas(conn, pagina_id):

@@ -955,6 +955,15 @@ function renderPaginas() {
         mostrarAviso(err.detail || "No se pudo guardar la pregunta.");
         return;
       }
+      const data = await res.json().catch(() => ({}));
+      // Si se acaba de marcar/desmarcar "Mostrar en el dashboard", el
+      // backend ya propagó el cambio a las respuestas YA guardadas (ver
+      // recalcular_columna_dashboard en informes.py) -- este aviso es solo
+      // para que quede claro que no hace falta esperar a la próxima
+      // respuesta para verlo reflejado.
+      if (data.respuestas_actualizadas > 0) {
+        mostrarAviso(`Listo -- se actualizaron ${data.respuestas_actualizadas} respuesta(s) ya guardadas con este cambio.`);
+      }
       editandoPreguntas.delete(preguntaId);
       await abrirEditor(currentTestId, { scroll: false });
     })

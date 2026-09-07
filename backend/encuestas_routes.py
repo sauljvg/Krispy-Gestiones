@@ -338,10 +338,10 @@ def add_pregunta_route(pagina_id: int, body: PreguntaIn, _user: dict = Depends(r
 
 @router.put("/preguntas/{pregunta_id}")
 def update_pregunta_route(pregunta_id: int, body: PreguntaIn, _user: dict = Depends(require_tests)):
-    encuestas_module.update_pregunta(
+    actualizadas = encuestas_module.update_pregunta(
         pregunta_id, body.etiqueta, body.obligatoria, body.opciones, body.mostrar_dashboard, body.opciones_descarta
     )
-    return {"ok": True}
+    return {"ok": True, "respuestas_actualizadas": actualizadas}
 
 
 @router.delete("/preguntas/{pregunta_id}")

@@ -643,6 +643,75 @@ def ingest_fila_directa(tipo_clave, fila, origen="Formulario web", columnas_extr
     }
 
 
+def recalcular_columna_dashboard(tipo_clave, etiqueta, mostrar):
+    """Cuando se marca/desmarca 'Mostrar en el dashboard de resultados' para
+    una pregunta del módulo de Test (ver update_pregunta en encuestas.py),
+    esto se propaga a las respuestas YA guardadas -- añadiendo o quitando esa
+    columna de sus filas Scoring/Dashboard, no solo a las que lleguen a
+    partir de ahora (antes, el dato quedaba "guardado a ciegas": existía en
+    la hoja Respuestas cruda, pero no se veía en la tabla de resultados
+    hasta la siguiente respuesta).
+
+    Cada envío del módulo de Test crea su propia informe_importacion (una
+    por respuesta, ver ingest_fila_directa) -- la hoja "Respuestas" (el dato
+    crudo, de donde se saca el valor real) y las hojas "Scoring"/"Dashboard"
+    de esa MISMA respuesta comparten importacion_id, así que ese es el
+    enlace para encontrar la fila que hay que tocar en cada hoja. Solo
+    aplica a respuestas que vinieron del módulo de Test -- una importación
+    manual de Excel puede meter muchas filas bajo la misma importacion_id,
+    así que ahí ese enlace 1-a-1 no vale y esas filas se dejan tal cual."""
+    tipo = get_tipo(tipo_clave)
+    if tipo is None:
+        raise ValueError(f"Tipo de informe desconocido: {tipo_clave}")
+    conn = get_connection()
+    filas_respuestas = conn.execute("""
+        SELECT id, importacion_id, datos_json FROM informe_respuestas
+        WHERE tipo_id = ? AND hoja = 'Respuestas'
+    """, (tipo["id"],)).fetchall()
+    actualizadas = 0
+    for r in filas_respuestas:
+        if r["importacion_id"] is None:
+            continue
+        datos_crudos = json.loads(r["datos_json"])
+        if etiqueta not in datos_crudos:
+            continue
+        # Una respuesta del módulo de Test siempre inserta UNA fila por hoja
+        # bajo la misma importacion_id -- si hay más de una fila "Respuestas"
+        # compartiendo importacion_id, es una importación de Excel con
+        # varias filas y este enlace no es fiable, se salta.
+        n_en_importacion = conn.execute(
+            "SELECT COUNT(*) FROM informe_respuestas WHERE tipo_id = ? AND hoja = 'Respuestas' AND importacion_id = ?",
+            (tipo["id"], r["importacion_id"]),
+        ).fetchone()[0]
+        if n_en_importacion != 1:
+            continue
+        valor = datos_crudos[etiqueta]
+        for hoja_destino in ("Scoring", "Dashboard"):
+            fila_destino = conn.execute(
+                "SELECT id, datos_json FROM informe_respuestas WHERE tipo_id = ? AND hoja = ? AND importacion_id = ?",
+                (tipo["id"], hoja_destino, r["importacion_id"]),
+            ).fetchone()
+            if not fila_destino:
+                continue
+            datos_destino = json.loads(fila_destino["datos_json"])
+            if mostrar:
+                if etiqueta in datos_destino:
+                    continue
+                datos_destino[etiqueta] = valor
+            else:
+                if etiqueta not in datos_destino:
+                    continue
+                del datos_destino[etiqueta]
+            conn.execute(
+                "UPDATE informe_respuestas SET datos_json = ? WHERE id = ?",
+                (json.dumps(datos_destino, ensure_ascii=False), fila_destino["id"]),
+            )
+            actualizadas += 1
+    conn.commit()
+    conn.close()
+    return actualizadas
+
+
 def recalcular_resultados_pendientes():
     """Backfill: respuestas de tests "de valores" (ver es_de_valores en
     ingest_fila_directa) que quedaron sin RESULTADO porque llegaron ANTES de
