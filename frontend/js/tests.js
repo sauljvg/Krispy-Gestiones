@@ -170,6 +170,18 @@ async function cargarFranjas() {
   wrap.querySelectorAll(".btn-borrar-franja").forEach((btn) => {
     btn.addEventListener("click", () => borrarFranja(Number(btn.dataset.id)));
   });
+  // Precarga con la dirección de la ÚLTIMA franja creada -- estos tests se
+  // reciclan (hoy en La Gavia, la próxima tanda en Plenilunio...) así que al
+  // reabrir el editor hace falta ver cuál quedó puesta para poder pisarla,
+  // no un campo en blanco sin pista de qué había. Solo si el campo está
+  // vacío -- no debe pisar lo que el admin esté escribiendo a medias.
+  const direccionInput = document.getElementById("cita-franja-direccion");
+  if (franjas.length > 0 && !direccionInput.value.trim()) {
+    const ultima = franjas.reduce((a, b) => (a.creado_en > b.creado_en ? a : b));
+    direccionInput.value = ultima.direccion || "";
+    document.getElementById("cita-franja-mapa-url").value = ultima.mapa_url || "";
+    actualizarLinkBuscarMaps();
+  }
 }
 
 async function agregarFranja() {
