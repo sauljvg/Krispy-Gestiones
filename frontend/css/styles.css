@@ -614,7 +614,12 @@ h3 {
 .staff-table tbody tr:hover { background: var(--surface-page); }
 .staff-table tbody tr.active { background: color-mix(in srgb, var(--acento) 16%, transparent); }
 
-.staff-hint { margin: -6px 0 10px; font-size: 12px; color: var(--text-muted); }
+/* margin-top: antes -6px -- pegaba el texto de ayuda justo debajo del
+   campo, como si fuera parte de la misma caja en vez de una nota aparte
+   (queja del usuario 07/09, viendo el editor de Test: se veía "metido"
+   en el contenedor del campo de arriba). Un poco de aire sin separarlo
+   tanto que deje de leerse como la explicación de ESE campo en concreto. */
+.staff-hint { margin: 4px 0 12px; font-size: 12px; color: var(--text-muted); }
 
 /* Tabla de datos genérica (no interactiva, a diferencia de .staff-table) —
    usada para los desgloses debajo de gráficos (evolución por tienda,
