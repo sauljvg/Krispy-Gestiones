@@ -213,6 +213,20 @@ def crear_franja_route(encuesta_id: int, body: FranjaIn, _user: dict = Depends(r
     return {"ok": True, "id": franja_id}
 
 
+class DireccionFranjasIn(BaseModel):
+    direccion: str | None = None
+    mapa_url: str | None = None
+
+
+@router.post("/encuestas/{encuesta_id}/franjas/aplicar-direccion")
+def aplicar_direccion_franjas_route(encuesta_id: int, body: DireccionFranjasIn, _user: dict = Depends(require_acceso_encuesta)):
+    """Corrige la dirección de TODAS las franjas ya creadas de este test de
+    una vez -- para cuando el test se recicla con otra tienda y las franjas
+    de antes se quedaron con la dirección (o sin ella) del sitio anterior."""
+    actualizadas = encuestas_module.aplicar_direccion_a_franjas(encuesta_id, body.direccion, body.mapa_url)
+    return {"ok": True, "actualizadas": actualizadas}
+
+
 @router.delete("/franjas/{franja_id}")
 def borrar_franja_route(franja_id: int, _user: dict = Depends(require_tests)):
     try:
