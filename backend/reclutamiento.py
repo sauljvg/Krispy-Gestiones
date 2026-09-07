@@ -969,6 +969,53 @@ def buscar_candidato_por_nombre(empresa, nombre):
     return None
 
 
+def buscar_posibles_duplicados(empresa, candidatos: list[dict]) -> list[dict | None]:
+    """Para cada candidato recién EXTRAÍDO de un PDF (antes de crear su
+    ficha), busca si ya existe alguien de la misma empresa con el mismo
+    teléfono (últimos 9 dígitos), email o nombre exacto -- el caso real que
+    motivó esto: volver a subir sin darse cuenta un PDF de lote que ya se
+    había subido antes (o que se solapa con uno anterior) creaba una ficha
+    nueva por cada persona, duplicando el historial entero (estado,
+    entrevista, test respondido...) en vez de reconocerla. Se usa en la
+    vista previa de "revisión múltiple" (ver extraer_cv_route) para
+    desmarcar por defecto a quien ya tiene ficha y avisar con qué ficha
+    coincide -- el reclutador decide si de verdad quiere crear una ficha
+    aparte (p.ej. dos personas distintas que comparten teléfono de casa).
+
+    Devuelve una lista del mismo largo que `candidatos`, con `None` o
+    {"candidato_id", "nombre_completo", "creado_en"} en cada posición."""
+    conn = get_connection()
+    existentes = conn.execute(
+        "SELECT id, nombre_completo, telefono, email, creado_en FROM candidatos WHERE empresa = ?", (empresa,)
+    ).fetchall()
+    conn.close()
+    por_tel = {}
+    por_email = {}
+    por_nombre = {}
+    for row in existentes:
+        tel = _ultimos_9_digitos(row["telefono"])
+        if tel:
+            por_tel.setdefault(tel, row)
+        email = (row["email"] or "").strip().lower()
+        if email:
+            por_email.setdefault(email, row)
+        nombre = normalizar_nombre(row["nombre_completo"])
+        if nombre:
+            por_nombre.setdefault(nombre, row)
+
+    resultado = []
+    for c in candidatos:
+        tel = _ultimos_9_digitos(c.get("telefono"))
+        email = (c.get("email") or "").strip().lower()
+        nombre = normalizar_nombre(c.get("nombre_completo"))
+        match = (por_tel.get(tel) if tel else None) or (por_email.get(email) if email else None) or (por_nombre.get(nombre) if nombre else None)
+        resultado.append(
+            {"candidato_id": match["id"], "nombre_completo": match["nombre_completo"], "creado_en": match["creado_en"]}
+            if match else None
+        )
+    return resultado
+
+
 def candidatos_ya_enriquecidos(candidato_ids: list[int]) -> set[int]:
     """De esos ids, a cuáles YA procesó la extracción de CV (ver
     ia_extraida_en) -- se usa en la vista previa de "Adjuntar PDF a fichas

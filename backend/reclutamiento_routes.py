@@ -668,7 +668,7 @@ def eliminar_candidato_route(candidato_id: int, _user: dict = Depends(require_ad
 
 
 @router.post("/candidatos/extraer-cv")
-async def extraer_cv_route(file: UploadFile = File(...), _user: dict = Depends(require_informes_o_reclutamiento)):
+async def extraer_cv_route(empresa: str = "kk", file: UploadFile = File(...), _user: dict = Depends(require_informes_o_reclutamiento)):
     """Lee un CV nuevo (sin guardarlo todavía) con el método local -- el
     frontend rellena el formulario con el resultado para que el reclutador
     lo revise antes de guardar. Si trae varios candidatos concatenados (PDF
@@ -697,10 +697,17 @@ async def extraer_cv_route(file: UploadFile = File(...), _user: dict = Depends(r
         except Exception:
             rangos = []
     division_disponible = len(rangos) == len(candidatos)
+    # Avisa si alguno de los candidatos leídos ya tiene ficha (mismo
+    # teléfono, email o nombre exacto) -- el caso real que motivó esto: subir
+    # sin querer un PDF de lote que ya se había subido antes (o que se
+    # solapa con uno anterior) duplicaba el historial entero de cada
+    # persona. Ver buscar_posibles_duplicados.
+    posibles_duplicados = reclutamiento_module.buscar_posibles_duplicados(empresa, candidatos)
     return {
         "ok": True, "candidatos": candidatos,
         "division_disponible": division_disponible,
         "rangos_paginas": rangos if division_disponible else None,
+        "posibles_duplicados": posibles_duplicados,
     }
 
 

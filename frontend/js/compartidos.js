@@ -1690,7 +1690,7 @@ let loteRevisionContexto = null;
 // Cuando el PDF trae varios candidatos, no tiene sentido rellenar el
 // formulario de "un candidato" — se oculta y se muestra en su lugar una
 // lista de revisión con checkboxes para crear varias fichas de golpe.
-function renderRevisionMultiple(candidatos, { file = null, rangosPaginas = null, vacantePreseleccionadaId = null } = {}) {
+function renderRevisionMultiple(candidatos, { file = null, rangosPaginas = null, vacantePreseleccionadaId = null, posiblesDuplicados = [] } = {}) {
   candidatosPorRevisar = candidatos;
   loteRevisionContexto = file ? { file, rangosPaginas } : null;
   document.getElementById("single-candidato-wrap").hidden = true;
@@ -1703,17 +1703,24 @@ function renderRevisionMultiple(candidatos, { file = null, rangosPaginas = null,
     <p class="staff-hint" id="revision-contador"></p>
     <div class="candidatos-grid">
       ${candidatos
-        .map(
-          (c, i) => `
+        .map((c, i) => {
+          // Ya tiene ficha (mismo teléfono/email/nombre) -- ver
+          // buscar_posibles_duplicados. Se desmarca por defecto para no
+          // duplicar su historial (estado, entrevista, test respondido...);
+          // el reclutador puede volver a marcarlo si de verdad son dos
+          // personas distintas que comparten el dato.
+          const dup = posiblesDuplicados[i];
+          return `
         <div class="candidato-mini-card" style="cursor:default;">
           <h4><label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-            <input type="checkbox" class="revision-multiple-check" data-idx="${i}" checked>
+            <input type="checkbox" class="revision-multiple-check" data-idx="${i}" ${dup ? "" : "checked"}>
             ${escapeHTML(c.nombre_completo || `Candidato ${i + 1}`)}
           </label></h4>
           <p>${escapeHTML(c.puesto_solicitado || "")}</p>
           <p>${escapeHTML([c.telefono, c.email].filter(Boolean).join(" · "))}</p>
-        </div>`
-        )
+          ${dup ? `<p class="extraccion-aviso local" style="margin:4px 0 0;">⚠️ Ya existe (ficha #${dup.candidato_id}, creada el ${escapeHTML((dup.creado_en || "").slice(0, 10))})</p>` : ""}
+        </div>`;
+        })
         .join("")}
     </div>
     <div class="form-actions">
@@ -1978,7 +1985,7 @@ async function procesarPdfNuevosCandidatos(file, avisoWrap, { vacantePreseleccio
   avisoWrap.innerHTML = `<p class="staff-hint">Leyendo el CV...</p>`;
   const formData = new FormData();
   formData.append("file", file);
-  const resp = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/extraer-cv`, { method: "POST", body: formData });
+  const resp = await fetch(`${AUTH_API_BASE}/reclutamiento/candidatos/extraer-cv?empresa=${EMPRESA}`, { method: "POST", body: formData });
   if (!resp.ok) {
     avisoWrap.innerHTML = `<p class="extraccion-aviso local">No se pudo leer el CV. Rellena los datos a mano.</p>`;
     return;
@@ -2003,11 +2010,17 @@ async function procesarPdfNuevosCandidatos(file, avisoWrap, { vacantePreseleccio
   const avisoSinTexto = nSinTexto
     ? `<p class="extraccion-aviso local">⚠️ ${nSinTexto} de ${candidatos.length} parece${nSinTexto === 1 ? "" : "n"} un CV escaneado como imagen (sin texto legible) -- revísalo(s) a mano.</p>`
     : "";
-  avisoWrap.innerHTML = `<p class="extraccion-aviso local">✓ ${candidatos.length} candidatos detectados.</p>${avisoSinTexto}`;
+  const posiblesDuplicados = data.posibles_duplicados || [];
+  const nDuplicados = posiblesDuplicados.filter(Boolean).length;
+  const avisoDuplicados = nDuplicados
+    ? `<p class="extraccion-aviso local">⚠️ ${nDuplicados} ya tiene${nDuplicados === 1 ? "" : "n"} ficha creada -- se han desmarcado abajo para no duplicarlos(as). Márcalos a mano solo si de verdad quieres crear una ficha aparte.</p>`
+    : "";
+  avisoWrap.innerHTML = `<p class="extraccion-aviso local">✓ ${candidatos.length} candidatos detectados.</p>${avisoSinTexto}${avisoDuplicados}`;
   renderRevisionMultiple(candidatos, {
     file,
     rangosPaginas: data.division_disponible ? data.rangos_paginas : null,
     vacantePreseleccionadaId,
+    posiblesDuplicados,
   });
 }
 
