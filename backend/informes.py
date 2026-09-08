@@ -837,6 +837,12 @@ def list_vacantes_de_respuestas(tipo_clave, hoja=None):
     # aquí solo porque tiene respuestas de test. ORDER BY ultima_respuesta
     # DESC: la vacante con la respuesta más reciente primero, no la que más
     # respuestas acumuladas tiene en total.
+    # v.empresa = tipo["empresa"]: defensa extra -- por diseño un candidato
+    # de una marca nunca debería acabar enlazado a la respuesta de un test
+    # de la otra (ver el filtro por empresa ya añadido en
+    # buscar_candidato_sin_respuesta_por_contacto/buscar_respuesta_huerfana_por_contacto),
+    # pero si algún dato antiguo se coló antes de ese arreglo, mejor no
+    # mezclar la vacante de otra marca en esta tarjeta que mostrarla mal.
     vacantes = conn.execute("""
         SELECT v.id AS vacante_id, v.puesto, v.centro, v.estado,
                COUNT(r.id) AS total,
@@ -845,10 +851,10 @@ def list_vacantes_de_respuestas(tipo_clave, hoja=None):
         FROM informe_respuestas r
         JOIN candidatos cand ON cand.respuesta_id = r.id
         JOIN vacantes v ON v.id = cand.vacante_id
-        WHERE r.tipo_id = ? AND r.hoja = ? AND v.archivada = 0
+        WHERE r.tipo_id = ? AND r.hoja = ? AND v.archivada = 0 AND v.empresa = ?
         GROUP BY v.id
         ORDER BY ultima_respuesta DESC
-    """, (tipo["id"], hoja)).fetchall()
+    """, (tipo["id"], hoja, tipo["empresa"])).fetchall()
     sin_vacante = conn.execute("""
         SELECT COUNT(*) FROM informe_respuestas r
         WHERE r.tipo_id = ? AND r.hoja = ?
@@ -1094,7 +1100,7 @@ def _candidato_id_para_respuesta(respuesta_id, compartido_por):
     # vez de crear una ficha duplicada — mismo criterio que el match
     # automático al recibir la respuesta (ver encuestas.guardar_respuesta).
     candidato_existente = reclutamiento_module.buscar_candidato_sin_respuesta_por_contacto(
-        campos.get("telefono"), campos.get("email")
+        campos.get("telefono"), campos.get("email"), empresa=empresa
     )
     if candidato_existente:
         reclutamiento_module.enlazar_respuesta_a_candidato(candidato_existente, respuesta_id)

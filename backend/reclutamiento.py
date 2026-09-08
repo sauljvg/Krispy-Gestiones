@@ -782,22 +782,37 @@ def _ultimos_9_digitos(telefono):
     return digitos[-9:] if len(digitos) >= 9 else None
 
 
-def buscar_candidato_sin_respuesta_por_contacto(telefono, email):
+def buscar_candidato_sin_respuesta_por_contacto(telefono, email, empresa=None):
     """Busca en Reclutamiento un candidato YA EXISTENTE (creado a mano, por CV
     o por una vacante) que coincida por teléfono o correo con quien acaba de
     responder un test — y que todavía no tenga ningún test enlazado. Así, si
     Bianca Burbano ya está en la base de candidatos y ahora rellena el test,
     se enlaza a su misma ficha en vez de quedar suelto hasta que alguien lo
     comparta a mano desde Informes. No toca candidatos que ya tengan un
-    respuesta_id (para no perder un enlace anterior)."""
+    respuesta_id (para no perder un enlace anterior).
+
+    `empresa`: restringe la búsqueda a esa marca (kk/saona) -- sin esto, dos
+    personas con el mismo teléfono/email en marcas DISTINTAS (o la misma
+    persona aplicando a las dos, caso real visto en producción: Preslava
+    Blazheva respondió el test de Saona y se enlazó por error a su ficha
+    vieja de Krispy Kreme) podían cruzarse: la respuesta de una marca
+    terminaba enlazada a la ficha de la otra. Se deja opcional (no
+    obligatorio) porque algún llamador antiguo podría no conocer la empresa
+    todavía -- mejor buscar sin filtrar que no encontrar nada, pero todo
+    llamador nuevo debería pasarla."""
     tel_norm = _ultimos_9_digitos(telefono)
     email_norm = (email or "").strip().lower()
     if not tel_norm and not email_norm:
         return None
     conn = get_connection()
-    candidatos = conn.execute(
-        "SELECT id, telefono, email FROM candidatos WHERE respuesta_id IS NULL"
-    ).fetchall()
+    if empresa:
+        candidatos = conn.execute(
+            "SELECT id, telefono, email FROM candidatos WHERE respuesta_id IS NULL AND empresa = ?", (empresa,)
+        ).fetchall()
+    else:
+        candidatos = conn.execute(
+            "SELECT id, telefono, email FROM candidatos WHERE respuesta_id IS NULL"
+        ).fetchall()
     conn.close()
     for c in candidatos:
         if tel_norm and _ultimos_9_digitos(c["telefono"]) == tel_norm:
@@ -807,24 +822,38 @@ def buscar_candidato_sin_respuesta_por_contacto(telefono, email):
     return None
 
 
-def buscar_respuesta_huerfana_por_contacto(telefono, email):
+def buscar_respuesta_huerfana_por_contacto(telefono, email, empresa=None):
     """Simétrico al anterior: cuando el candidato se da de alta en
     Reclutamiento DESPUÉS de que la persona ya hubiera respondido el test
     (p.ej. una importación de candidatos de una vacante), busca entre las
     respuestas de test que todavía no están enlazadas a ningún candidato una
     que coincida por teléfono o correo. Sin esto, el enlace automático solo
     funcionaba en un sentido (respuesta nueva -> candidato existente) y una
-    importación posterior se quedaba huérfana para siempre."""
+    importación posterior se quedaba huérfana para siempre.
+
+    `empresa`: mismo motivo que en buscar_candidato_sin_respuesta_por_contacto
+    -- restringe a las respuestas de tests de esa marca (vía informe_tipos,
+    la única tabla que sabe la empresa de una informe_respuesta), para no
+    enlazar por error la respuesta de un test de Saona a un candidato de
+    Krispy Kreme (o viceversa) solo porque comparten teléfono/email."""
     tel_norm = _ultimos_9_digitos(telefono)
     email_norm = (email or "").strip().lower()
     if not tel_norm and not email_norm:
         return None
     conn = get_connection()
-    rows = conn.execute("""
-        SELECT r.id, r.datos_json FROM informe_respuestas r
-        LEFT JOIN candidatos c ON c.respuesta_id = r.id
-        WHERE c.id IS NULL
-    """).fetchall()
+    if empresa:
+        rows = conn.execute("""
+            SELECT r.id, r.datos_json FROM informe_respuestas r
+            LEFT JOIN candidatos c ON c.respuesta_id = r.id
+            JOIN informe_tipos t ON t.id = r.tipo_id
+            WHERE c.id IS NULL AND t.empresa = ?
+        """, (empresa,)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT r.id, r.datos_json FROM informe_respuestas r
+            LEFT JOIN candidatos c ON c.respuesta_id = r.id
+            WHERE c.id IS NULL
+        """).fetchall()
     conn.close()
     for r in rows:
         datos = json.loads(r["datos_json"])
@@ -834,6 +863,38 @@ def buscar_respuesta_huerfana_por_contacto(telefono, email):
         if email_norm and (campos.get("email") or "").strip().lower() == email_norm:
             return r["id"]
     return None
+
+
+def transferir_respuesta(candidato_origen_id, candidato_destino_id):
+    """Corrige un enlace automático que se equivocó de ficha -- caso real
+    que motivó esto: antes de que buscar_candidato_sin_respuesta_por_contacto/
+    buscar_respuesta_huerfana_por_contacto filtraran por empresa, una
+    respuesta de test de Saona (Preslava Blazheva) se enlazó por coincidir
+    teléfono/email a su ficha vieja de Krispy Kreme en vez de a su ficha de
+    Saona. Deja al candidato origen sin respuesta_id (vuelve a "sin test
+    enlazado", como si nunca hubiera respondido -- puede volver a
+    enlazarse solo, p.ej. con 'Buscar tests ya respondidos', si de verdad
+    tiene un test propio pendiente) y se lo pasa al destino. Si el destino
+    ya tuviera un respuesta_id propio, se rechaza en vez de pisarlo --
+    perder ESE enlace sería un problema nuevo, no una corrección."""
+    conn = get_connection()
+    origen = conn.execute("SELECT respuesta_id FROM candidatos WHERE id = ?", (candidato_origen_id,)).fetchone()
+    destino = conn.execute("SELECT respuesta_id FROM candidatos WHERE id = ?", (candidato_destino_id,)).fetchone()
+    if origen is None or destino is None:
+        conn.close()
+        raise ValueError("Candidato no encontrado")
+    if origen["respuesta_id"] is None:
+        conn.close()
+        raise ValueError("Ese candidato no tiene ninguna respuesta de test enlazada")
+    if destino["respuesta_id"] is not None:
+        conn.close()
+        raise ValueError("El candidato destino ya tiene su propia respuesta de test enlazada -- no se puede pisar")
+    respuesta_id = origen["respuesta_id"]
+    conn.execute("UPDATE candidatos SET respuesta_id = NULL, actualizado_en = datetime('now') WHERE id = ?", (candidato_origen_id,))
+    conn.execute("UPDATE candidatos SET respuesta_id = ?, actualizado_en = datetime('now') WHERE id = ?", (respuesta_id, candidato_destino_id))
+    conn.commit()
+    conn.close()
+    return respuesta_id
 
 
 def enlazar_respuesta_a_candidato(candidato_id, respuesta_id):
@@ -1199,7 +1260,7 @@ def crear_candidato(campos: dict, empresa="kk", origen="manual", respuesta_id=No
     # respondido un test antes de tener ficha en Reclutamiento — ver
     # buscar_respuesta_huerfana_por_contacto.
     if respuesta_id is None:
-        respuesta_id = buscar_respuesta_huerfana_por_contacto(campos.get("telefono"), campos.get("email"))
+        respuesta_id = buscar_respuesta_huerfana_por_contacto(campos.get("telefono"), campos.get("email"), empresa=empresa)
     valores = {c: campos.get(c) for c in CAMPOS if c in campos}
     conn = get_connection()
     columnas = ["empresa", "origen", "respuesta_id", "creado_por", "extra_fields", "vacante_id",
@@ -1227,12 +1288,12 @@ def revincular_candidatos_existentes():
     respuestas de test sin enlazar y puede ser una operación algo pesada."""
     conn = get_connection()
     candidatos = conn.execute(
-        "SELECT id, telefono, email FROM candidatos WHERE respuesta_id IS NULL"
+        "SELECT id, telefono, email, empresa FROM candidatos WHERE respuesta_id IS NULL"
     ).fetchall()
     conn.close()
     enlazados = 0
     for c in candidatos:
-        respuesta_id = buscar_respuesta_huerfana_por_contacto(c["telefono"], c["email"])
+        respuesta_id = buscar_respuesta_huerfana_por_contacto(c["telefono"], c["email"], empresa=c["empresa"])
         if respuesta_id:
             enlazar_respuesta_a_candidato(c["id"], respuesta_id)
             enlazados += 1

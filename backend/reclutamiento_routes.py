@@ -435,6 +435,18 @@ def revincular_candidatos_route(user: dict = Depends(require_informes_o_reclutam
     return {"ok": True, "enlazados": enlazados}
 
 
+@router.post("/candidatos/{candidato_origen_id}/transferir-respuesta/{candidato_destino_id}")
+def transferir_respuesta_route(candidato_origen_id: int, candidato_destino_id: int, _user: dict = Depends(require_admin)):
+    """Corrige un enlace automático que se equivocó de ficha (teléfono/email
+    coincidente entre dos candidatos, típicamente de marcas distintas) --
+    ver transferir_respuesta en reclutamiento.py."""
+    try:
+        respuesta_id = reclutamiento_module.transferir_respuesta(candidato_origen_id, candidato_destino_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "respuesta_id": respuesta_id}
+
+
 @router.get("/candidatos/conteo-por-estado")
 def conteo_por_estado_route(
     empresa: str | None = None,

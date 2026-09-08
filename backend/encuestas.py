@@ -1344,9 +1344,17 @@ def guardar_respuesta(identificador, respuestas_por_pregunta, ip, user_agent, to
             # test enlazado, se conecta automáticamente con esta respuesta en
             # vez de quedar como una ficha aparte hasta que alguien la
             # comparta a mano — así el resultado aparece directo en su ficha.
+            # empresa: sin esto, dos personas (o la misma persona aplicando a
+            # las dos marcas) con el mismo teléfono/email en KK y en Saona
+            # podían cruzarse -- la respuesta de un test de una marca se
+            # enlazaba a la ficha de la otra (bug real, visto en producción:
+            # Preslava Blazheva respondió el test de Saona y quedó enlazada
+            # a su ficha vieja de Krispy Kreme en vez de a la de Saona).
             campos_contacto, _ = reclutamiento_module.mapear_datos_a_candidato(fila_por_etiqueta)
+            _tipo_para_empresa = informes_module.get_tipo(tipo_informe_clave) if tipo_informe_clave else None
             candidato_id = reclutamiento_module.buscar_candidato_sin_respuesta_por_contacto(
-                campos_contacto.get("telefono"), campos_contacto.get("email")
+                campos_contacto.get("telefono"), campos_contacto.get("email"),
+                empresa=_tipo_para_empresa["empresa"] if _tipo_para_empresa else None,
             )
             if candidato_id:
                 reclutamiento_module.enlazar_respuesta_a_candidato(candidato_id, enlace["respuesta_id"])
