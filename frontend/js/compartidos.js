@@ -1604,6 +1604,27 @@ function renderForm() {
   document.getElementById("btn-cerrar-ficha-x").addEventListener("click", cerrarForm);
   document.getElementById("btn-guardar-candidato").addEventListener("click", guardarCandidato);
   if (esEdicion) {
+    // Estado del contacto: se guarda solo al cambiar el selector, igual que
+    // en las tarjetas de la cuadrícula (ver renderCandidatosGrid) -- es un
+    // campo de seguimiento rápido (Sin contactar/Contactado/...), no tiene
+    // sentido obligar a pulsar "Guardar" (que además manda el resto de la
+    // ficha entera) solo para anotar esto. Se actualiza también
+    // candidatoEditando y la caché de la cuadrícula para que no se vea
+    // "revertido" si se repinta antes de recargar (mismo bug que ya se
+    // arregló ahí).
+    const selectContacto = document.getElementById("candidato-contacto-estado-form");
+    selectContacto.addEventListener("change", async () => {
+      const valorAnterior = candidatoEditando.contacto_estado;
+      const ok = await actualizarCandidatoInline(candidatoEditando.id, { contacto_estado: selectContacto.value });
+      if (!ok) {
+        mostrarAviso("No se pudo guardar el estado de contacto. Inténtalo de nuevo.");
+        selectContacto.value = valorAnterior || "sin_contactar";
+        return;
+      }
+      candidatoEditando.contacto_estado = selectContacto.value;
+      const c = ultimosCandidatosCargados.find((x) => x.id === candidatoEditando.id);
+      if (c) c.contacto_estado = selectContacto.value;
+    });
     document.getElementById("btn-eliminar-candidato")?.addEventListener("click", eliminarCandidatoActual);
     wrap.querySelectorAll(".btn-reextraer-cv").forEach((btn) => {
       btn.addEventListener("click", () => reextraerCv(Number(btn.dataset.archivoId)));
