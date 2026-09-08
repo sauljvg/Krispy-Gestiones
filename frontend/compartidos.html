@@ -20,13 +20,19 @@
      vista combinada de InfoJobs: la lista de candidatos a la izquierda y la
      ficha abierta fija a la derecha, para poder ir clicando uno tras otro
      sin perder el sitio en la lista. .hero-banner/.reclu-candidatos-wrap/
-     #form-wrap/#compartidos-list son hijos directos de .compartidos-wrap
+     #form-wrap/.compartidos-area son hijos directos de .compartidos-wrap
      (ver el HTML más abajo), así que grid-template-areas los reordena sin
      tener que mover nada en el DOM ni tocar el hueco de #form-wrap fuera de
      reclu-candidatos-wrap (lo sigue usando quien solo tiene acceso a
      Compartidos, ver el comentario junto a #form-wrap). Vacantes queda
      dentro de la misma columna de lista en vez de tener su propia área --
-     es un compromiso a propósito para no reestructurar el HTML compartido. */
+     es un compromiso a propósito para no reestructurar el HTML compartido.
+     .compartidos-area agrupa la barra de búsqueda (#compartidos-buscar) con
+     #compartidos-list en un solo hijo directo -- antes iban sueltos, y la
+     barra de búsqueda (sin grid-area propia) caía fuera de las áreas
+     nombradas, con lo que el navegador la mandaba a una fila implícita al
+     final de todo (bug real, visto en producción: la búsqueda aparecía
+     después de toda la lista de "Compartidos conmigo" en vez de encima). */
   .compartidos-wrap.vista-combinada {
     max-width: 1400px;
     display: grid;
@@ -41,13 +47,13 @@
     position: sticky; top: 12px; align-self: start;
     max-height: calc(100vh - 24px); overflow-y: auto;
   }
-  .compartidos-wrap.vista-combinada > #compartidos-list { grid-area: compartidos; }
+  .compartidos-wrap.vista-combinada > .compartidos-area { grid-area: compartidos; }
   /* Quien no tiene el módulo completo (.reclu-candidatos-wrap se queda con
      [hidden]) no tiene nada que ocupe el área "lista" -- para esa gente
-     #compartidos-list pasa a ocupar esa columna en vez de la fila entera de
+     .compartidos-area pasa a ocupar esa columna en vez de la fila entera de
      abajo, así "Lista + CV" también les queda con la lista a la izquierda y
      la ficha fija a la derecha (ver modo-restringido en loadCompartidos). */
-  .compartidos-wrap.vista-combinada.modo-restringido > #compartidos-list { grid-area: lista; }
+  .compartidos-wrap.vista-combinada.modo-restringido > .compartidos-area { grid-area: lista; }
   /* Por debajo de este ancho, la columna "lista" (mínimo 300px) no deja
      hueco real para la de "ficha" (1fr se queda en 0px) -- el panel de la
      ficha quedaba invisible del todo en vez de solo apretado. En pantallas
@@ -460,10 +466,12 @@
          ellos. -->
     <div id="form-wrap"></div>
 
-    <div class="candidatos-toolbar" style="margin-bottom:4px;">
-      <input type="text" id="compartidos-buscar" placeholder="Buscar por nombre, teléfono, email o puesto...">
+    <div class="compartidos-area">
+      <div class="candidatos-toolbar" style="margin-bottom:4px;">
+        <input type="text" id="compartidos-buscar" placeholder="Buscar por nombre, teléfono, email o puesto...">
+      </div>
+      <div id="compartidos-list"></div>
     </div>
-    <div id="compartidos-list"></div>
   </div>
 </div>
 
