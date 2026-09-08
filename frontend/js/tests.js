@@ -206,6 +206,19 @@ function renderCitaCondicion() {
   });
 }
 
+function reservaFilaHTML(r) {
+  const vacanteTxt = r.vacante_puesto
+    ? `${r.vacante_puesto}${r.vacante_centro ? ` · ${r.vacante_centro}` : ""}`
+    : "Sin vacante asignada";
+  return `
+    <div class="cita-reserva-fila">
+      <span class="cita-reserva-nombre">${escapeHTML(r.nombre || "(sin nombre)")}</span>
+      <span class="cita-reserva-dato">${escapeHTML(r.telefono || "—")}</span>
+      <span class="cita-reserva-dato">${escapeHTML(r.email || "—")}</span>
+      <span class="cita-reserva-dato">${escapeHTML(vacanteTxt)}</span>
+    </div>`;
+}
+
 function franjaFilaHTML(f) {
   const [y, m, d] = f.fecha.split("-").map(Number);
   const fechaTxt = new Date(y, m - 1, d).toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" });
@@ -215,6 +228,21 @@ function franjaFilaHTML(f) {
   const direccionHTML = f.direccion
     ? `<span class="cita-franja-direccion-txt">📍 ${escapeHTML(f.direccion)}${f.mapa_url ? ` · <a href="${escapeHTML(f.mapa_url)}" target="_blank" rel="noopener">ver mapa</a>` : ""}</span>`
     : "";
+  // "Ver reservas": pedido explícito del usuario -- nombre, teléfono, email
+  // y vacante de cada persona que reservó esta franja, sin tener que ir
+  // candidato a candidato. Colapsado por defecto (<details>) para no
+  // alargar la lista de franjas cuando hay muchas reservas -- igual que el
+  // resto de listas plegables de esta pantalla.
+  const reservasHTML = f.reservas.length > 0
+    ? `
+      <details class="cita-franja-reservas">
+        <summary class="btn-mini">Ver reservas (${f.reservas.length})</summary>
+        <div class="cita-reserva-cabecera">
+          <span>Nombre</span><span>Teléfono</span><span>Email</span><span>Vacante</span>
+        </div>
+        ${f.reservas.map(reservaFilaHTML).join("")}
+      </details>`
+    : "";
   return `
     <div class="cita-franja-fila" data-id="${f.id}">
       <div class="cita-franja-fila-linea1">
@@ -223,6 +251,7 @@ function franjaFilaHTML(f) {
         <button type="button" class="btn-mini btn-borrar-franja" data-id="${f.id}" ${f.reservas.length > 0 ? "disabled title=\"Ya tiene reservas, no se puede borrar\"" : ""}>Borrar</button>
       </div>
       ${direccionHTML}
+      ${reservasHTML}
     </div>`;
 }
 

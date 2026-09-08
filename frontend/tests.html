@@ -64,6 +64,16 @@
   .cita-franja-fila .cita-franja-cupo-txt { color: var(--text-secondary); flex: 1; }
   .cita-franja-fila .cita-franja-direccion-txt { font-size: 12px; color: var(--text-secondary); }
   .cita-franja-fila .cita-franja-direccion-txt a { color: var(--acento); }
+  .cita-franja-reservas { margin-top: 4px; }
+  .cita-franja-reservas > summary { cursor: pointer; font-size: 12px; user-select: none; }
+  .cita-reserva-cabecera, .cita-reserva-fila {
+    display: grid; grid-template-columns: 1.2fr 1fr 1.4fr 1.4fr; gap: 8px;
+    padding: 4px 8px; font-size: 12px;
+  }
+  .cita-reserva-cabecera { color: var(--text-secondary); font-weight: 600; padding-top: 8px; }
+  .cita-reserva-fila { background: var(--surface-page); border-radius: 4px; }
+  .cita-reserva-nombre { font-weight: 600; }
+  .cita-reserva-dato { color: var(--text-secondary); overflow-wrap: anywhere; }
   #cita-franjas-bloque > summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); padding: 6px 0; user-select: none; }
   #cita-franjas-bloque > summary:hover { color: var(--text-primary); }
   .cita-franja-nueva-fila, .cita-franja-nueva-direccion-fila { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
@@ -318,6 +328,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/tests.js?v=20260907g"></script>
+<script src="js/tests.js?v=20260908a"></script>
 </body>
 </html>

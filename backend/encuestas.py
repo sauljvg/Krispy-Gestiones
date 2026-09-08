@@ -719,17 +719,31 @@ def set_estado(encuesta_id, abierta):
 def list_franjas(encuesta_id):
     """Para el admin: cada franja con su cupo restante y quién la ha
     reservado (para poder llamar/confirmar sin tener que cruzar datos a
-    mano)."""
+    mano). Cada reserva incluye también la vacante a la que aplicó esa
+    persona (pedido explícito del usuario, para poder ver de un vistazo a
+    quién ha citado sin entrar candidato a candidato) -- se resuelve
+    siguiendo la misma cadena que ya usa list_candidatos para "cita_fecha":
+    entrevista_reservas -> encuesta_respuestas (respuesta_id) ->
+    informe_respuesta_id -> candidatos.respuesta_id -> vacante_id. Puede
+    salir NULL si el candidato respondió el test antes de tener ficha en
+    Reclutamiento, o si la respuesta nunca llegó a enlazarse -- se trata como
+    "sin vacante" en vez de romper el listado."""
     conn = get_connection()
     franjas = conn.execute(
         "SELECT * FROM entrevista_franjas WHERE encuesta_id = ? ORDER BY fecha, hora", (encuesta_id,)
     ).fetchall()
     resultado = []
     for f in franjas:
-        reservas = conn.execute(
-            "SELECT nombre, telefono, email, creado_en FROM entrevista_reservas WHERE franja_id = ? ORDER BY creado_en",
-            (f["id"],),
-        ).fetchall()
+        reservas = conn.execute("""
+            SELECT er.nombre, er.telefono, er.email, er.creado_en,
+                   v.puesto AS vacante_puesto, v.centro AS vacante_centro
+            FROM entrevista_reservas er
+            JOIN encuesta_respuestas eresp ON eresp.id = er.respuesta_id
+            LEFT JOIN candidatos c ON c.respuesta_id = eresp.informe_respuesta_id
+            LEFT JOIN vacantes v ON v.id = c.vacante_id
+            WHERE er.franja_id = ?
+            ORDER BY er.creado_en
+        """, (f["id"],)).fetchall()
         d = dict(f)
         d["reservas"] = [dict(r) for r in reservas]
         d["cupo_restante"] = max(0, f["cupo"] - len(reservas))
