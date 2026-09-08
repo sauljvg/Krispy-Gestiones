@@ -2928,11 +2928,23 @@ function renderCandidatosGrid() {
   grid.querySelectorAll(".candidato-mini-contacto-select").forEach((select) => {
     select.addEventListener("click", (e) => e.stopPropagation());
     select.addEventListener("change", async () => {
+      const id = Number(select.dataset.candidatoId);
       const ok = await actualizarCandidatoInline(select.dataset.candidatoId, { contacto_estado: select.value });
       if (!ok) {
         mostrarAviso("No se pudo guardar el estado de contacto. Inténtalo de nuevo.");
         await loadCandidatos();
+        return;
       }
+      // Éxito: se guardó bien en el servidor, pero si no se actualiza
+      // también aquí en la caché en memoria (ultimosCandidatosCargados),
+      // el próximo renderCandidatosGrid() -- que salta con solo marcar un
+      // checkbox, cambiar de página, etc., no hace falta recargar -- vuelve
+      // a pintar este candidato con el contacto_estado VIEJO que sigue
+      // trayendo la caché, y el cambio parece haberse deshecho aunque en la
+      // base de datos esté bien guardado (bug real, visto en producción:
+      // "cambio el estado, paso a otro candidato, y vuelve al de antes").
+      const c = ultimosCandidatosCargados.find((x) => x.id === id);
+      if (c) c.contacto_estado = select.value;
     });
   });
 }
