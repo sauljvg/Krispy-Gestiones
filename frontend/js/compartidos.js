@@ -318,6 +318,13 @@ function citaEntrevistaHTML(c) {
 // dentro de item.datos (respuesta del test) en vez de nombre_completo --
 // de ahí el fallback a nombreCandidato.
 let compartidosBusqueda = "";
+// #compartidos-buscar ahora se repinta con el resto de #compartidos-list
+// (ver candidatosCompartidosConmigoSeccionHTML) en vez de vivir suelto y
+// fijo en el HTML -- el timeout del debounce necesita sobrevivir a esos
+// repintados (uno nuevo por cada tecla), así que va aquí arriba, a nivel de
+// módulo, en vez de una variable local de un único listener que se
+// engancha una sola vez.
+let buscarCompartidosTimeout;
 
 function candidatoCompartidoCoincideBusqueda(c, termino) {
   if (!termino) return true;
@@ -453,6 +460,23 @@ function wireSeleccionCompartidos(wrap, { listaId, seleccionSet, cache, btnTodos
 }
 
 function wireCompartidosInteractivos(wrap) {
+  // #compartidos-buscar se recrea en cada repintado (ver
+  // candidatosCompartidosConmigoSeccionHTML) -- hay que reenganchar el
+  // listener cada vez, igual que con el resto de elementos de esta función.
+  const inputBuscar = document.getElementById("compartidos-buscar");
+  if (inputBuscar) {
+    inputBuscar.addEventListener("input", (e) => {
+      clearTimeout(buscarCompartidosTimeout);
+      // Repinta en cliente (renderizarCompartidos, sin fetch) contra lo que ya
+      // se cargó -- antes cada tecleo volvía a pedir las 3 listas completas al
+      // servidor (hallazgo de QA), notorio con Area Manager/Director viendo
+      // cientos de candidatos de golpe.
+      buscarCompartidosTimeout = setTimeout(() => {
+        compartidosBusqueda = e.target.value.trim();
+        renderizarCompartidos();
+      }, 300);
+    });
+  }
   wrap.querySelectorAll(".candidato-abrir-ficha").forEach((el) => {
     el.addEventListener("click", () => abrirEdicionCandidato(el.dataset.candidatoId));
   });
@@ -606,7 +630,19 @@ function candidatosCompartidosConmigoToolbarHTML(n, hayCandidatos = true) {
 // candidatos -- con las dos secciones fundidas en una ya no hacía falta
 // esconderlas para no abrumar.
 function candidatosCompartidosConmigoSeccionHTML(candidatos, ocultosPorEstado, totalCompartidos, hayBusqueda) {
-  let html = `<h2 class="reclu-seccion">Compartidos conmigo</h2>${candidatosCompartidosConmigoToolbarHTML(compartidosConmigoSeleccionadosIds.size, candidatos.length > 0)}`;
+  // Pedido explícito del usuario: la búsqueda va debajo de "Compartidos
+  // conmigo" y su barra de herramientas, no encima de todo ni (el bug de
+  // antes) debajo de la lista entera. Se pinta aquí, dentro de
+  // #compartidos-list, en vez de suelta en el HTML estático -- así hereda
+  // su grid-area en la vista "Lista + CV" sin más lío (ver comentario junto
+  // a #compartidos-list en compartidos.html). El valor se restaura desde
+  // compartidosBusqueda (no se pierde al repintar) y el listener se
+  // vuelve a enganchar en wireCompartidosInteractivos.
+  const buscarHTML = `
+    <div class="candidatos-toolbar" style="margin-bottom:12px;">
+      <input type="text" id="compartidos-buscar" placeholder="Buscar por nombre, teléfono, email o puesto..." value="${escapeHTML(compartidosBusqueda)}">
+    </div>`;
+  let html = `<h2 class="reclu-seccion">Compartidos conmigo</h2>${candidatosCompartidosConmigoToolbarHTML(compartidosConmigoSeleccionadosIds.size, candidatos.length > 0)}${buscarHTML}`;
   if (candidatos.length === 0) {
     // Tres motivos MUY distintos para que esto salga vacío -- antes se
     // mostraba siempre el mismo mensaje ("Todavía no te han compartido
@@ -776,11 +812,24 @@ function renderizarCompartidos() {
     html += candidatosCompartidosPorTiSeccionHTML(porMiVisibles, gerentesPorVacante);
   }
 
+  // #compartidos-buscar se recrea de cero abajo (wrap.innerHTML = html) --
+  // sin esto, cada repintado disparado por el propio tecleo (300ms después
+  // de la última tecla, ver wireCompartidosInteractivos) le quitaría el
+  // foco al input a media escritura, obligando a hacer clic otra vez para
+  // seguir buscando.
+  const buscarTeniaFoco = document.activeElement?.id === "compartidos-buscar";
   aparcarFormWrapEnSitio();
   wrap.innerHTML = html;
   wireCompartidosInteractivos(wrap);
   wireVistaToggle(wrap, aplicarVistaGlobal);
   aplicarVistaGlobal();
+  if (buscarTeniaFoco) {
+    const nuevoInput = document.getElementById("compartidos-buscar");
+    if (nuevoInput) {
+      nuevoInput.focus();
+      nuevoInput.setSelectionRange(nuevoInput.value.length, nuevoInput.value.length);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -3361,17 +3410,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   // tandas de "Compartidos por ti" -- si fueran en paralelo, la primera
   // pintada podría no tener todavía los nombres.
   await initBaseCandidatos(user);
-  let buscarCompartidosTimeout;
-  document.getElementById("compartidos-buscar").addEventListener("input", (e) => {
-    clearTimeout(buscarCompartidosTimeout);
-    // Repinta en cliente (renderizarCompartidos, sin fetch) contra lo que ya
-    // se cargó -- antes cada tecleo volvía a pedir las 3 listas completas al
-    // servidor (hallazgo de QA), notorio con Area Manager/Director viendo
-    // cientos de candidatos de golpe.
-    buscarCompartidosTimeout = setTimeout(() => {
-      compartidosBusqueda = e.target.value.trim();
-      renderizarCompartidos();
-    }, 300);
-  });
+  // El listener de #compartidos-buscar ya no se engancha aquí -- ese input
+  // ahora se pinta (y repinta) dentro de #compartidos-list, así que se
+  // engancha en wireCompartidosInteractivos, que corre después de cada
+  // renderizarCompartidos() (incluida la primera, dentro de loadCompartidos).
   await loadCompartidos();
 });

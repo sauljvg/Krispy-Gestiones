@@ -20,19 +20,19 @@
      vista combinada de InfoJobs: la lista de candidatos a la izquierda y la
      ficha abierta fija a la derecha, para poder ir clicando uno tras otro
      sin perder el sitio en la lista. .hero-banner/.reclu-candidatos-wrap/
-     #form-wrap/.compartidos-area son hijos directos de .compartidos-wrap
+     #form-wrap/#compartidos-list son hijos directos de .compartidos-wrap
      (ver el HTML más abajo), así que grid-template-areas los reordena sin
      tener que mover nada en el DOM ni tocar el hueco de #form-wrap fuera de
      reclu-candidatos-wrap (lo sigue usando quien solo tiene acceso a
      Compartidos, ver el comentario junto a #form-wrap). Vacantes queda
      dentro de la misma columna de lista en vez de tener su propia área --
      es un compromiso a propósito para no reestructurar el HTML compartido.
-     .compartidos-area agrupa la barra de búsqueda (#compartidos-buscar) con
-     #compartidos-list en un solo hijo directo -- antes iban sueltos, y la
-     barra de búsqueda (sin grid-area propia) caía fuera de las áreas
-     nombradas, con lo que el navegador la mandaba a una fila implícita al
-     final de todo (bug real, visto en producción: la búsqueda aparecía
-     después de toda la lista de "Compartidos conmigo" en vez de encima). */
+     La barra de búsqueda (#compartidos-buscar) ya no vive suelta como hijo
+     directo de .compartidos-wrap -- se pinta DENTRO de #compartidos-list
+     (ver candidatosCompartidosConmigoSeccionHTML en compartidos.js), así
+     hereda su grid-area sin necesitar una propia y queda ordenada donde el
+     usuario la espera (debajo de "Compartidos conmigo" y sus botones) en
+     vez de en una fila implícita al final de todo. */
   .compartidos-wrap.vista-combinada {
     max-width: 1400px;
     display: grid;
@@ -47,13 +47,13 @@
     position: sticky; top: 12px; align-self: start;
     max-height: calc(100vh - 24px); overflow-y: auto;
   }
-  .compartidos-wrap.vista-combinada > .compartidos-area { grid-area: compartidos; }
+  .compartidos-wrap.vista-combinada > #compartidos-list { grid-area: compartidos; }
   /* Quien no tiene el módulo completo (.reclu-candidatos-wrap se queda con
      [hidden]) no tiene nada que ocupe el área "lista" -- para esa gente
-     .compartidos-area pasa a ocupar esa columna en vez de la fila entera de
+     #compartidos-list pasa a ocupar esa columna en vez de la fila entera de
      abajo, así "Lista + CV" también les queda con la lista a la izquierda y
      la ficha fija a la derecha (ver modo-restringido en loadCompartidos). */
-  .compartidos-wrap.vista-combinada.modo-restringido > .compartidos-area { grid-area: lista; }
+  .compartidos-wrap.vista-combinada.modo-restringido > #compartidos-list { grid-area: lista; }
   /* Por debajo de este ancho, la columna "lista" (mínimo 300px) no deja
      hueco real para la de "ficha" (1fr se queda en 0px) -- el panel de la
      ficha quedaba invisible del todo en vez de solo apretado. En pantallas
@@ -466,12 +466,16 @@
          ellos. -->
     <div id="form-wrap"></div>
 
-    <div class="compartidos-area">
-      <div class="candidatos-toolbar" style="margin-bottom:4px;">
-        <input type="text" id="compartidos-buscar" placeholder="Buscar por nombre, teléfono, email o puesto...">
-      </div>
-      <div id="compartidos-list"></div>
-    </div>
+    <!-- La barra de búsqueda (#compartidos-buscar) ya no va suelta aquí --
+         se pinta dentro de #compartidos-list, justo debajo de "Compartidos
+         conmigo" y su barra de herramientas (ver
+         candidatosCompartidosConmigoSeccionHTML en compartidos.js). Puesta
+         aquí fuera, sin grid-area propia en la vista "Lista + CV", el
+         navegador la mandaba a una fila implícita al final de todo (bug
+         real, visto en producción). Pedido explícito del usuario: quiere la
+         búsqueda justo debajo de los botones de Compartidos conmigo, no
+         encima de "Compartidos conmigo" ni al final de la lista. -->
+    <div id="compartidos-list"></div>
   </div>
 </div>
 
@@ -549,6 +553,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/compartidos.js?v=20260907d"></script>
+<script src="js/compartidos.js?v=20260907e"></script>
 </body>
 </html>
