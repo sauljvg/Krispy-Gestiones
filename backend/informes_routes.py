@@ -173,6 +173,23 @@ def recalcular_resultados_pendientes_route(user: dict = Depends(require_informes
     return informes_module.recalcular_resultados_pendientes()
 
 
+class RenombrarColumnaIn(BaseModel):
+    clave_vieja: str
+    clave_nueva: str
+
+
+@router.post("/{tipo_clave}/renombrar-columna")
+def renombrar_columna_route(tipo_clave: str, body: RenombrarColumnaIn, user: dict = Depends(require_informes)):
+    """Puntual: cuando se edita el texto de una pregunta del módulo de Test,
+    las respuestas de antes y después quedan en dos columnas distintas de
+    Informes con el mismo dato -- ver renombrar_columna en informes.py."""
+    try:
+        actualizadas = informes_module.renombrar_columna(tipo_clave, body.clave_vieja, body.clave_nueva)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"ok": True, "actualizadas": actualizadas}
+
+
 @router.get("/usuarios-para-compartir")
 def usuarios_para_compartir_route(_user: dict = Depends(get_current_user)):
     # Cualquiera logueado puede pedir esta lista (nombre/usuario/rol, nada

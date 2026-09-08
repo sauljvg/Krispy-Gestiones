@@ -712,6 +712,51 @@ def recalcular_columna_dashboard(tipo_clave, etiqueta, mostrar):
     return actualizadas
 
 
+def renombrar_columna(tipo_clave, clave_vieja, clave_nueva):
+    """Cuando se edita el texto (etiqueta) de una pregunta del módulo de
+    Test, guardar_respuesta (encuestas.py) usa ese texto tal cual como clave
+    en el JSON de cada respuesta nueva -- las respuestas YA guardadas antes
+    de la edición se quedan con la clave vieja, así que la misma pregunta
+    lógica termina partida en dos columnas distintas en Informes (una con el
+    texto antiguo, otra con el nuevo), aunque sea exactamente el mismo dato.
+    Caso real que motivó esto: se corrigió el enunciado de una pregunta de
+    "aceptas la oferta" para cubrir dos vacantes en vez de una, y las
+    respuestas de antes y después quedaron en columnas separadas en la tabla
+    de Informes.
+
+    Renombra `clave_vieja` -> `clave_nueva` en TODAS las filas de este tipo
+    (cualquier hoja -- Respuestas, Scoring, Dashboard: la pregunta puede
+    aparecer en más de una si tiene "Mostrar en el dashboard" activado, ver
+    columnas_extra en guardar_respuesta). Si una fila ya tuviera la clave
+    nueva por algún motivo, se conserva ese valor tal cual y se descarta el
+    de la clave vieja, en vez de pisarlo -- no debería pasar en la práctica
+    (una sola respuesta no puede traer las dos claves), pero es la opción
+    más segura si pasara."""
+    tipo = get_tipo(tipo_clave)
+    if tipo is None:
+        raise ValueError(f"Tipo de informe desconocido: {tipo_clave}")
+    conn = get_connection()
+    filas = conn.execute(
+        "SELECT id, datos_json FROM informe_respuestas WHERE tipo_id = ?", (tipo["id"],)
+    ).fetchall()
+    actualizadas = 0
+    for r in filas:
+        datos = json.loads(r["datos_json"])
+        if clave_vieja not in datos:
+            continue
+        valor = datos.pop(clave_vieja)
+        if clave_nueva not in datos:
+            datos[clave_nueva] = valor
+        conn.execute(
+            "UPDATE informe_respuestas SET datos_json = ? WHERE id = ?",
+            (json.dumps(datos, ensure_ascii=False), r["id"]),
+        )
+        actualizadas += 1
+    conn.commit()
+    conn.close()
+    return actualizadas
+
+
 def recalcular_resultados_pendientes():
     """Backfill: respuestas de tests "de valores" (ver es_de_valores en
     ingest_fila_directa) que quedaron sin RESULTADO porque llegaron ANTES de
