@@ -24,6 +24,24 @@ HORAS_JORNADA_COMPLETA = 40
 APERTURA_DEFECTO_MIN = 8 * 60      # 08:00
 CIERRE_DEFECTO_MIN = 25 * 60       # 01:00 del día siguiente (25:00)
 
+SIN_ASIGNAR = 0  # trabajador_id de un turno/slot todavía sin persona
+
+# Slots de horario "de siempre" -- se precargan la primera vez (empresa kk) a
+# partir de los patrones que más se repiten en la planificación real de Odoo.
+# (nombre, inicio_min, duracion_min)
+_SLOTS_SEED = [
+    ("Apertura 8h", 8 * 60, 480),
+    ("Media mañana 8h", 10 * 60, 480),
+    ("Cierre 8h", 15 * 60 + 10, 480),
+    ("Tarde 6h", 17 * 60 + 10, 360),
+    ("Tarde 5h", 17 * 60 + 30, 300),
+    ("Mañana corta 3h", 10 * 60 + 30, 180),
+    ("Mañana 5h", 10 * 60 + 30, 300),
+    ("Media mañana 4h", 10 * 60, 240),
+    ("Refuerzo tarde 4h", 18 * 60, 240),
+    ("Refuerzo tarde 3h", 18 * 60, 180),
+]
+
 
 def ensure_planificador_tables():
     conn = get_connection()
@@ -78,6 +96,24 @@ def ensure_planificador_tables():
             PRIMARY KEY (empresa, centro)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS planificador_slots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            empresa TEXT NOT NULL DEFAULT 'kk',
+            nombre TEXT NOT NULL,
+            inicio_min INTEGER NOT NULL,
+            duracion_min INTEGER NOT NULL,
+            orden INTEGER NOT NULL DEFAULT 0,
+            creado_en TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    if conn.execute("SELECT COUNT(*) FROM planificador_slots WHERE empresa = 'kk'").fetchone()[0] == 0:
+        for i, (nombre, ini, dur) in enumerate(_SLOTS_SEED):
+            conn.execute(
+                "INSERT INTO planificador_slots (empresa, nombre, inicio_min, duracion_min, orden) "
+                "VALUES ('kk', ?, ?, ?, ?)",
+                (nombre, ini, dur, i),
+            )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_turnos_busqueda ON planificador_turnos (empresa, centro, fecha)")
     cols_turnos = {r[1] for r in conn.execute("PRAGMA table_info(planificador_turnos)")}
     if "tipo" not in cols_turnos:
@@ -400,7 +436,10 @@ def get_turno(turno_id):
 
 def _solapa(conn, trabajador_id, fecha, ini, fin, excluir_id=None):
     """¿Hay ya un turno de trabajo de esta persona ese día que se PISE con
-    [ini, fin)? Tocarse (fin == ini del otro) NO cuenta como solape."""
+    [ini, fin)? Tocarse (fin == ini del otro) NO cuenta como solape. Los
+    turnos sin asignar pueden solaparse entre sí libremente."""
+    if trabajador_id == SIN_ASIGNAR:
+        return False
     q = (
         "SELECT id FROM planificador_turnos WHERE trabajador_id = ? AND fecha = ? AND tipo = 'trabajo' "
         "AND inicio_min < ? AND (inicio_min + duracion_min) > ?"
@@ -496,6 +535,139 @@ def eliminar_turno(turno_id):
     conn.close()
 
 
+def asignar_turno(turno_id, trabajador_id):
+    """Pone (o quita, si trabajador_id = 0) una persona a un turno. Comprueba
+    que esa persona es de este centro, que no tiene ya un turno a esa hora y
+    que no tiene el día libre."""
+    trabajador_id = int(trabajador_id or 0)
+    conn = get_connection()
+    t = conn.execute("SELECT * FROM planificador_turnos WHERE id = ?", (turno_id,)).fetchone()
+    if t is None:
+        conn.close()
+        raise ValueError("Turno no encontrado")
+    t = dict(t)
+    if trabajador_id != SIN_ASIGNAR:
+        w = conn.execute("SELECT id, centro, empresa FROM planificador_trabajadores WHERE id = ?", (trabajador_id,)).fetchone()
+        if w is None or w["centro"] != t["centro"] or w["empresa"] != t["empresa"]:
+            conn.close()
+            raise ValueError("Esa persona no es de este centro")
+        fin = t["inicio_min"] + t["duracion_min"]
+        solapa = conn.execute(
+            "SELECT id FROM planificador_turnos WHERE trabajador_id = ? AND fecha = ? AND tipo = 'trabajo' "
+            "AND id != ? AND inicio_min < ? AND (inicio_min + duracion_min) > ?",
+            (trabajador_id, t["fecha"], turno_id, fin, t["inicio_min"]),
+        ).fetchone()
+        if solapa:
+            conn.close()
+            raise ValueError("Esa persona ya tiene un turno a esa hora")
+        libre = conn.execute(
+            "SELECT id FROM planificador_turnos WHERE trabajador_id = ? AND fecha = ? AND tipo = 'libre'",
+            (trabajador_id, t["fecha"]),
+        ).fetchone()
+        if libre:
+            conn.close()
+            raise ValueError("Esa persona tiene el día libre")
+    conn.execute(
+        "UPDATE planificador_turnos SET trabajador_id = ?, actualizado_en = datetime('now') WHERE id = ?",
+        (trabajador_id, turno_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+# --- Biblioteca de slots (horarios predefinidos) ---
+
+def list_slots(empresa):
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM planificador_slots WHERE empresa = ? ORDER BY orden, inicio_min", (empresa,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def crear_slot(empresa, nombre, inicio_min, duracion_min):
+    nombre = (nombre or "").strip()
+    if not nombre:
+        raise ValueError("Falta el nombre del slot")
+    conn = get_connection()
+    mx = conn.execute("SELECT COALESCE(MAX(orden), 0) FROM planificador_slots WHERE empresa = ?", (empresa,)).fetchone()[0]
+    cur = conn.execute(
+        "INSERT INTO planificador_slots (empresa, nombre, inicio_min, duracion_min, orden) VALUES (?, ?, ?, ?, ?)",
+        (empresa, nombre, int(inicio_min), int(duracion_min), mx + 1),
+    )
+    conn.commit()
+    sid = cur.lastrowid
+    conn.close()
+    return sid
+
+
+def actualizar_slot(slot_id, nombre=None, inicio_min=None, duracion_min=None):
+    sets, params = [], []
+    if nombre is not None:
+        sets.append("nombre = ?")
+        params.append(nombre.strip())
+    if inicio_min is not None:
+        sets.append("inicio_min = ?")
+        params.append(int(inicio_min))
+    if duracion_min is not None:
+        sets.append("duracion_min = ?")
+        params.append(int(duracion_min))
+    if not sets:
+        return
+    params.append(slot_id)
+    conn = get_connection()
+    conn.execute(f"UPDATE planificador_slots SET {', '.join(sets)} WHERE id = ?", params)
+    conn.commit()
+    conn.close()
+
+
+def eliminar_slot(slot_id):
+    conn = get_connection()
+    conn.execute("DELETE FROM planificador_slots WHERE id = ?", (slot_id,))
+    conn.commit()
+    conn.close()
+
+
+# --- Sugerencias de a quién poner en un slot ---
+
+def sugerencias(empresa, centro, fecha, inicio_min, duracion_min):
+    """Para un hueco [inicio, inicio+duracion) de un día concreto, devuelve la
+    plantilla del centro ordenada: primero quien está DISPONIBLE (sin turno
+    solapado ni día libre ese día), de menos a más horas ya planificadas en
+    la semana; después el resto (en gris) con el motivo."""
+    fin = int(inicio_min) + int(duracion_min)
+    trabajadores = list_trabajadores(empresa, centro)
+    turnos_sem = turnos_semana(empresa, centro, fecha)
+    min_sem = _minutos_semana(turnos_sem)
+    del_dia = [t for t in turnos_sem if t["fecha"] == fecha]
+    out = []
+    for w in trabajadores:
+        wid = w["id"]
+        ocupado = any(
+            t["trabajador_id"] == wid and t["tipo"] == "trabajo"
+            and t["inicio_min"] < fin and t["inicio_min"] + t["duracion_min"] > int(inicio_min)
+            for t in del_dia
+        )
+        libre = any(t["trabajador_id"] == wid and t["tipo"] == "libre" for t in del_dia)
+        ms = min_sem.get(wid, 0)
+        contrato = w["horas_contrato_semana"]
+        aviso = ""
+        if contrato and (ms + int(duracion_min)) / 60 > contrato:
+            aviso = "se pasaría de contrato"
+        out.append({
+            "trabajador_id": wid,
+            "nombre": w["nombre"],
+            "minutos_semana": ms,
+            "horas_contrato": contrato,
+            "disponible": not ocupado and not libre,
+            "motivo": "ya trabaja ese día" if ocupado else ("día libre" if libre else ""),
+            "aviso": aviso,
+        })
+    out.sort(key=lambda x: (not x["disponible"], x["minutos_semana"], x["nombre"].lower()))
+    return out
+
+
 # --- Proyección ---
 
 _CAMPOS_PROYECCION = ("transacciones_prevista", "venta_prevista", "personal_ideal_manual")
@@ -529,11 +701,11 @@ def set_proyeccion_celda(empresa, centro, fecha, franja_min, campo, valor):
 # --- Vista de un día (todo junto) ---
 
 def _minutos_semana(turnos_sem):
-    """Suma de minutos de trabajo por trabajador -- los bloques 'libre' (días
-    libres) NO cuentan como horas trabajadas."""
+    """Suma de minutos de trabajo por trabajador -- los días libres y los
+    turnos sin asignar (SIN_ASIGNAR) NO cuentan como horas trabajadas."""
     out = {}
     for t in turnos_sem:
-        if t.get("tipo") == "libre":
+        if t.get("tipo") == "libre" or t["trabajador_id"] == SIN_ASIGNAR:
             continue
         out[t["trabajador_id"]] = out.get(t["trabajador_id"], 0) + t["duracion_min"]
     return out
@@ -544,7 +716,7 @@ def _dias_trabajados_semana(turnos_sem):
     turno de trabajo -- para avisar si le quedan menos de 2 días de descanso."""
     dias = {}
     for t in turnos_sem:
-        if t.get("tipo") == "libre":
+        if t.get("tipo") == "libre" or t["trabajador_id"] == SIN_ASIGNAR:
             continue
         dias.setdefault(t["trabajador_id"], set()).add(t["fecha"])
     return {str(k): len(v) for k, v in dias.items()}
@@ -559,6 +731,7 @@ def dia_completo(empresa, centro, fecha):
         "minutos_semana": {str(k): v for k, v in _minutos_semana(turnos_sem).items()},
         "dias_trabajados": _dias_trabajados_semana(turnos_sem),
         "proyeccion": {str(k): v for k, v in get_proyeccion(empresa, centro, fecha).items()},
+        "slots": list_slots(empresa),
         "lunes": _lunes_de(fecha),
     }
 
@@ -573,6 +746,7 @@ def semana_completa(empresa, centro, fecha):
         "turnos": turnos_sem,
         "minutos_semana": {str(k): v for k, v in _minutos_semana(turnos_sem).items()},
         "dias_trabajados": _dias_trabajados_semana(turnos_sem),
+        "slots": list_slots(empresa),
         "lunes": lunes,
         "dias": dias,
     }

@@ -155,9 +155,11 @@ def crear_turno_route(body: TurnoIn, empresa: str = "kk", user: dict = Depends(r
         raise HTTPException(status_code=400, detail="Tipo de turno inválido")
     if body.tipo == "trabajo" and body.duracion_min < 10:
         raise HTTPException(status_code=400, detail="Un turno dura como mínimo 10 minutos")
-    t = planificador_module.get_trabajador(body.trabajador_id)
-    if t is None or t["centro"] != body.centro or t["empresa"] != empresa:
-        raise HTTPException(status_code=400, detail="Ese trabajador no es de este centro")
+    # trabajador_id 0 = slot sin asignar (no hay que validar persona).
+    if body.trabajador_id != planificador_module.SIN_ASIGNAR:
+        t = planificador_module.get_trabajador(body.trabajador_id)
+        if t is None or t["centro"] != body.centro or t["empresa"] != empresa:
+            raise HTTPException(status_code=400, detail="Ese trabajador no es de este centro")
     try:
         tid = planificador_module.crear_turno(
             empresa, body.centro, body.trabajador_id, body.fecha,
@@ -212,6 +214,80 @@ def eliminar_turno_route(turno_id: int, empresa: str = "kk", user: dict = Depend
         raise HTTPException(status_code=404, detail="Turno no encontrado")
     _exigir_centro(user, t["centro"])
     planificador_module.eliminar_turno(turno_id)
+    return {"ok": True}
+
+
+class AsignarIn(BaseModel):
+    trabajador_id: int = 0  # 0 = quitar la persona (dejar sin asignar)
+
+
+@router.patch("/turnos/{turno_id}/asignar")
+def asignar_turno_route(
+    turno_id: int, body: AsignarIn, empresa: str = "kk", user: dict = Depends(require_planificador)
+):
+    t = planificador_module.get_turno(turno_id)
+    if t is None:
+        raise HTTPException(status_code=404, detail="Turno no encontrado")
+    _exigir_centro(user, t["centro"])
+    try:
+        planificador_module.asignar_turno(turno_id, body.trabajador_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
+@router.get("/sugerencias")
+def sugerencias_route(
+    empresa: str = "kk", centro: str = "", fecha: str = "", inicio_min: int = 0, duracion_min: int = 0,
+    user: dict = Depends(require_planificador),
+):
+    if not centro or not fecha or duracion_min <= 0:
+        raise HTTPException(status_code=400, detail="Faltan datos")
+    _exigir_centro(user, centro)
+    return {"sugerencias": planificador_module.sugerencias(empresa, centro, fecha, inicio_min, duracion_min)}
+
+
+# --- Biblioteca de slots (horarios predefinidos) ---
+
+@router.get("/slots")
+def slots_route(empresa: str = "kk", user: dict = Depends(require_planificador)):
+    return {"slots": planificador_module.list_slots(empresa)}
+
+
+class SlotIn(BaseModel):
+    nombre: str
+    inicio_min: int
+    duracion_min: int
+
+
+@router.post("/slots")
+def crear_slot_route(body: SlotIn, empresa: str = "kk", user: dict = Depends(require_planificador)):
+    try:
+        sid = planificador_module.crear_slot(empresa, body.nombre, body.inicio_min, body.duracion_min)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "id": sid}
+
+
+class SlotUpdateIn(BaseModel):
+    nombre: str | None = None
+    inicio_min: int | None = None
+    duracion_min: int | None = None
+
+
+@router.patch("/slots/{slot_id}")
+def actualizar_slot_route(
+    slot_id: int, body: SlotUpdateIn, empresa: str = "kk", user: dict = Depends(require_planificador)
+):
+    planificador_module.actualizar_slot(
+        slot_id, nombre=body.nombre, inicio_min=body.inicio_min, duracion_min=body.duracion_min
+    )
+    return {"ok": True}
+
+
+@router.delete("/slots/{slot_id}")
+def eliminar_slot_route(slot_id: int, empresa: str = "kk", user: dict = Depends(require_planificador)):
+    planificador_module.eliminar_slot(slot_id)
     return {"ok": True}
 
 

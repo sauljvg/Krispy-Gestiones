@@ -48,6 +48,9 @@
   .plan-turno .plan-turno-x { position: absolute; top: 1px; right: 2px; width: 15px; height: 15px; line-height: 14px; text-align: center; border-radius: 4px; background: rgba(0,0,0,.25); font-size: 12px; opacity: 0; transition: opacity .1s; }
   .plan-turno:hover .plan-turno-x { opacity: 1; }
   .plan-turno-fantasma { position: absolute; top: 6px; bottom: 6px; border-radius: 7px; background: color-mix(in srgb, var(--acento) 45%, transparent); border: 1px dashed var(--acento); pointer-events: none; }
+  .plan-turno.sin-asignar { background: color-mix(in srgb, var(--status-warning) 30%, var(--surface-1)); color: var(--text-primary); border: 1px dashed var(--status-warning); }
+  .plan-turno .plan-turno-asig { position: absolute; top: 1px; right: 20px; width: 15px; height: 15px; line-height: 14px; text-align: center; border-radius: 4px; background: rgba(0,0,0,.2); font-size: 11px; opacity: 0; transition: opacity .1s; }
+  .plan-turno:hover .plan-turno-asig { opacity: 1; }
   /* Bloque "negativo": día libre de la persona -- toda la franja en gris. */
   .plan-turno.libre { left: 0 !important; width: 100% !important; background: color-mix(in srgb, var(--text-secondary) 30%, var(--surface-1)); color: var(--text-secondary); cursor: default; box-shadow: none; font-weight: 500; text-transform: uppercase; letter-spacing: .08em; font-size: 10.5px; z-index: 0; }
   .plan-fila-acciones { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
@@ -72,6 +75,7 @@
   .plan-sem-celda:hover { background: color-mix(in srgb, var(--acento) 6%, transparent); }
   .plan-sem-celda.libre { background: color-mix(in srgb, var(--text-secondary) 16%, transparent); }
   .plan-sem-chip { background: var(--acento); color: #fff; border-radius: 5px; font-size: 10.5px; font-weight: 600; padding: 2px 5px; text-align: center; }
+  .plan-sem-chip.sin-asignar-chip { background: color-mix(in srgb, var(--status-warning) 35%, var(--surface-1)); color: var(--text-primary); border: 1px dashed var(--status-warning); cursor: pointer; }
   .plan-sem-libre-txt { color: var(--text-secondary); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; align-self: center; margin: auto 0; }
   .plan-sem-luna { position: absolute; top: 2px; right: 3px; font-size: 11px; opacity: 0; cursor: pointer; }
   .plan-sem-celda:hover .plan-sem-luna { opacity: .8; }
@@ -93,6 +97,42 @@
 
   .plan-vacia { padding: 30px; text-align: center; color: var(--text-secondary); }
   .plan-leyenda { font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
+
+  /* --- Modo Slots --- */
+  .plan-slots-layout { display: flex; gap: 12px; align-items: flex-start; }
+  .plan-slots-main { flex: 1; min-width: 0; }
+  .plan-paleta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; align-items: center; }
+  .plan-slot-chip { border: 1px solid var(--acento); background: color-mix(in srgb, var(--acento) 12%, var(--surface-1)); color: var(--text-primary); border-radius: 999px; padding: 4px 10px; font-size: 11.5px; font-weight: 600; cursor: grab; user-select: none; }
+  .plan-slot-chip:active { cursor: grabbing; }
+  .plan-slot-chip small { color: var(--text-secondary); font-weight: 400; }
+  .plan-slot-lane { position: relative; flex: none; width: var(--plan-ancho, 1200px); min-height: 42px; }
+  .plan-slot-turno { position: absolute; top: 5px; bottom: 5px; border-radius: 7px; background: var(--acento); color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px; overflow: hidden; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+  .plan-slot-turno.sin-asignar { background: color-mix(in srgb, var(--status-warning) 30%, var(--surface-1)); color: var(--text-primary); border: 1px dashed var(--status-warning); }
+  .plan-slot-turno.activo { outline: 2px solid var(--text-primary); outline-offset: 1px; }
+  .plan-slot-turno.drop-hover { filter: brightness(1.15); }
+  .plan-slot-turno .plan-turno-x { position: absolute; top: 1px; right: 2px; width: 15px; height: 15px; line-height: 14px; text-align: center; border-radius: 4px; background: rgba(0,0,0,.25); font-size: 12px; opacity: 0; }
+  .plan-slot-turno:hover .plan-turno-x { opacity: 1; }
+  .plan-slots-drop { border: 2px dashed var(--border); border-radius: 8px; }
+  .plan-slots-drop.drop-hover { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 8%, transparent); }
+
+  .plan-sugeridos { width: 240px; flex: none; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); padding: 10px; align-self: stretch; }
+  .plan-sugeridos h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--text-secondary); }
+  .plan-sug-fila { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 7px; font-size: 12.5px; cursor: grab; border: 1px solid transparent; }
+  .plan-sug-fila:hover { border-color: var(--acento); }
+  .plan-sug-fila.no-disp { opacity: .5; cursor: default; }
+  .plan-sug-fila .plan-sug-h { color: var(--text-secondary); font-size: 11px; white-space: nowrap; }
+  .plan-sug-fila .plan-sug-aviso { color: var(--status-bad, #d9534f); font-size: 10px; }
+
+  /* semana de slots: columnas por día */
+  .plan-slots-sem { display: grid; grid-template-columns: repeat(7, minmax(120px, 1fr)); gap: 8px; }
+  .plan-slots-col { border: 1px solid var(--border); border-radius: 8px; padding: 6px; min-height: 90px; display: flex; flex-direction: column; gap: 5px; }
+  .plan-slots-col h5 { margin: 0 0 2px; font-size: 11.5px; text-align: center; color: var(--text-secondary); cursor: pointer; }
+  .plan-slots-col h5:hover { color: var(--acento); }
+  .plan-slots-col.drop-hover { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 8%, transparent); }
+  .plan-sem-slot { border-radius: 6px; padding: 4px 6px; font-size: 10.5px; font-weight: 600; background: var(--acento); color: #fff; cursor: pointer; position: relative; }
+  .plan-sem-slot.sin-asignar { background: color-mix(in srgb, var(--status-warning) 30%, var(--surface-1)); color: var(--text-primary); border: 1px dashed var(--status-warning); }
+  .plan-sem-slot.activo { outline: 2px solid var(--text-primary); }
+  .plan-sem-slot small { display: block; font-weight: 400; opacity: .85; }
 
   dialog.plan-dialog { border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); color: var(--text-primary); max-width: 620px; width: 92vw; padding: 0; }
   dialog.plan-dialog::backdrop { background: rgba(0,0,0,.45); }
@@ -150,6 +190,10 @@
         <select id="plan-centro"></select>
       </label>
       <div class="plan-vista-toggle">
+        <button type="button" class="plan-btn-icono" id="plan-modo-turnos">Turnos</button>
+        <button type="button" class="plan-btn-icono" id="plan-modo-slots">Slots</button>
+      </div>
+      <div class="plan-vista-toggle">
         <button type="button" class="plan-btn-icono" id="plan-vista-dia">Día</button>
         <button type="button" class="plan-btn-icono" id="plan-vista-semana">Semana</button>
       </div>
@@ -206,12 +250,34 @@
   </div>
 </dialog>
 
+<dialog class="plan-dialog" id="plan-dialog-slots">
+  <div class="plan-dialog-cab">
+    <h3>Slots de horario</h3>
+    <button type="button" class="btn btn-ghost" data-cerrar>✕</button>
+  </div>
+  <div class="plan-dialog-body">
+    <p class="staff-hint">Horarios predefinidos que arrastras a un día. Valen para todos los centros.</p>
+    <div id="plan-slots-lista"></div>
+    <button type="button" class="btn btn-primary" id="plan-slots-nuevo" style="margin-top:10px;">＋ Añadir slot</button>
+  </div>
+</dialog>
+
+<dialog class="plan-dialog" id="plan-dialog-asignar">
+  <div class="plan-dialog-cab">
+    <h3>Asignar turno</h3>
+    <button type="button" class="btn btn-ghost" data-cerrar>✕</button>
+  </div>
+  <div class="plan-dialog-body">
+    <div class="plan-sugeridos" style="width:auto;"></div>
+  </div>
+</dialog>
+
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/icons.js?v=20260903a"></script>
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260910a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/planificador.js?v=20260910f"></script>
+<script src="js/planificador.js?v=20260910g"></script>
 </body>
 </html>
