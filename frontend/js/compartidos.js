@@ -1306,7 +1306,7 @@ function leerExtraFieldsDelForm() {
   return extra;
 }
 
-// --- Valoración del gerente (checklist tras la entrevista) ---
+// --- Feedback del gerente (checklist tras la entrevista) ---
 // Bloque en dos columnas justo encima de Notas: izquierda el checklist de
 // "Encaje con el puesto", derecha la decisión. Debajo, un campo de texto
 // cuyo texto cambia según la decisión, y un sello de quién/cuándo. Se
@@ -1327,7 +1327,7 @@ function feedbackSelloHTML(fb) {
   } catch {
     fecha = "";
   }
-  return `<p class="ficha-feedback-sello">Última valoración: ${escapeHTML(fb.actualizado_por)}${fecha ? ` · ${fecha}` : ""}</p>`;
+  return `<p class="ficha-feedback-sello">Último feedback: ${escapeHTML(fb.actualizado_por)}${fecha ? ` · ${fecha}` : ""}</p>`;
 }
 
 function feedbackGerenteHTML() {
@@ -1351,7 +1351,7 @@ function feedbackGerenteHTML() {
       </label>`).join("");
   return `
     <div class="form-field form-field-full ficha-feedback" id="feedback-gerente-wrap">
-      <label>Valoración del gerente</label>
+      <label>Feedback del gerente</label>
       <p class="staff-hint" style="margin:-2px 0 8px;">Rellénalo tras la entrevista. Marca solo lo que se cumple; lo que quede sin marcar, coméntalo en el recuadro si hace falta.</p>
       <div class="ficha-feedback-cols">
         <div class="ficha-feedback-col">
