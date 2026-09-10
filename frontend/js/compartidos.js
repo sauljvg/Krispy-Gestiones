@@ -1206,21 +1206,22 @@ let feedbackGerenteState = {}; // valoración del gerente tras la entrevista (ve
 // Textos pensados para el día a día de tienda/fábrica (KK) y restaurante
 // (Saona): turnos, fines de semana, trato al cliente, presencia, puntualidad.
 const FEEDBACK_ENCAJE_ITEMS = [
-  ["experiencia", "Experiencia", "tiene el tipo de experiencia y el tiempo necesario para el puesto"],
-  ["conocimientos", "Conocimientos", "sabe hacer lo que pide el puesto en el día a día, o aprende rápido"],
-  ["disponibilidad", "Disponibilidad", "le encajan los turnos, los fines de semana y la fecha de incorporación"],
-  ["puntualidad", "Puntualidad", "llegó puntual a la entrevista"],
-  ["presencia", "Presencia", "vino bien vestido y arreglado, con buena imagen para atender al público"],
-  ["actitud", "Actitud y ganas", "se le vio con energía e interés real por trabajar con nosotros"],
-  ["trato", "Trato", "encaja con cómo tratamos al cliente y al compañero (cercanía, compañerismo, honestidad)"],
-  ["feeling", "Buen feeling", "en general me transmitió buenas sensaciones"],
+  ["experiencia", "Experiencia", "Tiene el tipo de experiencia y el tiempo necesario para el puesto"],
+  ["conocimientos", "Conocimientos", "Sabe hacer lo que pide el puesto en el día a día, o aprende rápido"],
+  ["disponibilidad", "Disponibilidad", "Le encajan los turnos, los fines de semana y la fecha de incorporación"],
+  ["puntualidad", "Puntualidad", "Llegó puntual a la entrevista"],
+  ["presencia", "Presencia", "Vino bien vestido, arreglado y con buena imagen"],
+  ["actitud", "Actitud y ganas", "Se le vio con energía e interés real por trabajar con nosotros"],
+  ["trato", "Trato", "Encaja con cómo tratamos al cliente y al compañero (cercanía, compañerismo, honestidad)"],
+  ["sonrisa", "Sonrisa", "Sonríe con naturalidad y transmite cercanía"],
+  ["feeling", "Buen feeling", "En general me transmitió buenas sensaciones"],
 ];
 
 const FEEDBACK_DECISIONES = [
-  ["adelante", "Adelante", "me encaja, sigamos con esta persona"],
-  ["plan_b", "Plan B", "está bien, pero prefiero esperar por si aparece alguien mejor"],
-  ["con_reservas", "Con reservas", "me interesa, pero antes hay que aclarar algo"],
-  ["descartar", "Descartar", "no lo veo para este puesto"],
+  ["adelante", "Adelante", "Me encaja, sigamos con esta persona"],
+  ["plan_b", "Plan B", "Está bien, pero prefiero esperar por si aparece alguien mejor"],
+  ["con_reservas", "Con reservas", "Me interesa, pero antes hay que aclarar algo"],
+  ["descartar", "Descartar", "No lo veo para este puesto"],
 ];
 
 function vacanteSelectHTML(selectedId, elementId, fallbackLabel) {
@@ -1351,7 +1352,7 @@ function feedbackGerenteHTML() {
   return `
     <div class="form-field form-field-full ficha-feedback" id="feedback-gerente-wrap">
       <label>Valoración del gerente</label>
-      <p class="staff-hint" style="margin:-2px 0 8px;">Rellénalo tras la entrevista. Marca solo lo que se cumple; lo que quede sin marcar, coméntalo abajo si hace falta.</p>
+      <p class="staff-hint" style="margin:-2px 0 8px;">Rellénalo tras la entrevista. Marca solo lo que se cumple; lo que quede sin marcar, coméntalo en el recuadro si hace falta.</p>
       <div class="ficha-feedback-cols">
         <div class="ficha-feedback-col">
           <h4>Encaje con el puesto</h4>
@@ -1360,9 +1361,9 @@ function feedbackGerenteHTML() {
         <div class="ficha-feedback-col">
           <h4>¿Qué hacemos ahora?</h4>
           ${decisionesHTML}
+          <textarea id="feedback-comentario" class="feedback-comentario" style="min-height:110px; margin-top:10px;" placeholder="${feedbackComentarioLabel(fb.decision)}">${escapeHTML(fb.decision_comentario || "")}</textarea>
         </div>
       </div>
-      <textarea id="feedback-comentario" class="feedback-comentario" style="min-height:52px; margin-top:8px;" placeholder="${feedbackComentarioLabel(fb.decision)}">${escapeHTML(fb.decision_comentario || "")}</textarea>
       ${feedbackSelloHTML(fb)}
     </div>`;
 }
