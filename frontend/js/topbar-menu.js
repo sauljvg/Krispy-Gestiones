@@ -440,6 +440,19 @@ document.addEventListener("DOMContentLoaded", () => {
     return div;
   }
 
+  // Burbuja "Pensando..." mientras se espera la respuesta: los tres puntos
+  // parpadean por turnos para que se note que sigue trabajando (mejor que
+  // unos "..." quietos). Se reutiliza esta misma burbuja para meter luego
+  // la respuesta (o el error) -- ver el submit de más abajo.
+  function agregarPensando() {
+    const div = document.createElement("div");
+    div.className = "david-msg david-msg-david david-msg-pensando";
+    div.innerHTML = 'Pensando<span class="david-dot">.</span><span class="david-dot">.</span><span class="david-dot">.</span>';
+    mensajesWrap.appendChild(div);
+    mensajesWrap.scrollTop = mensajesWrap.scrollHeight;
+    return div;
+  }
+
   function reconstruirMensajes() {
     mensajesWrap.innerHTML = "";
     agregarMensaje("david", MENSAJE_BIENVENIDA);
@@ -481,7 +494,7 @@ document.addEventListener("DOMContentLoaded", () => {
     agregarMensaje("user", mensaje);
     input.value = "";
     input.style.height = "auto";
-    const pensando = agregarMensaje("david", "…");
+    const pensando = agregarPensando();
     try {
       const res = await fetch(`${window.location.origin}/api/david/chat`, {
         method: "POST",
@@ -490,11 +503,13 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || "Error al preguntarle a David");
+      pensando.classList.remove("david-msg-pensando");
       pensando.innerHTML = formatearTexto(data.respuesta);
       historial.push({ rol: "user", texto: mensaje });
       historial.push({ rol: "david", texto: data.respuesta });
       guardarHistorial();
     } catch (err) {
+      pensando.classList.remove("david-msg-pensando");
       pensando.classList.add("david-msg-error");
       pensando.textContent = err.message || "No se pudo contactar a David. Inténtalo de nuevo.";
     } finally {

@@ -1025,6 +1025,11 @@ html { scrollbar-gutter: stable; }
 .david-msg-david { align-self: flex-start; background: var(--surface-page); color: var(--text-primary); border: 1px solid var(--border); }
 .david-msg-user { align-self: flex-end; background: var(--acento); color: #fff; }
 .david-msg-error { background: #fdecea; color: #b3261e; border: 1px solid #f5c6c2; }
+.david-msg-pensando { color: var(--text-secondary); font-style: italic; }
+.david-msg-pensando .david-dot { animation: david-pensando-parpadeo 1.4s infinite both; }
+.david-msg-pensando .david-dot:nth-child(2) { animation-delay: .2s; }
+.david-msg-pensando .david-dot:nth-child(3) { animation-delay: .4s; }
+@keyframes david-pensando-parpadeo { 0%, 100% { opacity: 1; } 50% { opacity: .15; } }
 .david-form { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--border); }
 .david-form textarea {
   flex: 1; resize: none; max-height: 110px; padding: 8px 10px; border-radius: 8px;
