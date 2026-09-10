@@ -254,20 +254,33 @@ function tiposInformeResumenHTML(u) {
   // acceso al módulo Informes en primer lugar. Si no lo tiene, "Todos" es
   // engañoso (parece que ve de todo cuando en realidad no entra a Informes).
   const tieneInformes = u.rol === "admin" || (u.modulos || []).some((m) => m === "informes" || m === "saona_informes");
-  if (!tieneInformes) return `<span class="staff-hint">Ninguno</span>`;
   const tipos = u.tipos_informes;
-  if (!tipos || tipos.length === 0) return `<span class="staff-hint">Todos</span>`;
   const cache = TIPOS_INFORME_CACHE || [];
+  if (!tieneInformes) {
+    // Sin el módulo Informes, la restricción por tipo no hace nada -- pero
+    // si el admin ya la puso, hay que MOSTRARLA (antes salía "Ninguno" y
+    // parecía que no se había guardado), avisando de que falta el módulo.
+    if (!tipos || tipos.length === 0) return `<span class="staff-hint">Ninguno</span>`;
+    const nombres = tipos.map((clave) => cache.find((t) => t.clave === clave)?.nombre || clave);
+    return `${escapeHTML(nombres.join(", "))} <span class="staff-hint">· falta módulo Informes</span>`;
+  }
+  if (!tipos || tipos.length === 0) return `<span class="staff-hint">Todos</span>`;
   const nombres = tipos.map((clave) => cache.find((t) => t.clave === clave)?.nombre || clave);
   return escapeHTML(nombres.join(", "));
 }
 
 function climaCentrosResumenHTML(u) {
-  // Mismo razonamiento que tiposInformeResumenHTML: "Todos" solo tiene
-  // sentido si el usuario tiene acceso al módulo Clima Laboral.
+  // Mismo razonamiento que tiposInformeResumenHTML.
   const tieneClima = u.rol === "admin" || (u.modulos || []).some((m) => m === "clima" || m === "saona_clima");
-  if (!tieneClima) return `<span class="staff-hint">Ninguno</span>`;
   const centros = u.clima_centros;
+  if (!tieneClima) {
+    // Sin el módulo Clima Laboral, la restricción por centro no hace nada,
+    // pero si ya está puesta se muestra igual (antes salía "Ninguno" y
+    // parecía que el Guardar no había funcionado). El aviso deja claro que
+    // además hace falta darle el módulo Clima Laboral en la columna Módulos.
+    if (!centros || centros.length === 0) return `<span class="staff-hint">Ninguno</span>`;
+    return `${escapeHTML(resumenSeleccionPorMarca(centros, CLIMA_CENTROS_CACHE || []))} <span class="staff-hint">· falta módulo Clima Laboral</span>`;
+  }
   if (!centros || centros.length === 0) return `<span class="staff-hint">Todos</span>`;
   return escapeHTML(resumenSeleccionPorMarca(centros, CLIMA_CENTROS_CACHE || []));
 }
