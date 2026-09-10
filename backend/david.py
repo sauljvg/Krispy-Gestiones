@@ -1,11 +1,5 @@
-import os
-
-import requests
-
 import auth as auth_module
-
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+import gemini as gemini_module
 
 # Mapa de la interfaz mantenido a mano (no generado del codigo) -- si se
 # anade o cambia una accion visible del portal, hay que actualizar esto
@@ -394,10 +388,6 @@ def _texto_acceso(modulos_usuario: list[str]) -> str:
 
 
 def preguntar(mensaje: str, historial: list[dict], modulos_usuario: list[str]) -> str:
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise DavidError("Falta configurar GEMINI_API_KEY en el entorno del servidor")
-
     contents = []
     for turno in historial:
         rol = "model" if turno.get("rol") == "david" else "user"
@@ -408,30 +398,16 @@ def preguntar(mensaje: str, historial: list[dict], modulos_usuario: list[str]) -
 
     system_instruction = f"{SYSTEM_PROMPT}\n\n{_texto_acceso(modulos_usuario)}"
 
-    body = {
-        "contents": contents,
-        "systemInstruction": {"parts": [{"text": system_instruction}]},
-        # thinkingBudget=0 desactiva el "razonamiento" interno del modelo -- sin esto, gemini-3.5-flash
-        # gasta buena parte de maxOutputTokens pensando y la respuesta visible se corta a mitad de
-        # frase (se vio en pruebas reales: una lista de 7 pasos se cortaba en el 7). No hace falta ese
-        # razonamiento para explicar botones del portal, así que se apaga y así toda la cuota de
-        # tokens es para el texto que de verdad se muestra.
-        "generationConfig": {
-            "temperature": 0.3,
-            "maxOutputTokens": 1024,
-            "thinkingConfig": {"thinkingBudget": 0},
-        },
-    }
-
     try:
-        resp = requests.post(GEMINI_URL, params={"key": api_key}, json=body, timeout=20)
-    except requests.RequestException as exc:
-        raise DavidError(f"No se pudo contactar con Gemini: {exc}") from exc
+        data = gemini_module.generar(
+            contents,
+            system_instruction=system_instruction,
+            temperature=0.3,
+            max_output_tokens=1024,
+        )
+    except gemini_module.GeminiError as exc:
+        raise DavidError(str(exc)) from exc
 
-    if resp.status_code != 200:
-        raise DavidError(f"Gemini devolvio un error ({resp.status_code}): {resp.text[:300]}")
-
-    data = resp.json()
     candidatos = data.get("candidates") or []
     if not candidatos:
         motivo = data.get("promptFeedback", {}).get("blockReason", "sin candidatos")

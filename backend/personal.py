@@ -15,15 +15,11 @@ informativas, no se usan para filtrar menciones por fecha de reseña.
 
 import datetime
 import json
-import os
 import re
-
-import requests
 
 from db import get_connection
 
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+import gemini as gemini_module
 
 
 class PersonalError(Exception):
@@ -420,10 +416,6 @@ def sugerir_variantes(nombre):
     if not nombre:
         raise PersonalError("Falta el nombre")
 
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise PersonalError("Falta configurar GEMINI_API_KEY en el entorno del servidor")
-
     prompt = (
         f"Nombre de pila español: \"{nombre}\".\n"
         "Dame sus variantes de escritura habituales en España: diminutivos, hipocorísticos "
@@ -431,23 +423,15 @@ def sugerir_variantes(nombre):
         "esta persona. Responde SOLO un array JSON de strings en minúsculas, sin explicación "
         "ni markdown, máximo 8 elementos. Ejemplo de formato: [\"variante1\",\"variante2\"]"
     )
-    body = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.4,
-            "maxOutputTokens": 200,
-            "thinkingConfig": {"thinkingBudget": 0},
-        },
-    }
-
     try:
-        resp = requests.post(GEMINI_URL, params={"key": api_key}, json=body, timeout=20)
-    except requests.RequestException as exc:
-        raise PersonalError(f"No se pudo contactar con Gemini: {exc}") from exc
-    if resp.status_code != 200:
-        raise PersonalError(f"Gemini devolvió un error ({resp.status_code}): {resp.text[:300]}")
+        data = gemini_module.generar(
+            [{"role": "user", "parts": [{"text": prompt}]}],
+            temperature=0.4,
+            max_output_tokens=200,
+        )
+    except gemini_module.GeminiError as exc:
+        raise PersonalError(str(exc)) from exc
 
-    data = resp.json()
     candidatos = data.get("candidates") or []
     if not candidatos:
         raise PersonalError("Gemini no devolvió variantes")
