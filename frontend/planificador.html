@@ -110,6 +110,16 @@
   .plan-barra > i { display: block; height: 100%; background: var(--status-good); }
   .plan-barra.ambar > i { background: var(--status-warning); }
   .plan-barra.rojo > i { background: var(--status-bad, #d9534f); }
+  /* Barra con tramos de horas complementarias (tiempo parcial): verde contrato,
+     amarillo pactadas (100-130%), rojo voluntarias (130-145%). */
+  .plan-barra-comp { position: relative; display: flex; overflow: visible; }
+  .plan-barra-comp > i { height: 100%; }
+  .plan-barra-comp .seg-verde { background: var(--status-good); }
+  .plan-barra-comp .seg-amar { background: var(--status-warning); }
+  .plan-barra-comp .seg-rojo { background: var(--status-bad, #d9534f); }
+  .plan-barra-comp .plan-barra-marca { position: absolute; top: -1px; bottom: -1px; width: 1px; background: var(--text-secondary); opacity: .5; }
+  .plan-sug-fila.comp-pactada { border-color: var(--status-warning); }
+  .plan-sug-fila.comp-voluntaria { border-color: var(--status-bad, #d9534f); }
 
   .plan-cab-titulo { font-weight: 600; color: var(--text-secondary); text-transform: uppercase; font-size: 11px; letter-spacing: .03em; }
   .plan-cab-cell { position: absolute; top: 4px; bottom: 4px; display: flex; align-items: center; justify-content: center; }
@@ -277,6 +287,12 @@
       <label for="plan-cfg-rol">Rol en Odoo (para el export)</label>
       <input type="text" id="plan-cfg-rol" placeholder="Retail" style="width:160px;">
     </div>
+    <div class="plan-config-campo">
+      <label style="display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--text-primary);">
+        <input type="checkbox" id="plan-cfg-complementarias-jc"> Permitir horas complementarias también a jornada completa
+      </label>
+      <span class="staff-hint">Por defecto solo las hacen los contratos a tiempo parcial.</span>
+    </div>
     <button type="button" class="btn btn-primary" id="plan-cfg-guardar">Guardar</button>
     <p class="config-error" id="plan-cfg-error" hidden></p>
   </div>
@@ -326,6 +342,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260910a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/planificador.js?v=20260910k"></script>
+<script src="js/planificador.js?v=20260911a"></script>
 </body>
 </html>

@@ -307,13 +307,77 @@ function textoHoras(min, contrato) {
     : `${h} h / sin contrato`;
 }
 
+// --- Horas complementarias (convenio) ---
+const COMP_TECHO = 1.45; // 145% del contrato: contrato + 30% pactadas + 15% voluntarias
+const COMP_VOLUNTARIAS_DESDE = 1.3; // a partir del 130% ya son voluntarias
+function admiteComplementarias(contrato) {
+  // Solo tiempo parcial, salvo que el centro lo abra a jornada completa.
+  if (!contrato) return false;
+  return contrato < 40 || !!S.config.complementarias_jornada_completa;
+}
+function techoMinSemana(contrato) {
+  return admiteComplementarias(contrato) ? Math.round(contrato * 60 * COMP_TECHO) : Infinity;
+}
+// Cuántos minutos más se le pueden planificar a alguien esta semana antes de
+// tocar su tope de complementarias (Infinity si no aplica / no tiene tope).
+function margenComplementariasMin(trabId, excluirDurMin = 0) {
+  const w = S.trabajadores.find((x) => x.id === trabId);
+  if (!w || !admiteComplementarias(w.horas_contrato_semana)) return Infinity;
+  const ya = (S.minutosSemana[String(trabId)] || 0) - excluirDurMin;
+  return Math.max(0, techoMinSemana(w.horas_contrato_semana) - ya);
+}
+// Pide confirmación si el resultado deja a la persona en horas complementarias
+// (amarillo, >100%) o voluntarias (rojo, >130%). Devuelve true si sigue adelante.
+async function confirmarComplementarias(contrato, prevMin, nuevoMin) {
+  if (!admiteComplementarias(contrato) || nuevoMin <= prevMin) return true;
+  const cont = contrato * 60;
+  if (nuevoMin <= cont) return true;
+  const hN = fmtHMM(nuevoMin);
+  const hC = fmtHMM(cont);
+  if (nuevoMin > cont * COMP_VOLUNTARIAS_DESDE) {
+    return pedirConfirmacion(
+      `Se pasaría a ${hN} h (contrato ${hC} h): entra en horas complementarias VOLUNTARIAS ` +
+        `(requieren acuerdo del trabajador). Puede que no le queden 2 días de descanso. ¿Confirmas?`
+    );
+  }
+  return pedirConfirmacion(
+    `Se pasaría a ${hN} h (contrato ${hC} h): el resto serán horas complementarias. ` +
+      `Puede que no le queden 2 días de descanso. ¿Confirmas?`
+  );
+}
+
+// Barra de horas: 3 tramos (verde contrato / amarillo pactadas / rojo
+// voluntarias) para tiempo parcial; barra simple para jornada completa.
+function barraHorasHTML(min, contrato) {
+  if (!contrato) return `<div class="plan-barra"><i style="width:0%;"></i></div>`;
+  const pct = min / 60 / contrato;
+  if (!admiteComplementarias(contrato)) {
+    const clase = pct >= 1 ? "rojo" : pct >= 0.85 ? "ambar" : "";
+    return `<div class="plan-barra ${clase}"><i style="width:${Math.min(100, Math.round(pct * 100))}%;"></i></div>`;
+  }
+  const esc = (p) => (Math.max(0, Math.min(p, COMP_TECHO)) / COMP_TECHO) * 100;
+  const verde = esc(Math.min(pct, 1));
+  const amar = esc(Math.min(pct, COMP_VOLUNTARIAS_DESDE)) - verde;
+  const rojo = esc(Math.min(pct, COMP_TECHO)) - esc(Math.min(pct, COMP_VOLUNTARIAS_DESDE));
+  return `<div class="plan-barra plan-barra-comp" title="${Math.round(pct * 100)}% del contrato (tope 145% con complementarias)">
+    <i class="seg-verde" style="width:${verde}%;"></i>
+    <i class="seg-amar" style="width:${amar}%;"></i>
+    <i class="seg-rojo" style="width:${rojo}%;"></i>
+    <span class="plan-barra-marca" style="left:${esc(1)}%;"></span>
+    <span class="plan-barra-marca" style="left:${esc(COMP_VOLUNTARIAS_DESDE)}%;"></span>
+  </div>`;
+}
+
 // 🌙 con ✓ verde si el horario de la persona esta semana es correcto, o ✕
 // rojo si hay conflicto: menos de 2 días de descanso, o más horas
 // planificadas que las de su contrato.
 function descansoIndicadorHTML(trabId, minSemana, contrato) {
   const descanso = 7 - (S.diasTrabajados[String(trabId)] || 0);
   const pocosDescansos = descanso < DIAS_DESCANSO_MIN;
-  const sobreContrato = contrato && minSemana / 60 > contrato;
+  // Para tiempo parcial, estar por encima del contrato es lo esperado con
+  // complementarias; solo es conflicto pasar del 145%.
+  const limite = admiteComplementarias(contrato) ? contrato * COMP_TECHO : contrato;
+  const sobreContrato = contrato && minSemana / 60 > limite;
   const ok = !pocosDescansos && !sobreContrato;
   const motivos = [];
   if (pocosDescansos) motivos.push(`solo ${descanso} día${descanso === 1 ? "" : "s"} de descanso (mínimo ${DIAS_DESCANSO_MIN})`);
@@ -327,8 +391,6 @@ function descansoIndicadorHTML(trabId, minSemana, contrato) {
 function filaTrabajador(t) {
   const min = S.minutosSemana[String(t.id)] || 0;
   const contrato = t.horas_contrato_semana;
-  const pct = contrato ? min / 60 / contrato : 0;
-  const clase = !contrato ? "" : pct >= 1 ? "rojo" : pct >= 0.85 ? "ambar" : "";
   const misTurnos = S.turnos.filter((x) => x.trabajador_id === t.id);
   const tieneLibre = misTurnos.some((x) => x.tipo === "libre");
   const bloques = misTurnos.map(turnoHTML).join("");
@@ -338,7 +400,7 @@ function filaTrabajador(t) {
       <div class="plan-celda-izq">
         <span class="plan-trab-nombre" title="${escapeHTML(t.nombre)}">${escapeHTML(t.nombre)}</span>
         <span class="plan-trab-horas">${textoHoras(min, contrato)}</span>
-        <div class="plan-barra ${clase}"><i style="width:${Math.min(100, Math.round(pct * 100))}%;"></i></div>
+        ${barraHorasHTML(min, contrato)}
         <div class="plan-fila-acciones">
           <button type="button" class="plan-libre-btn ${tieneLibre ? "activo" : ""}" data-trab="${t.id}">${tieneLibre ? "Quitar libre" : "Día libre"}</button>
           <button type="button" class="plan-libre-btn plan-vac-btn" data-trab="${t.id}" data-nombre="${escapeHTML(t.nombre)}">🏖 Vacaciones</button>
@@ -498,6 +560,8 @@ function wireTurno(el) {
     const durOrig = Number(el.dataset.duracion);
     const trabId = Number(el.dataset.trab);
     const { izq, der } = paredes(trabId, el.dataset.id, iniOrig, iniOrig + durOrig);
+    // Tope duro: no dejar estirar más allá del 145% del contrato (complementarias).
+    const maxDur = Math.min(MAX_DUR, margenComplementariasMin(trabId, durOrig));
     let ini = iniOrig;
     let dur = durOrig;
     try {
@@ -513,10 +577,10 @@ function wireTurno(el) {
         ini = clamp(iniOrig + dMin, izq, der - durOrig);
         dur = durOrig;
       } else if (modo === "izq") {
-        ini = clamp(iniOrig + dMin, Math.max(izq, iniOrig + durOrig - MAX_DUR), iniOrig + durOrig - MIN_DUR);
+        ini = clamp(iniOrig + dMin, Math.max(izq, iniOrig + durOrig - maxDur), iniOrig + durOrig - MIN_DUR);
         dur = iniOrig + durOrig - ini;
       } else {
-        dur = clamp(durOrig + dMin, MIN_DUR, Math.min(der - iniOrig, MAX_DUR));
+        dur = clamp(durOrig + dMin, MIN_DUR, Math.min(der - iniOrig, maxDur));
         ini = iniOrig;
       }
       el.style.left = minToX(ini) + "px";
@@ -533,6 +597,14 @@ function wireTurno(el) {
       el.removeEventListener("pointerup", onUp);
       el.style.cursor = "grab";
       if (ini === iniOrig && dur === durOrig) return;
+      if (!esGrupo && dur > durOrig && trabId !== SIN_ASIGNAR) {
+        const w = S.trabajadores.find((x) => x.id === trabId);
+        const prev = S.minutosSemana[String(trabId)] || 0;
+        if (w && !(await confirmarComplementarias(w.horas_contrato_semana, prev, prev - durOrig + dur))) {
+          cargarDia();
+          return;
+        }
+      }
       const rs = await Promise.all(
         ids.map((id) =>
           fetch(url(`turnos/${id}`), {
@@ -566,8 +638,13 @@ function wireLane(lane, trabajadorId) {
     // el turno nuevo no puede pisar a otro de esa persona: se limita al
     // hueco libre alrededor del punto donde se ha pulsado.
     const { izq, der } = paredes(trabajadorId, null, iniClick, iniClick);
+    const maxNuevo = Math.min(MAX_DUR, margenComplementariasMin(trabajadorId, 0));
     if (der - izq < MIN_DUR) {
       mostrarAviso("No cabe un turno de 1 h en este hueco.");
+      return;
+    }
+    if (maxNuevo < MIN_DUR) {
+      mostrarAviso("Esa persona ya está en su tope de horas complementarias (145% del contrato).");
       return;
     }
     const fantasma = document.createElement("div");
@@ -578,13 +655,13 @@ function wireLane(lane, trabajadorId) {
     let ini = iniClick;
     let dur = MIN_DUR;
     let arrastrado = false;
-    const topeDer = Math.min(der, izq + MAX_DUR);
+    const topeDer = Math.min(der, izq + maxNuevo);
 
     const onMove = (ev) => {
       arrastrado = arrastrado || Math.abs(ev.clientX - startX) > 4;
       const cursorMin = clamp(snap(xToMin(ev.clientX - laneRect.left)), izq, topeDer);
       ini = clamp(Math.min(iniClick, cursorMin), izq, der - MIN_DUR);
-      dur = clamp(Math.abs(cursorMin - iniClick), MIN_DUR, MAX_DUR);
+      dur = clamp(Math.abs(cursorMin - iniClick), MIN_DUR, maxNuevo);
       if (ini + dur > der) dur = der - ini;
       fantasma.style.left = minToX(ini) + "px";
       fantasma.style.width = dur * PX_POR_MIN + "px";
@@ -595,9 +672,12 @@ function wireLane(lane, trabajadorId) {
       fantasma.remove();
       if (!arrastrado) {
         ini = clamp(iniClick, izq, der - MIN_DUR);
-        dur = clamp(Math.min(240, der - ini), MIN_DUR, MAX_DUR);
+        dur = clamp(Math.min(240, der - ini), MIN_DUR, maxNuevo);
       }
       if (dur < MIN_DUR) return;
+      const w = S.trabajadores.find((x) => x.id === trabajadorId);
+      const prev = S.minutosSemana[String(trabajadorId)] || 0;
+      if (w && !(await confirmarComplementarias(w.horas_contrato_semana, prev, prev + dur))) return;
       const res = await fetch(url("turnos"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -653,7 +733,9 @@ async function pintarSugeridos(container, turno, { drag = true } = {}) {
       const detalle = s.disponible
         ? `<span class="plan-sug-h">${h} h${s.aviso ? ` · <span class="plan-sug-aviso">${s.aviso}</span>` : ""}</span>`
         : `<span class="plan-sug-h">${escapeHTML(s.motivo)}</span>`;
-      return `<div class="plan-sug-fila ${s.disponible ? "" : "no-disp"}" data-trab="${s.trabajador_id}" ${
+      return `<div class="plan-sug-fila ${s.disponible ? "" : "no-disp"} ${
+        s.complementaria ? "comp-" + s.complementaria : ""
+      }" data-trab="${s.trabajador_id}" ${
         s.disponible && drag ? 'draggable="true"' : ""
       }><span>${escapeHTML(s.nombre)}</span>${detalle}</div>`;
     })
@@ -675,6 +757,14 @@ async function pintarSugeridos(container, turno, { drag = true } = {}) {
 }
 
 async function asignarTurno(turnoId, trabajadorId) {
+  if (trabajadorId !== SIN_ASIGNAR) {
+    const turno = S.turnos.find((t) => String(t.id) === String(turnoId));
+    const w = S.trabajadores.find((x) => x.id === trabajadorId);
+    if (turno && w) {
+      const prev = S.minutosSemana[String(trabajadorId)] || 0;
+      if (!(await confirmarComplementarias(w.horas_contrato_semana, prev, prev + turno.duracion_min))) return;
+    }
+  }
   const res = await fetch(url(`turnos/${turnoId}/asignar`), {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -830,6 +920,11 @@ async function pintarSlotGrupo(container, g) {
 // Poner a alguien en un slot: si hay una plaza libre (turno sin asignar del
 // grupo) se ocupa; si no, se crea otra plaza -- así entran varias personas.
 async function asignarAGrupo(g, trabajadorId) {
+  const w = S.trabajadores.find((x) => x.id === trabajadorId);
+  if (w) {
+    const prev = S.minutosSemana[String(trabajadorId)] || 0;
+    if (!(await confirmarComplementarias(w.horas_contrato_semana, prev, prev + g.dur))) return;
+  }
   const libre = grupoLibres(g)[0];
   let res;
   if (libre) {
@@ -1160,8 +1255,6 @@ function renderSemana() {
     .map((t) => {
       const min = S.minutosSemana[String(t.id)] || 0;
       const contrato = t.horas_contrato_semana;
-      const pct = contrato ? min / 60 / contrato : 0;
-      const claseBarra = !contrato ? "" : pct >= 1 ? "rojo" : pct >= 0.85 ? "ambar" : "";
       const celdas = dias
         .map((d) => {
           const delDia = S.turnos.filter((x) => x.trabajador_id === t.id && x.fecha === d);
@@ -1183,7 +1276,7 @@ function renderSemana() {
           <div class="plan-sem-nombre">
             <span class="plan-trab-nombre" title="${escapeHTML(t.nombre)}">${escapeHTML(t.nombre)}</span>
             <span class="plan-trab-horas">${textoHoras(min, contrato)}</span>
-            <div class="plan-barra ${claseBarra}"><i style="width:${Math.min(100, Math.round(pct * 100))}%;"></i></div>
+            ${barraHorasHTML(min, contrato)}
             <div class="plan-fila-acciones">${descansoIndicadorHTML(t.id, min, contrato)}</div>
           </div>
           ${celdas}
@@ -1359,6 +1452,7 @@ function wireConfig() {
     document.getElementById("plan-cfg-objetivo").value = S.config.objetivo_transacciones_hora ?? "";
     document.getElementById("plan-cfg-direccion").value = S.config.direccion_odoo ?? "";
     document.getElementById("plan-cfg-rol").value = S.config.rol_odoo ?? "";
+    document.getElementById("plan-cfg-complementarias-jc").checked = !!S.config.complementarias_jornada_completa;
     document.getElementById("plan-cfg-error").hidden = true;
     dlg.showModal();
   });
@@ -1387,6 +1481,7 @@ function wireConfig() {
         objetivo_transacciones_hora: objStr === "" ? null : Number(objStr),
         direccion_odoo: document.getElementById("plan-cfg-direccion").value.trim(),
         rol_odoo: document.getElementById("plan-cfg-rol").value.trim(),
+        complementarias_jornada_completa: document.getElementById("plan-cfg-complementarias-jc").checked,
       }),
     });
     if (!r.ok) {

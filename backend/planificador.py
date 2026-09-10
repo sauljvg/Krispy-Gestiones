@@ -38,6 +38,14 @@ _TIPOS_NO_TRABAJO = ("libre", "vacaciones")   # bloques que no cuentan como hora
 BOCADILLO_MIN = 20
 BOCADILLO_DESDE_MIN = 6 * 60
 
+# Horas complementarias (Estatuto de los Trabajadores art. 12): solo para
+# contratos a TIEMPO PARCIAL. Sobre las horas de contrato se pueden añadir,
+# con acuerdo del trabajador, hasta un +30% (pactadas) y otro +15%
+# (voluntarias) -> techo del 145%. Se puede abrir a jornada completa por
+# centro (config `complementarias_jornada_completa`).
+COMPLEMENTARIAS_TECHO = 1.45
+COMPLEMENTARIAS_VOLUNTARIAS_DESDE = 1.30
+
 # "Dirección de trabajo" / "Rol" que espera Odoo (planning.slot) al reimportar.
 # Editable por centro en "Horario del centro"; esto es solo el valor de partida.
 _DIRECCION_ODOO_DEFECTO = {
@@ -152,6 +160,10 @@ def ensure_planificador_tables():
             )
     if "rol_odoo" not in cols_config:
         conn.execute("ALTER TABLE planificador_config ADD COLUMN rol_odoo TEXT")
+    if "complementarias_jornada_completa" not in cols_config:
+        conn.execute(
+            "ALTER TABLE planificador_config ADD COLUMN complementarias_jornada_completa INTEGER NOT NULL DEFAULT 0"
+        )
     # Todo el mundo tiene contrato: quien se quedó sin horas (sin % de jornada
     # en el Excel) pasa a jornada completa. Idempotente.
     conn.execute(
@@ -207,6 +219,69 @@ def _horas_contrato(pct):
     return int(h) if h == int(h) else h
 
 
+def _admite_complementarias(contrato, jornada_completa_ok=False):
+    """¿Se le pueden planificar horas complementarias a esta persona? Solo a
+    tiempo parcial, salvo que el centro lo abra a jornada completa."""
+    if not contrato:
+        return False
+    if contrato < HORAS_JORNADA_COMPLETA:
+        return True
+    return bool(jornada_completa_ok)
+
+
+def _techo_semana_min(contrato, jornada_completa_ok=False):
+    """Tope duro de minutos de trabajo efectivo por semana. Con complementarias
+    es el 145 % del contrato; sin ellas no hay tope duro (pasarse solo avisa)."""
+    if not _admite_complementarias(contrato, jornada_completa_ok):
+        return None
+    return int(round(contrato * 60 * COMPLEMENTARIAS_TECHO))
+
+
+def _minutos_trabajo_semana(conn, empresa, centro, trabajador_id, fecha, excluir_id=None):
+    """Minutos de trabajo efectivo ya planificados a una persona en la semana
+    (lun-dom) de `fecha`. `excluir_id` deja fuera un turno (el que se está
+    moviendo/reasignando)."""
+    lunes = _lunes_de(fecha)
+    domingo = (datetime.date.fromisoformat(lunes) + datetime.timedelta(days=6)).isoformat()
+    q = ("SELECT COALESCE(SUM(duracion_min), 0) FROM planificador_turnos "
+         "WHERE empresa = ? AND centro = ? AND trabajador_id = ? AND tipo = 'trabajo' "
+         "AND fecha BETWEEN ? AND ?")
+    p = [empresa, centro, trabajador_id, lunes, domingo]
+    if excluir_id is not None:
+        q += " AND id != ?"
+        p.append(excluir_id)
+    return conn.execute(q, p).fetchone()[0]
+
+
+def _jornada_completa_ok(conn, empresa, centro):
+    row = conn.execute(
+        "SELECT complementarias_jornada_completa FROM planificador_config WHERE empresa = ? AND centro = ?",
+        (empresa, centro),
+    ).fetchone()
+    return bool(row[0]) if row else False
+
+
+def _chequear_techo(conn, empresa, centro, trabajador_id, fecha, nueva_dur, excluir_id=None):
+    """Rechaza si planificar `nueva_dur` min a esta persona la dejaría por
+    encima del 145 % de su contrato esa semana (tope de complementarias). A
+    jornada completa (sin complementarias) no hay tope duro."""
+    if trabajador_id == SIN_ASIGNAR:
+        return
+    w = conn.execute(
+        "SELECT horas_contrato_semana FROM planificador_trabajadores WHERE id = ?", (trabajador_id,)
+    ).fetchone()
+    contrato = w["horas_contrato_semana"] if w else None
+    techo = _techo_semana_min(contrato, _jornada_completa_ok(conn, empresa, centro))
+    if techo is None:
+        return
+    total = _minutos_trabajo_semana(conn, empresa, centro, trabajador_id, fecha, excluir_id=excluir_id) + int(nueva_dur)
+    if total > techo:
+        raise ValueError(
+            f"Llegaría a {round(total / 60, 1)} h esta semana y su tope con horas complementarias "
+            f"es {round(techo / 60, 1)} h (145 % de su contrato). Recorta el turno o repártelo con otra persona."
+        )
+
+
 # --- Centros ---
 
 def centros_disponibles(empresa):
@@ -238,7 +313,8 @@ def centros_disponibles(empresa):
 def get_config(empresa, centro):
     conn = get_connection()
     row = conn.execute(
-        "SELECT apertura_min, cierre_min, objetivo_transacciones_hora, direccion_odoo, rol_odoo "
+        "SELECT apertura_min, cierre_min, objetivo_transacciones_hora, direccion_odoo, rol_odoo, "
+        "complementarias_jornada_completa "
         "FROM planificador_config WHERE empresa = ? AND centro = ?",
         (empresa, centro),
     ).fetchone()
@@ -250,6 +326,7 @@ def get_config(empresa, centro):
             objetivo_transacciones_hora=None,
             direccion_odoo=None,
             rol_odoo=None,
+            complementarias_jornada_completa=0,
         )
     else:
         d = dict(row)
@@ -257,26 +334,30 @@ def get_config(empresa, centro):
         d["direccion_odoo"] = _DIRECCION_ODOO_DEFECTO.get(centro, "")
     if not d.get("rol_odoo"):
         d["rol_odoo"] = "Retail"
+    d["complementarias_jornada_completa"] = int(d.get("complementarias_jornada_completa") or 0)
     return d
 
 
 def set_config(empresa, centro, apertura_min, cierre_min, objetivo_transacciones_hora,
-               direccion_odoo=None, rol_odoo=None):
+               direccion_odoo=None, rol_odoo=None, complementarias_jornada_completa=False):
     if cierre_min <= apertura_min:
         raise ValueError("La hora de cierre debe ser posterior a la de apertura")
     conn = get_connection()
     conn.execute("""
         INSERT INTO planificador_config
-            (empresa, centro, apertura_min, cierre_min, objetivo_transacciones_hora, direccion_odoo, rol_odoo)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (empresa, centro, apertura_min, cierre_min, objetivo_transacciones_hora, direccion_odoo, rol_odoo,
+             complementarias_jornada_completa)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (empresa, centro) DO UPDATE SET
             apertura_min = excluded.apertura_min,
             cierre_min = excluded.cierre_min,
             objetivo_transacciones_hora = excluded.objetivo_transacciones_hora,
             direccion_odoo = excluded.direccion_odoo,
-            rol_odoo = excluded.rol_odoo
+            rol_odoo = excluded.rol_odoo,
+            complementarias_jornada_completa = excluded.complementarias_jornada_completa
     """, (empresa, centro, apertura_min, cierre_min, objetivo_transacciones_hora,
-          (direccion_odoo or "").strip() or None, (rol_odoo or "").strip() or None))
+          (direccion_odoo or "").strip() or None, (rol_odoo or "").strip() or None,
+          1 if complementarias_jornada_completa else 0))
     conn.commit()
     conn.close()
 
@@ -518,6 +599,11 @@ def crear_turno(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min,
         if _solapa(conn, trabajador_id, fecha, int(inicio_min), int(inicio_min) + int(duracion_min)):
             conn.close()
             raise ValueError("El turno se solapa con otro de esa persona")
+        try:
+            _chequear_techo(conn, empresa, centro, trabajador_id, fecha, int(duracion_min))
+        except ValueError:
+            conn.close()
+            raise
     cur = conn.execute(
         "INSERT INTO planificador_turnos "
         "(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, tipo, creado_por) "
@@ -548,6 +634,12 @@ def actualizar_turno(turno_id, inicio_min=None, duracion_min=None):
         if _solapa(conn, row["trabajador_id"], row["fecha"], ini, ini + dur, excluir_id=turno_id):
             conn.close()
             raise ValueError("El turno se solapa con otro de esa persona")
+        try:
+            _chequear_techo(conn, row["empresa"], row["centro"], row["trabajador_id"], row["fecha"], dur,
+                            excluir_id=turno_id)
+        except ValueError:
+            conn.close()
+            raise
     conn.execute(
         "UPDATE planificador_turnos SET inicio_min = ?, duracion_min = ?, actualizado_en = datetime('now') WHERE id = ?",
         (ini, dur, turno_id),
@@ -574,6 +666,13 @@ def fusionar_turnos(id_a, id_b):
         raise ValueError("Esos turnos no se pueden unir")
     ini = min(a["inicio_min"], b["inicio_min"])
     fin = max(a["inicio_min"] + a["duracion_min"], b["inicio_min"] + b["duracion_min"])
+    # El turno unido puede ser mayor que la suma de los dos (si había un hueco).
+    try:
+        _chequear_techo(conn, a["empresa"], a["centro"], a["trabajador_id"], a["fecha"],
+                        (fin - ini) - b["duracion_min"], excluir_id=id_a)
+    except ValueError:
+        conn.close()
+        raise
     conn.execute(
         "UPDATE planificador_turnos SET inicio_min = ?, duracion_min = ?, actualizado_en = datetime('now') WHERE id = ?",
         (ini, fin - ini, id_a),
@@ -623,6 +722,12 @@ def asignar_turno(turno_id, trabajador_id):
         if libre:
             conn.close()
             raise ValueError("Esa persona tiene " + ("vacaciones" if libre["tipo"] == "vacaciones" else "el día libre"))
+        try:
+            _chequear_techo(conn, t["empresa"], t["centro"], trabajador_id, t["fecha"], t["duracion_min"],
+                            excluir_id=turno_id)
+        except ValueError:
+            conn.close()
+            raise
     conn.execute(
         "UPDATE planificador_turnos SET trabajador_id = ?, actualizado_en = datetime('now') WHERE id = ?",
         (trabajador_id, turno_id),
@@ -787,6 +892,7 @@ def sugerencias(empresa, centro, fecha, inicio_min, duracion_min):
     min_sem = _minutos_semana(turnos_sem)
     del_dia = [t for t in turnos_sem if t["fecha"] == fecha]
     ventana = _turnos_ventana_por_trab(empresa, centro, fecha)
+    jc_ok = get_config(empresa, centro).get("complementarias_jornada_completa")
     out = []
     for w in trabajadores:
         wid = w["id"]
@@ -800,20 +906,43 @@ def sugerencias(empresa, centro, fecha, inicio_min, duracion_min):
         )
         ms = min_sem.get(wid, 0)
         contrato = w["horas_contrato_semana"]
+        proyectado = ms + int(duracion_min)
+        admite = _admite_complementarias(contrato, jc_ok)
+        techo = _techo_semana_min(contrato, jc_ok)
+        supera_techo = techo is not None and proyectado > techo
+        complementaria = ""
         avisos = []
-        if contrato and (ms + int(duracion_min)) / 60 > contrato:
-            avisos.append("se pasaría de contrato")
+        if contrato and proyectado / 60 > contrato:
+            if not admite:
+                avisos.append("se pasaría de contrato")
+            elif proyectado / 60 > contrato * COMPLEMENTARIAS_VOLUNTARIAS_DESDE:
+                complementaria = "voluntaria"
+                avisos.append("horas complementarias voluntarias")
+            else:
+                complementaria = "pactada"
+                avisos.append("horas complementarias")
         if _descanso_12h_ko(ventana.get(wid, []), fecha, ini, fin):
             avisos.append("No cumple el descanso mínimo de 12 h entre jornadas")
-        motivo = "ya trabaja ese día" if ocupado else ("vacaciones" if fuera == "vacaciones" else ("día libre" if fuera else ""))
+        if ocupado:
+            motivo = "ya trabaja ese día"
+        elif fuera == "vacaciones":
+            motivo = "vacaciones"
+        elif fuera:
+            motivo = "día libre"
+        elif supera_techo:
+            motivo = "supera el 145 % de su contrato"
+        else:
+            motivo = ""
         out.append({
             "trabajador_id": wid,
             "nombre": w["nombre"],
             "minutos_semana": ms,
             "horas_contrato": contrato,
-            "disponible": not ocupado and not fuera,
+            "disponible": not ocupado and not fuera and not supera_techo,
             "motivo": motivo,
             "aviso": " · ".join(avisos),
+            "complementaria": complementaria,
+            "supera_techo": supera_techo,
         })
     out.sort(key=lambda x: (not x["disponible"], bool(x["aviso"]), x["minutos_semana"], x["nombre"].lower()))
     return out

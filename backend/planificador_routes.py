@@ -344,6 +344,7 @@ class ConfigIn(BaseModel):
     objetivo_transacciones_hora: float | None = None
     direccion_odoo: str | None = None
     rol_odoo: str | None = None
+    complementarias_jornada_completa: bool = False
 
 
 @router.put("/config")
@@ -353,6 +354,7 @@ def config_route(body: ConfigIn, empresa: str = "kk", user: dict = Depends(requi
         planificador_module.set_config(
             empresa, body.centro, body.apertura_min, body.cierre_min, body.objetivo_transacciones_hora,
             direccion_odoo=body.direccion_odoo, rol_odoo=body.rol_odoo,
+            complementarias_jornada_completa=body.complementarias_jornada_completa,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
