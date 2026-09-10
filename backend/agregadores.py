@@ -845,6 +845,81 @@ def get_rondas_actuales() -> dict:
         conn.close()
 
 
+# Umbral para considerar una ronda "completa": tiene que haber cubierto al
+# menos este % de su objetivo. No se exige el 100% porque siempre hay algún
+# punto que falla y no se reintenta -- pero 46/400 (JustEat 3-sep) o 102/329
+# (Glovo 4-sep, parada a mano) están MUY por debajo y no sirven para comparar.
+RONDA_COMPLETA_UMBRAL = 0.9
+
+
+def _ronda_es_completa(fila: dict, hechos: int) -> bool:
+    return bool(
+        fila["finalizada_en"]
+        and fila["total_objetivo"]
+        and hechos >= fila["total_objetivo"] * RONDA_COMPLETA_UMBRAL
+    )
+
+
+def historico_rondas() -> dict:
+    """Histórico COMPLETO de vueltas por agregador (no solo la última, como
+    get_rondas_actuales) -- para poder ver de un vistazo cuáles se terminaron
+    de verdad y cuáles quedaron a medias, antes de decidir qué limpiar. Cada
+    ronda trae su conteo real de puntos cubiertos (chequeos distintos dentro
+    de su ventana de tiempo) y un flag `completa` calculado con
+    _ronda_es_completa. Solo lo consulta un admin (ver la ruta)."""
+    conn = get_connection()
+    try:
+        salida = {}
+        for agregador in AGREGADORES:
+            filas = conn.execute(
+                "SELECT id, iniciada_en, total_objetivo, finalizada_en, worker_count, workers_finalizados "
+                "FROM agregadores_rondas WHERE agregador=? ORDER BY id DESC",
+                (agregador,),
+            ).fetchall()
+            rondas = []
+            for i, f in enumerate(filas):
+                fin = f["finalizada_en"]
+                # Acotar la ventana por arriba con el inicio de la ronda
+                # SIGUIENTE si esta no tiene finalizada_en (ronda abandonada
+                # sin cerrar) -- así "hechos" no arrastra chequeos de rondas
+                # posteriores ni del daemon 24/7.
+                tope = fin
+                if not tope and i > 0:
+                    tope = filas[i - 1]["iniciada_en"]
+                if tope:
+                    hechos = conn.execute(
+                        "SELECT COUNT(DISTINCT direccion_id) FROM agregadores_chequeos "
+                        "WHERE agregador=? AND timestamp>=? AND timestamp<=?",
+                        (agregador, f["iniciada_en"], tope),
+                    ).fetchone()[0]
+                else:
+                    hechos = conn.execute(
+                        "SELECT COUNT(DISTINCT direccion_id) FROM agregadores_chequeos "
+                        "WHERE agregador=? AND timestamp>=?",
+                        (agregador, f["iniciada_en"]),
+                    ).fetchone()[0]
+                n_chequeos = conn.execute(
+                    "SELECT COUNT(*) FROM agregadores_chequeos "
+                    "WHERE agregador=? AND timestamp>=?" + (" AND timestamp<=?" if tope else ""),
+                    (agregador, f["iniciada_en"], tope) if tope else (agregador, f["iniciada_en"]),
+                ).fetchone()[0]
+                rondas.append({
+                    "id": f["id"],
+                    "iniciada_en": f["iniciada_en"],
+                    "finalizada_en": fin,
+                    "total_objetivo": f["total_objetivo"],
+                    "worker_count": f["worker_count"],
+                    "workers_finalizados": f["workers_finalizados"],
+                    "puntos_cubiertos": hechos,
+                    "filas_chequeos": n_chequeos,
+                    "completa": _ronda_es_completa(dict(f), hechos),
+                })
+            salida[agregador] = rondas
+        return salida
+    finally:
+        conn.close()
+
+
 def deduplicar_direcciones(umbral_km: float = UMBRAL_DUPLICADO_KM, aplicar: bool = False) -> dict:
     """Encuentra grupos de direcciones activas que son el mismo sitio real (ver
     _agrupar_por_proximidad) y, si aplicar=True, los fusiona: el "ganador" de cada

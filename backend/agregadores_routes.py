@@ -669,6 +669,14 @@ def panel_rondas_actuales_route():
     return agregadores_module.get_rondas_actuales()
 
 
+@router.get("/panel/historico-rondas", dependencies=[Depends(require_admin)])
+def panel_historico_rondas_route():
+    """Histórico completo de vueltas por agregador, con el conteo real de
+    puntos cubiertos y un flag `completa` -- para decidir qué rondas
+    incompletas limpiar. Ver agregadores.historico_rondas."""
+    return agregadores_module.historico_rondas()
+
+
 @router.post("/admin/direcciones/deduplicar", dependencies=[Depends(require_api_key)])
 def deduplicar_direcciones_route(aplicar: bool = False, umbral_m: float = 100):
     """Encuentra (y si aplicar=true, fusiona) direcciones activas que son el mismo
