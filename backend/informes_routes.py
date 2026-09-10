@@ -197,8 +197,18 @@ def usuarios_para_compartir_route(_user: dict = Depends(get_current_user)):
     # comparte un candidato de su vacante con otro gerente (ver
     # compartir_candidatos_route en reclutamiento_routes.py, que sí filtra
     # de verdad qué candidatos puede compartir).
+    #
+    # rol != 'colaborador': pedido explícito del usuario -- un colaborador no
+    # tiene por qué ver candidatos, así que no debe poder aparecer como
+    # destinatario en NINGUNO de los sitios que usan esta lista (responsable
+    # de una vacante, compartir un candidato suelto, cambiar destinatario,
+    # compartir desde Informes). Si algún día un colaborador sí necesita
+    # recibir algo compartido, esto habría que revisarlo a propósito, no
+    # dejarlo colarse porque salía en una lista pensada para otra cosa.
     conn = get_connection()
-    rows = conn.execute("SELECT id, username, nombre, rol FROM usuarios ORDER BY nombre").fetchall()
+    rows = conn.execute(
+        "SELECT id, username, nombre, rol FROM usuarios WHERE rol != 'colaborador' ORDER BY nombre"
+    ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
