@@ -270,6 +270,28 @@
     background: var(--surface-page); color: var(--text-primary); font-size: 13px; font-family: inherit; box-sizing: border-box;
   }
   .form-field-full { grid-column: 1 / -1; }
+  /* Valoración del gerente tras la entrevista (ver feedbackGerenteHTML en
+     compartidos.js) -- dos columnas en ancho, apiladas en móvil. */
+  .ficha-feedback { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface-1); }
+  .ficha-feedback > label { font-weight: 600; color: var(--text-primary); font-size: 13px; }
+  .ficha-feedback-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; }
+  @media (max-width: 640px) { .ficha-feedback-cols { grid-template-columns: 1fr; } }
+  .ficha-feedback-col h4 { margin: 4px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--text-secondary); }
+  .feedback-check, .feedback-decision {
+    display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; line-height: 1.4;
+    padding: 4px 0; cursor: pointer; color: var(--text-primary);
+  }
+  .feedback-check input, .feedback-decision input { margin-top: 2px; flex-shrink: 0; width: auto; }
+  .feedback-disp-motivo {
+    margin: 2px 0 6px 24px; width: calc(100% - 24px); padding: 6px 8px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary);
+    font-size: 12px; font-family: inherit; box-sizing: border-box;
+  }
+  .feedback-comentario {
+    width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 13px; font-family: inherit; box-sizing: border-box;
+  }
+  .ficha-feedback-sello { margin: 6px 0 0; font-size: 11.5px; color: var(--text-secondary); font-style: italic; }
   .form-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
   /* Acciones de la ficha de vacante: etiquetas cortas + sin salto de línea
      para que Guardar/Mensaje/Fusionar/Archivar/Eliminar/Cancelar quepan
@@ -553,6 +575,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/compartidos.js?v=20260907e"></script>
+<script src="js/compartidos.js?v=20260910a"></script>
 </body>
 </html>

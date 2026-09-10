@@ -165,6 +165,17 @@ def ensure_reclutamiento_tables():
         conn.execute("ALTER TABLE candidatos ADD COLUMN formacion_json TEXT")
     if "experiencia_json" not in cols_candidatos:
         conn.execute("ALTER TABLE candidatos ADD COLUMN experiencia_json TEXT")
+    # feedback_gerente_json: valoración que deja el gerente tras entrevistar a
+    # la persona -- un checklist de "encaje con el puesto" + una decisión
+    # ("Adelante"/"Plan B"/"Con reservas"/"Descartar") + comentarios, más un
+    # sello de quién y cuándo. Es una RECOMENDACIÓN: no cambia el "estado" del
+    # candidato (eso lo sigue llevando RRHH). Estructura:
+    #   {"encaje": {"experiencia": bool, "conocimientos": bool, "estabilidad":
+    #    bool, "disponibilidad": bool, "actitud": bool, "trato": bool,
+    #    "feeling": bool}, "disponibilidad_motivo": str, "decision": str|None,
+    #    "decision_comentario": str, "actualizado_por": str, "actualizado_en": str}
+    if "feedback_gerente_json" not in cols_candidatos:
+        conn.execute("ALTER TABLE candidatos ADD COLUMN feedback_gerente_json TEXT")
     # ia_extraida_en: marca explícita de "a este candidato ya lo procesó
     # Gemini", independiente de si formacion_json/experiencia_json quedaron
     # con algo -- antes se usaba solo "¿tiene formacion_json/experiencia_json
@@ -593,6 +604,7 @@ def _row_to_dict(row):
     d["extra_fields"] = json.loads(d.get("extra_fields") or "{}")
     d["formacion_json"] = json.loads(d.get("formacion_json") or "[]")
     d["experiencia_json"] = json.loads(d.get("experiencia_json") or "[]")
+    d["feedback_gerente_json"] = json.loads(d.get("feedback_gerente_json") or "null")
     # No se expone la ruta de disco tal cual (igual que cv_ruta en
     # informes.py) -- solo si hay foto o no; la propia foto se sirve por su
     # endpoint dedicado (GET /candidatos/{id}/foto).
@@ -1320,6 +1332,10 @@ def actualizar_candidato(candidato_id, campos: dict):
     if "experiencia_json" in campos:
         sets.append("experiencia_json = ?")
         params.append(json.dumps(campos.pop("experiencia_json") or [], ensure_ascii=False))
+    if "feedback_gerente_json" in campos:
+        sets.append("feedback_gerente_json = ?")
+        valor_fb = campos.pop("feedback_gerente_json")
+        params.append(json.dumps(valor_fb, ensure_ascii=False) if valor_fb else None)
     for campo in CAMPOS:
         if campo in campos:
             sets.append(f"{campo} = ?")

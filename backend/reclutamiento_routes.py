@@ -8,6 +8,7 @@ import re
 import secrets
 import threading
 import time
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
@@ -210,6 +211,7 @@ class CandidatoUpdateIn(BaseModel):
     extra_fields: dict[str, str] | None = None
     formacion_json: list[dict[str, str]] | None = None
     experiencia_json: list[dict[str, str]] | None = None
+    feedback_gerente_json: dict | None = None
 
 
 @router.get("/vacantes")
@@ -634,12 +636,48 @@ def crear_candidato_route(body: CandidatoIn, user: dict = Depends(require_inform
     return {"ok": True, "id": candidato_id}
 
 
-_CAMPOS_EDITABLES_SIN_MODULO = ("notas", "contacto_estado")
+# notas, estado del contacto y la valoración del gerente (checklist tras la
+# entrevista) son lo único que puede tocar quien solo tiene la ficha
+# compartida, sin el módulo completo -- todo lo demás son datos del candidato
+# en sí (nombre, teléfono, vacante...) que gestiona RRHH.
+_CAMPOS_EDITABLES_SIN_MODULO = ("notas", "contacto_estado", "feedback_gerente_json")
+
+_FEEDBACK_CAMPOS_CONTENIDO = ("encaje", "disponibilidad_motivo", "decision", "decision_comentario")
+
+
+def _feedback_con_sello(nuevo: dict | None, actual: dict | None, user: dict) -> dict | None:
+    """Devuelve la valoración del gerente lista para guardar. Si el contenido
+    no cambió respecto a lo ya guardado, se conserva el sello anterior (para
+    que un Guardar de la ficha que solo tocó el teléfono no re-firme la
+    valoración a nombre de quien no la escribió). Si cambió, se re-sella con
+    el usuario actual y la fecha de ahora."""
+    def contenido(f):
+        f = f or {}
+        # encaje se normaliza a solo las claves marcadas True -- así "todo
+        # desmarcado" equivale a "sin encaje" y no cuenta como contenido.
+        encaje = {k: True for k, v in (f.get("encaje") or {}).items() if v is True}
+        return {
+            "encaje": encaje,
+            "disponibilidad_motivo": (f.get("disponibilidad_motivo") or "").strip(),
+            "decision": f.get("decision") or None,
+            "decision_comentario": (f.get("decision_comentario") or "").strip(),
+        }
+
+    limpio = contenido(nuevo)
+    # Nada marcado ni escrito -> se guarda NULL (no deja rastro de sello).
+    if not (limpio["encaje"] or limpio["disponibilidad_motivo"] or limpio["decision"] or limpio["decision_comentario"]):
+        return None
+    if actual and contenido(actual) == limpio:
+        return actual
+    limpio["actualizado_por"] = user.get("nombre") or user.get("username")
+    limpio["actualizado_en"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return limpio
 
 
 @router.put("/candidatos/{candidato_id}")
 def actualizar_candidato_route(candidato_id: int, body: CandidatoUpdateIn, user: dict = Depends(require_acceso_candidato)):
-    if reclutamiento_module.get_candidato(candidato_id) is None:
+    candidato_actual = reclutamiento_module.get_candidato(candidato_id)
+    if candidato_actual is None:
         raise HTTPException(status_code=404, detail="Candidato no encontrado")
     if body.estado is not None and body.estado not in reclutamiento_module.ESTADOS:
         raise HTTPException(status_code=400, detail=f"Estado inválido: {body.estado}")
@@ -667,6 +705,10 @@ def actualizar_candidato_route(candidato_id: int, body: CandidatoUpdateIn, user:
         # formulario de la ficha los sigue mandando aunque no se hayan
         # tocado (ver frontend/js/compartidos.js, guardarCandidato).
         campos = {k: v for k, v in campos.items() if k in _CAMPOS_EDITABLES_SIN_MODULO}
+    if "feedback_gerente_json" in campos:
+        campos["feedback_gerente_json"] = _feedback_con_sello(
+            campos["feedback_gerente_json"], candidato_actual.get("feedback_gerente_json"), user
+        )
     reclutamiento_module.actualizar_candidato(candidato_id, campos)
     return {"ok": True}
 

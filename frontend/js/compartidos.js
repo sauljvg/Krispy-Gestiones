@@ -1200,6 +1200,27 @@ let candidatoEditando = null; // null = alta nueva; objeto = editando existente
 let extraFieldsState = {};
 let formacionState = [];
 let experienciaState = [];
+let feedbackGerenteState = {}; // valoración del gerente tras la entrevista (ver feedbackGerenteHTML)
+
+// Checklist "Encaje con el puesto" -- clave interna + etiqueta + descripción.
+// Textos pensados para el día a día de tienda/fábrica (KK) y restaurante
+// (Saona): turnos, fines de semana, trato al cliente, aguante.
+const FEEDBACK_ENCAJE_ITEMS = [
+  ["experiencia", "Experiencia", "tiene el tipo de experiencia y el tiempo necesario para el puesto"],
+  ["conocimientos", "Conocimientos", "sabe hacer lo que pide el puesto en el día a día, o aprende rápido"],
+  ["estabilidad", "Estabilidad", "su historial no cambia de trabajo cada poco tiempo"],
+  ["disponibilidad", "Disponibilidad", "le encajan los turnos, los fines de semana y la fecha de incorporación"],
+  ["actitud", "Actitud y ganas", "se le vio con energía e interés real por trabajar con nosotros"],
+  ["trato", "Trato", "encaja con cómo tratamos al cliente y al compañero (cercanía, compañerismo, honestidad)"],
+  ["feeling", "Buen feeling", "en general me transmitió buenas sensaciones"],
+];
+
+const FEEDBACK_DECISIONES = [
+  ["adelante", "Adelante", "me encaja, sigamos con esta persona"],
+  ["plan_b", "Plan B", "está bien, pero prefiero esperar por si aparece alguien mejor"],
+  ["con_reservas", "Con reservas", "me interesa, pero antes hay que aclarar algo"],
+  ["descartar", "Descartar", "no lo veo para este puesto"],
+];
 
 function vacanteSelectHTML(selectedId, elementId, fallbackLabel) {
   const opciones = vacantesTodasCache
@@ -1281,6 +1302,107 @@ function leerExtraFieldsDelForm() {
     if (k) extra[k] = v;
   });
   return extra;
+}
+
+// --- Valoración del gerente (checklist tras la entrevista) ---
+// Bloque en dos columnas justo encima de Notas: izquierda el checklist de
+// "Encaje con el puesto", derecha la decisión. Debajo, un campo de texto
+// cuyo texto cambia según la decisión, y un sello de quién/cuándo. Se
+// guarda con el botón "Guardar" de la ficha (los gerentes ya lo usan para
+// las Notas). NO cambia el "Estado" del candidato: es una recomendación.
+
+function feedbackComentarioLabel(decision) {
+  if (decision === "con_reservas") return "¿Qué hay que aclarar o preguntarle?";
+  if (decision === "descartar") return "¿Por qué no encaja?";
+  return "Comentario (opcional)";
+}
+
+function feedbackSelloHTML(fb) {
+  if (!fb || !fb.actualizado_por) return "";
+  let fecha = "";
+  try {
+    fecha = new Date(fb.actualizado_en).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" });
+  } catch {
+    fecha = "";
+  }
+  return `<p class="ficha-feedback-sello">Última valoración: ${escapeHTML(fb.actualizado_por)}${fecha ? ` · ${fecha}` : ""}</p>`;
+}
+
+function feedbackGerenteHTML() {
+  const fb = feedbackGerenteState || {};
+  const encaje = fb.encaje || {};
+  const dispNoEncaja = encaje.disponibilidad !== true;
+  const checksHTML = FEEDBACK_ENCAJE_ITEMS.map(([clave, etiqueta, desc]) => {
+    const dispExtra = clave === "disponibilidad"
+      ? `<input type="text" class="feedback-disp-motivo" placeholder="¿Qué no le encaja? (horario, turnos, fines de semana, incorporación...)" value="${escapeHTML(fb.disponibilidad_motivo || "")}" ${dispNoEncaja ? "" : "hidden"}>`
+      : "";
+    return `
+      <label class="feedback-check">
+        <input type="checkbox" class="feedback-encaje" data-clave="${clave}" ${encaje[clave] === true ? "checked" : ""}>
+        <span><strong>${etiqueta}</strong> — ${escapeHTML(desc)}</span>
+      </label>${dispExtra}`;
+  }).join("");
+  const decisionesHTML = FEEDBACK_DECISIONES.map(([clave, etiqueta, desc]) => `
+      <label class="feedback-decision">
+        <input type="radio" name="feedback-decision" class="feedback-decision-radio" value="${clave}" ${fb.decision === clave ? "checked" : ""}>
+        <span><strong>${etiqueta}</strong> — ${escapeHTML(desc)}</span>
+      </label>`).join("");
+  return `
+    <div class="form-field form-field-full ficha-feedback" id="feedback-gerente-wrap">
+      <label>Valoración del gerente</label>
+      <p class="staff-hint" style="margin:-2px 0 8px;">Rellénalo tras la entrevista. Marca solo lo que se cumple; lo que quede sin marcar, coméntalo abajo si hace falta.</p>
+      <div class="ficha-feedback-cols">
+        <div class="ficha-feedback-col">
+          <h4>Encaje con el puesto</h4>
+          ${checksHTML}
+        </div>
+        <div class="ficha-feedback-col">
+          <h4>¿Qué hacemos ahora?</h4>
+          ${decisionesHTML}
+        </div>
+      </div>
+      <textarea id="feedback-comentario" class="feedback-comentario" style="min-height:52px; margin-top:8px;" placeholder="${feedbackComentarioLabel(fb.decision)}">${escapeHTML(fb.decision_comentario || "")}</textarea>
+      ${feedbackSelloHTML(fb)}
+    </div>`;
+}
+
+function wireFeedbackGerente() {
+  const wrap = document.getElementById("feedback-gerente-wrap");
+  if (!wrap) return;
+  const dispMotivo = wrap.querySelector(".feedback-disp-motivo");
+  wrap.querySelectorAll(".feedback-encaje").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      if (cb.dataset.clave === "disponibilidad" && dispMotivo) {
+        dispMotivo.hidden = cb.checked;
+        if (cb.checked) dispMotivo.value = "";
+      }
+    });
+  });
+  const comentario = wrap.querySelector("#feedback-comentario");
+  wrap.querySelectorAll(".feedback-decision-radio").forEach((r) => {
+    r.addEventListener("change", () => {
+      if (comentario) comentario.placeholder = feedbackComentarioLabel(r.value);
+    });
+  });
+}
+
+function leerFeedbackGerenteDelForm() {
+  const wrap = document.getElementById("feedback-gerente-wrap");
+  if (!wrap) return feedbackGerenteState || null; // no se renderizó (alta nueva): deja lo que hubiera
+  const encaje = {};
+  wrap.querySelectorAll(".feedback-encaje").forEach((cb) => {
+    encaje[cb.dataset.clave] = cb.checked;
+  });
+  const decisionRadio = wrap.querySelector(".feedback-decision-radio:checked");
+  const dispMotivoEl = wrap.querySelector(".feedback-disp-motivo");
+  const fb = {
+    encaje,
+    disponibilidad_motivo: !encaje.disponibilidad && dispMotivoEl ? dispMotivoEl.value.trim() : "",
+    decision: decisionRadio ? decisionRadio.value : null,
+    decision_comentario: wrap.querySelector("#feedback-comentario").value.trim(),
+  };
+  const algoMarcado = Object.values(encaje).some(Boolean) || fb.decision || fb.decision_comentario || fb.disponibilidad_motivo;
+  return algoMarcado ? fb : null;
 }
 
 // Historial estructurado de Formación/Experiencia -- estilo InfoJobs (título/
@@ -1470,6 +1592,7 @@ function renderForm() {
   extraFieldsState = esEdicion ? { ...(candidatoEditando.extra_fields || {}) } : {};
   formacionState = esEdicion ? [...(candidatoEditando.formacion_json || [])] : [];
   experienciaState = esEdicion ? [...(candidatoEditando.experiencia_json || [])] : [];
+  feedbackGerenteState = esEdicion ? { ...(candidatoEditando.feedback_gerente_json || {}) } : {};
 
   const subirCvHTML = esEdicion ? "" : `
     <div class="subir-cv-row">
@@ -1596,6 +1719,7 @@ function renderForm() {
                 ${Object.entries(CONTACTO_ESTADO_LABELS).map(([v, l]) => `<option value="${v}" ${(candidatoEditando.contacto_estado || "sin_contactar") === v ? "selected" : ""}>${l}</option>`).join("")}
               </select>
             </div>` : ""}
+          ${esEdicion ? feedbackGerenteHTML() : ""}
           <div class="form-field form-field-full">
             <label>Notas</label>
             <textarea id="candidato-notas-form" style="min-height:60px;">${esEdicion ? escapeHTML(candidatoEditando.notas || "") : ""}</textarea>
@@ -1653,6 +1777,7 @@ function renderForm() {
   document.getElementById("btn-cerrar-ficha-x").addEventListener("click", cerrarForm);
   document.getElementById("btn-guardar-candidato").addEventListener("click", guardarCandidato);
   if (esEdicion) {
+    wireFeedbackGerente();
     // Estado del contacto: se guarda solo al cambiar el selector, igual que
     // en las tarjetas de la cuadrícula (ver renderCandidatosGrid) -- es un
     // campo de seguimiento rápido (Sin contactar/Contactado/...), no tiene
@@ -1687,14 +1812,18 @@ function renderForm() {
     document.getElementById("btn-agregar-archivo").addEventListener("click", agregarArchivoAlCandidato);
   }
   // Quien solo tiene esta ficha compartida (sin el módulo completo) puede
-  // ver todos los datos y anotar seguimiento (Notas, Estado del contacto),
-  // pero no tocar el resto -- el backend ya lo rechaza en silencio si se
-  // manda igualmente, esto es solo para que la ficha no aparente permitir
-  // algo que luego no se guarda. Se deshabilita en vez de ocultar para que
-  // los datos existentes se sigan viendo.
+  // ver todos los datos y anotar seguimiento (Notas, Estado del contacto) y
+  // dejar su Valoración del gerente tras la entrevista -- pero no tocar el
+  // resto. El backend ya lo rechaza en silencio si se manda igualmente,
+  // esto es solo para que la ficha no aparente permitir algo que luego no
+  // se guarda. Se deshabilita en vez de ocultar para que los datos
+  // existentes se sigan viendo.
   if (esEdicion && esUsuarioRestringido) {
     wrap.querySelectorAll("input, textarea, select").forEach((el) => {
-      if (el.id !== "candidato-notas-form" && el.id !== "candidato-contacto-estado-form") el.disabled = true;
+      const editable = el.id === "candidato-notas-form"
+        || el.id === "candidato-contacto-estado-form"
+        || el.closest("#feedback-gerente-wrap");
+      if (!editable) el.disabled = true;
     });
     const btnEliminar = document.getElementById("btn-eliminar-candidato");
     if (btnEliminar) btnEliminar.hidden = true;
@@ -2160,6 +2289,9 @@ async function guardarCandidato() {
   campos.extra_fields = leerExtraFieldsDelForm();
   campos.formacion_json = leerFormacionDelForm();
   campos.experiencia_json = leerExperienciaDelForm();
+  if (document.getElementById("feedback-gerente-wrap")) {
+    campos.feedback_gerente_json = leerFeedbackGerenteDelForm();
+  }
   const vacanteValor = document.getElementById("candidato-vacante-form").value;
   campos.vacante_id = vacanteValor ? Number(vacanteValor) : null;
 
