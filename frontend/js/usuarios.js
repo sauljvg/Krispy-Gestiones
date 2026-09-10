@@ -216,9 +216,30 @@ function tiposInformeSeleccionadosNuevoUsuario() {
 
 // --- Tabla de usuarios existentes ---
 
+// Resumen compacto de una selección de tiendas/centros: si están TODAS las
+// de una marca, se colapsa a "Todas Krispy Kreme" / "Todas Saona" en vez de
+// listar los 7 nombres (que hacían la fila larguísima y disparaban el
+// scroll horizontal). `universo` = lista completa de opciones disponibles.
+function resumenSeleccionPorMarca(seleccionados, universo) {
+  if (!seleccionados || seleccionados.length === 0) return "Todas";
+  const sel = new Set(seleccionados);
+  const kk = (universo || []).filter((x) => !esDeSaona(x));
+  const saona = (universo || []).filter(esDeSaona);
+  const partes = [];
+  for (const [grupo, etiqueta] of [[kk, "Todas Krispy Kreme"], [saona, "Todas Saona"]]) {
+    const elegidos = grupo.filter((x) => sel.has(x));
+    if (elegidos.length === 0) continue;
+    partes.push(elegidos.length === grupo.length && grupo.length > 1 ? etiqueta : elegidos.join(", "));
+  }
+  // Cualquier seleccionado que no esté en el universo conocido (raro) se
+  // añade tal cual para no ocultarlo.
+  const sueltos = seleccionados.filter((x) => !(universo || []).includes(x));
+  return [...partes, ...sueltos].join(", ") || "Todas";
+}
+
 function tiendasResumenHTML(tiendas) {
   if (!tiendas || tiendas.length === 0) return `<span class="staff-hint">Todas</span>`;
-  return escapeHTML(tiendas.join(", "));
+  return escapeHTML(resumenSeleccionPorMarca(tiendas, TIENDAS_DISPONIBLES));
 }
 
 function modulosResumenHTML(u) {
@@ -248,7 +269,7 @@ function climaCentrosResumenHTML(u) {
   if (!tieneClima) return `<span class="staff-hint">Ninguno</span>`;
   const centros = u.clima_centros;
   if (!centros || centros.length === 0) return `<span class="staff-hint">Todos</span>`;
-  return escapeHTML(centros.join(", "));
+  return escapeHTML(resumenSeleccionPorMarca(centros, CLIMA_CENTROS_CACHE || []));
 }
 
 function filaUsuarioHTML(u, currentUserId) {
