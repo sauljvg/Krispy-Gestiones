@@ -1002,14 +1002,15 @@ async function agrCargarMapa() {
   // día concreto (el último chequeo real de cada uno hasta esa hora) --
   // pedido explícito del usuario 28/08: "lo que queremos ver por fechas
   // realmente es una fecha vs otra, cómo estaba el mapa con los dots".
-  // solo_completa=true (solo sin filtro de fecha): el estado "actual" de
-  // cada agregador se toma de su última VUELTA COMPLETA, no del último
-  // chequeo suelto -- así comparar un agregador con otro se hace sobre
-  // pasadas enteras y una vuelta a medias (parada a mano, corte) no
-  // ensucia el mapa. Con filtro de fecha, se compara tal cual ese momento.
+  // agrSoloVueltaCompleta (toggle en la UI): cuando está activo y no hay
+  // filtro de fecha, el estado "actual" de cada agregador se toma de su
+  // última VUELTA COMPLETA, no del último chequeo suelto -- así comparar un
+  // agregador con otro se hace sobre pasadas enteras. Ojo: si la última
+  // vuelta completa cubrió menos puntos que el grid actual, esos puntos
+  // salen "sin datos" hasta que corra una vuelta completa nueva.
   const urlMapa = agrFiltroFechaActivo
     ? `${AGR_API}/mapa-datos-todas?hasta=${encodeURIComponent(agrFiltroFechaActivo.hasta)}`
-    : `${AGR_API}/mapa-datos-todas?solo_completa=true`;
+    : `${AGR_API}/mapa-datos-todas${agrSoloVueltaCompleta ? "?solo_completa=true" : ""}`;
   const res = await fetch(urlMapa, { credentials: "include" });
   const data = await res.json();
 
@@ -1081,6 +1082,11 @@ function agrFilaTabla(c) {
 }
 
 let agrFiltroFechaActivo = null; // null = últimas 24h (de siempre) -- si no, {desde, hasta} ISO UTC
+// false = mapa "estado actual" de siempre (último chequeo de cada punto).
+// true = cada agregador se muestra tal como quedó en su última VUELTA
+// COMPLETA, para poder comparar agregador contra agregador sobre pasadas
+// enteras (ver agrCargarMapa). Se recuerda entre recargas de página.
+let agrSoloVueltaCompleta = localStorage.getItem("agr-solo-vuelta-completa") === "1";
 
 // Los selects de fecha/hora del filtro del mapa solo ofrecen días y horas en
 // los que de verdad hubo scraping -- pedido explícito del usuario 28/08:
@@ -1602,6 +1608,12 @@ function agrToggleMostrarPoligono() {
   const activo = document.getElementById("agr-mostrar-poligono")?.checked;
   localStorage.setItem(AGR_MOSTRAR_POLIGONO_KEY, activo ? "1" : "0");
   agrActualizarPoligonoLimite();
+}
+
+function agrToggleSoloVueltaCompleta() {
+  agrSoloVueltaCompleta = !!document.getElementById("agr-solo-vuelta-completa")?.checked;
+  localStorage.setItem("agr-solo-vuelta-completa", agrSoloVueltaCompleta ? "1" : "0");
+  agrCargarMapa();
 }
 
 function agrMoverPunto(lat, lng, bearingDeg, distanciaKm) {
@@ -2147,6 +2159,8 @@ async function agrActualizarPoligonoLimite() {
   const nota = document.getElementById("agr-cobertura-nota");
   const checkboxPoligono = document.getElementById("agr-mostrar-poligono");
   if (checkboxPoligono) checkboxPoligono.checked = agrMostrarPoligonoActivo();
+  const checkboxVueltaCompleta = document.getElementById("agr-solo-vuelta-completa");
+  if (checkboxVueltaCompleta) checkboxVueltaCompleta.checked = agrSoloVueltaCompleta;
   const checkboxUnion = document.getElementById("agr-mostrar-union");
   if (checkboxUnion) checkboxUnion.checked = agrMostrarUnionActivo();
 

@@ -320,6 +320,10 @@
         <span id="agr-filtro-fecha-activo" style="font-size:12px;color:var(--text-muted);"></span>
       </div>
       <label class="agr-toggle-nuevos">
+        <input type="checkbox" id="agr-solo-vuelta-completa" onchange="agrToggleSoloVueltaCompleta()">
+        Comparar solo con la última vuelta completa de cada agregador (más fiable para comparar, pero los puntos que esa vuelta no llegó a comprobar salen "sin datos")
+      </label>
+      <label class="agr-toggle-nuevos">
         <input type="checkbox" id="agr-mostrar-poligono" checked onchange="agrToggleMostrarPoligono()">
         Mostrar polígono de límite real (forma real de cobertura por dirección)
       </label>
