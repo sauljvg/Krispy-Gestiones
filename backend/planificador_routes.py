@@ -269,11 +269,14 @@ def sugerencias_route(
 # --- Biblioteca de slots (horarios predefinidos) ---
 
 @router.get("/slots")
-def slots_route(empresa: str = "kk", user: dict = Depends(require_planificador)):
-    return {"slots": planificador_module.list_slots(empresa)}
+def slots_route(empresa: str = "kk", centro: str = "", user: dict = Depends(require_planificador)):
+    if centro:
+        _exigir_centro(user, centro)
+    return {"slots": planificador_module.list_slots(empresa, centro or None)}
 
 
 class SlotIn(BaseModel):
+    centro: str
     nombre: str
     inicio_min: int
     duracion_min: int
@@ -281,8 +284,9 @@ class SlotIn(BaseModel):
 
 @router.post("/slots")
 def crear_slot_route(body: SlotIn, empresa: str = "kk", user: dict = Depends(require_planificador)):
+    _exigir_centro(user, body.centro)
     try:
-        sid = planificador_module.crear_slot(empresa, body.nombre, body.inicio_min, body.duracion_min)
+        sid = planificador_module.crear_slot(empresa, body.centro, body.nombre, body.inicio_min, body.duracion_min)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True, "id": sid}

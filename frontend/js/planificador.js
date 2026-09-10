@@ -78,6 +78,21 @@ function presenciaMin(dur) {
   // Minutos que la persona está presente = horas efectivas + bocadillo.
   return dur + boc(dur);
 }
+// El bocadillo de un turno de 6 h+ va al FINAL (turnos de apertura / mañana)
+// salvo que eso empujaría la presencia más allá del cierre -> entonces al
+// PRINCIPIO (turnos de cierre).
+function bocLado(inicioMin, dur) {
+  if (!boc(dur)) return "";
+  return inicioMin + dur + BOCADILLO_MIN > S.config.cierre_min ? "inicio" : "fin";
+}
+// Geometría del bloque en la línea de tiempo: inicio/fin de PRESENCIA (con
+// bocadillo donde corresponda) y el lado en que va la franja rayada.
+function bloqueGeom(inicioMin, dur) {
+  const lado = bocLado(inicioMin, dur);
+  const presIni = inicioMin - (lado === "inicio" ? BOCADILLO_MIN : 0);
+  const presFin = inicioMin + dur + (lado === "fin" ? BOCADILLO_MIN : 0);
+  return { lado, presIni, presFin, left: minToX(presIni), width: (presFin - presIni) * PX_POR_MIN };
+}
 function anchoTimeline() {
   return (S.config.cierre_min - S.config.apertura_min) * PX_POR_MIN;
 }
@@ -424,14 +439,14 @@ function turnoHTML(t) {
   }
   const sin = t.trabajador_id === SIN_ASIGNAR;
   const b = boc(t.duracion_min);
-  const ancho = presenciaMin(t.duracion_min) * PX_POR_MIN;
+  const g = bloqueGeom(t.inicio_min, t.duracion_min);
   const titulo = b
-    ? `${fmtHoras(t.duracion_min)} efectivas · sale 20 min más tarde por el bocadillo (no computa)`
+    ? `${fmtHoras(t.duracion_min)} efectivas · 20 min de bocadillo al ${g.lado === "inicio" ? "principio" : "final"} (no computa)`
     : "";
   return `<div class="plan-turno ${sin ? "sin-asignar" : ""}" data-id="${t.id}" data-trab="${t.trabajador_id}" data-inicio="${t.inicio_min}" data-duracion="${t.duracion_min}"
-    style="left:${minToX(t.inicio_min)}px; width:${ancho}px;"${titulo ? ` title="${titulo}"` : ""}>
+    style="left:${g.left}px; width:${g.width}px;"${titulo ? ` title="${titulo}"` : ""}>
     <span class="plan-turno-txt">${sin ? `Sin asignar · ${fmtHoras(t.duracion_min)}` : etiquetaTurno(t.inicio_min, t.duracion_min)}</span>
-    <i class="plan-turno-boc" style="width:${b * PX_POR_MIN}px;"></i>
+    <i class="plan-turno-boc ${g.lado === "inicio" ? "boc-inicio" : ""}" style="width:${b * PX_POR_MIN}px;"></i>
     ${sin ? `<span class="plan-turno-asig" title="Asignar a alguien">👤</span>` : ""}
     <span class="plan-turno-x" title="Quitar">✕</span>
   </div>`;
@@ -472,12 +487,12 @@ async function quizasUnir(turnoId, ini, fin, trabId) {
   if (!res.ok) mostrarAviso("No se pudieron unir.");
 }
 function etiquetaTurno(inicio, dur) {
-  // El rango muestra la PRESENCIA (con bocadillo); "· X h" son las horas
-  // efectivas que sí computan.
-  const finPres = inicio + presenciaMin(dur);
+  // El rango muestra la PRESENCIA (con bocadillo, al inicio o al fin); "· X h"
+  // son las horas efectivas que sí computan.
+  const g = bloqueGeom(inicio, dur);
   return presenciaMin(dur) * PX_POR_MIN < 95
     ? fmtHoras(dur)
-    : `${fmtHHMM(inicio)}–${fmtHHMM(finPres)} · ${fmtHoras(dur)}`;
+    : `${fmtHHMM(g.presIni)}–${fmtHHMM(g.presFin)} · ${fmtHoras(dur)}`;
 }
 
 // ---------------------------------------------------------------- proyección
@@ -583,10 +598,14 @@ function wireTurno(el) {
         dur = clamp(durOrig + dMin, MIN_DUR, Math.min(der - iniOrig, maxDur));
         ini = iniOrig;
       }
-      el.style.left = minToX(ini) + "px";
-      el.style.width = presenciaMin(dur) * PX_POR_MIN + "px";
+      const g = bloqueGeom(ini, dur);
+      el.style.left = g.left + "px";
+      el.style.width = g.width + "px";
       const bocEl = el.querySelector(".plan-turno-boc");
-      if (bocEl) bocEl.style.width = boc(dur) * PX_POR_MIN + "px";
+      if (bocEl) {
+        bocEl.style.width = boc(dur) * PX_POR_MIN + "px";
+        bocEl.classList.toggle("boc-inicio", g.lado === "inicio");
+      }
       el.querySelector(".plan-turno-txt").textContent = el.classList.contains("sin-asignar")
         ? `Sin asignar · ${fmtHoras(dur)}`
         : etiquetaTurno(ini, dur);
@@ -809,10 +828,11 @@ async function crearSlotEnDia(slot, fecha) {
 
 function paletaHTML() {
   const chips = S.slots
-    .map(
-      (s) => `<div class="plan-slot-chip" draggable="true" data-slot="${s.id}">${escapeHTML(s.nombre)}
-        <small>${fmtHHMM(s.inicio_min)}–${fmtHHMM(s.inicio_min + s.duracion_min)}</small></div>`
-    )
+    .map((s) => {
+      const g = bloqueGeom(s.inicio_min, s.duracion_min);
+      return `<div class="plan-slot-chip" draggable="true" data-slot="${s.id}">${escapeHTML(s.nombre)}
+        <small>${fmtHHMM(g.presIni)}–${fmtHHMM(g.presFin)}</small></div>`;
+    })
     .join("");
   return `<div class="plan-paleta">${chips}<button type="button" class="plan-btn-icono" id="plan-slots-editar">＋ Editar slots</button></div>`;
 }
@@ -875,15 +895,16 @@ function slotGrupoHTML(g) {
   const asg = grupoAsignados(g);
   const lib = grupoLibres(g);
   const b = boc(g.dur);
+  const gm = bloqueGeom(g.ini, g.dur);
   const activo = String(S.slotActivo) === g.key ? "slot-activo" : "";
   const num = `👥 ${asg.length}${lib.length ? ` +${lib.length}` : ""}`;
   return `<div class="plan-turno slot-grupo ${asg.length ? "" : "sin-asignar"} ${activo}"
       data-key="${g.key}" data-ids="${g.turnos.map((t) => t.id).join(",")}"
       data-inicio="${g.ini}" data-duracion="${g.dur}" data-trab="0"
-      style="left:${minToX(g.ini)}px; width:${presenciaMin(g.dur) * PX_POR_MIN}px;"
-      title="${b ? `${fmtHoras(g.dur)} efectivas + 20 min de bocadillo (no computa)` : ""}">
+      style="left:${gm.left}px; width:${gm.width}px;"
+      title="${b ? `${fmtHoras(g.dur)} efectivas + 20 min de bocadillo al ${gm.lado === "inicio" ? "principio" : "final"} (no computa)` : ""}">
     <span class="plan-turno-txt">${etiquetaTurno(g.ini, g.dur)}</span>
-    <i class="plan-turno-boc" style="width:${b * PX_POR_MIN}px;"></i>
+    <i class="plan-turno-boc ${gm.lado === "inicio" ? "boc-inicio" : ""}" style="width:${b * PX_POR_MIN}px;"></i>
     <span class="plan-turno-num" title="Personas en este slot — clic para ver o quitar">${num}</span>
     <span class="plan-turno-x" title="Quitar el slot entero del día">✕</span>
   </div>`;
@@ -1028,7 +1049,7 @@ function renderSlotsSemana() {
             S.slotActivo === actkey ? "activo" : ""
           }" data-actkey="${actkey}" data-key="${g.key}" data-fecha="${d}">
             <span class="plan-sem-slot-num">👥 ${asg.length}${lib.length ? ` +${lib.length}` : ""}</span>
-            <small>${fmtHHMM(g.ini)}–${fmtHHMM(g.ini + presenciaMin(g.dur))} · ${fmtHoras(g.dur)}</small>
+            <small>${fmtHHMM(bloqueGeom(g.ini, g.dur).presIni)}–${fmtHHMM(bloqueGeom(g.ini, g.dur).presFin)} · ${fmtHoras(g.dur)}</small>
           </div>`;
         })
         .join("");
@@ -1135,7 +1156,7 @@ function wireSlots() {
     const r = await fetch(url("slots"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nombre: nombre.trim(), inicio_min: ini, duracion_min: fin - ini }),
+      body: JSON.stringify({ centro: S.centro, nombre: nombre.trim(), inicio_min: ini, duracion_min: fin - ini }),
     });
     if (!r.ok) return mostrarAviso("No se pudo crear el slot.");
     const d = await r.json();

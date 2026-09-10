@@ -50,27 +50,121 @@ COMPLEMENTARIAS_VOLUNTARIAS_DESDE = 1.30
 # Editable por centro en "Horario del centro"; esto es solo el valor de partida.
 _DIRECCION_ODOO_DEFECTO = {
     "ParqueSur Tienda": "T-MD02 PQS-Parquesur",
+    "ParqueSur Fabrica": "F-MD01 PQS-Parquesur Fábrica",
+    "Princesa": "T-MD03 PRC-Princesa",
+    "Caleido": "T-MD04 CLD-Caleido",
+    "La Gavia": "T-MD05 LGV-La Gavia",
+    "Gran Plaza 2": "T-MD06 GPZ-Gran Plaza 2",
+    "Plenilunio": "T-MD07 PLE-Plenilunio",
 }
 
 
 def _bocadillo(duracion_min):
     return BOCADILLO_MIN if int(duracion_min or 0) >= BOCADILLO_DESDE_MIN else 0
 
-# Slots de horario "de siempre" -- se precargan la primera vez (empresa kk) a
-# partir de los patrones que más se repiten en la planificación real de Odoo.
-# (nombre, inicio_min, duracion_min)
-_SLOTS_SEED = [
-    ("Apertura 8h", 8 * 60, 480),
-    ("Media mañana 8h", 10 * 60, 480),
-    ("Cierre 8h", 15 * 60 + 10, 480),
-    ("Tarde 6h", 17 * 60 + 10, 360),
-    ("Tarde 5h", 17 * 60 + 30, 300),
-    ("Mañana corta 3h", 10 * 60 + 30, 180),
-    ("Mañana 5h", 10 * 60 + 30, 300),
-    ("Media mañana 4h", 10 * 60, 240),
-    ("Refuerzo tarde 4h", 18 * 60, 240),
-    ("Refuerzo tarde 3h", 18 * 60, 180),
-]
+
+def _bocadillo_lado(inicio_min, duracion_min, cierre_min):
+    """El bocadillo de 20 min de un turno de 6 h+ va al FINAL de la jornada
+    (turnos de apertura / mañana) salvo que eso empujaría la presencia más allá
+    del cierre de la tienda -- entonces va al PRINCIPIO (turnos de cierre)."""
+    if _bocadillo(duracion_min) == 0:
+        return ""
+    if int(inicio_min) + int(duracion_min) + BOCADILLO_MIN > int(cierre_min):
+        return "inicio"
+    return "fin"
+
+
+# Apertura / cierre por centro (min desde 00:00; >1440 = pasada la medianoche).
+# De los patrones reales de Odoo. Solo se siembran la 1ª vez; el gerente los
+# puede cambiar en "Horario del centro" sin que se vuelvan a pisar.
+_CONFIG_SEED_POR_CENTRO = {
+    "ParqueSur Tienda": (8 * 60, 23 * 60 + 30),
+    "ParqueSur Fabrica": (6 * 60, 31 * 60 + 20),   # cierra 07:20 del día siguiente (turno de noche)
+    "Princesa": (7 * 60, 23 * 60 + 30),
+    "Caleido": (7 * 60 + 30, 23 * 60 + 30),
+    "La Gavia": (8 * 60, 22 * 60 + 30),
+    "Gran Plaza 2": (9 * 60 + 30, 23 * 60),
+    "Plenilunio": (9 * 60 + 10, 22 * 60 + 30),
+}
+
+# Slots "de siempre" por centro. (nombre, inicio_min, duracion_min) donde
+# inicio/duracion son de TRABAJO EFECTIVO (sin contar el bocadillo). El lado
+# del bocadillo se calcula solo con `_bocadillo_lado`. Sacados de los patrones
+# que más se repiten en la planificación real de Odoo (planning.slot).
+_SLOTS_SEED_POR_CENTRO = {
+    "ParqueSur Tienda": [
+        ("Apertura 8h", 8 * 60, 480),
+        ("Media mañana 8h", 10 * 60, 480),
+        ("Cierre 8h", 15 * 60 + 30, 480),
+        ("Cierre 6h", 17 * 60 + 30, 360),
+        ("Tarde 5h", 17 * 60 + 30, 300),
+        ("Mañana corta 3h", 10 * 60 + 30, 180),
+        ("Mañana 5h", 10 * 60 + 30, 300),
+        ("Refuerzo tarde 4h30", 18 * 60, 270),
+        ("Refuerzo tarde 4h", 18 * 60, 240),
+    ],
+    "Princesa": [
+        ("Apertura 8h", 7 * 60, 480),
+        ("Media mañana 8h", 9 * 60, 480),
+        ("Cierre 8h", 15 * 60 + 30, 480),
+        ("Cierre 7h", 16 * 60 + 30, 420),
+        ("Cierre 6h", 17 * 60 + 30, 360),
+        ("Media mañana 6h", 10 * 60, 360),
+        ("Mañana 4h", 10 * 60, 240),
+        ("Tarde 5h", 17 * 60, 300),
+    ],
+    "Caleido": [
+        ("Apertura 8h", 7 * 60 + 30, 480),
+        ("Media mañana 8h", 10 * 60, 480),
+        ("Mediodía 8h", 13 * 60 + 40, 480),
+        ("Tarde 8h", 14 * 60 + 10, 480),
+        ("Cierre 8h", 15 * 60 + 30, 480),
+        ("Tarde 6h", 15 * 60 + 40, 360),
+        ("Mañana 4h", 10 * 60, 240),
+        ("Tarde 5h", 17 * 60, 300),
+    ],
+    "La Gavia": [
+        ("Media mañana 8h", 9 * 60 + 30, 480),
+        ("Media mañana 7h", 9 * 60 + 30, 420),
+        ("Media mañana 6h", 9 * 60 + 30, 360),
+        ("Mediodía cierre 8h", 14 * 60 + 30, 480),
+        ("Cierre 6h", 16 * 60 + 30, 360),
+        ("Mediodía 5h", 13 * 60 + 30, 300),
+        ("Tarde 5h", 17 * 60 + 30, 300),
+        ("Refuerzo tarde 4h", 18 * 60 + 30, 240),
+    ],
+    "Gran Plaza 2": [
+        ("Apertura 8h", 9 * 60 + 30, 480),
+        ("Mediodía 8h", 14 * 60 + 10, 480),
+        ("Cierre 7h", 15 * 60 + 10, 420),
+        ("Cierre 6h", 16 * 60 + 10, 360),
+        ("Tarde 5h", 17 * 60 + 30, 300),
+        ("Refuerzo tarde 4h30", 18 * 60, 270),
+        ("Mañana 4h", 10 * 60, 240),
+    ],
+    "Plenilunio": [
+        ("Apertura 8h", 9 * 60 + 10, 480),
+        ("Mediodía cierre 8h", 14 * 60 + 30, 480),
+        ("Cierre 7h", 15 * 60 + 30, 420),
+        ("Cierre 6h", 16 * 60 + 30, 360),
+        ("Media mañana 6h", 10 * 60, 360),
+        ("Mañana 5h", 9 * 60 + 10, 300),
+        ("Tarde 5h", 17 * 60 + 30, 300),
+        ("Refuerzo tarde 4h", 18 * 60 + 30, 240),
+    ],
+    "ParqueSur Fabrica": [
+        ("Mañana 8h", 7 * 60, 480),
+        ("Apertura 8h", 6 * 60, 480),
+        ("Tarde 8h", 15 * 60, 480),
+        ("Tarde-noche 8h", 15 * 60 + 30, 480),
+        ("Noche 8h", 23 * 60, 480),
+        ("Mediodía 8h", 10 * 60, 480),
+        ("Refuerzo tarde 6h", 17 * 60, 360),
+        ("Limpieza mañana 4h", 7 * 60, 240),
+        ("Limpieza mediodía 4h", 11 * 60, 240),
+        ("Limpieza tarde 4h", 19 * 60, 240),
+    ],
+}
 
 
 def ensure_planificador_tables():
@@ -137,13 +231,34 @@ def ensure_planificador_tables():
             creado_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
-    if conn.execute("SELECT COUNT(*) FROM planificador_slots WHERE empresa = 'kk'").fetchone()[0] == 0:
-        for i, (nombre, ini, dur) in enumerate(_SLOTS_SEED):
+    # Los slots pasan a ser POR CENTRO (cada tienda tiene sus patrones). Los
+    # que ya había eran los globales auto-sembrados de ParqueSur Tienda con el
+    # modelo antiguo -- se descartan y se vuelven a sembrar bien más abajo.
+    cols_slots = {r[1] for r in conn.execute("PRAGMA table_info(planificador_slots)")}
+    if "centro" not in cols_slots:
+        conn.execute("ALTER TABLE planificador_slots ADD COLUMN centro TEXT")
+        conn.execute("DELETE FROM planificador_slots WHERE centro IS NULL AND empresa = 'kk'")
+    # Siembra por centro: solo si ese centro todavía no tiene slots (no pisa
+    # nada que el gerente haya tocado). ParqueSur Tienda ya tenía los suyos.
+    for centro, patrones in _SLOTS_SEED_POR_CENTRO.items():
+        ya = conn.execute(
+            "SELECT COUNT(*) FROM planificador_slots WHERE empresa = 'kk' AND centro = ?", (centro,)
+        ).fetchone()[0]
+        if ya:
+            continue
+        for i, (nombre, ini, dur) in enumerate(patrones):
             conn.execute(
-                "INSERT INTO planificador_slots (empresa, nombre, inicio_min, duracion_min, orden) "
-                "VALUES ('kk', ?, ?, ?, ?)",
-                (nombre, ini, dur, i),
+                "INSERT INTO planificador_slots (empresa, centro, nombre, inicio_min, duracion_min, orden) "
+                "VALUES ('kk', ?, ?, ?, ?, ?)",
+                (centro, nombre, ini, dur, i),
             )
+    # Apertura / cierre por centro: solo si no hay fila de config todavía.
+    for centro, (ap, ci) in _CONFIG_SEED_POR_CENTRO.items():
+        conn.execute(
+            "INSERT INTO planificador_config (empresa, centro, apertura_min, cierre_min) VALUES ('kk', ?, ?, ?) "
+            "ON CONFLICT (empresa, centro) DO NOTHING",
+            (centro, ap, ci),
+        )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_turnos_busqueda ON planificador_turnos (empresa, centro, fecha)")
     cols_turnos = {r[1] for r in conn.execute("PRAGMA table_info(planificador_turnos)")}
     if "tipo" not in cols_turnos:
@@ -784,26 +899,37 @@ def set_vacaciones(empresa, centro, trabajador_id, desde, hasta, quitar=False):
 
 # --- Biblioteca de slots (horarios predefinidos) ---
 
-def list_slots(empresa):
+def list_slots(empresa, centro=None):
     conn = get_connection()
-    rows = conn.execute(
-        "SELECT * FROM planificador_slots WHERE empresa = ? ORDER BY orden, inicio_min", (empresa,)
-    ).fetchall()
+    if centro:
+        rows = conn.execute(
+            "SELECT * FROM planificador_slots WHERE empresa = ? AND centro = ? ORDER BY orden, inicio_min",
+            (empresa, centro),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM planificador_slots WHERE empresa = ? ORDER BY orden, inicio_min", (empresa,)
+        ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def crear_slot(empresa, nombre, inicio_min, duracion_min):
+def crear_slot(empresa, centro, nombre, inicio_min, duracion_min):
     nombre = (nombre or "").strip()
     if not nombre:
         raise ValueError("Falta el nombre del slot")
+    if not centro:
+        raise ValueError("Falta el centro")
     if not (MIN_TURNO_MIN <= int(duracion_min) <= MAX_TURNO_MIN):
         raise ValueError("Un slot debe durar entre 1 y 10 horas")
     conn = get_connection()
-    mx = conn.execute("SELECT COALESCE(MAX(orden), 0) FROM planificador_slots WHERE empresa = ?", (empresa,)).fetchone()[0]
+    mx = conn.execute(
+        "SELECT COALESCE(MAX(orden), 0) FROM planificador_slots WHERE empresa = ? AND centro = ?", (empresa, centro)
+    ).fetchone()[0]
     cur = conn.execute(
-        "INSERT INTO planificador_slots (empresa, nombre, inicio_min, duracion_min, orden) VALUES (?, ?, ?, ?, ?)",
-        (empresa, nombre, int(inicio_min), int(duracion_min), mx + 1),
+        "INSERT INTO planificador_slots (empresa, centro, nombre, inicio_min, duracion_min, orden) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (empresa, centro, nombre, int(inicio_min), int(duracion_min), mx + 1),
     )
     conn.commit()
     sid = cur.lastrowid
@@ -861,17 +987,27 @@ def _turnos_ventana_por_trab(empresa, centro, fecha):
     return out
 
 
-def _descanso_12h_ko(turnos_persona, fecha, ini, fin):
+def _presencia(inicio_min, duracion_min, cierre_min):
+    """Ventana de presencia real de un turno: el trabajo efectivo más los
+    20 min de bocadillo, que van al final o al principio según la jornada."""
+    lado = _bocadillo_lado(inicio_min, duracion_min, cierre_min)
+    ini = inicio_min - (BOCADILLO_MIN if lado == "inicio" else 0)
+    fin = inicio_min + duracion_min + (BOCADILLO_MIN if lado == "fin" else 0)
+    return ini, fin
+
+
+def _descanso_12h_ko(turnos_persona, fecha, ini, fin, cierre_min):
     """¿Poner [ini, fin) en `fecha` deja menos de 12 h entre esa jornada y una
     adyacente (mismo día -- turno partido lejano no --, día anterior o
-    siguiente)? Se mide sobre la PRESENCIA real: si el turno lleva bocadillo,
-    la persona sale 20 min más tarde. Los solapes los pilla otro chequeo."""
+    siguiente)? Se mide sobre la PRESENCIA real (con el bocadillo). Los
+    solapes los pilla otro chequeo."""
     d = datetime.date.fromisoformat(fecha)
-    fin = fin + _bocadillo(fin - ini)
+    _, fin = _presencia(ini, fin - ini, cierre_min)
     for t in turnos_persona:
         off = (datetime.date.fromisoformat(t["fecha"]) - d).days * 1440
-        tini = t["inicio_min"] + off
-        tfin = t["inicio_min"] + t["duracion_min"] + _bocadillo(t["duracion_min"]) + off
+        tini_p, tfin_p = _presencia(t["inicio_min"], t["duracion_min"], cierre_min)
+        tini = tini_p + off
+        tfin = tfin_p + off
         if tini >= fin and tini - fin < DESCANSO_ENTRE_JORNADAS_MIN:
             return True
         if ini >= tfin and ini - tfin < DESCANSO_ENTRE_JORNADAS_MIN:
@@ -892,7 +1028,9 @@ def sugerencias(empresa, centro, fecha, inicio_min, duracion_min):
     min_sem = _minutos_semana(turnos_sem)
     del_dia = [t for t in turnos_sem if t["fecha"] == fecha]
     ventana = _turnos_ventana_por_trab(empresa, centro, fecha)
-    jc_ok = get_config(empresa, centro).get("complementarias_jornada_completa")
+    cfg = get_config(empresa, centro)
+    jc_ok = cfg.get("complementarias_jornada_completa")
+    cierre_min = cfg.get("cierre_min", CIERRE_DEFECTO_MIN)
     out = []
     for w in trabajadores:
         wid = w["id"]
@@ -921,7 +1059,7 @@ def sugerencias(empresa, centro, fecha, inicio_min, duracion_min):
             else:
                 complementaria = "pactada"
                 avisos.append("horas complementarias")
-        if _descanso_12h_ko(ventana.get(wid, []), fecha, ini, fin):
+        if _descanso_12h_ko(ventana.get(wid, []), fecha, ini, fin, cierre_min):
             avisos.append("No cumple el descanso mínimo de 12 h entre jornadas")
         if ocupado:
             motivo = "ya trabaja ese día"
@@ -963,6 +1101,7 @@ def exportar_odoo_xlsx(empresa, centro, desde, hasta):
     cfg = get_config(empresa, centro)
     direccion = (cfg.get("direccion_odoo") or "").strip()
     rol = (cfg.get("rol_odoo") or "Retail").strip() or "Retail"
+    cierre_min = cfg.get("cierre_min", CIERRE_DEFECTO_MIN)
     trabajadores = {w["id"]: w for w in list_trabajadores(empresa, centro, incluir_inactivos=True)}
     conn = get_connection()
     rows = conn.execute(
@@ -986,8 +1125,11 @@ def exportar_odoo_xlsx(empresa, centro, desde, hasta):
             continue
         dur = int(r["duracion_min"])
         descanso = round(_bocadillo(dur) / 60, 10)
+        # "Fecha de inicio" en Odoo es el inicio de PRESENCIA -- si el bocadillo
+        # va al principio (turno de cierre), empieza 20 min antes del trabajo.
+        pres_ini, _ = _presencia(int(r["inicio_min"]), dur, cierre_min)
         d = datetime.date.fromisoformat(r["fecha"])
-        ini = datetime.datetime(d.year, d.month, d.day) + datetime.timedelta(minutes=int(r["inicio_min"]))
+        ini = datetime.datetime(d.year, d.month, d.day) + datetime.timedelta(minutes=pres_ini)
         ws.append([
             descanso,
             direccion,
@@ -1072,7 +1214,7 @@ def dia_completo(empresa, centro, fecha):
         "minutos_semana": {str(k): v for k, v in _minutos_semana(turnos_sem).items()},
         "dias_trabajados": _dias_trabajados_semana(turnos_sem),
         "proyeccion": {str(k): v for k, v in get_proyeccion(empresa, centro, fecha).items()},
-        "slots": list_slots(empresa),
+        "slots": list_slots(empresa, centro),
         "lunes": _lunes_de(fecha),
     }
 
@@ -1087,7 +1229,7 @@ def semana_completa(empresa, centro, fecha):
         "turnos": turnos_sem,
         "minutos_semana": {str(k): v for k, v in _minutos_semana(turnos_sem).items()},
         "dias_trabajados": _dias_trabajados_semana(turnos_sem),
-        "slots": list_slots(empresa),
+        "slots": list_slots(empresa, centro),
         "lunes": lunes,
         "dias": dias,
     }

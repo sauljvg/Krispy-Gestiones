@@ -57,7 +57,9 @@
   .plan-turno:hover .plan-turno-asig { opacity: 1; }
   /* Últimos 20 min de un turno de 6 h+ : bocadillo (presencia, no computa). */
   .plan-turno-boc { position: absolute; right: 0; top: 0; bottom: 0; pointer-events: none; background: repeating-linear-gradient(45deg, rgba(0,0,0,.20) 0 4px, rgba(0,0,0,0) 4px 8px); border-left: 1px dashed rgba(255,255,255,.55); }
+  .plan-turno-boc.boc-inicio { right: auto; left: 0; border-left: none; border-right: 1px dashed rgba(255,255,255,.55); }
   .plan-turno.sin-asignar .plan-turno-boc { border-left-color: rgba(0,0,0,.3); }
+  .plan-turno.sin-asignar .plan-turno-boc.boc-inicio { border-right-color: rgba(0,0,0,.3); }
   /* Contador de personas en un slot compartido (vista Slots). */
   .plan-turno-num { position: absolute; top: 1px; right: 20px; height: 15px; line-height: 15px; padding: 0 5px; border-radius: 4px; background: rgba(0,0,0,.4); color: #fff; font-size: 10.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
   .plan-turno.sin-asignar .plan-turno-num { background: color-mix(in srgb, var(--status-warning) 55%, #000); }
@@ -342,6 +344,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260910a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/planificador.js?v=20260911a"></script>
+<script src="js/planificador.js?v=20260911b"></script>
 </body>
 </html>
