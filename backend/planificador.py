@@ -1,0 +1,431 @@
+"""Planificador de turnos: el gerente arma el horario del día de su centro en
+una línea de tiempo horizontal por horas. Bloques de turno (solo horario,
+sin puesto) que se arrastran y se estiran por los bordes; el contador de la
+izquierda va sumando las horas de la SEMANA (lun-dom) de cada trabajador
+contra sus horas de contrato.
+
+- Roster propio (planificador_trabajadores): se puebla desde el Dashboard
+  KPIs (kpi_empleados, por codigo_empleado), importando el mismo Excel de
+  Odoo ("GO_report"), o a mano. Horas de contrato = % de jornada * 40.
+- Proyección por franja horaria (planificador_proyeccion): transacciones y
+  venta previstas que mete el gerente. El "personal ideal" de una franja se
+  calcula como transacciones_previstas / objetivo_transacciones_hora (config
+  por centro), con override manual opcional.
+"""
+import datetime
+
+from db import get_connection
+
+# Reutilizamos los lectores de Excel, el mapa de centros y las utilidades de
+# parseo del Dashboard KPIs -- el Excel de Odoo es exactamente el mismo.
+import kpis as kpis_module
+
+HORAS_JORNADA_COMPLETA = 40
+APERTURA_DEFECTO_MIN = 8 * 60      # 08:00
+CIERRE_DEFECTO_MIN = 25 * 60       # 01:00 del día siguiente (25:00)
+
+
+def ensure_planificador_tables():
+    conn = get_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS planificador_trabajadores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            empresa TEXT NOT NULL DEFAULT 'kk',
+            centro TEXT NOT NULL,
+            codigo_empleado TEXT,
+            nombre TEXT NOT NULL,
+            horas_contrato_semana REAL,
+            origen TEXT NOT NULL DEFAULT 'manual',
+            activo INTEGER NOT NULL DEFAULT 1,
+            creado_en TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS planificador_turnos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            empresa TEXT NOT NULL DEFAULT 'kk',
+            centro TEXT NOT NULL,
+            trabajador_id INTEGER NOT NULL REFERENCES planificador_trabajadores(id) ON DELETE CASCADE,
+            fecha TEXT NOT NULL,
+            inicio_min INTEGER NOT NULL,
+            duracion_min INTEGER NOT NULL,
+            creado_por TEXT,
+            creado_en TEXT NOT NULL DEFAULT (datetime('now')),
+            actualizado_en TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS planificador_proyeccion (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            empresa TEXT NOT NULL DEFAULT 'kk',
+            centro TEXT NOT NULL,
+            fecha TEXT NOT NULL,
+            franja_min INTEGER NOT NULL,
+            transacciones_prevista REAL,
+            venta_prevista REAL,
+            personal_ideal_manual REAL,
+            UNIQUE (empresa, centro, fecha, franja_min)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS planificador_config (
+            empresa TEXT NOT NULL DEFAULT 'kk',
+            centro TEXT NOT NULL,
+            apertura_min INTEGER NOT NULL DEFAULT 480,
+            cierre_min INTEGER NOT NULL DEFAULT 1500,
+            objetivo_transacciones_hora REAL,
+            PRIMARY KEY (empresa, centro)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_turnos_busqueda ON planificador_turnos (empresa, centro, fecha)")
+    conn.commit()
+    conn.close()
+
+
+def _horas_contrato(pct):
+    if pct is None:
+        return None
+    h = round(pct / 100 * HORAS_JORNADA_COMPLETA, 1)
+    return int(h) if h == int(h) else h
+
+
+# --- Centros ---
+
+def centros_disponibles(empresa):
+    """Centros para los que se puede planificar. En KK salen de kpi_empleados
+    (misma fuente que el roster); en Saona, de lo que ya se haya dado de alta
+    en el propio planificador (kpi_empleados es solo KK). En ambos casos se
+    añaden los centros dados de alta a mano que no estén ya en la lista."""
+    conn = get_connection()
+    centros = set()
+    if empresa != "saona":
+        rows = conn.execute(
+            "SELECT DISTINCT centro FROM kpi_empleados WHERE centro IS NOT NULL AND centro != ''"
+        ).fetchall()
+        for r in rows:
+            if r["centro"] not in kpis_module.CENTROS_EXCLUIDOS:
+                centros.add(r["centro"])
+    rows = conn.execute(
+        "SELECT DISTINCT centro FROM planificador_trabajadores WHERE empresa = ? AND centro IS NOT NULL AND centro != ''",
+        (empresa,),
+    ).fetchall()
+    for r in rows:
+        centros.add(r["centro"])
+    conn.close()
+    return sorted(centros)
+
+
+# --- Config del centro ---
+
+def get_config(empresa, centro):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT apertura_min, cierre_min, objetivo_transacciones_hora FROM planificador_config WHERE empresa = ? AND centro = ?",
+        (empresa, centro),
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return {
+            "apertura_min": APERTURA_DEFECTO_MIN,
+            "cierre_min": CIERRE_DEFECTO_MIN,
+            "objetivo_transacciones_hora": None,
+        }
+    return dict(row)
+
+
+def set_config(empresa, centro, apertura_min, cierre_min, objetivo_transacciones_hora):
+    if cierre_min <= apertura_min:
+        raise ValueError("La hora de cierre debe ser posterior a la de apertura")
+    conn = get_connection()
+    conn.execute("""
+        INSERT INTO planificador_config (empresa, centro, apertura_min, cierre_min, objetivo_transacciones_hora)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (empresa, centro) DO UPDATE SET
+            apertura_min = excluded.apertura_min,
+            cierre_min = excluded.cierre_min,
+            objetivo_transacciones_hora = excluded.objetivo_transacciones_hora
+    """, (empresa, centro, apertura_min, cierre_min, objetivo_transacciones_hora))
+    conn.commit()
+    conn.close()
+
+
+# --- Roster ---
+
+def list_trabajadores(empresa, centro, incluir_inactivos=False):
+    conn = get_connection()
+    sql = "SELECT * FROM planificador_trabajadores WHERE empresa = ? AND centro = ?"
+    params = [empresa, centro]
+    if not incluir_inactivos:
+        sql += " AND activo = 1"
+    sql += " ORDER BY nombre COLLATE NOCASE"
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def cargar_desde_kpis(empresa, centro):
+    """Trae los empleados activos de ese centro desde kpi_empleados (solo KK).
+    Upsert por codigo_empleado: crea los que faltan, actualiza nombre de los
+    que ya están y reactiva los inactivos. No pisa las horas de contrato si el
+    gerente ya las editó (COALESCE), ni toca a los de alta manual."""
+    if empresa != "kk":
+        return {"creados": 0, "actualizados": 0}
+    conn = get_connection()
+    empleados = conn.execute(
+        "SELECT codigo_empleado, nombre, porcentaje_jornada FROM kpi_empleados "
+        "WHERE centro = ? AND (fecha_baja IS NULL OR fecha_baja = '')",
+        (centro,),
+    ).fetchall()
+    creados = actualizados = 0
+    for e in empleados:
+        cod = str(e["codigo_empleado"]).strip()
+        horas = _horas_contrato(e["porcentaje_jornada"])
+        existente = conn.execute(
+            "SELECT id FROM planificador_trabajadores WHERE empresa = 'kk' AND centro = ? AND codigo_empleado = ?",
+            (centro, cod),
+        ).fetchone()
+        if existente:
+            conn.execute(
+                "UPDATE planificador_trabajadores SET nombre = ?, "
+                "horas_contrato_semana = COALESCE(horas_contrato_semana, ?), activo = 1 WHERE id = ?",
+                (e["nombre"], horas, existente["id"]),
+            )
+            actualizados += 1
+        else:
+            conn.execute(
+                "INSERT INTO planificador_trabajadores "
+                "(empresa, centro, codigo_empleado, nombre, horas_contrato_semana, origen) "
+                "VALUES ('kk', ?, ?, ?, ?, 'kpis')",
+                (centro, cod, e["nombre"], horas),
+            )
+            creados += 1
+    conn.commit()
+    conn.close()
+    return {"creados": creados, "actualizados": actualizados}
+
+
+def importar_odoo_excel(empresa, contenido, nombre_archivo):
+    """El mismo Excel que el Dashboard KPIs (GO_report). Da de alta / actualiza
+    en el roster a los empleados activos, cada uno en su centro. Solo KK (el
+    Excel de Odoo es de GO)."""
+    es_xls = nombre_archivo.lower().endswith(".xls") and not nombre_archivo.lower().endswith(".xlsx")
+    try:
+        filas = kpis_module._leer_filas_xls(contenido) if es_xls else kpis_module._leer_filas_xlsx(contenido)
+    except Exception as exc:
+        raise ValueError(f"No se pudo leer el archivo Excel: {exc}")
+    if not filas:
+        raise ValueError("El archivo está vacío")
+    encabezado = [kpis_module._normaliza(str(c)) for c in filas[0]]
+    indice = {}
+    for i, col in enumerate(encabezado):
+        clave = kpis_module._ALIAS_COLUMNAS.get(col)
+        if clave:
+            indice[clave] = i
+    faltan = [c for c in ("centro", "codigo_empleado", "nombre") if c not in indice]
+    if faltan:
+        raise ValueError(f"Faltan columnas obligatorias en el Excel: {', '.join(faltan)}")
+
+    conn = get_connection()
+    creados = actualizados = 0
+    for fila in filas[1:]:
+        def val(clave):
+            i = indice.get(clave)
+            return fila[i] if i is not None and i < len(fila) else None
+
+        cod = kpis_module._codigo_empleado(val("codigo_empleado"))
+        nombre = kpis_module._texto(val("nombre"))
+        centro = kpis_module._centro_normalizado(val("centro"))
+        baja = kpis_module._fecha_a_iso(val("fecha_baja"))
+        if not cod or not nombre or not centro or centro in kpis_module.CENTROS_EXCLUIDOS or baja:
+            continue
+        horas = _horas_contrato(kpis_module._numero(val("porcentaje_jornada")))
+        existente = conn.execute(
+            "SELECT id FROM planificador_trabajadores WHERE empresa = 'kk' AND codigo_empleado = ?",
+            (cod,),
+        ).fetchone()
+        if existente:
+            conn.execute(
+                "UPDATE planificador_trabajadores SET nombre = ?, centro = ?, "
+                "horas_contrato_semana = COALESCE(horas_contrato_semana, ?), activo = 1 WHERE id = ?",
+                (nombre, centro, horas, existente["id"]),
+            )
+            actualizados += 1
+        else:
+            conn.execute(
+                "INSERT INTO planificador_trabajadores "
+                "(empresa, centro, codigo_empleado, nombre, horas_contrato_semana, origen) "
+                "VALUES ('kk', ?, ?, ?, ?, 'odoo')",
+                (centro, cod, nombre, horas),
+            )
+            creados += 1
+    conn.commit()
+    conn.close()
+    return {"creados": creados, "actualizados": actualizados}
+
+
+def crear_trabajador_manual(empresa, centro, nombre, horas_contrato_semana):
+    nombre = (nombre or "").strip()
+    if not nombre:
+        raise ValueError("Falta el nombre")
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO planificador_trabajadores (empresa, centro, nombre, horas_contrato_semana, origen) "
+        "VALUES (?, ?, ?, ?, 'manual')",
+        (empresa, centro, nombre, horas_contrato_semana),
+    )
+    conn.commit()
+    tid = cur.lastrowid
+    conn.close()
+    return tid
+
+
+def actualizar_trabajador(trabajador_id, nombre=None, horas_contrato_semana=None, activo=None):
+    sets, params = [], []
+    if nombre is not None:
+        sets.append("nombre = ?")
+        params.append(nombre.strip())
+    if horas_contrato_semana is not None:
+        sets.append("horas_contrato_semana = ?")
+        params.append(horas_contrato_semana)
+    if activo is not None:
+        sets.append("activo = ?")
+        params.append(1 if activo else 0)
+    if not sets:
+        return
+    params.append(trabajador_id)
+    conn = get_connection()
+    conn.execute(f"UPDATE planificador_trabajadores SET {', '.join(sets)} WHERE id = ?", params)
+    conn.commit()
+    conn.close()
+
+
+def eliminar_trabajador(trabajador_id):
+    conn = get_connection()
+    conn.execute("DELETE FROM planificador_turnos WHERE trabajador_id = ?", (trabajador_id,))
+    conn.execute("DELETE FROM planificador_trabajadores WHERE id = ?", (trabajador_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_trabajador(trabajador_id):
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM planificador_trabajadores WHERE id = ?", (trabajador_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+# --- Turnos ---
+
+def _lunes_de(fecha_iso):
+    d = datetime.date.fromisoformat(fecha_iso)
+    return (d - datetime.timedelta(days=d.weekday())).isoformat()
+
+
+def turnos_semana(empresa, centro, fecha_iso):
+    lunes = _lunes_de(fecha_iso)
+    domingo = (datetime.date.fromisoformat(lunes) + datetime.timedelta(days=6)).isoformat()
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM planificador_turnos WHERE empresa = ? AND centro = ? AND fecha BETWEEN ? AND ? "
+        "ORDER BY inicio_min",
+        (empresa, centro, lunes, domingo),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_turno(turno_id):
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM planificador_turnos WHERE id = ?", (turno_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def crear_turno(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, creado_por):
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO planificador_turnos "
+        "(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, creado_por) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (empresa, centro, trabajador_id, fecha, int(inicio_min), int(duracion_min), creado_por),
+    )
+    conn.commit()
+    tid = cur.lastrowid
+    conn.close()
+    return tid
+
+
+def actualizar_turno(turno_id, inicio_min=None, duracion_min=None):
+    sets, params = [], []
+    if inicio_min is not None:
+        sets.append("inicio_min = ?")
+        params.append(int(inicio_min))
+    if duracion_min is not None:
+        sets.append("duracion_min = ?")
+        params.append(int(duracion_min))
+    if not sets:
+        return
+    sets.append("actualizado_en = datetime('now')")
+    params.append(turno_id)
+    conn = get_connection()
+    conn.execute(f"UPDATE planificador_turnos SET {', '.join(sets)} WHERE id = ?", params)
+    conn.commit()
+    conn.close()
+
+
+def eliminar_turno(turno_id):
+    conn = get_connection()
+    conn.execute("DELETE FROM planificador_turnos WHERE id = ?", (turno_id,))
+    conn.commit()
+    conn.close()
+
+
+# --- Proyección ---
+
+_CAMPOS_PROYECCION = ("transacciones_prevista", "venta_prevista", "personal_ideal_manual")
+
+
+def get_proyeccion(empresa, centro, fecha):
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT franja_min, transacciones_prevista, venta_prevista, personal_ideal_manual "
+        "FROM planificador_proyeccion WHERE empresa = ? AND centro = ? AND fecha = ?",
+        (empresa, centro, fecha),
+    ).fetchall()
+    conn.close()
+    return {r["franja_min"]: dict(r) for r in rows}
+
+
+def set_proyeccion_celda(empresa, centro, fecha, franja_min, campo, valor):
+    if campo not in _CAMPOS_PROYECCION:
+        raise ValueError("Campo inválido")
+    conn = get_connection()
+    conn.execute(
+        f"INSERT INTO planificador_proyeccion (empresa, centro, fecha, franja_min, {campo}) "
+        f"VALUES (?, ?, ?, ?, ?) "
+        f"ON CONFLICT (empresa, centro, fecha, franja_min) DO UPDATE SET {campo} = excluded.{campo}",
+        (empresa, centro, fecha, int(franja_min), valor),
+    )
+    conn.commit()
+    conn.close()
+
+
+# --- Vista de un día (todo junto) ---
+
+def dia_completo(empresa, centro, fecha):
+    trabajadores = list_trabajadores(empresa, centro)
+    turnos_sem = turnos_semana(empresa, centro, fecha)
+    minutos_semana = {}
+    for t in turnos_sem:
+        minutos_semana[t["trabajador_id"]] = minutos_semana.get(t["trabajador_id"], 0) + t["duracion_min"]
+    return {
+        "config": get_config(empresa, centro),
+        "trabajadores": trabajadores,
+        "turnos": [t for t in turnos_sem if t["fecha"] == fecha],
+        "minutos_semana": {str(k): v for k, v in minutos_semana.items()},
+        "proyeccion": {str(k): v for k, v in get_proyeccion(empresa, centro, fecha).items()},
+        "lunes": _lunes_de(fecha),
+    }
+
+
+ensure_planificador_tables()

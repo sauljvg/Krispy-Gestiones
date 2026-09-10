@@ -3,7 +3,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (!user) return;
 
   const modulos = user.modulos || [];
-  const tieneAlgunModuloSaona = ["saona_resenas", "saona_informes", "saona_clima", "saona_evaluaciones360", "saona_reclutamiento"].some((m) => modulos.includes(m));
+  const tieneAlgunModuloSaona = ["saona_resenas", "saona_informes", "saona_clima", "saona_evaluaciones360", "saona_reclutamiento", "saona_planificador"].some((m) => modulos.includes(m));
   if (!tieneAlgunModuloSaona) {
     window.location.href = "/";
     return;
@@ -16,4 +16,5 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("card-saona-entrevistas").hidden = !modulos.includes("saona_informes");
   document.getElementById("card-saona-compartidos").hidden = !(modulos.includes("saona_informes") || modulos.includes("saona_reclutamiento"));
   aplicarVisibilidadEval360(document.getElementById("card-saona-evaluaciones360"), user, modulos.includes("saona_evaluaciones360"));
+  document.getElementById("card-saona-planificador").hidden = !modulos.includes("saona_planificador");
 });

@@ -37,12 +37,14 @@ MODULOS = {
     "reclutamiento": "Reclutamiento",
     "manuales": "Manuales",
     "kpis": "Dashboard KPI's",
+    "planificador": "Planificador de turnos",
     "saona_resenas": "SAONA · Reseñas",
     "saona_informes": "SAONA · Informes",
     "saona_clima": "SAONA · Clima Laboral",
     "saona_evaluaciones360": "SAONA · Evaluaciones 360°",
     "saona_reclutamiento": "SAONA · Reclutamiento",
     "saona_tests": "SAONA · Test",
+    "saona_planificador": "SAONA · Planificador de turnos",
 }
 
 # Módulos que pertenecen al "hub" SAONA en Home — un usuario ve la tarjeta

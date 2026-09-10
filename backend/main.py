@@ -49,6 +49,7 @@ from informes_routes import router as informes_router
 from kpis_routes import router as kpis_router
 from manuales_routes import router as manuales_router
 from notificaciones_routes import router as notificaciones_router
+from planificador_routes import router as planificador_router
 import reclutamiento as reclutamiento_module
 from reclutamiento_routes import reanudar_lotes_ia_pendientes
 from reclutamiento_routes import router as reclutamiento_router
@@ -150,6 +151,7 @@ app.include_router(disc_router, prefix="/api/disc")
 app.include_router(disc_router_publico, prefix="/api/public/disc")
 app.include_router(david_router, prefix="/api/david")
 app.include_router(agregadores_router, prefix="/api/agregadores")
+app.include_router(planificador_router, prefix="/api/planificador")
 app.include_router(notificaciones_router, prefix="/api")
 app.include_router(router, prefix="/api", dependencies=[Depends(require_resenas)])
 

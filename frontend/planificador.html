@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krispy Gestiones · Planificador de turnos</title>
+<link rel="icon" type="image/png" href="assets/favicon-kk.png">
+<script>
+  (function () {
+    var g = localStorage.getItem("kt-theme");
+    if (g === "light" || g === "dark") document.documentElement.dataset.theme = g;
+  })();
+</script>
+<link rel="stylesheet" href="css/styles.css?v=20260907a">
+<style>
+  .plan-wrap { max-width: 1600px; margin: 0 auto; padding: 0 0 40px; }
+  .plan-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0; }
+  .plan-toolbar select, .plan-toolbar input { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 14px; }
+  .plan-nav-fecha { display: flex; align-items: center; gap: 6px; }
+  .plan-nav-fecha .plan-fecha-txt { font-weight: 600; min-width: 150px; text-align: center; }
+  .plan-btn-icono { border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); border-radius: 8px; padding: 6px 10px; font-size: 14px; cursor: pointer; }
+  .plan-btn-icono:hover { border-color: var(--acento); }
+
+  /* --- Rejilla --- */
+  .plan-grid-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+  .plan-grid { display: inline-block; min-width: 100%; }
+  .plan-fila { display: flex; min-height: 54px; }
+  .plan-fila-cabecera { min-height: 34px; }
+  .plan-fila:not(:last-child) { border-bottom: 1px solid var(--border); }
+  .plan-celda-izq { width: 210px; flex: none; padding: 6px 10px; font-size: 12.5px; display: flex; flex-direction: column; justify-content: center; gap: 3px; background: var(--surface-1); position: sticky; left: 0; z-index: 2; border-right: 2px solid var(--border); box-sizing: border-box; }
+  .plan-lane { position: relative; flex: none; width: var(--plan-ancho, 1200px); }
+  .plan-fila-cabecera { background: color-mix(in srgb, var(--acento) 7%, var(--surface-1)); }
+
+  .plan-horas-fila { display: flex; position: sticky; top: 0; z-index: 4; background: var(--surface-1); border-bottom: 2px solid var(--border); }
+  .plan-esquina { width: 210px; flex: none; position: sticky; left: 0; z-index: 5; background: var(--surface-1); border-right: 2px solid var(--border); box-sizing: border-box; }
+  .plan-horas { position: relative; height: 30px; flex: none; width: var(--plan-ancho, 1200px); }
+  .plan-hora-tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--border); font-size: 11px; color: var(--text-secondary); padding-left: 3px; box-sizing: border-box; }
+
+  .plan-lane-lineas { position: absolute; inset: 0; pointer-events: none; }
+  .plan-lane-linea { position: absolute; top: 0; bottom: 0; border-left: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+  .plan-lane-linea.hora { border-left-color: var(--border); }
+
+  /* --- Turnos --- */
+  .plan-turno { position: absolute; top: 6px; bottom: 6px; border-radius: 7px; background: var(--acento); color: #fff; font-size: 11.5px; font-weight: 600; display: flex; align-items: center; justify-content: center; cursor: grab; user-select: none; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+  .plan-turno:active { cursor: grabbing; }
+  .plan-turno .plan-turno-x { position: absolute; top: 1px; right: 2px; width: 15px; height: 15px; line-height: 14px; text-align: center; border-radius: 4px; background: rgba(0,0,0,.25); font-size: 12px; opacity: 0; transition: opacity .1s; }
+  .plan-turno:hover .plan-turno-x { opacity: 1; }
+  .plan-turno-fantasma { position: absolute; top: 6px; bottom: 6px; border-radius: 7px; background: color-mix(in srgb, var(--acento) 45%, transparent); border: 1px dashed var(--acento); pointer-events: none; }
+
+  /* --- Contador semanal --- */
+  .plan-trab-nombre { font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .plan-trab-horas { font-size: 11px; color: var(--text-secondary); }
+  .plan-barra { height: 5px; border-radius: 3px; background: var(--border); overflow: hidden; }
+  .plan-barra > i { display: block; height: 100%; background: var(--status-good); }
+  .plan-barra.ambar > i { background: var(--status-warning); }
+  .plan-barra.rojo > i { background: var(--status-bad, #d9534f); }
+
+  .plan-cab-titulo { font-weight: 600; color: var(--text-secondary); text-transform: uppercase; font-size: 11px; letter-spacing: .03em; }
+  .plan-cab-cell { position: absolute; top: 4px; bottom: 4px; display: flex; align-items: center; justify-content: center; }
+  .plan-cab-cell input { width: 90%; height: 24px; text-align: center; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-page); color: var(--text-primary); font-size: 11.5px; padding: 0 2px; box-sizing: border-box; }
+  .plan-cab-cell.calc { font-size: 12px; color: var(--text-primary); font-weight: 600; }
+  .plan-cab-cell.deficit { color: var(--status-bad, #d9534f); }
+
+  .plan-vacia { padding: 30px; text-align: center; color: var(--text-secondary); }
+  .plan-leyenda { font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
+
+  dialog.plan-dialog { border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); color: var(--text-primary); max-width: 620px; width: 92vw; padding: 0; }
+  dialog.plan-dialog::backdrop { background: rgba(0,0,0,.45); }
+  .plan-dialog-cab { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .plan-dialog-cab h3 { margin: 0; font-size: 16px; }
+  .plan-dialog-body { padding: 16px; max-height: 70vh; overflow-y: auto; }
+  .plan-roster-fila { display: grid; grid-template-columns: 1fr 90px 70px 34px; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .plan-roster-fila input[type="text"], .plan-roster-fila input[type="number"] { width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 13px; box-sizing: border-box; }
+  .plan-roster-fila.inactivo { opacity: .5; }
+  .plan-roster-acciones { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .plan-config-campo { margin-bottom: 12px; }
+  .plan-config-campo label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+  .plan-config-campo input { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon" id="brand-icon">🍩</span>
+      <div>
+        <h1 id="brand-title">Krispy Gestiones</h1>
+        <p class="subtitle">Planificador de turnos</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="btn btn-ghost hamburger-btn" title="Atrás" aria-label="Atrás" onclick="history.back()">←</button>
+      <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
+      <div class="hamburger-wrap">
+        <button id="btn-hamburger" class="btn btn-ghost hamburger-btn" aria-label="Menú" aria-haspopup="true" aria-expanded="false">☰</button>
+        <div id="hamburger-menu" class="hamburger-menu" hidden>
+          <span id="topbar-user" class="topbar-user" hidden></span>
+          <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema">🌙 Cambiar tema</button>
+          <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="plan-wrap">
+    <div class="hero-banner">
+      <span class="eyebrow">Portal interno</span>
+      <h1>Planificador de turnos</h1>
+      <p>Arma el horario del día de tu centro arrastrando los bloques. El contador de cada persona suma sus horas de toda la semana.</p>
+    </div>
+
+    <div class="plan-toolbar">
+      <div class="plan-nav-fecha">
+        <button type="button" class="plan-btn-icono" id="plan-dia-prev">‹</button>
+        <span class="plan-fecha-txt" id="plan-fecha-txt">—</span>
+        <button type="button" class="plan-btn-icono" id="plan-dia-next">›</button>
+        <input type="date" id="plan-fecha-input">
+      </div>
+      <label>Centro
+        <select id="plan-centro"></select>
+      </label>
+      <button type="button" class="plan-btn-icono" id="plan-btn-plantilla">👥 Plantilla</button>
+      <button type="button" class="plan-btn-icono" id="plan-btn-config">⚙ Horario del centro</button>
+    </div>
+
+    <div id="plan-contenido"></div>
+    <p class="plan-leyenda">Arrastra el centro de un bloque para moverlo · arrastra un borde para alargarlo o acortarlo · pasa el ratón por encima y pulsa ✕ para quitarlo · haz clic en una fila vacía para crear un turno de 4 h.</p>
+  </div>
+</div>
+
+<dialog class="plan-dialog" id="plan-dialog-roster">
+  <div class="plan-dialog-cab">
+    <h3>Plantilla del centro</h3>
+    <button type="button" class="btn btn-ghost" data-cerrar>✕</button>
+  </div>
+  <div class="plan-dialog-body">
+    <div class="plan-roster-acciones">
+      <button type="button" class="btn btn-ghost" id="plan-roster-kpis">⬇ Cargar de KPIs</button>
+      <label class="btn btn-ghost btn-upload">⬆ Importar Excel de Odoo
+        <input type="file" id="plan-roster-odoo" accept=".xls,.xlsx" hidden>
+      </label>
+      <button type="button" class="btn btn-primary" id="plan-roster-nuevo">＋ Añadir persona</button>
+    </div>
+    <p class="staff-hint" id="plan-roster-aviso" hidden></p>
+    <div id="plan-roster-lista"></div>
+  </div>
+</dialog>
+
+<dialog class="plan-dialog" id="plan-dialog-config">
+  <div class="plan-dialog-cab">
+    <h3>Horario del centro</h3>
+    <button type="button" class="btn btn-ghost" data-cerrar>✕</button>
+  </div>
+  <div class="plan-dialog-body">
+    <div class="plan-config-campo">
+      <label for="plan-cfg-apertura">Apertura</label>
+      <input type="time" id="plan-cfg-apertura" step="900">
+    </div>
+    <div class="plan-config-campo">
+      <label for="plan-cfg-cierre">Cierre</label>
+      <input type="time" id="plan-cfg-cierre" step="900">
+      <label style="display:inline-flex; align-items:center; gap:6px; margin-top:6px; font-size:13px;">
+        <input type="checkbox" id="plan-cfg-cierre-siguiente"> cierra al día siguiente
+      </label>
+    </div>
+    <div class="plan-config-campo">
+      <label for="plan-cfg-objetivo">Objetivo de transacciones por hora y persona (para el "personal ideal")</label>
+      <input type="number" id="plan-cfg-objetivo" min="0" step="0.5" style="width:120px;">
+    </div>
+    <button type="button" class="btn btn-primary" id="plan-cfg-guardar">Guardar</button>
+    <p class="config-error" id="plan-cfg-error" hidden></p>
+  </div>
+</dialog>
+
+<script src="js/theme.js?v=20260723g"></script>
+<script src="js/dialogs.js?v=20260818a"></script>
+<script src="js/icons.js?v=20260903a"></script>
+<script src="js/auth-common.js?v=20260824a"></script>
+<script src="js/topbar-menu.js?v=20260910a"></script>
+<script src="js/common.js?v=20260823a"></script>
+<script src="js/planificador.js?v=20260910a"></script>
+</body>
+</html>

@@ -60,6 +60,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // a `document.getElementById("card-manuales").hidden = !modulos.includes("manuales");`.
   document.getElementById("card-manuales").hidden = true;
   document.getElementById("card-kpis").hidden = !modulos.includes("kpis");
+  document.getElementById("card-planificador").hidden = !modulos.includes("planificador");
   const tieneModuloSaona = ["saona_resenas", "saona_informes", "saona_clima", "saona_evaluaciones360", "saona_reclutamiento"].some((m) => modulos.includes(m));
   document.getElementById("card-saona").hidden = !tieneModuloSaona;
   if (user.rol === "admin") {
