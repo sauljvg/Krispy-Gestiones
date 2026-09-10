@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
 import auth as auth_module
@@ -342,6 +342,8 @@ class ConfigIn(BaseModel):
     apertura_min: int
     cierre_min: int
     objetivo_transacciones_hora: float | None = None
+    direccion_odoo: str | None = None
+    rol_odoo: str | None = None
 
 
 @router.put("/config")
@@ -349,8 +351,29 @@ def config_route(body: ConfigIn, empresa: str = "kk", user: dict = Depends(requi
     _exigir_centro(user, body.centro)
     try:
         planificador_module.set_config(
-            empresa, body.centro, body.apertura_min, body.cierre_min, body.objetivo_transacciones_hora
+            empresa, body.centro, body.apertura_min, body.cierre_min, body.objetivo_transacciones_hora,
+            direccion_odoo=body.direccion_odoo, rol_odoo=body.rol_odoo,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True}
+
+
+@router.get("/exportar-odoo")
+def exportar_odoo_route(
+    empresa: str = "kk", centro: str = "", desde: str = "", hasta: str = "",
+    user: dict = Depends(require_planificador),
+):
+    if not centro or not desde or not hasta:
+        raise HTTPException(status_code=400, detail="Faltan centro o fechas")
+    _exigir_centro(user, centro)
+    try:
+        contenido = planificador_module.exportar_odoo_xlsx(empresa, centro, desde, hasta)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    nombre = f"planificacion_{centro}_{desde}_{hasta}.xlsx".replace(" ", "_")
+    return Response(
+        content=contenido,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )

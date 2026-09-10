@@ -55,6 +55,16 @@
   .plan-turno.slot-activo { outline: 2px solid var(--text-primary); outline-offset: 1px; }
   .plan-turno .plan-turno-asig { position: absolute; top: 1px; right: 20px; width: 15px; height: 15px; line-height: 14px; text-align: center; border-radius: 4px; background: rgba(0,0,0,.2); font-size: 11px; opacity: 0; transition: opacity .1s; }
   .plan-turno:hover .plan-turno-asig { opacity: 1; }
+  /* Últimos 20 min de un turno de 6 h+ : bocadillo (presencia, no computa). */
+  .plan-turno-boc { position: absolute; right: 0; top: 0; bottom: 0; pointer-events: none; background: repeating-linear-gradient(45deg, rgba(0,0,0,.20) 0 4px, rgba(0,0,0,0) 4px 8px); border-left: 1px dashed rgba(255,255,255,.55); }
+  .plan-turno.sin-asignar .plan-turno-boc { border-left-color: rgba(0,0,0,.3); }
+  /* Contador de personas en un slot compartido (vista Slots). */
+  .plan-turno-num { position: absolute; top: 1px; right: 20px; height: 15px; line-height: 15px; padding: 0 5px; border-radius: 4px; background: rgba(0,0,0,.4); color: #fff; font-size: 10.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+  .plan-turno.sin-asignar .plan-turno-num { background: color-mix(in srgb, var(--status-warning) 55%, #000); }
+  .plan-turno-num:hover { background: rgba(0,0,0,.65); }
+  .plan-slot-personas { margin-top: 8px; }
+  .plan-slot-personas .plan-sug-fila { cursor: default; }
+  .plan-slot-personas .plan-sp-quitar { cursor: pointer; color: var(--status-bad, #d9534f); font-weight: 700; padding: 0 4px; }
   .plan-vac-btn { border-color: #2f8fd6 !important; }
   .plan-dia-total { font-size: 13px; color: var(--text-secondary); margin: 0 0 8px; }
   .plan-dia-total b { color: var(--text-primary); }
@@ -145,6 +155,7 @@
   .plan-sem-slot.sin-asignar { background: color-mix(in srgb, var(--status-warning) 30%, var(--surface-1)); color: var(--text-primary); border: 1px dashed var(--status-warning); }
   .plan-sem-slot.activo { outline: 2px solid var(--text-primary); }
   .plan-sem-slot small { display: block; font-weight: 400; opacity: .85; }
+  .plan-sem-slot-num { font-weight: 700; }
 
   dialog.plan-dialog { border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); color: var(--text-primary); max-width: 620px; width: 92vw; padding: 0; }
   dialog.plan-dialog::backdrop { background: rgba(0,0,0,.45); }
@@ -211,6 +222,7 @@
       </div>
       <button type="button" class="plan-btn-icono" id="plan-btn-plantilla">👥 Plantilla</button>
       <button type="button" class="plan-btn-icono" id="plan-btn-config">⚙ Horario del centro</button>
+      <button type="button" class="plan-btn-icono" id="plan-btn-export" title="Descarga la semana en el formato de Odoo (planning.slot)">⬇ Exportar a Odoo</button>
     </div>
 
     <div id="plan-contenido"></div>
@@ -256,6 +268,14 @@
     <div class="plan-config-campo">
       <label for="plan-cfg-objetivo">Objetivo de transacciones por hora y persona (para el "personal ideal")</label>
       <input type="number" id="plan-cfg-objetivo" min="0" step="0.5" style="width:120px;">
+    </div>
+    <div class="plan-config-campo">
+      <label for="plan-cfg-direccion">Dirección de trabajo en Odoo (para el export)</label>
+      <input type="text" id="plan-cfg-direccion" placeholder="T-MD02 PQS-Parquesur" style="width:260px;">
+    </div>
+    <div class="plan-config-campo">
+      <label for="plan-cfg-rol">Rol en Odoo (para el export)</label>
+      <input type="text" id="plan-cfg-rol" placeholder="Retail" style="width:160px;">
     </div>
     <button type="button" class="btn btn-primary" id="plan-cfg-guardar">Guardar</button>
     <p class="config-error" id="plan-cfg-error" hidden></p>
@@ -306,6 +326,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260910a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/planificador.js?v=20260910j"></script>
+<script src="js/planificador.js?v=20260910k"></script>
 </body>
 </html>

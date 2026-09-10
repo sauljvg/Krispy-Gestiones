@@ -13,6 +13,11 @@ const LS_CENTRO = `plan-centro-${EMPRESA}`;
 const LS_VISTA = `plan-vista-${EMPRESA}`;
 const LS_MODO = `plan-modo-${EMPRESA}`;
 const SIN_ASIGNAR = 0;
+// Convenio de Madrid: turnos de 6 h o más llevan 20 min de bocadillo que NO
+// computan como trabajo -- se SUMAN a la presencia (la persona sale 20 min más
+// tarde) pero no a las horas que cuentan contra el contrato.
+const BOCADILLO_MIN = 20;
+const BOCADILLO_DESDE = 360;
 
 const S = {
   centro: "",
@@ -58,8 +63,20 @@ function fmtHHMM(min) {
   const m = ((Math.round(min) % 1440) + 1440) % 1440;
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 }
+function fmtHMM(min) {
+  const m = Math.max(0, Math.round(min));
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
+}
 function fmtHoras(min) {
-  return (Math.round((min / 60) * 100) / 100).toString().replace(".", ",") + " h";
+  // Horas en formato H:MM (8:20 h), no decimal.
+  return fmtHMM(min) + " h";
+}
+function boc(dur) {
+  return dur >= BOCADILLO_DESDE ? BOCADILLO_MIN : 0;
+}
+function presenciaMin(dur) {
+  // Minutos que la persona está presente = horas efectivas + bocadillo.
+  return dur + boc(dur);
 }
 function anchoTimeline() {
   return (S.config.cierre_min - S.config.apertura_min) * PX_POR_MIN;
@@ -79,6 +96,10 @@ function sumarDias(iso, n) {
   const d = new Date(iso + "T12:00:00");
   d.setDate(d.getDate() + n);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function lunesDe(iso) {
+  const d = new Date(iso + "T12:00:00");
+  return sumarDias(iso, -((d.getDay() + 6) % 7));
 }
 
 // ---------------------------------------------------------------- carga
@@ -136,13 +157,11 @@ async function cargarDia() {
   if (gs) gs.scrollLeft = sx;
 }
 
-function fmtHMM(min) {
-  const m = Math.max(0, Math.round(min));
-  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
-}
 function totalMinDia(fecha) {
+  // Horas efectivas de ese día -- solo turnos de trabajo CON persona (un slot
+  // sin asignar todavía no son horas trabajadas). El bocadillo no computa.
   return S.turnos
-    .filter((t) => t.fecha === fecha && t.tipo === "trabajo")
+    .filter((t) => t.fecha === fecha && t.tipo === "trabajo" && t.trabajador_id !== SIN_ASIGNAR)
     .reduce((s, t) => s + t.duracion_min, 0);
 }
 
@@ -282,8 +301,10 @@ function planificadoEnFranja(m) {
 }
 
 function textoHoras(min, contrato) {
-  const h = (Math.round((min / 60) * 100) / 100).toString().replace(".", ",");
-  return contrato ? `${h} h / ${contrato} h (${Math.round((min / 60 / contrato) * 100)}%)` : `${h} h / sin contrato`;
+  const h = fmtHMM(min);
+  return contrato
+    ? `${h} h / ${fmtHMM(contrato * 60)} h (${Math.round((min / 60 / contrato) * 100)}%)`
+    : `${h} h / sin contrato`;
 }
 
 // 🌙 con ✓ verde si el horario de la persona esta semana es correcto, o ✕
@@ -296,7 +317,7 @@ function descansoIndicadorHTML(trabId, minSemana, contrato) {
   const ok = !pocosDescansos && !sobreContrato;
   const motivos = [];
   if (pocosDescansos) motivos.push(`solo ${descanso} día${descanso === 1 ? "" : "s"} de descanso (mínimo ${DIAS_DESCANSO_MIN})`);
-  if (sobreContrato) motivos.push(`${(minSemana / 60).toFixed(2).replace(/\.?0+$/, "").replace(".", ",")} h planificadas / ${contrato} h de contrato`);
+  if (sobreContrato) motivos.push(`${fmtHMM(minSemana)} h planificadas / ${fmtHMM(contrato * 60)} h de contrato`);
   const titulo = ok
     ? `${descanso} días de descanso esta semana · dentro de contrato`
     : `Conflicto en el horario: ${motivos.join(" · ")} — revísalo`;
@@ -340,9 +361,15 @@ function turnoHTML(t) {
     </div>`;
   }
   const sin = t.trabajador_id === SIN_ASIGNAR;
+  const b = boc(t.duracion_min);
+  const ancho = presenciaMin(t.duracion_min) * PX_POR_MIN;
+  const titulo = b
+    ? `${fmtHoras(t.duracion_min)} efectivas · sale 20 min más tarde por el bocadillo (no computa)`
+    : "";
   return `<div class="plan-turno ${sin ? "sin-asignar" : ""}" data-id="${t.id}" data-trab="${t.trabajador_id}" data-inicio="${t.inicio_min}" data-duracion="${t.duracion_min}"
-    style="left:${minToX(t.inicio_min)}px; width:${t.duracion_min * PX_POR_MIN}px;">
+    style="left:${minToX(t.inicio_min)}px; width:${ancho}px;"${titulo ? ` title="${titulo}"` : ""}>
     <span class="plan-turno-txt">${sin ? `Sin asignar · ${fmtHoras(t.duracion_min)}` : etiquetaTurno(t.inicio_min, t.duracion_min)}</span>
+    <i class="plan-turno-boc" style="width:${b * PX_POR_MIN}px;"></i>
     ${sin ? `<span class="plan-turno-asig" title="Asignar a alguien">👤</span>` : ""}
     <span class="plan-turno-x" title="Quitar">✕</span>
   </div>`;
@@ -383,7 +410,12 @@ async function quizasUnir(turnoId, ini, fin, trabId) {
   if (!res.ok) mostrarAviso("No se pudieron unir.");
 }
 function etiquetaTurno(inicio, dur) {
-  return dur * PX_POR_MIN < 95 ? fmtHoras(dur) : `${fmtHHMM(inicio)}–${fmtHHMM(inicio + dur)} · ${fmtHoras(dur)}`;
+  // El rango muestra la PRESENCIA (con bocadillo); "· X h" son las horas
+  // efectivas que sí computan.
+  const finPres = inicio + presenciaMin(dur);
+  return presenciaMin(dur) * PX_POR_MIN < 95
+    ? fmtHoras(dur)
+    : `${fmtHHMM(inicio)}–${fmtHHMM(finPres)} · ${fmtHoras(dur)}`;
 }
 
 // ---------------------------------------------------------------- proyección
@@ -427,6 +459,10 @@ function wireTurno(el) {
   // Día libre y vacaciones: bloque fijo a toda la franja -- no se mueve ni se
   // estira, y la ✕ lo quita sin preguntar (como el botón "Quitar libre").
   const esLibre = el.dataset.tipo === "libre" || el.dataset.tipo === "vacaciones";
+  // Un "slot grupo" (varias personas en el mismo horario) lleva data-ids con
+  // todos los turnos que representa; mover/estirar o quitar afecta a todos.
+  const ids = el.dataset.ids ? el.dataset.ids.split(",").filter(Boolean) : [el.dataset.id];
+  const esGrupo = !!el.dataset.ids;
   const btnAsig = el.querySelector(".plan-turno-asig");
   if (btnAsig) {
     btnAsig.addEventListener("pointerdown", (e) => e.stopPropagation());
@@ -439,12 +475,14 @@ function wireTurno(el) {
   btnX.addEventListener("pointerdown", (e) => e.stopPropagation());
   btnX.addEventListener("click", async (e) => {
     e.stopPropagation();
-    if (!esLibre && !(await pedirConfirmacion("¿Quitar este turno?"))) return;
-    const res = await fetch(url(`turnos/${el.dataset.id}`), { method: "DELETE" });
-    if (!res.ok) {
-      mostrarAviso("No se pudo quitar.");
+    if (esGrupo) {
+      const n = ids.length;
+      if (!(await pedirConfirmacion(`¿Quitar este slot del día?${n > 1 ? ` (${n} personas)` : ""}`))) return;
+    } else if (!esLibre && !(await pedirConfirmacion("¿Quitar este turno?"))) {
       return;
     }
+    const rs = await Promise.all(ids.map((id) => fetch(url(`turnos/${id}`), { method: "DELETE" })));
+    if (rs.some((r) => !r.ok)) mostrarAviso("No se pudo quitar todo.");
     cargarDia();
   });
   if (esLibre) return; // un día libre no se mueve ni se estira
@@ -482,7 +520,9 @@ function wireTurno(el) {
         ini = iniOrig;
       }
       el.style.left = minToX(ini) + "px";
-      el.style.width = dur * PX_POR_MIN + "px";
+      el.style.width = presenciaMin(dur) * PX_POR_MIN + "px";
+      const bocEl = el.querySelector(".plan-turno-boc");
+      if (bocEl) bocEl.style.width = boc(dur) * PX_POR_MIN + "px";
       el.querySelector(".plan-turno-txt").textContent = el.classList.contains("sin-asignar")
         ? `Sin asignar · ${fmtHoras(dur)}`
         : etiquetaTurno(ini, dur);
@@ -493,17 +533,21 @@ function wireTurno(el) {
       el.removeEventListener("pointerup", onUp);
       el.style.cursor = "grab";
       if (ini === iniOrig && dur === durOrig) return;
-      const res = await fetch(url(`turnos/${el.dataset.id}`), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inicio_min: ini, duracion_min: dur }),
-      });
-      if (!res.ok) {
+      const rs = await Promise.all(
+        ids.map((id) =>
+          fetch(url(`turnos/${id}`), {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ inicio_min: ini, duracion_min: dur }),
+          })
+        )
+      );
+      if (rs.some((r) => !r.ok)) {
         mostrarAviso("No se pudo guardar el cambio.");
         cargarDia();
         return;
       }
-      await quizasUnir(el.dataset.id, ini, ini + dur, trabId);
+      if (!esGrupo) await quizasUnir(el.dataset.id, ini, ini + dur, trabId);
       cargarDia();
     };
     el.addEventListener("pointermove", onMove);
@@ -605,7 +649,7 @@ async function pintarSugeridos(container, turno, { drag = true } = {}) {
   const data = res.ok ? await res.json() : { sugerencias: [] };
   const filas = data.sugerencias
     .map((s) => {
-      const h = (Math.round((s.minutos_semana / 60) * 100) / 100).toString().replace(".", ",");
+      const h = fmtHMM(s.minutos_semana);
       const detalle = s.disponible
         ? `<span class="plan-sug-h">${h} h${s.aviso ? ` · <span class="plan-sug-aviso">${s.aviso}</span>` : ""}</span>`
         : `<span class="plan-sug-h">${escapeHTML(s.motivo)}</span>`;
@@ -614,11 +658,15 @@ async function pintarSugeridos(container, turno, { drag = true } = {}) {
       }><span>${escapeHTML(s.nombre)}</span>${detalle}</div>`;
     })
     .join("");
-  container.innerHTML = `<h4>¿Quién en ${fmtHHMM(turno.inicio_min)}–${fmtHHMM(turno.inicio_min + turno.duracion_min)}?</h4>${
+  container.innerHTML = `<h4>¿Quién en ${fmtHHMM(turno.inicio_min)}–${fmtHHMM(turno.inicio_min + presenciaMin(turno.duracion_min))}?</h4>${
     filas || `<p class="staff-hint">Nadie disponible.</p>`
   }`;
   container.querySelectorAll(".plan-sug-fila:not(.no-disp)").forEach((fila) => {
-    fila.addEventListener("click", () => asignarTurno(turno.id, Number(fila.dataset.trab)));
+    fila.addEventListener("click", () =>
+      turno._grupo
+        ? asignarAGrupo(turno._grupo, Number(fila.dataset.trab))
+        : asignarTurno(turno.id, Number(fila.dataset.trab))
+    );
     fila.addEventListener("dragstart", (e) => {
       e.dataTransfer.setData("text/plain", `trab:${fila.dataset.trab}`);
       e.dataTransfer.effectAllowed = "copy";
@@ -692,7 +740,7 @@ function wirePaleta(root) {
 
 // Maneja soltar en una zona: un chip de slot (crea turno sin asignar) o un
 // nombre arrastrado (asigna, si el destino es un turno-slot con data-id).
-function wireDrop(zona, fecha, turnoIdDestino = null) {
+function wireDrop(zona, fecha, turnoIdDestino = null, grupoDestino = null) {
   zona.addEventListener("dragover", (e) => {
     e.preventDefault();
     zona.classList.add("drop-hover");
@@ -705,10 +753,110 @@ function wireDrop(zona, fecha, turnoIdDestino = null) {
     if (dato.startsWith("slot:")) {
       const slot = S.slots.find((s) => String(s.id) === dato.slice(5));
       if (slot) crearSlotEnDia(slot, fecha);
-    } else if (dato.startsWith("trab:") && turnoIdDestino) {
-      asignarTurno(turnoIdDestino, Number(dato.slice(5)));
+    } else if (dato.startsWith("trab:")) {
+      if (grupoDestino) asignarAGrupo(grupoDestino, Number(dato.slice(5)));
+      else if (turnoIdDestino) asignarTurno(turnoIdDestino, Number(dato.slice(5)));
     }
   });
+}
+
+// Un "slot" que hacen varias personas se guarda como varios turnos con el
+// MISMO (inicio, duración). Aquí se agrupan para pintar un único bloque con
+// un contador de personas.
+function agruparSlots(turnos) {
+  const map = new Map();
+  for (const t of turnos) {
+    if (t.tipo !== "trabajo") continue;
+    const k = `${t.inicio_min}-${t.duracion_min}`;
+    if (!map.has(k)) map.set(k, { key: k, fecha: t.fecha, ini: t.inicio_min, dur: t.duracion_min, turnos: [] });
+    map.get(k).turnos.push(t);
+  }
+  return [...map.values()].sort((a, b) => a.ini - b.ini || a.dur - b.dur);
+}
+
+function grupoAsignados(g) {
+  return g.turnos.filter((t) => t.trabajador_id !== SIN_ASIGNAR);
+}
+function grupoLibres(g) {
+  return g.turnos.filter((t) => t.trabajador_id === SIN_ASIGNAR);
+}
+
+function slotGrupoHTML(g) {
+  const asg = grupoAsignados(g);
+  const lib = grupoLibres(g);
+  const b = boc(g.dur);
+  const activo = String(S.slotActivo) === g.key ? "slot-activo" : "";
+  const num = `👥 ${asg.length}${lib.length ? ` +${lib.length}` : ""}`;
+  return `<div class="plan-turno slot-grupo ${asg.length ? "" : "sin-asignar"} ${activo}"
+      data-key="${g.key}" data-ids="${g.turnos.map((t) => t.id).join(",")}"
+      data-inicio="${g.ini}" data-duracion="${g.dur}" data-trab="0"
+      style="left:${minToX(g.ini)}px; width:${presenciaMin(g.dur) * PX_POR_MIN}px;"
+      title="${b ? `${fmtHoras(g.dur)} efectivas + 20 min de bocadillo (no computa)` : ""}">
+    <span class="plan-turno-txt">${etiquetaTurno(g.ini, g.dur)}</span>
+    <i class="plan-turno-boc" style="width:${b * PX_POR_MIN}px;"></i>
+    <span class="plan-turno-num" title="Personas en este slot — clic para ver o quitar">${num}</span>
+    <span class="plan-turno-x" title="Quitar el slot entero del día">✕</span>
+  </div>`;
+}
+
+// Panel derecho: personas ya puestas en el slot (con ✕ para quitarlas -> la
+// plaza queda "sin asignar") + las sugerencias para añadir a alguien más.
+async function pintarSlotGrupo(container, g) {
+  const asg = grupoAsignados(g);
+  const listaPersonas = asg.length
+    ? `<div class="plan-slot-personas"><h4>Ya en este slot (${asg.length})</h4>${asg
+        .map(
+          (t) =>
+            `<div class="plan-sug-fila"><span>${escapeHTML(nombreTrabajador(t.trabajador_id))}</span>` +
+            `<span class="plan-sp-quitar" data-turno="${t.id}" title="Quitar de este slot">✕</span></div>`
+        )
+        .join("")}</div>`
+    : "";
+  await pintarSugeridos(container, { fecha: g.fecha || S.fecha, inicio_min: g.ini, duracion_min: g.dur, _grupo: g });
+  container.insertAdjacentHTML("afterbegin", listaPersonas);
+  container.querySelectorAll(".plan-sp-quitar").forEach((x) => {
+    x.addEventListener("click", async () => {
+      const r = await fetch(url(`turnos/${x.dataset.turno}/asignar`), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trabajador_id: SIN_ASIGNAR }),
+      });
+      if (!r.ok) return mostrarAviso("No se pudo quitar a la persona.");
+      cargarDia();
+    });
+  });
+}
+
+// Poner a alguien en un slot: si hay una plaza libre (turno sin asignar del
+// grupo) se ocupa; si no, se crea otra plaza -- así entran varias personas.
+async function asignarAGrupo(g, trabajadorId) {
+  const libre = grupoLibres(g)[0];
+  let res;
+  if (libre) {
+    res = await fetch(url(`turnos/${libre.id}/asignar`), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trabajador_id: trabajadorId }),
+    });
+  } else {
+    res = await fetch(url("turnos"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        centro: S.centro,
+        fecha: g.fecha || S.fecha,
+        trabajador_id: trabajadorId,
+        inicio_min: g.ini,
+        duracion_min: g.dur,
+      }),
+    });
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    mostrarAviso(err.detail || "No se pudo asignar.");
+    return;
+  }
+  cargarDia();
 }
 
 function renderSlotsDia() {
@@ -720,14 +868,12 @@ function renderSlotsDia() {
     .map((m) => `<div class="plan-hora-tick" style="left:${minToX(m)}px; width:${anchoHora}px;">${fmtHHMM(m)}</div>`)
     .join("");
   const lineas = fr.map((m) => `<div class="plan-lane-linea hora" style="left:${minToX(m)}px;"></div>`).join("");
-  const delDia = turnosDia(S.fecha)
-    .filter((t) => t.tipo === "trabajo")
-    .sort((a, b) => a.inicio_min - b.inicio_min || a.duracion_min - b.duracion_min);
-  const lanes = delDia
+  const grupos = agruparSlots(turnosDia(S.fecha));
+  const lanes = grupos
     .map(
-      (t) => `<div class="plan-slot-lane" data-linea>
+      (g) => `<div class="plan-slot-lane" data-linea>
         <div class="plan-lane-lineas">${lineas}</div>
-        ${turnoHTML(t)}
+        ${slotGrupoHTML(g)}
       </div>`
     )
     .join("");
@@ -744,20 +890,27 @@ function renderSlotsDia() {
           </div>
         </div>
       </div>
-      <div class="plan-sugeridos"><h4>Elige un slot</h4><p class="staff-hint">Haz clic en un slot colocado para ver a quién puedes poner. Puedes estirarlo por los bordes.</p></div>
+      <div class="plan-sugeridos"><h4>Elige un slot</h4><p class="staff-hint">Haz clic en un slot colocado para ver a quién puedes poner (varias personas pueden hacer el mismo). Estíralo por los bordes para ajustarlo.</p></div>
     </div>`;
 
   wirePaleta(cont);
   wireDrop(cont.querySelector("#plan-slots-zona"), S.fecha);
-  cont.querySelectorAll(".plan-turno").forEach((el) => {
-    if (String(S.slotActivo) === el.dataset.id) el.classList.add("slot-activo");
+  cont.querySelectorAll(".plan-turno.slot-grupo").forEach((el) => {
+    const g = grupos.find((x) => x.key === el.dataset.key);
     wireTurno(el);
-    wireDrop(el, S.fecha, Number(el.dataset.id));
+    wireDrop(el, S.fecha, null, g);
+    el.querySelector(".plan-turno-num").addEventListener("pointerdown", (e) => e.stopPropagation());
+    el.querySelector(".plan-turno-num").addEventListener("click", (e) => {
+      e.stopPropagation();
+      S.slotActivo = g.key;
+      cont.querySelectorAll(".plan-turno.slot-grupo").forEach((x) => x.classList.toggle("slot-activo", x === el));
+      pintarSlotGrupo(cont.querySelector(".plan-sugeridos"), g);
+    });
     el.addEventListener("click", (e) => {
-      if (e.target.closest(".plan-turno-x, .plan-turno-asig")) return;
-      S.slotActivo = Number(el.dataset.id);
-      cont.querySelectorAll(".plan-turno").forEach((x) => x.classList.toggle("slot-activo", x === el));
-      pintarSugeridos(cont.querySelector(".plan-sugeridos"), S.turnos.find((t) => String(t.id) === el.dataset.id));
+      if (e.target.closest(".plan-turno-x, .plan-turno-num")) return;
+      S.slotActivo = g.key;
+      cont.querySelectorAll(".plan-turno.slot-grupo").forEach((x) => x.classList.toggle("slot-activo", x === el));
+      pintarSlotGrupo(cont.querySelector(".plan-sugeridos"), g);
     });
   });
 }
@@ -766,18 +919,21 @@ function renderSlotsSemana() {
   const cont = document.getElementById("plan-contenido");
   const dias = S.dias.length ? S.dias : [S.fecha];
   const nombresDia = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+  const gruposPorDia = {};
   const cols = dias
     .map((d, i) => {
-      const slotsDia = S.turnos
-        .filter((t) => t.fecha === d && t.tipo === "trabajo")
-        .sort((a, b) => a.inicio_min - b.inicio_min);
-      const items = slotsDia
-        .map((t) => {
-          const sin = t.trabajador_id === SIN_ASIGNAR;
-          const activo = String(S.slotActivo) === String(t.id) ? "activo" : "";
-          return `<div class="plan-sem-slot ${sin ? "sin-asignar" : ""} ${activo}" data-id="${t.id}" data-fecha="${d}">
-            ${sin ? "Sin asignar" : escapeHTML(nombreTrabajador(t.trabajador_id))}
-            <small>${fmtHHMM(t.inicio_min)}–${fmtHHMM(t.inicio_min + t.duracion_min)}</small>
+      const grupos = agruparSlots(S.turnos.filter((t) => t.fecha === d));
+      gruposPorDia[d] = grupos;
+      const items = grupos
+        .map((g) => {
+          const asg = grupoAsignados(g);
+          const lib = grupoLibres(g);
+          const actkey = `${d}|${g.key}`;
+          return `<div class="plan-sem-slot ${asg.length ? "" : "sin-asignar"} ${
+            S.slotActivo === actkey ? "activo" : ""
+          }" data-actkey="${actkey}" data-key="${g.key}" data-fecha="${d}">
+            <span class="plan-sem-slot-num">👥 ${asg.length}${lib.length ? ` +${lib.length}` : ""}</span>
+            <small>${fmtHHMM(g.ini)}–${fmtHHMM(g.ini + presenciaMin(g.dur))} · ${fmtHoras(g.dur)}</small>
           </div>`;
         })
         .join("");
@@ -793,7 +949,7 @@ function renderSlotsSemana() {
     ${paletaHTML()}
     <div class="plan-slots-layout">
       <div class="plan-slots-main"><div class="plan-slots-sem">${cols}</div></div>
-      <div class="plan-sugeridos"><h4>Elige un slot</h4><p class="staff-hint">Haz clic en un slot para ver a quién puedes poner.</p></div>
+      <div class="plan-sugeridos"><h4>Elige un slot</h4><p class="staff-hint">Haz clic en un slot para ver o cambiar quién lo hace.</p></div>
     </div>`;
 
   wirePaleta(cont);
@@ -807,12 +963,13 @@ function renderSlotsSemana() {
     });
   });
   cont.querySelectorAll(".plan-sem-slot").forEach((el) => {
-    wireDrop(el, el.dataset.fecha, Number(el.dataset.id));
+    const g = (gruposPorDia[el.dataset.fecha] || []).find((x) => x.key === el.dataset.key);
+    if (!g) return;
+    wireDrop(el, el.dataset.fecha, null, g);
     el.addEventListener("click", () => {
-      S.slotActivo = Number(el.dataset.id);
+      S.slotActivo = el.dataset.actkey;
       cont.querySelectorAll(".plan-sem-slot").forEach((x) => x.classList.toggle("activo", x === el));
-      const turno = S.turnos.find((t) => String(t.id) === el.dataset.id);
-      pintarSugeridos(cont.querySelector(".plan-sugeridos"), turno);
+      pintarSlotGrupo(cont.querySelector(".plan-sugeridos"), g);
     });
   });
 }
@@ -992,7 +1149,7 @@ function renderSemana() {
             return `<div class="plan-sem-celda">${sin
               .map(
                 (x) =>
-                  `<span class="plan-sem-chip sin-asignar-chip" data-id="${x.id}" title="Asignar">${fmtHHMM(x.inicio_min)}–${fmtHHMM(x.inicio_min + x.duracion_min)}</span>`
+                  `<span class="plan-sem-chip sin-asignar-chip" data-id="${x.id}" title="Asignar">${fmtHHMM(x.inicio_min)}–${fmtHHMM(x.inicio_min + presenciaMin(x.duracion_min))}</span>`
               )
               .join("")}</div>`;
           })
@@ -1012,7 +1169,7 @@ function renderSemana() {
           const vac = delDia.some((x) => x.tipo === "vacaciones");
           const trabajo = delDia.filter((x) => x.tipo === "trabajo").sort((a, b) => a.inicio_min - b.inicio_min);
           const chips = trabajo
-            .map((x) => `<span class="plan-sem-chip">${fmtHHMM(x.inicio_min)}–${fmtHHMM(x.inicio_min + x.duracion_min)}</span>`)
+            .map((x) => `<span class="plan-sem-chip">${fmtHHMM(x.inicio_min)}–${fmtHHMM(x.inicio_min + presenciaMin(x.duracion_min))}</span>`)
             .join("");
           const fuera = vac ? "vacaciones" : libre ? "libre" : "";
           return `<div class="plan-sem-celda ${fuera}" data-trab="${t.id}" data-fecha="${d}">
@@ -1200,6 +1357,8 @@ function wireConfig() {
     document.getElementById("plan-cfg-cierre").value = fmtHHMM(S.config.cierre_min);
     document.getElementById("plan-cfg-cierre-siguiente").checked = S.config.cierre_min >= 1440;
     document.getElementById("plan-cfg-objetivo").value = S.config.objetivo_transacciones_hora ?? "";
+    document.getElementById("plan-cfg-direccion").value = S.config.direccion_odoo ?? "";
+    document.getElementById("plan-cfg-rol").value = S.config.rol_odoo ?? "";
     document.getElementById("plan-cfg-error").hidden = true;
     dlg.showModal();
   });
@@ -1226,6 +1385,8 @@ function wireConfig() {
         apertura_min: apertura,
         cierre_min: cierre,
         objetivo_transacciones_hora: objStr === "" ? null : Number(objStr),
+        direccion_odoo: document.getElementById("plan-cfg-direccion").value.trim(),
+        rol_odoo: document.getElementById("plan-cfg-rol").value.trim(),
       }),
     });
     if (!r.ok) {
@@ -1290,6 +1451,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   };
   document.getElementById("plan-modo-turnos").addEventListener("click", () => setModo("turnos"));
   document.getElementById("plan-modo-slots").addEventListener("click", () => setModo("slots"));
+  document.getElementById("plan-btn-export").addEventListener("click", () => {
+    if (!S.centro) return mostrarAviso("Elige un centro primero.");
+    const desde = lunesDe(S.fecha);
+    const hasta = sumarDias(desde, 6);
+    window.location.href = url("exportar-odoo", { centro: S.centro, desde, hasta });
+  });
   const pasoDias = () => (S.vista === "semana" ? 7 : 1);
   document.getElementById("plan-dia-prev").addEventListener("click", () => {
     S.fecha = sumarDias(S.fecha, -pasoDias());

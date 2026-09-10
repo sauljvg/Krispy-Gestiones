@@ -13,6 +13,7 @@ contra sus horas de contrato.
   por centro), con override manual opcional.
 """
 import datetime
+import io
 
 from db import get_connection
 
@@ -29,6 +30,23 @@ MIN_TURNO_MIN = 60      # un turno de trabajo dura entre 1 h...
 MAX_TURNO_MIN = 600     # ...y 10 h
 DESCANSO_ENTRE_JORNADAS_MIN = 12 * 60   # 12 h de descanso entre el fin de una jornada y el inicio de la siguiente
 _TIPOS_NO_TRABAJO = ("libre", "vacaciones")   # bloques que no cuentan como horas trabajadas
+
+# Convenio de Madrid (art. 16): en turnos de 6 h o más, la pausa del bocadillo
+# de 20 min NO computa como trabajo efectivo. En el planificador esos 20 min se
+# SUMAN a la presencia (la persona sale 20 min más tarde) pero no a las horas
+# que cuentan contra el contrato. Las tiendas de Valencia tendrán otras reglas.
+BOCADILLO_MIN = 20
+BOCADILLO_DESDE_MIN = 6 * 60
+
+# "Dirección de trabajo" / "Rol" que espera Odoo (planning.slot) al reimportar.
+# Editable por centro en "Horario del centro"; esto es solo el valor de partida.
+_DIRECCION_ODOO_DEFECTO = {
+    "ParqueSur Tienda": "T-MD02 PQS-Parquesur",
+}
+
+
+def _bocadillo(duracion_min):
+    return BOCADILLO_MIN if int(duracion_min or 0) >= BOCADILLO_DESDE_MIN else 0
 
 # Slots de horario "de siempre" -- se precargan la primera vez (empresa kk) a
 # partir de los patrones que más se repiten en la planificación real de Odoo.
@@ -122,6 +140,18 @@ def ensure_planificador_tables():
     cols_turnos = {r[1] for r in conn.execute("PRAGMA table_info(planificador_turnos)")}
     if "tipo" not in cols_turnos:
         conn.execute("ALTER TABLE planificador_turnos ADD COLUMN tipo TEXT NOT NULL DEFAULT 'trabajo'")
+    # Datos para el export a Odoo (planning.slot): "Dirección de trabajo" y "Rol",
+    # uno por centro. Se rellenan en "Horario del centro"; ParqueSur precargado.
+    cols_config = {r[1] for r in conn.execute("PRAGMA table_info(planificador_config)")}
+    if "direccion_odoo" not in cols_config:
+        conn.execute("ALTER TABLE planificador_config ADD COLUMN direccion_odoo TEXT")
+        for centro, direccion in _DIRECCION_ODOO_DEFECTO.items():
+            conn.execute(
+                "UPDATE planificador_config SET direccion_odoo = ? WHERE centro = ? AND (direccion_odoo IS NULL OR direccion_odoo = '')",
+                (direccion, centro),
+            )
+    if "rol_odoo" not in cols_config:
+        conn.execute("ALTER TABLE planificador_config ADD COLUMN rol_odoo TEXT")
     # Todo el mundo tiene contrato: quien se quedó sin horas (sin % de jornada
     # en el Excel) pasa a jornada completa. Idempotente.
     conn.execute(
@@ -208,31 +238,45 @@ def centros_disponibles(empresa):
 def get_config(empresa, centro):
     conn = get_connection()
     row = conn.execute(
-        "SELECT apertura_min, cierre_min, objetivo_transacciones_hora FROM planificador_config WHERE empresa = ? AND centro = ?",
+        "SELECT apertura_min, cierre_min, objetivo_transacciones_hora, direccion_odoo, rol_odoo "
+        "FROM planificador_config WHERE empresa = ? AND centro = ?",
         (empresa, centro),
     ).fetchone()
     conn.close()
     if row is None:
-        return {
-            "apertura_min": APERTURA_DEFECTO_MIN,
-            "cierre_min": CIERRE_DEFECTO_MIN,
-            "objetivo_transacciones_hora": None,
-        }
-    return dict(row)
+        d = dict(
+            apertura_min=APERTURA_DEFECTO_MIN,
+            cierre_min=CIERRE_DEFECTO_MIN,
+            objetivo_transacciones_hora=None,
+            direccion_odoo=None,
+            rol_odoo=None,
+        )
+    else:
+        d = dict(row)
+    if not d.get("direccion_odoo"):
+        d["direccion_odoo"] = _DIRECCION_ODOO_DEFECTO.get(centro, "")
+    if not d.get("rol_odoo"):
+        d["rol_odoo"] = "Retail"
+    return d
 
 
-def set_config(empresa, centro, apertura_min, cierre_min, objetivo_transacciones_hora):
+def set_config(empresa, centro, apertura_min, cierre_min, objetivo_transacciones_hora,
+               direccion_odoo=None, rol_odoo=None):
     if cierre_min <= apertura_min:
         raise ValueError("La hora de cierre debe ser posterior a la de apertura")
     conn = get_connection()
     conn.execute("""
-        INSERT INTO planificador_config (empresa, centro, apertura_min, cierre_min, objetivo_transacciones_hora)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO planificador_config
+            (empresa, centro, apertura_min, cierre_min, objetivo_transacciones_hora, direccion_odoo, rol_odoo)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (empresa, centro) DO UPDATE SET
             apertura_min = excluded.apertura_min,
             cierre_min = excluded.cierre_min,
-            objetivo_transacciones_hora = excluded.objetivo_transacciones_hora
-    """, (empresa, centro, apertura_min, cierre_min, objetivo_transacciones_hora))
+            objetivo_transacciones_hora = excluded.objetivo_transacciones_hora,
+            direccion_odoo = excluded.direccion_odoo,
+            rol_odoo = excluded.rol_odoo
+    """, (empresa, centro, apertura_min, cierre_min, objetivo_transacciones_hora,
+          (direccion_odoo or "").strip() or None, (rol_odoo or "").strip() or None))
     conn.commit()
     conn.close()
 
@@ -715,12 +759,14 @@ def _turnos_ventana_por_trab(empresa, centro, fecha):
 def _descanso_12h_ko(turnos_persona, fecha, ini, fin):
     """¿Poner [ini, fin) en `fecha` deja menos de 12 h entre esa jornada y una
     adyacente (mismo día -- turno partido lejano no --, día anterior o
-    siguiente)? Los solapes ya los pilla otro chequeo, aquí se ignoran."""
+    siguiente)? Se mide sobre la PRESENCIA real: si el turno lleva bocadillo,
+    la persona sale 20 min más tarde. Los solapes los pilla otro chequeo."""
     d = datetime.date.fromisoformat(fecha)
+    fin = fin + _bocadillo(fin - ini)
     for t in turnos_persona:
         off = (datetime.date.fromisoformat(t["fecha"]) - d).days * 1440
         tini = t["inicio_min"] + off
-        tfin = t["inicio_min"] + t["duracion_min"] + off
+        tfin = t["inicio_min"] + t["duracion_min"] + _bocadillo(t["duracion_min"]) + off
         if tini >= fin and tini - fin < DESCANSO_ENTRE_JORNADAS_MIN:
             return True
         if ini >= tfin and ini - tfin < DESCANSO_ENTRE_JORNADAS_MIN:
@@ -771,6 +817,63 @@ def sugerencias(empresa, centro, fecha, inicio_min, duracion_min):
         })
     out.sort(key=lambda x: (not x["disponible"], bool(x["aviso"]), x["minutos_semana"], x["nombre"].lower()))
     return out
+
+
+# --- Export a Odoo (planning.slot) ---
+
+def exportar_odoo_xlsx(empresa, centro, desde, hasta):
+    """Genera un .xlsx con el mismo formato que exporta Odoo (planning.slot),
+    para poder reimportarlo allí: una fila por turno de trabajo con persona
+    en el rango [desde, hasta]. Columnas: Descanso, Dirección de trabajo,
+    Fecha de inicio, Recurso, Rol, Tiempo asignado, Color, Color del recurso.
+    'Tiempo asignado' son las horas efectivas; 'Descanso' = 20 min (0,333 h)
+    en turnos de 6 h o más (bocadillo)."""
+    from openpyxl import Workbook
+
+    fechas = _rango_fechas(desde, hasta)
+    cfg = get_config(empresa, centro)
+    direccion = (cfg.get("direccion_odoo") or "").strip()
+    rol = (cfg.get("rol_odoo") or "Retail").strip() or "Retail"
+    trabajadores = {w["id"]: w for w in list_trabajadores(empresa, centro, incluir_inactivos=True)}
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT trabajador_id, fecha, inicio_min, duracion_min FROM planificador_turnos "
+        "WHERE empresa = ? AND centro = ? AND tipo = 'trabajo' AND trabajador_id != 0 "
+        "AND fecha BETWEEN ? AND ? ORDER BY fecha, inicio_min",
+        (empresa, centro, fechas[0], fechas[-1]),
+    ).fetchall()
+    conn.close()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "planning.slot"
+    ws.append([
+        "Descanso", "Dirección de trabajo", "Fecha de inicio", "Recurso",
+        "Rol", "Tiempo asignado", "Color", "Color del recurso",
+    ])
+    for r in rows:
+        w = trabajadores.get(r["trabajador_id"])
+        if not w:
+            continue
+        dur = int(r["duracion_min"])
+        descanso = round(_bocadillo(dur) / 60, 10)
+        d = datetime.date.fromisoformat(r["fecha"])
+        ini = datetime.datetime(d.year, d.month, d.day) + datetime.timedelta(minutes=int(r["inicio_min"]))
+        ws.append([
+            descanso,
+            direccion,
+            ini,
+            (w["nombre"] or "").upper(),
+            rol,
+            round(dur / 60, 6),
+            1,
+            1,
+        ])
+    for cell in ws["C"][1:]:
+        cell.number_format = "YYYY-MM-DD HH:MM:SS"
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
 # --- Proyección ---
