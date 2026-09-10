@@ -19,7 +19,6 @@ import calendar
 import datetime
 import io
 import re
-import sqlite3
 
 import xlrd
 from openpyxl import load_workbook
@@ -560,7 +559,6 @@ def compute_resumen():
     headcount_por_centro_lista, horas_por_centro_lista = _headcount_y_horas_por_centro(
         activos, movimientos_centro, hoy_str
     )
-    headcount_por_centro = dict(headcount_por_centro_lista)
 
     # --- Serie mensual completa (todo el histórico de Entrevista de Salida) -
     # Se calcula para TODOS los meses con datos (no solo los últimos 12) para

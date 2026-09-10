@@ -7,7 +7,6 @@ Aproximacion, no el algoritmo propietario de TTI Success Insights: el perfil
 Dominante (top-2 letras) es fiable; los valores numericos tienen un margen
 de error de aprox. +/-10 puntos incluso tras la optimizacion (ver
 config_disc.py para el detalle de precision antes/despues)."""
-import datetime
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
