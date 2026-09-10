@@ -81,8 +81,10 @@
   .plan-libre-btn { border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary); border-radius: 5px; padding: 2px 7px; font-size: 10.5px; cursor: pointer; }
   .plan-libre-btn:hover { border-color: var(--acento); }
   .plan-libre-btn.activo { background: color-mix(in srgb, var(--text-secondary) 30%, var(--surface-1)); color: var(--text-primary); }
-  /* Aviso de días de descanso semanales: 🌙 con ✓ (ok) o ✕ (menos de 2). */
+  /* Aviso de días de descanso semanales: cama con ✓ (ok) o ✕ (menos de 2). */
   .plan-descanso { position: relative; display: inline-flex; font-size: 15px; line-height: 1; cursor: help; }
+  .plan-descanso.ok { color: var(--status-good); }
+  .plan-descanso.mal { color: var(--status-bad, #d9534f); }
   .plan-descanso-marca { position: absolute; top: -4px; right: -6px; width: 12px; height: 12px; line-height: 12px; text-align: center; font-size: 9px; font-weight: 700; border-radius: 50%; color: #fff; }
   .plan-descanso.ok .plan-descanso-marca { background: var(--status-good); }
   .plan-descanso.mal .plan-descanso-marca { background: var(--status-bad, #d9534f); }
@@ -340,10 +342,10 @@
 
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/dialogs.js?v=20260818a"></script>
-<script src="js/icons.js?v=20260903a"></script>
+<script src="js/icons.js?v=20260911a"></script>
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260910a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/planificador.js?v=20260911b"></script>
+<script src="js/planificador.js?v=20260911c"></script>
 </body>
 </html>

@@ -1117,7 +1117,7 @@ def exportar_odoo_xlsx(empresa, centro, desde, hasta):
     ws.title = "planning.slot"
     ws.append([
         "Descanso", "Dirección de trabajo", "Fecha de inicio", "Recurso",
-        "Rol", "Tiempo asignado", "Color", "Color del recurso",
+        "Rol", "Tiempo asignado", "Fecha de finalización",
     ])
     for r in rows:
         w = trabajadores.get(r["trabajador_id"])
@@ -1125,23 +1125,24 @@ def exportar_odoo_xlsx(empresa, centro, desde, hasta):
             continue
         dur = int(r["duracion_min"])
         descanso = round(_bocadillo(dur) / 60, 10)
-        # "Fecha de inicio" en Odoo es el inicio de PRESENCIA -- si el bocadillo
-        # va al principio (turno de cierre), empieza 20 min antes del trabajo.
-        pres_ini, _ = _presencia(int(r["inicio_min"]), dur, cierre_min)
+        # "Fecha de inicio" / "Fecha de finalización" en Odoo son de PRESENCIA
+        # (con el bocadillo, al principio en turnos de cierre y al final en los
+        # de apertura). Se cumple: fin - inicio = Tiempo asignado + Descanso.
+        pres_ini, pres_fin = _presencia(int(r["inicio_min"]), dur, cierre_min)
         d = datetime.date.fromisoformat(r["fecha"])
-        ini = datetime.datetime(d.year, d.month, d.day) + datetime.timedelta(minutes=pres_ini)
+        base = datetime.datetime(d.year, d.month, d.day)
         ws.append([
             descanso,
             direccion,
-            ini,
+            base + datetime.timedelta(minutes=pres_ini),
             (w["nombre"] or "").upper(),
             rol,
             round(dur / 60, 6),
-            1,
-            1,
+            base + datetime.timedelta(minutes=pres_fin),
         ])
-    for cell in ws["C"][1:]:
-        cell.number_format = "YYYY-MM-DD HH:MM:SS"
+    for col in ("C", "G"):
+        for cell in ws[col][1:]:
+            cell.number_format = "YYYY-MM-DD HH:MM:SS"
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()

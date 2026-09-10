@@ -383,7 +383,7 @@ function barraHorasHTML(min, contrato) {
   </div>`;
 }
 
-// 🌙 con ✓ verde si el horario de la persona esta semana es correcto, o ✕
+// 🛏 con ✓ verde si el horario de la persona esta semana es correcto, o ✕
 // rojo si hay conflicto: menos de 2 días de descanso, o más horas
 // planificadas que las de su contrato.
 function descansoIndicadorHTML(trabId, minSemana, contrato) {
@@ -400,7 +400,7 @@ function descansoIndicadorHTML(trabId, minSemana, contrato) {
   const titulo = ok
     ? `${descanso} días de descanso esta semana · dentro de contrato`
     : `Conflicto en el horario: ${motivos.join(" · ")} — revísalo`;
-  return `<span class="plan-descanso ${ok ? "ok" : "mal"}" title="${titulo}">🌙<span class="plan-descanso-marca">${ok ? "✓" : "✕"}</span></span>`;
+  return `<span class="plan-descanso ${ok ? "ok" : "mal"}" title="${titulo}">🛏<span class="plan-descanso-marca">${ok ? "✓" : "✕"}</span></span>`;
 }
 
 function filaTrabajador(t) {
@@ -1287,7 +1287,7 @@ function renderSemana() {
             .join("");
           const fuera = vac ? "vacaciones" : libre ? "libre" : "";
           return `<div class="plan-sem-celda ${fuera}" data-trab="${t.id}" data-fecha="${d}">
-            <span class="plan-sem-luna ${libre ? "activo" : ""}" data-trab="${t.id}" data-fecha="${d}" title="Día libre">🌙</span>
+            <span class="plan-sem-luna ${libre ? "activo" : ""}" data-trab="${t.id}" data-fecha="${d}" title="Día libre">🛏</span>
             ${fuera ? `<span class="plan-sem-libre-txt">${vac ? "Vacaciones" : "Libre"}</span>` : chips}
           </div>`;
         })
