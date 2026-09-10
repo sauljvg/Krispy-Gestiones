@@ -1204,12 +1204,13 @@ let feedbackGerenteState = {}; // valoración del gerente tras la entrevista (ve
 
 // Checklist "Encaje con el puesto" -- clave interna + etiqueta + descripción.
 // Textos pensados para el día a día de tienda/fábrica (KK) y restaurante
-// (Saona): turnos, fines de semana, trato al cliente, aguante.
+// (Saona): turnos, fines de semana, trato al cliente, presencia, puntualidad.
 const FEEDBACK_ENCAJE_ITEMS = [
   ["experiencia", "Experiencia", "tiene el tipo de experiencia y el tiempo necesario para el puesto"],
   ["conocimientos", "Conocimientos", "sabe hacer lo que pide el puesto en el día a día, o aprende rápido"],
-  ["estabilidad", "Estabilidad", "su historial no cambia de trabajo cada poco tiempo"],
   ["disponibilidad", "Disponibilidad", "le encajan los turnos, los fines de semana y la fecha de incorporación"],
+  ["puntualidad", "Puntualidad", "llegó puntual a la entrevista"],
+  ["presencia", "Presencia", "vino bien vestido y arreglado, con buena imagen para atender al público"],
   ["actitud", "Actitud y ganas", "se le vio con energía e interés real por trabajar con nosotros"],
   ["trato", "Trato", "encaja con cómo tratamos al cliente y al compañero (cercanía, compañerismo, honestidad)"],
   ["feeling", "Buen feeling", "en general me transmitió buenas sensaciones"],
