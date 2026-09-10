@@ -34,6 +34,57 @@ const TIENDAS_DISPONIBLES = [
   "Saona Madnum", "Saona Salamanca",
 ];
 
+// Un centro/tienda es de Saona si su nombre empieza por "Saona"; el resto es
+// Krispy Kreme. Se usa para dividir el checklist en dos grupos ("Todas KK" /
+// "Todas Saona") en vez de un único "Todas" que mezcla las dos marcas
+// (pedido explícito del usuario: quería poder dar "todas las de KK" a un
+// gerente sin darle también las de Saona).
+function esDeSaona(nombre) {
+  return /^saona\b/i.test((nombre || "").trim());
+}
+
+// Genera el interior de un checklist-popover agrupado por marca. `prefix` es
+// "et" (tiendas) o "ecc" (centros de Clima). El "Sin restricción" de arriba
+// = array vacío = ve todo (comportamiento de siempre, además cubre tiendas
+// futuras). Cada grupo tiene su propio "Todas las de <marca>" que solo
+// marca/desmarca las casillas de ESE grupo.
+function checklistAgrupadoHTML({ prefix, userId, items, seleccionados, masterLabel }) {
+  const sinRestriccion = !seleccionados || seleccionados.length === 0;
+  const sel = new Set(seleccionados || []);
+  const grupos = [
+    { clave: "kk", etiqueta: "Krispy Kreme", lista: items.filter((x) => !esDeSaona(x)) },
+    { clave: "saona", etiqueta: "Saona", lista: items.filter(esDeSaona) },
+  ].filter((g) => g.lista.length > 0);
+
+  const master = `
+    <div class="checklist-row" style="border-bottom:1px solid var(--border); padding-bottom:6px; margin-bottom:4px;">
+      <input type="checkbox" id="${prefix}-todas-${userId}" class="${prefix}-todas" data-id="${userId}" ${sinRestriccion ? "checked" : ""}>
+      <label for="${prefix}-todas-${userId}">${escapeHTML(masterLabel)}</label>
+    </div>`;
+
+  const gruposHTML = grupos.map((g) => {
+    const todasGrupo = g.lista.every((x) => sel.has(x));
+    const filas = g.lista.map((x) => {
+      const idx = items.indexOf(x);
+      return `
+        <div class="checklist-row">
+          <input type="checkbox" id="${prefix}-${userId}-${idx}" class="${prefix}-item" data-id="${userId}" data-grupo="${g.clave}" value="${escapeHTML(x)}"
+            ${sel.has(x) ? "checked" : ""} ${sinRestriccion ? "disabled" : ""}>
+          <label for="${prefix}-${userId}-${idx}">${escapeHTML(x)}</label>
+        </div>`;
+    }).join("");
+    return `
+      <div class="checklist-grupo-titulo" style="font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin:8px 0 2px;">${escapeHTML(g.etiqueta)}</div>
+      <div class="checklist-row" style="font-weight:600;">
+        <input type="checkbox" class="${prefix}-grupo" data-id="${userId}" data-grupo="${g.clave}" ${todasGrupo && !sinRestriccion ? "checked" : ""} ${sinRestriccion ? "disabled" : ""}>
+        <label>Todas las de ${escapeHTML(g.etiqueta)}</label>
+      </div>
+      ${filas}`;
+  }).join("");
+
+  return master + gruposHTML;
+}
+
 function fmtFecha(iso) {
   if (!iso) return "";
   return iso.slice(0, 10);
@@ -241,19 +292,7 @@ function filaUsuarioHTML(u, currentUserId) {
                 <span style="font-size:11px; color:var(--text-secondary);">Tiendas</span>
                 <button type="button" class="btn-tiendas-cerrar" data-id="${u.id}">Cerrar</button>
               </div>
-              <div class="checklist-row" style="border-bottom:1px solid var(--border); padding-bottom:6px; margin-bottom:4px;">
-                <input type="checkbox" id="et-todas-${u.id}" class="et-todas" data-id="${u.id}" ${!u.tiendas || u.tiendas.length === 0 ? "checked" : ""}>
-                <label for="et-todas-${u.id}">Todas las tiendas</label>
-              </div>
-              ${TIENDAS_DISPONIBLES.map(
-                (t, i) => `
-                <div class="checklist-row">
-                  <input type="checkbox" id="et-${u.id}-${i}" class="et-tienda" data-id="${u.id}" value="${t}"
-                    ${(u.tiendas || []).includes(t) ? "checked" : ""}
-                    ${!u.tiendas || u.tiendas.length === 0 ? "disabled" : ""}>
-                  <label for="et-${u.id}-${i}">${t}</label>
-                </div>`
-              ).join("")}
+              ${checklistAgrupadoHTML({ prefix: "et", userId: u.id, items: TIENDAS_DISPONIBLES, seleccionados: u.tiendas, masterLabel: "Todas las tiendas (sin restricción)" })}
               <button type="button" class="btn btn-primary btn-guardar-tiendas" data-id="${u.id}" style="width:100%; margin-top:8px; font-size:12px;">Guardar</button>
             </div>
           </div>
@@ -293,19 +332,7 @@ function filaUsuarioHTML(u, currentUserId) {
                 <span style="font-size:11px; color:var(--text-secondary);">Clima Laboral</span>
                 <button type="button" class="btn-clima-centros-cerrar" data-id="${u.id}">Cerrar</button>
               </div>
-              <div class="checklist-row" style="border-bottom:1px solid var(--border); padding-bottom:6px; margin-bottom:4px;">
-                <input type="checkbox" id="ecc-todos-${u.id}" class="ecc-todos" data-id="${u.id}" ${!u.clima_centros || u.clima_centros.length === 0 ? "checked" : ""}>
-                <label for="ecc-todos-${u.id}">Todos los centros</label>
-              </div>
-              ${(CLIMA_CENTROS_CACHE || []).map(
-                (c, i) => `
-                <div class="checklist-row">
-                  <input type="checkbox" id="ecc-${u.id}-${i}" class="ecc-centro" data-id="${u.id}" value="${escapeHTML(c)}"
-                    ${(u.clima_centros || []).includes(c) ? "checked" : ""}
-                    ${!u.clima_centros || u.clima_centros.length === 0 ? "disabled" : ""}>
-                  <label for="ecc-${u.id}-${i}">${escapeHTML(c)}</label>
-                </div>`
-              ).join("")}
+              ${checklistAgrupadoHTML({ prefix: "ecc", userId: u.id, items: (CLIMA_CENTROS_CACHE || []), seleccionados: u.clima_centros, masterLabel: "Todos los centros (sin restricción)" })}
               <button type="button" class="btn btn-primary btn-guardar-clima-centros" data-id="${u.id}" style="width:100%; margin-top:8px; font-size:12px;">Guardar</button>
             </div>
           </div>
@@ -478,15 +505,40 @@ function renderUsuariosFiltrados() {
   wirePopoverToggle(".btn-editar-clima-centros", "clima-centros-popover");
   wirePopoverClose(".btn-clima-centros-cerrar", "clima-centros-popover");
 
-  tbody.querySelectorAll(".et-todas").forEach((cb) => {
-    cb.addEventListener("change", () => {
-      const id = cb.dataset.id;
-      tbody.querySelectorAll(`.et-tienda[data-id="${id}"]`).forEach((tCb) => {
-        tCb.disabled = cb.checked;
-        if (cb.checked) tCb.checked = false;
+  // Checklists agrupados por marca (Tiendas de Reseñas y Centros de Clima):
+  // "sin restricción" (master) desactiva y desmarca TODO; "Todas las de
+  // <marca>" solo marca/desmarca su grupo; y al tocar una casilla suelta se
+  // recalcula si su grupo queda entero marcado. prefix = "et" | "ecc".
+  function wireChecklistAgrupado(prefix) {
+    tbody.querySelectorAll(`.${prefix}-todas`).forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const id = cb.dataset.id;
+        tbody.querySelectorAll(`.${prefix}-item[data-id="${id}"], .${prefix}-grupo[data-id="${id}"]`).forEach((x) => {
+          x.disabled = cb.checked;
+          if (cb.checked) x.checked = false;
+        });
       });
     });
-  });
+    tbody.querySelectorAll(`.${prefix}-grupo`).forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const { id, grupo } = cb.dataset;
+        tbody.querySelectorAll(`.${prefix}-item[data-id="${id}"][data-grupo="${grupo}"]`).forEach((x) => {
+          x.checked = cb.checked;
+        });
+      });
+    });
+    tbody.querySelectorAll(`.${prefix}-item`).forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const { id, grupo } = cb.dataset;
+        const items = [...tbody.querySelectorAll(`.${prefix}-item[data-id="${id}"][data-grupo="${grupo}"]`)];
+        const grupoCb = tbody.querySelector(`.${prefix}-grupo[data-id="${id}"][data-grupo="${grupo}"]`);
+        if (grupoCb) grupoCb.checked = items.length > 0 && items.every((x) => x.checked);
+      });
+    });
+  }
+  wireChecklistAgrupado("et");
+  wireChecklistAgrupado("ecc");
+
   tbody.querySelectorAll(".eti-todos").forEach((cb) => {
     cb.addEventListener("change", () => {
       const id = cb.dataset.id;
@@ -496,16 +548,6 @@ function renderUsuariosFiltrados() {
       });
     });
   });
-  tbody.querySelectorAll(".ecc-todos").forEach((cb) => {
-    cb.addEventListener("change", () => {
-      const id = cb.dataset.id;
-      tbody.querySelectorAll(`.ecc-centro[data-id="${id}"]`).forEach((tCb) => {
-        tCb.disabled = cb.checked;
-        if (cb.checked) tCb.checked = false;
-      });
-    });
-  });
-
   tbody.querySelectorAll(".btn-guardar-modulos").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = btn.dataset.id;
@@ -529,7 +571,7 @@ function renderUsuariosFiltrados() {
       const todas = document.getElementById(`et-todas-${id}`).checked;
       const tiendas = todas
         ? []
-        : [...tbody.querySelectorAll(`.et-tienda[data-id="${id}"]:checked`)].map((cb) => cb.value);
+        : [...tbody.querySelectorAll(`.et-item[data-id="${id}"]:checked`)].map((cb) => cb.value);
       const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}/tiendas`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -566,10 +608,10 @@ function renderUsuariosFiltrados() {
   tbody.querySelectorAll(".btn-guardar-clima-centros").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = btn.dataset.id;
-      const todos = document.getElementById(`ecc-todos-${id}`).checked;
+      const todos = document.getElementById(`ecc-todas-${id}`).checked;
       const centros = todos
         ? []
-        : [...tbody.querySelectorAll(`.ecc-centro[data-id="${id}"]:checked`)].map((cb) => cb.value);
+        : [...tbody.querySelectorAll(`.ecc-item[data-id="${id}"]:checked`)].map((cb) => cb.value);
       const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}/clima-centros`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
