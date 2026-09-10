@@ -8,15 +8,18 @@ const API = `${window.location.origin}/api/planificador`;
 const PX_POR_MIN = 1.15; // ancho en px de cada minuto de la línea de tiempo
 const SNAP = 15; // los bloques saltan de 15 en 15 minutos
 const LS_CENTRO = `plan-centro-${EMPRESA}`;
+const LS_VISTA = `plan-vista-${EMPRESA}`;
 
 const S = {
   centro: "",
   fecha: hoyISO(),
+  vista: localStorage.getItem(LS_VISTA) === "semana" ? "semana" : "dia",
   config: { apertura_min: 480, cierre_min: 1500, objetivo_transacciones_hora: null },
   trabajadores: [],
   turnos: [],
   minutosSemana: {},
   proyeccion: {},
+  dias: [],
 };
 
 // ---------------------------------------------------------------- utilidades
@@ -89,9 +92,12 @@ async function cargarCentros() {
 async function cargarDia() {
   const cont = document.getElementById("plan-contenido");
   cont.innerHTML = `<p class="plan-vacia">Cargando…</p>`;
-  const res = await fetch(url("dia", { centro: S.centro, fecha: S.fecha }));
+  document.getElementById("plan-vista-dia").classList.toggle("activo", S.vista === "dia");
+  document.getElementById("plan-vista-semana").classList.toggle("activo", S.vista === "semana");
+  const endpoint = S.vista === "semana" ? "semana" : "dia";
+  const res = await fetch(url(endpoint, { centro: S.centro, fecha: S.fecha }));
   if (!res.ok) {
-    cont.innerHTML = `<p class="plan-vacia">No se pudo cargar el día.</p>`;
+    cont.innerHTML = `<p class="plan-vacia">No se pudo cargar.</p>`;
     return;
   }
   const data = await res.json();
@@ -100,9 +106,16 @@ async function cargarDia() {
   S.turnos = data.turnos;
   S.minutosSemana = data.minutos_semana || {};
   S.proyeccion = normalizarProyeccion(data.proyeccion || {});
-  document.getElementById("plan-fecha-txt").textContent = fechaLarga(S.fecha);
+  S.dias = data.dias || [];
+  document.getElementById("plan-fecha-txt").textContent =
+    S.vista === "semana" ? `Semana del ${fechaCorta(data.lunes || S.fecha)}` : fechaLarga(S.fecha);
   document.getElementById("plan-fecha-input").value = S.fecha;
   renderTodo();
+}
+
+function fechaCorta(iso) {
+  const d = new Date(iso + "T12:00:00");
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function normalizarProyeccion(obj) {
@@ -115,6 +128,11 @@ function normalizarProyeccion(obj) {
 // ---------------------------------------------------------------- render
 
 function renderTodo() {
+  if (S.vista === "semana") renderSemana();
+  else renderDia();
+}
+
+function renderDia() {
   const cont = document.getElementById("plan-contenido");
   const fr = franjas();
   const ancho = anchoTimeline();
@@ -175,6 +193,9 @@ function renderTodo() {
   wireInputsProyeccion();
   S.trabajadores.forEach((t) => wireLane(cont.querySelector(`.plan-lane[data-trab="${t.id}"]`), t.id));
   cont.querySelectorAll(".plan-turno").forEach(wireTurno);
+  cont.querySelectorAll(".plan-libre-btn").forEach((btn) => {
+    btn.addEventListener("click", () => toggleLibre(Number(btn.dataset.trab), S.fecha));
+  });
 }
 
 function celdasPlanificado() {
@@ -200,6 +221,7 @@ function idealCalculado(m) {
 function planificadoEnFranja(m) {
   const ids = new Set();
   for (const t of S.turnos) {
+    if (t.tipo === "libre") continue;
     if (t.inicio_min < m + 60 && t.inicio_min + t.duracion_min > m) ids.add(t.trabajador_id);
   }
   return ids.size;
@@ -215,7 +237,9 @@ function filaTrabajador(t) {
   const contrato = t.horas_contrato_semana;
   const pct = contrato ? min / 60 / contrato : 0;
   const clase = !contrato ? "" : pct >= 1 ? "rojo" : pct >= 0.85 ? "ambar" : "";
-  const bloques = S.turnos.filter((x) => x.trabajador_id === t.id).map(turnoHTML).join("");
+  const misTurnos = S.turnos.filter((x) => x.trabajador_id === t.id);
+  const tieneLibre = misTurnos.some((x) => x.tipo === "libre");
+  const bloques = misTurnos.map(turnoHTML).join("");
   const lineas = franjas().map((m) => `<div class="plan-lane-linea hora" style="left:${minToX(m)}px;"></div>`).join("");
   return `
     <div class="plan-fila">
@@ -223,6 +247,7 @@ function filaTrabajador(t) {
         <span class="plan-trab-nombre" title="${escapeHTML(t.nombre)}">${escapeHTML(t.nombre)}</span>
         <span class="plan-trab-horas">${textoHoras(min, contrato)}</span>
         <div class="plan-barra ${clase}"><i style="width:${Math.min(100, Math.round(pct * 100))}%;"></i></div>
+        <button type="button" class="plan-libre-btn ${tieneLibre ? "activo" : ""}" data-trab="${t.id}">${tieneLibre ? "Quitar libre" : "Día libre"}</button>
       </div>
       <div class="plan-lane" data-trab="${t.id}">
         <div class="plan-lane-lineas">${lineas}</div>
@@ -232,6 +257,12 @@ function filaTrabajador(t) {
 }
 
 function turnoHTML(t) {
+  if (t.tipo === "libre") {
+    return `<div class="plan-turno libre" data-id="${t.id}" data-tipo="libre">
+      <span class="plan-turno-txt">Libre</span>
+      <span class="plan-turno-x" title="Quitar día libre">✕</span>
+    </div>`;
+  }
   return `<div class="plan-turno" data-id="${t.id}" data-inicio="${t.inicio_min}" data-duracion="${t.duracion_min}"
     style="left:${minToX(t.inicio_min)}px; width:${t.duracion_min * PX_POR_MIN}px;">
     <span class="plan-turno-txt">${etiquetaTurno(t.inicio_min, t.duracion_min)}</span>
@@ -280,18 +311,20 @@ function refrescarCalculadas() {
 // ---------------------------------------------------------------- arrastrar / crear
 
 function wireTurno(el) {
+  const esLibre = el.dataset.tipo === "libre";
   const btnX = el.querySelector(".plan-turno-x");
   btnX.addEventListener("pointerdown", (e) => e.stopPropagation());
   btnX.addEventListener("click", async (e) => {
     e.stopPropagation();
-    if (!(await pedirConfirmacion("¿Quitar este turno?"))) return;
+    if (!esLibre && !(await pedirConfirmacion("¿Quitar este turno?"))) return;
     const res = await fetch(url(`turnos/${el.dataset.id}`), { method: "DELETE" });
     if (!res.ok) {
-      mostrarAviso("No se pudo quitar el turno.");
+      mostrarAviso("No se pudo quitar.");
       return;
     }
     cargarDia();
   });
+  if (esLibre) return; // un día libre no se mueve ni se estira
 
   el.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
@@ -391,6 +424,117 @@ function wireLane(lane, trabajadorId) {
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+  });
+}
+
+async function toggleLibre(trabajadorId, fecha) {
+  const existente = S.turnos.find(
+    (t) => t.trabajador_id === trabajadorId && t.tipo === "libre" && t.fecha === fecha
+  );
+  let res;
+  if (existente) {
+    res = await fetch(url(`turnos/${existente.id}`), { method: "DELETE" });
+  } else {
+    res = await fetch(url("turnos"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        centro: S.centro,
+        fecha,
+        trabajador_id: trabajadorId,
+        inicio_min: S.config.apertura_min,
+        duracion_min: S.config.cierre_min - S.config.apertura_min,
+        tipo: "libre",
+      }),
+    });
+  }
+  if (!res.ok) {
+    mostrarAviso("No se pudo cambiar el día libre.");
+    return;
+  }
+  cargarDia();
+}
+
+// ---------------------------------------------------------------- vista semana
+
+function renderSemana() {
+  const cont = document.getElementById("plan-contenido");
+  const dias = S.dias.length ? S.dias : [S.fecha];
+  const nombresDia = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+  const hoy = hoyISO();
+
+  const cabecera = `
+    <div class="plan-sem-fila plan-sem-cabecera">
+      <div class="plan-sem-nombre"></div>
+      ${dias
+        .map(
+          (d, i) =>
+            `<div class="plan-sem-dia ${d === hoy ? "hoy" : ""}" data-fecha="${d}">${nombresDia[i]} ${fechaCorta(d)}</div>`
+        )
+        .join("")}
+    </div>`;
+
+  const filas = S.trabajadores
+    .map((t) => {
+      const min = S.minutosSemana[String(t.id)] || 0;
+      const contrato = t.horas_contrato_semana;
+      const pct = contrato ? min / 60 / contrato : 0;
+      const claseBarra = !contrato ? "" : pct >= 1 ? "rojo" : pct >= 0.85 ? "ambar" : "";
+      const celdas = dias
+        .map((d) => {
+          const delDia = S.turnos.filter((x) => x.trabajador_id === t.id && x.fecha === d);
+          const libre = delDia.some((x) => x.tipo === "libre");
+          const trabajo = delDia.filter((x) => x.tipo !== "libre").sort((a, b) => a.inicio_min - b.inicio_min);
+          const chips = trabajo
+            .map((x) => `<span class="plan-sem-chip">${fmtHHMM(x.inicio_min)}–${fmtHHMM(x.inicio_min + x.duracion_min)}</span>`)
+            .join("");
+          return `<div class="plan-sem-celda ${libre ? "libre" : ""}" data-trab="${t.id}" data-fecha="${d}">
+            <span class="plan-sem-luna ${libre ? "activo" : ""}" data-trab="${t.id}" data-fecha="${d}" title="Día libre">🌙</span>
+            ${libre ? `<span class="plan-sem-libre-txt">Libre</span>` : chips}
+          </div>`;
+        })
+        .join("");
+      return `
+        <div class="plan-sem-fila">
+          <div class="plan-sem-nombre">
+            <span class="plan-trab-nombre" title="${escapeHTML(t.nombre)}">${escapeHTML(t.nombre)}</span>
+            <span class="plan-trab-horas">${textoHoras(min, contrato)}</span>
+            <div class="plan-barra ${claseBarra}"><i style="width:${Math.min(100, Math.round(pct * 100))}%;"></i></div>
+          </div>
+          ${celdas}
+        </div>`;
+    })
+    .join("");
+
+  cont.innerHTML = `
+    <div class="plan-grid-scroll">
+      <div class="plan-semana">
+        ${cabecera}
+        ${S.trabajadores.length === 0 ? `<div class="plan-vacia">Este centro no tiene trabajadores en la plantilla.</div>` : filas}
+      </div>
+    </div>`;
+
+  cont.querySelectorAll(".plan-sem-dia").forEach((el) => {
+    el.addEventListener("click", () => {
+      S.fecha = el.dataset.fecha;
+      S.vista = "dia";
+      localStorage.setItem(LS_VISTA, "dia");
+      cargarDia();
+    });
+  });
+  cont.querySelectorAll(".plan-sem-luna").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleLibre(Number(el.dataset.trab), el.dataset.fecha);
+    });
+  });
+  cont.querySelectorAll(".plan-sem-celda").forEach((el) => {
+    el.addEventListener("click", () => {
+      S.fecha = el.dataset.fecha;
+      S.vista = "dia";
+      localStorage.setItem(LS_VISTA, "dia");
+      cargarDia();
+    });
   });
 }
 
@@ -583,12 +727,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     localStorage.setItem(LS_CENTRO, S.centro);
     cargarDia();
   });
+  const setVista = (v) => {
+    S.vista = v;
+    localStorage.setItem(LS_VISTA, v);
+    cargarDia();
+  };
+  document.getElementById("plan-vista-dia").addEventListener("click", () => setVista("dia"));
+  document.getElementById("plan-vista-semana").addEventListener("click", () => setVista("semana"));
+  const pasoDias = () => (S.vista === "semana" ? 7 : 1);
   document.getElementById("plan-dia-prev").addEventListener("click", () => {
-    S.fecha = sumarDias(S.fecha, -1);
+    S.fecha = sumarDias(S.fecha, -pasoDias());
     cargarDia();
   });
   document.getElementById("plan-dia-next").addEventListener("click", () => {
-    S.fecha = sumarDias(S.fecha, 1);
+    S.fecha = sumarDias(S.fecha, pasoDias());
     cargarDia();
   });
   document.getElementById("plan-fecha-input").addEventListener("change", (e) => {

@@ -49,6 +49,7 @@ def ensure_planificador_tables():
             fecha TEXT NOT NULL,
             inicio_min INTEGER NOT NULL,
             duracion_min INTEGER NOT NULL,
+            tipo TEXT NOT NULL DEFAULT 'trabajo',
             creado_por TEXT,
             creado_en TEXT NOT NULL DEFAULT (datetime('now')),
             actualizado_en TEXT
@@ -78,12 +79,22 @@ def ensure_planificador_tables():
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_turnos_busqueda ON planificador_turnos (empresa, centro, fecha)")
+    cols_turnos = {r[1] for r in conn.execute("PRAGMA table_info(planificador_turnos)")}
+    if "tipo" not in cols_turnos:
+        conn.execute("ALTER TABLE planificador_turnos ADD COLUMN tipo TEXT NOT NULL DEFAULT 'trabajo'")
     # Todo el mundo tiene contrato: quien se quedó sin horas (sin % de jornada
     # en el Excel) pasa a jornada completa. Idempotente.
     conn.execute(
         "UPDATE planificador_trabajadores SET horas_contrato_semana = ? WHERE horas_contrato_semana IS NULL",
         (HORAS_JORNADA_COMPLETA,),
     )
+    # Nombres "APELLIDOS, NOMBRE" (formato del Excel) -> "NOMBRE APELLIDOS".
+    # Idempotente: tras darle la vuelta ya no queda ", ".
+    for row in conn.execute("SELECT id, nombre FROM planificador_trabajadores WHERE nombre LIKE '%, %'").fetchall():
+        conn.execute(
+            "UPDATE planificador_trabajadores SET nombre = ? WHERE id = ?",
+            (_nombre_directo(row["nombre"]), row["id"]),
+        )
     conn.commit()
     conn.close()
 
@@ -99,6 +110,16 @@ _PUESTOS_NO_OPERATIVOS = ("area coach", "area manager", "director")
 def _puesto_no_operativo(puesto):
     p = (puesto or "").strip().lower()
     return any(x in p for x in _PUESTOS_NO_OPERATIVOS)
+
+
+def _nombre_directo(nombre):
+    """El Excel trae "APELLIDO1 APELLIDO2, NOMBRE"; se muestra "NOMBRE
+    APELLIDO1 APELLIDO2". Si no hay coma se deja tal cual (alta manual)."""
+    nombre = (nombre or "").strip()
+    if ", " in nombre:
+        apellidos, pila = nombre.split(", ", 1)
+        return f"{pila.strip()} {apellidos.strip()}".strip()
+    return nombre
 
 
 def _horas_contrato(pct):
@@ -202,6 +223,7 @@ def cargar_desde_kpis(empresa, centro):
         if _puesto_no_operativo(e["puesto"]):
             continue
         cod = str(e["codigo_empleado"]).strip()
+        nombre = _nombre_directo(e["nombre"])
         horas = _horas_contrato(e["porcentaje_jornada"])
         existente = conn.execute(
             "SELECT id FROM planificador_trabajadores WHERE empresa = 'kk' AND centro = ? AND codigo_empleado = ?",
@@ -211,7 +233,7 @@ def cargar_desde_kpis(empresa, centro):
             conn.execute(
                 "UPDATE planificador_trabajadores SET nombre = ?, "
                 "horas_contrato_semana = COALESCE(horas_contrato_semana, ?), activo = 1 WHERE id = ?",
-                (e["nombre"], horas, existente["id"]),
+                (nombre, horas, existente["id"]),
             )
             actualizados += 1
         else:
@@ -219,7 +241,7 @@ def cargar_desde_kpis(empresa, centro):
                 "INSERT INTO planificador_trabajadores "
                 "(empresa, centro, codigo_empleado, nombre, horas_contrato_semana, origen) "
                 "VALUES ('kk', ?, ?, ?, ?, 'kpis')",
-                (centro, cod, e["nombre"], horas),
+                (centro, cod, nombre, horas),
             )
             creados += 1
     conn.commit()
@@ -256,7 +278,7 @@ def importar_odoo_excel(empresa, contenido, nombre_archivo):
             return fila[i] if i is not None and i < len(fila) else None
 
         cod = kpis_module._codigo_empleado(val("codigo_empleado"))
-        nombre = kpis_module._texto(val("nombre"))
+        nombre = _nombre_directo(kpis_module._texto(val("nombre")))
         centro = kpis_module._centro_normalizado(val("centro"))
         baja = kpis_module._fecha_a_iso(val("fecha_baja"))
         if (
@@ -370,13 +392,23 @@ def get_turno(turno_id):
     return dict(row) if row else None
 
 
-def crear_turno(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, creado_por):
+def crear_turno(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, creado_por, tipo="trabajo"):
     conn = get_connection()
+    if tipo == "libre":
+        # Solo un "día libre" por persona y fecha -- si ya hay uno, no se duplica.
+        ya = conn.execute(
+            "SELECT id FROM planificador_turnos WHERE empresa = ? AND centro = ? AND trabajador_id = ? "
+            "AND fecha = ? AND tipo = 'libre'",
+            (empresa, centro, trabajador_id, fecha),
+        ).fetchone()
+        if ya:
+            conn.close()
+            return ya["id"]
     cur = conn.execute(
         "INSERT INTO planificador_turnos "
-        "(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, creado_por) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (empresa, centro, trabajador_id, fecha, int(inicio_min), int(duracion_min), creado_por),
+        "(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, tipo, creado_por) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (empresa, centro, trabajador_id, fecha, int(inicio_min), int(duracion_min), tipo, creado_por),
     )
     conn.commit()
     tid = cur.lastrowid
@@ -441,19 +473,40 @@ def set_proyeccion_celda(empresa, centro, fecha, franja_min, campo, valor):
 
 # --- Vista de un día (todo junto) ---
 
-def dia_completo(empresa, centro, fecha):
-    trabajadores = list_trabajadores(empresa, centro)
-    turnos_sem = turnos_semana(empresa, centro, fecha)
-    minutos_semana = {}
+def _minutos_semana(turnos_sem):
+    """Suma de minutos de trabajo por trabajador -- los bloques 'libre' (días
+    libres) NO cuentan como horas trabajadas."""
+    out = {}
     for t in turnos_sem:
-        minutos_semana[t["trabajador_id"]] = minutos_semana.get(t["trabajador_id"], 0) + t["duracion_min"]
+        if t.get("tipo") == "libre":
+            continue
+        out[t["trabajador_id"]] = out.get(t["trabajador_id"], 0) + t["duracion_min"]
+    return out
+
+
+def dia_completo(empresa, centro, fecha):
+    turnos_sem = turnos_semana(empresa, centro, fecha)
     return {
         "config": get_config(empresa, centro),
-        "trabajadores": trabajadores,
+        "trabajadores": list_trabajadores(empresa, centro),
         "turnos": [t for t in turnos_sem if t["fecha"] == fecha],
-        "minutos_semana": {str(k): v for k, v in minutos_semana.items()},
+        "minutos_semana": {str(k): v for k, v in _minutos_semana(turnos_sem).items()},
         "proyeccion": {str(k): v for k, v in get_proyeccion(empresa, centro, fecha).items()},
         "lunes": _lunes_de(fecha),
+    }
+
+
+def semana_completa(empresa, centro, fecha):
+    lunes = _lunes_de(fecha)
+    dias = [(datetime.date.fromisoformat(lunes) + datetime.timedelta(days=i)).isoformat() for i in range(7)]
+    turnos_sem = turnos_semana(empresa, centro, fecha)
+    return {
+        "config": get_config(empresa, centro),
+        "trabajadores": list_trabajadores(empresa, centro),
+        "turnos": turnos_sem,
+        "minutos_semana": {str(k): v for k, v in _minutos_semana(turnos_sem).items()},
+        "lunes": lunes,
+        "dias": dias,
     }
 
 

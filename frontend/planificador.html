@@ -20,6 +20,8 @@
   .plan-nav-fecha .plan-fecha-txt { font-weight: 600; min-width: 150px; text-align: center; }
   .plan-btn-icono { border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); border-radius: 8px; padding: 6px 10px; font-size: 14px; cursor: pointer; }
   .plan-btn-icono:hover { border-color: var(--acento); }
+  .plan-btn-icono.activo { background: var(--acento); color: #fff; border-color: var(--acento); }
+  .plan-vista-toggle { display: inline-flex; gap: 4px; }
 
   /* --- Rejilla --- */
   .plan-grid-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
@@ -46,6 +48,28 @@
   .plan-turno .plan-turno-x { position: absolute; top: 1px; right: 2px; width: 15px; height: 15px; line-height: 14px; text-align: center; border-radius: 4px; background: rgba(0,0,0,.25); font-size: 12px; opacity: 0; transition: opacity .1s; }
   .plan-turno:hover .plan-turno-x { opacity: 1; }
   .plan-turno-fantasma { position: absolute; top: 6px; bottom: 6px; border-radius: 7px; background: color-mix(in srgb, var(--acento) 45%, transparent); border: 1px dashed var(--acento); pointer-events: none; }
+  /* Bloque "negativo": día libre de la persona -- toda la franja en gris. */
+  .plan-turno.libre { left: 0 !important; width: 100% !important; background: color-mix(in srgb, var(--text-secondary) 30%, var(--surface-1)); color: var(--text-secondary); cursor: default; box-shadow: none; font-weight: 500; text-transform: uppercase; letter-spacing: .08em; font-size: 10.5px; z-index: 0; }
+  .plan-libre-btn { align-self: flex-start; margin-top: 2px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary); border-radius: 5px; padding: 2px 7px; font-size: 10.5px; cursor: pointer; }
+  .plan-libre-btn:hover { border-color: var(--acento); }
+  .plan-libre-btn.activo { background: color-mix(in srgb, var(--text-secondary) 30%, var(--surface-1)); color: var(--text-primary); }
+
+  /* --- Vista semana --- */
+  .plan-semana { min-width: max-content; }
+  .plan-sem-fila { display: grid; grid-template-columns: 190px repeat(7, minmax(118px, 1fr)); }
+  .plan-sem-fila:not(:last-child) { border-bottom: 1px solid var(--border); }
+  .plan-sem-nombre { position: sticky; left: 0; z-index: 2; background: var(--surface-1); border-right: 2px solid var(--border); padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; box-sizing: border-box; }
+  .plan-sem-cabecera .plan-sem-dia { text-align: center; font-weight: 600; font-size: 12px; color: var(--text-secondary); padding: 8px 4px; cursor: pointer; border-left: 1px solid var(--border); }
+  .plan-sem-cabecera .plan-sem-dia:hover { color: var(--acento); }
+  .plan-sem-cabecera .plan-sem-dia.hoy { color: var(--acento); }
+  .plan-sem-celda { border-left: 1px solid var(--border); padding: 6px 5px; min-height: 46px; display: flex; flex-direction: column; gap: 3px; position: relative; cursor: pointer; }
+  .plan-sem-celda:hover { background: color-mix(in srgb, var(--acento) 6%, transparent); }
+  .plan-sem-celda.libre { background: color-mix(in srgb, var(--text-secondary) 16%, transparent); }
+  .plan-sem-chip { background: var(--acento); color: #fff; border-radius: 5px; font-size: 10.5px; font-weight: 600; padding: 2px 5px; text-align: center; }
+  .plan-sem-libre-txt { color: var(--text-secondary); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; align-self: center; margin: auto 0; }
+  .plan-sem-luna { position: absolute; top: 2px; right: 3px; font-size: 11px; opacity: 0; cursor: pointer; }
+  .plan-sem-celda:hover .plan-sem-luna { opacity: .8; }
+  .plan-sem-luna.activo { opacity: 1; }
 
   /* --- Contador semanal --- */
   .plan-trab-nombre { font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -119,6 +143,10 @@
       <label>Centro
         <select id="plan-centro"></select>
       </label>
+      <div class="plan-vista-toggle">
+        <button type="button" class="plan-btn-icono" id="plan-vista-dia">Día</button>
+        <button type="button" class="plan-btn-icono" id="plan-vista-semana">Semana</button>
+      </div>
       <button type="button" class="plan-btn-icono" id="plan-btn-plantilla">👥 Plantilla</button>
       <button type="button" class="plan-btn-icono" id="plan-btn-config">⚙ Horario del centro</button>
     </div>
@@ -178,6 +206,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260910a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/planificador.js?v=20260910b"></script>
+<script src="js/planificador.js?v=20260910c"></script>
 </body>
 </html>

@@ -48,6 +48,14 @@ def dia_route(empresa: str = "kk", centro: str = "", fecha: str = "", user: dict
     return planificador_module.dia_completo(empresa, centro, fecha)
 
 
+@router.get("/semana")
+def semana_route(empresa: str = "kk", centro: str = "", fecha: str = "", user: dict = Depends(require_planificador)):
+    if not centro or not fecha:
+        raise HTTPException(status_code=400, detail="Faltan centro o fecha")
+    _exigir_centro(user, centro)
+    return planificador_module.semana_completa(empresa, centro, fecha)
+
+
 # --- Roster ---
 
 @router.get("/roster")
@@ -137,18 +145,22 @@ class TurnoIn(BaseModel):
     trabajador_id: int
     inicio_min: int
     duracion_min: int
+    tipo: str = "trabajo"
 
 
 @router.post("/turnos")
 def crear_turno_route(body: TurnoIn, empresa: str = "kk", user: dict = Depends(require_planificador)):
     _exigir_centro(user, body.centro)
-    if body.duracion_min < 15:
+    if body.tipo not in ("trabajo", "libre"):
+        raise HTTPException(status_code=400, detail="Tipo de turno inválido")
+    if body.tipo == "trabajo" and body.duracion_min < 15:
         raise HTTPException(status_code=400, detail="Un turno dura como mínimo 15 minutos")
     t = planificador_module.get_trabajador(body.trabajador_id)
     if t is None or t["centro"] != body.centro or t["empresa"] != empresa:
         raise HTTPException(status_code=400, detail="Ese trabajador no es de este centro")
     tid = planificador_module.crear_turno(
-        empresa, body.centro, body.trabajador_id, body.fecha, body.inicio_min, body.duracion_min, user["username"]
+        empresa, body.centro, body.trabajador_id, body.fecha,
+        body.inicio_min, body.duracion_min, user["username"], tipo=body.tipo,
     )
     return {"ok": True, "id": tid}
 
