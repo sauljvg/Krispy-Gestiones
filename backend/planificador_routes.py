@@ -158,10 +158,13 @@ def crear_turno_route(body: TurnoIn, empresa: str = "kk", user: dict = Depends(r
     t = planificador_module.get_trabajador(body.trabajador_id)
     if t is None or t["centro"] != body.centro or t["empresa"] != empresa:
         raise HTTPException(status_code=400, detail="Ese trabajador no es de este centro")
-    tid = planificador_module.crear_turno(
-        empresa, body.centro, body.trabajador_id, body.fecha,
-        body.inicio_min, body.duracion_min, user["username"], tipo=body.tipo,
-    )
+    try:
+        tid = planificador_module.crear_turno(
+            empresa, body.centro, body.trabajador_id, body.fecha,
+            body.inicio_min, body.duracion_min, user["username"], tipo=body.tipo,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True, "id": tid}
 
 
@@ -180,8 +183,26 @@ def actualizar_turno_route(
     _exigir_centro(user, t["centro"])
     if body.duracion_min is not None and body.duracion_min < 15:
         raise HTTPException(status_code=400, detail="Un turno dura como mínimo 15 minutos")
-    planificador_module.actualizar_turno(turno_id, inicio_min=body.inicio_min, duracion_min=body.duracion_min)
+    try:
+        planificador_module.actualizar_turno(turno_id, inicio_min=body.inicio_min, duracion_min=body.duracion_min)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True}
+
+
+@router.post("/turnos/{turno_id}/fusionar/{otro_id}")
+def fusionar_turnos_route(
+    turno_id: int, otro_id: int, empresa: str = "kk", user: dict = Depends(require_planificador)
+):
+    t = planificador_module.get_turno(turno_id)
+    if t is None:
+        raise HTTPException(status_code=404, detail="Turno no encontrado")
+    _exigir_centro(user, t["centro"])
+    try:
+        nuevo_id = planificador_module.fusionar_turnos(turno_id, otro_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "id": nuevo_id}
 
 
 @router.delete("/turnos/{turno_id}")

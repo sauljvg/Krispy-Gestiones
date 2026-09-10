@@ -263,11 +263,44 @@ function turnoHTML(t) {
       <span class="plan-turno-x" title="Quitar día libre">✕</span>
     </div>`;
   }
-  return `<div class="plan-turno" data-id="${t.id}" data-inicio="${t.inicio_min}" data-duracion="${t.duracion_min}"
+  return `<div class="plan-turno" data-id="${t.id}" data-trab="${t.trabajador_id}" data-inicio="${t.inicio_min}" data-duracion="${t.duracion_min}"
     style="left:${minToX(t.inicio_min)}px; width:${t.duracion_min * PX_POR_MIN}px;">
     <span class="plan-turno-txt">${etiquetaTurno(t.inicio_min, t.duracion_min)}</span>
     <span class="plan-turno-x" title="Quitar">✕</span>
   </div>`;
+}
+
+// Los turnos de trabajo de una persona no se pueden solapar. `paredes`
+// devuelve hasta dónde puede llegar un bloque por cada lado sin pisar a
+// otro, tomando como referencia la posición original [refIni, refFin).
+function paredes(trabId, excluirId, refIni, refFin) {
+  let izq = S.config.apertura_min;
+  let der = S.config.cierre_min;
+  for (const o of S.turnos) {
+    if (o.tipo === "libre" || o.trabajador_id !== trabId || String(o.id) === String(excluirId)) continue;
+    const oFin = o.inicio_min + o.duracion_min;
+    if (oFin <= refIni) izq = Math.max(izq, oFin);
+    else if (o.inicio_min >= refFin) der = Math.min(der, o.inicio_min);
+    else return { izq: refIni, der: refIni }; // el punto de referencia cae dentro de otro bloque
+  }
+  return { izq, der };
+}
+
+// Tras crear/mover/estirar un bloque: si queda pegado (borde con borde) a
+// otro de la misma persona, ofrece unirlos en uno solo.
+async function quizasUnir(turnoId, ini, fin, trabId) {
+  const vecino = S.turnos.find(
+    (x) =>
+      String(x.id) !== String(turnoId) &&
+      x.trabajador_id === trabId &&
+      x.tipo !== "libre" &&
+      x.fecha === S.fecha &&
+      (x.inicio_min + x.duracion_min === ini || x.inicio_min === fin)
+  );
+  if (!vecino) return;
+  if (!(await pedirConfirmacion("Los dos turnos quedan pegados. ¿Unirlos en uno solo?"))) return;
+  const res = await fetch(url(`turnos/${turnoId}/fusionar/${vecino.id}`), { method: "POST" });
+  if (!res.ok) mostrarAviso("No se pudieron unir.");
 }
 function etiquetaTurno(inicio, dur) {
   return dur * PX_POR_MIN < 95 ? fmtHoras(dur) : `${fmtHHMM(inicio)}–${fmtHHMM(inicio + dur)} · ${fmtHoras(dur)}`;
@@ -335,21 +368,27 @@ function wireTurno(el) {
     const startX = e.clientX;
     const iniOrig = Number(el.dataset.inicio);
     const durOrig = Number(el.dataset.duracion);
+    const trabId = Number(el.dataset.trab);
+    const { izq, der } = paredes(trabId, el.dataset.id, iniOrig, iniOrig + durOrig);
     let ini = iniOrig;
     let dur = durOrig;
-    el.setPointerCapture(e.pointerId);
+    try {
+      el.setPointerCapture(e.pointerId);
+    } catch {
+      /* sin captura el arrastre sigue funcionando mientras el puntero no salga del bloque */
+    }
     el.style.cursor = modo === "mover" ? "grabbing" : "ew-resize";
 
     const onMove = (ev) => {
       const dMin = snap((ev.clientX - startX) / PX_POR_MIN);
       if (modo === "mover") {
-        ini = clamp(iniOrig + dMin, S.config.apertura_min, S.config.cierre_min - durOrig);
+        ini = clamp(iniOrig + dMin, izq, der - durOrig);
         dur = durOrig;
       } else if (modo === "izq") {
-        ini = clamp(iniOrig + dMin, S.config.apertura_min, iniOrig + durOrig - SNAP);
+        ini = clamp(iniOrig + dMin, izq, iniOrig + durOrig - SNAP);
         dur = iniOrig + durOrig - ini;
       } else {
-        dur = clamp(durOrig + dMin, SNAP, S.config.cierre_min - iniOrig);
+        dur = clamp(durOrig + dMin, SNAP, der - iniOrig);
         ini = iniOrig;
       }
       el.style.left = minToX(ini) + "px";
@@ -367,7 +406,12 @@ function wireTurno(el) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ inicio_min: ini, duracion_min: dur }),
       });
-      if (!res.ok) mostrarAviso("No se pudo guardar el cambio.");
+      if (!res.ok) {
+        mostrarAviso("No se pudo guardar el cambio.");
+        cargarDia();
+        return;
+      }
+      await quizasUnir(el.dataset.id, ini, ini + dur, trabId);
       cargarDia();
     };
     el.addEventListener("pointermove", onMove);
@@ -383,6 +427,10 @@ function wireLane(lane, trabajadorId) {
     const laneRect = lane.getBoundingClientRect();
     const startX = e.clientX;
     const iniClick = clamp(snap(xToMin(e.clientX - laneRect.left)), S.config.apertura_min, S.config.cierre_min - SNAP);
+    // el turno nuevo no puede pisar a otro de esa persona: se limita al
+    // hueco libre alrededor del punto donde se ha pulsado.
+    const { izq, der } = paredes(trabajadorId, null, iniClick, iniClick);
+    if (der - izq < SNAP) return; // no cabe nada aquí
     const fantasma = document.createElement("div");
     fantasma.className = "plan-turno-fantasma";
     fantasma.style.left = minToX(iniClick) + "px";
@@ -394,10 +442,10 @@ function wireLane(lane, trabajadorId) {
 
     const onMove = (ev) => {
       arrastrado = arrastrado || Math.abs(ev.clientX - startX) > 4;
-      const cursorMin = clamp(snap(xToMin(ev.clientX - laneRect.left)), S.config.apertura_min, S.config.cierre_min);
-      ini = Math.min(iniClick, cursorMin);
+      const cursorMin = clamp(snap(xToMin(ev.clientX - laneRect.left)), izq, der);
+      ini = clamp(Math.min(iniClick, cursorMin), izq, der - SNAP);
       dur = Math.max(SNAP, Math.abs(cursorMin - iniClick));
-      if (ini + dur > S.config.cierre_min) dur = S.config.cierre_min - ini;
+      if (ini + dur > der) dur = der - ini;
       fantasma.style.left = minToX(ini) + "px";
       fantasma.style.width = dur * PX_POR_MIN + "px";
     };
@@ -406,8 +454,8 @@ function wireLane(lane, trabajadorId) {
       window.removeEventListener("pointerup", onUp);
       fantasma.remove();
       if (!arrastrado) {
-        ini = iniClick;
-        dur = Math.min(240, S.config.cierre_min - iniClick);
+        ini = clamp(iniClick, izq, der - SNAP);
+        dur = Math.min(240, der - ini);
       }
       if (dur < SNAP) return;
       const res = await fetch(url("turnos"), {
@@ -420,6 +468,8 @@ function wireLane(lane, trabajadorId) {
         mostrarAviso(err.detail || "No se pudo crear el turno.");
         return;
       }
+      const data = await res.json().catch(() => ({}));
+      if (data.id) await quizasUnir(data.id, ini, ini + dur, trabajadorId);
       cargarDia();
     };
     window.addEventListener("pointermove", onMove);

@@ -95,6 +95,17 @@ def ensure_planificador_tables():
             "UPDATE planificador_trabajadores SET nombre = ? WHERE id = ?",
             (_nombre_directo(row["nombre"]), row["id"]),
         )
+    # Limpieza: si antes del filtro de puestos entró en la plantilla algún
+    # mando de área (Area Coach...), se saca cruzando por codigo_empleado con
+    # kpi_empleados. Idempotente.
+    for row in conn.execute(
+        "SELECT pt.id AS id, ke.puesto AS puesto FROM planificador_trabajadores pt "
+        "JOIN kpi_empleados ke ON ke.codigo_empleado = pt.codigo_empleado "
+        "WHERE pt.codigo_empleado IS NOT NULL AND pt.codigo_empleado != ''"
+    ).fetchall():
+        if _puesto_no_operativo(row["puesto"]):
+            conn.execute("DELETE FROM planificador_turnos WHERE trabajador_id = ?", (row["id"],))
+            conn.execute("DELETE FROM planificador_trabajadores WHERE id = ?", (row["id"],))
     conn.commit()
     conn.close()
 
@@ -392,6 +403,20 @@ def get_turno(turno_id):
     return dict(row) if row else None
 
 
+def _solapa(conn, trabajador_id, fecha, ini, fin, excluir_id=None):
+    """¿Hay ya un turno de trabajo de esta persona ese día que se PISE con
+    [ini, fin)? Tocarse (fin == ini del otro) NO cuenta como solape."""
+    q = (
+        "SELECT id FROM planificador_turnos WHERE trabajador_id = ? AND fecha = ? AND tipo = 'trabajo' "
+        "AND inicio_min < ? AND (inicio_min + duracion_min) > ?"
+    )
+    params = [trabajador_id, fecha, fin, ini]
+    if excluir_id is not None:
+        q += " AND id != ?"
+        params.append(excluir_id)
+    return conn.execute(q, params).fetchone() is not None
+
+
 def crear_turno(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, creado_por, tipo="trabajo"):
     conn = get_connection()
     if tipo == "libre":
@@ -404,6 +429,9 @@ def crear_turno(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min,
         if ya:
             conn.close()
             return ya["id"]
+    elif _solapa(conn, trabajador_id, fecha, int(inicio_min), int(inicio_min) + int(duracion_min)):
+        conn.close()
+        raise ValueError("El turno se solapa con otro de esa persona")
     cur = conn.execute(
         "INSERT INTO planificador_turnos "
         "(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, tipo, creado_por) "
@@ -417,21 +445,53 @@ def crear_turno(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min,
 
 
 def actualizar_turno(turno_id, inicio_min=None, duracion_min=None):
-    sets, params = [], []
-    if inicio_min is not None:
-        sets.append("inicio_min = ?")
-        params.append(int(inicio_min))
-    if duracion_min is not None:
-        sets.append("duracion_min = ?")
-        params.append(int(duracion_min))
-    if not sets:
+    if inicio_min is None and duracion_min is None:
         return
-    sets.append("actualizado_en = datetime('now')")
-    params.append(turno_id)
     conn = get_connection()
-    conn.execute(f"UPDATE planificador_turnos SET {', '.join(sets)} WHERE id = ?", params)
+    row = conn.execute("SELECT * FROM planificador_turnos WHERE id = ?", (turno_id,)).fetchone()
+    if row is None:
+        conn.close()
+        return
+    row = dict(row)
+    ini = int(inicio_min) if inicio_min is not None else row["inicio_min"]
+    dur = int(duracion_min) if duracion_min is not None else row["duracion_min"]
+    if row["tipo"] == "trabajo" and _solapa(conn, row["trabajador_id"], row["fecha"], ini, ini + dur, excluir_id=turno_id):
+        conn.close()
+        raise ValueError("El turno se solapa con otro de esa persona")
+    conn.execute(
+        "UPDATE planificador_turnos SET inicio_min = ?, duracion_min = ?, actualizado_en = datetime('now') WHERE id = ?",
+        (ini, dur, turno_id),
+    )
     conn.commit()
     conn.close()
+
+
+def fusionar_turnos(id_a, id_b):
+    """Une dos turnos de trabajo (de la misma persona y día) en uno solo que
+    va del inicio más temprano al fin más tardío. Sobrevive `id_a`."""
+    conn = get_connection()
+    a = conn.execute("SELECT * FROM planificador_turnos WHERE id = ?", (id_a,)).fetchone()
+    b = conn.execute("SELECT * FROM planificador_turnos WHERE id = ?", (id_b,)).fetchone()
+    if a is None or b is None:
+        conn.close()
+        raise ValueError("Turno no encontrado")
+    a, b = dict(a), dict(b)
+    mismos = (a["empresa"], a["centro"], a["trabajador_id"], a["fecha"]) == (
+        b["empresa"], b["centro"], b["trabajador_id"], b["fecha"]
+    )
+    if not mismos or a["tipo"] != "trabajo" or b["tipo"] != "trabajo":
+        conn.close()
+        raise ValueError("Esos turnos no se pueden unir")
+    ini = min(a["inicio_min"], b["inicio_min"])
+    fin = max(a["inicio_min"] + a["duracion_min"], b["inicio_min"] + b["duracion_min"])
+    conn.execute(
+        "UPDATE planificador_turnos SET inicio_min = ?, duracion_min = ?, actualizado_en = datetime('now') WHERE id = ?",
+        (ini, fin - ini, id_a),
+    )
+    conn.execute("DELETE FROM planificador_turnos WHERE id = ?", (id_b,))
+    conn.commit()
+    conn.close()
+    return id_a
 
 
 def eliminar_turno(turno_id):
