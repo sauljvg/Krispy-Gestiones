@@ -266,6 +266,46 @@ def ensure_tables():
         # la ronda cuando TODOS lo han hecho.
         conn.execute("ALTER TABLE agregadores_rondas ADD COLUMN worker_count INTEGER")
         conn.execute("ALTER TABLE agregadores_rondas ADD COLUMN workers_finalizados INTEGER NOT NULL DEFAULT 0")
+    if "completa" not in cols_rondas:
+        # Una vuelta cuenta como "completa" (y por tanto sirve para comparar
+        # agregadores entre sí) solo si terminó Y cubrió al menos el
+        # RONDA_COMPLETA_UMBRAL del objetivo -- ver _ronda_es_completa /
+        # finalizar_ronda. Antes no había forma de distinguir "vuelta buena"
+        # de "vuelta que se paró a mano a mitad" salvo recontar a mano, y el
+        # mapa de comparación acababa mezclando el estado de una pasada
+        # completa con los pocos puntos de otra a medias.
+        conn.execute("ALTER TABLE agregadores_rondas ADD COLUMN completa INTEGER NOT NULL DEFAULT 0")
+        # Backfill: marcar las históricas que ya cumplían el criterio (mismo
+        # cálculo que historico_rondas, pero en bloque una sola vez).
+        for agregador in AGREGADORES:
+            filas = conn.execute(
+                "SELECT id, iniciada_en, total_objetivo, finalizada_en FROM agregadores_rondas "
+                "WHERE agregador=? ORDER BY id DESC", (agregador,),
+            ).fetchall()
+            for i, f in enumerate(filas):
+                tope = f["finalizada_en"] or (filas[i - 1]["iniciada_en"] if i > 0 else None)
+                if tope:
+                    hechos = conn.execute(
+                        "SELECT COUNT(DISTINCT direccion_id) FROM agregadores_chequeos "
+                        "WHERE agregador=? AND timestamp>=? AND timestamp<=?",
+                        (agregador, f["iniciada_en"], tope),
+                    ).fetchone()[0]
+                else:
+                    hechos = conn.execute(
+                        "SELECT COUNT(DISTINCT direccion_id) FROM agregadores_chequeos "
+                        "WHERE agregador=? AND timestamp>=?", (agregador, f["iniciada_en"]),
+                    ).fetchone()[0]
+                if _ronda_es_completa(dict(f), hechos):
+                    conn.execute("UPDATE agregadores_rondas SET completa=1 WHERE id=?", (f["id"],))
+    cols_chequeos_r = {row[1] for row in conn.execute("PRAGMA table_info(agregadores_chequeos)")}
+    if "ronda_id" not in cols_chequeos_r:
+        # Cada chequeo queda ligado a la vuelta en curso de su agregador
+        # (si la hay) al insertarse -- ver guardar_chequeo/guardar_chequeos_batch.
+        # NULL = chequeo del daemon 24/7, fuera de cualquier vuelta completa.
+        # De momento el filtro de comparación va por ventana de tiempo (más
+        # fiable con el histórico ya existente sin ronda_id), pero tenerlo
+        # marcado deja la puerta abierta a un filtro exacto más adelante.
+        conn.execute("ALTER TABLE agregadores_chequeos ADD COLUMN ronda_id INTEGER")
     conn.commit()
     conn.close()
 
@@ -737,18 +777,56 @@ def finalizar_ronda(agregador: str, finalizada_en: str | None = None, forzar: bo
             (agregador,),
         )
         fila = conn.execute(
-            "SELECT id, worker_count, workers_finalizados FROM agregadores_rondas "
+            "SELECT id, iniciada_en, total_objetivo, worker_count, workers_finalizados FROM agregadores_rondas "
             "WHERE agregador=? AND finalizada_en IS NULL ORDER BY id DESC LIMIT 1",
             (agregador,),
         ).fetchone()
         if fila and (forzar or (fila["worker_count"] and fila["workers_finalizados"] >= fila["worker_count"])):
+            momento_fin = finalizada_en or datetime.now(timezone.utc).isoformat()
+            # completa=1 solo si NO se forzó el cierre (parar a mano a mitad
+            # = incompleta por definición) Y de verdad se cubrió el objetivo.
+            hechos = conn.execute(
+                "SELECT COUNT(DISTINCT direccion_id) FROM agregadores_chequeos "
+                "WHERE agregador=? AND timestamp>=? AND timestamp<=?",
+                (agregador, fila["iniciada_en"], momento_fin),
+            ).fetchone()[0]
+            completa = 0 if forzar else int(_ronda_es_completa(
+                {"finalizada_en": momento_fin, "total_objetivo": fila["total_objetivo"]}, hechos
+            ))
             conn.execute(
-                "UPDATE agregadores_rondas SET finalizada_en=? WHERE id=?",
-                (finalizada_en or datetime.now(timezone.utc).isoformat(), fila["id"]),
+                "UPDATE agregadores_rondas SET finalizada_en=?, completa=? WHERE id=?",
+                (momento_fin, completa, fila["id"]),
             )
         conn.commit()
     finally:
         conn.close()
+
+
+def _ronda_activa_id(conn, agregador: str) -> int | None:
+    """id de la vuelta EN CURSO (sin finalizar) de este agregador, para
+    etiquetar los chequeos que se insertan mientras corre. None si no hay
+    ninguna -- p.ej. los chequeos del daemon 24/7 entre vuelta y vuelta."""
+    fila = conn.execute(
+        "SELECT id FROM agregadores_rondas WHERE agregador=? AND finalizada_en IS NULL "
+        "ORDER BY id DESC LIMIT 1",
+        (agregador,),
+    ).fetchone()
+    return fila["id"] if fila else None
+
+
+def ventana_ultima_ronda_completa(conn, agregador: str) -> tuple[str, str] | None:
+    """(iniciada_en, finalizada_en) de la última vuelta COMPLETA de este
+    agregador -- la ventana de tiempo que define el "estado real" con el que
+    comparar contra los otros agregadores. None si nunca ha habido una
+    vuelta completa (en ese caso el mapa se queda como siempre, con el
+    último chequeo de cada punto sin filtrar)."""
+    fila = conn.execute(
+        "SELECT iniciada_en, finalizada_en FROM agregadores_rondas "
+        "WHERE agregador=? AND completa=1 AND finalizada_en IS NOT NULL "
+        "ORDER BY id DESC LIMIT 1",
+        (agregador,),
+    ).fetchone()
+    return (fila["iniciada_en"], fila["finalizada_en"]) if fila else None
 
 
 def get_rondas_actuales() -> dict:
@@ -916,6 +994,54 @@ def historico_rondas() -> dict:
                 })
             salida[agregador] = rondas
         return salida
+    finally:
+        conn.close()
+
+
+def limpiar_ronda_incompleta(ronda_id: int, aplicar: bool = False) -> dict:
+    """Borra los chequeos de una vuelta que se quedó a medias (parada a mano,
+    corte...) y el propio registro de ronda -- para que ese estado a medias
+    no ensucie las comparaciones. Se niega si la ronda está marcada como
+    completa (esas NO se tocan). La ventana de chequeos se calcula igual que
+    en historico_rondas: desde iniciada_en hasta finalizada_en, o hasta el
+    inicio de la ronda siguiente si esta nunca se cerró. aplicar=False (por
+    defecto) solo devuelve el plan (cuántas filas caerían); aplicar=True
+    ejecuta el borrado."""
+    conn = get_connection()
+    try:
+        f = conn.execute(
+            "SELECT id, agregador, iniciada_en, finalizada_en, total_objetivo, completa "
+            "FROM agregadores_rondas WHERE id=?", (ronda_id,),
+        ).fetchone()
+        if not f:
+            raise ValueError(f"No existe la ronda {ronda_id}")
+        if f["completa"]:
+            raise ValueError(f"La ronda {ronda_id} está marcada como COMPLETA -- no se borra")
+        agregador = f["agregador"]
+        siguiente = conn.execute(
+            "SELECT iniciada_en FROM agregadores_rondas WHERE agregador=? AND id>? "
+            "ORDER BY id ASC LIMIT 1",
+            (agregador, ronda_id),
+        ).fetchone()
+        tope = f["finalizada_en"] or (siguiente["iniciada_en"] if siguiente else None)
+        if tope:
+            where = "agregador=? AND timestamp>=? AND timestamp<=?"
+            params = (agregador, f["iniciada_en"], tope)
+        else:
+            where = "agregador=? AND timestamp>=?"
+            params = (agregador, f["iniciada_en"])
+        n = conn.execute(f"SELECT COUNT(*) FROM agregadores_chequeos WHERE {where}", params).fetchone()[0]
+        plan = {
+            "ronda_id": ronda_id, "agregador": agregador,
+            "ventana": [f["iniciada_en"], tope],
+            "chequeos_a_borrar": n, "aplicado": False,
+        }
+        if aplicar:
+            conn.execute(f"DELETE FROM agregadores_chequeos WHERE {where}", params)
+            conn.execute("DELETE FROM agregadores_rondas WHERE id=?", (ronda_id,))
+            conn.commit()
+            plan["aplicado"] = True
+        return plan
     finally:
         conn.close()
 
@@ -1595,11 +1721,12 @@ def resetear_estadisticas_hoy():
 
 def guardar_chequeo(data: dict) -> int:
     conn = get_connection()
+    ronda_id = _ronda_activa_id(conn, data["agregador"])
     cur = conn.execute(
         """INSERT INTO agregadores_chequeos
            (tienda, agregador, direccion_id, timestamp, disponible, tiempo_entrega_min,
-            mensaje_bloqueo, error_texto, verificado_por)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            mensaje_bloqueo, error_texto, verificado_por, ronda_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             data["tienda"],
             data["agregador"],
@@ -1610,6 +1737,7 @@ def guardar_chequeo(data: dict) -> int:
             data.get("mensaje_bloqueo"),
             data.get("error_texto"),
             data.get("verificado_por"),
+            ronda_id,
         ),
     )
     conn.commit()
@@ -1631,6 +1759,10 @@ def guardar_chequeos_batch(items: list[dict]) -> list[dict]:
     conn = get_connection()
     try:
         ahora = datetime.now(timezone.utc).isoformat()
+        # La ronda activa por agregador se resuelve una vez por lote (todos
+        # los items de un batch vienen del mismo worker/agregador en la
+        # práctica, pero se cachea por si acaso llegan mezclados).
+        ronda_por_agregador: dict[str, int | None] = {}
         resultados = []
         for data in items:
             transicion = False
@@ -1643,11 +1775,15 @@ def guardar_chequeos_batch(items: list[dict]) -> list[dict]:
                 ).fetchone()
                 transicion = bool(fila and fila["disponible"])
 
+            agr = data["agregador"]
+            if agr not in ronda_por_agregador:
+                ronda_por_agregador[agr] = _ronda_activa_id(conn, agr)
+
             cur = conn.execute(
                 """INSERT INTO agregadores_chequeos
                    (tienda, agregador, direccion_id, timestamp, disponible, tiempo_entrega_min,
-                    mensaje_bloqueo, error_texto, verificado_por)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    mensaje_bloqueo, error_texto, verificado_por, ronda_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     data["tienda"],
                     data["agregador"],
@@ -1658,6 +1794,7 @@ def guardar_chequeos_batch(items: list[dict]) -> list[dict]:
                     data.get("mensaje_bloqueo"),
                     data.get("error_texto"),
                     data.get("verificado_por"),
+                    ronda_por_agregador[agr],
                 ),
             )
             resultados.append(
@@ -2346,15 +2483,30 @@ def limitar_hasta_por_checkpoint(hasta: str | None, es_admin: bool) -> str | Non
     return hasta if fecha_hasta >= AGR_CHECKPOINT_FECHA else None
 
 
-def get_mapa_datos(tienda: str, hasta: str | None = None):
+def get_mapa_datos(tienda: str, hasta: str | None = None, solo_completa: bool = False):
     """`hasta` (ISO, opcional): en vez del estado ACTUAL de cada punto (el
     chequeo más reciente de cada agregador, comportamiento de siempre),
     devuelve cómo estaba cada uno en un momento concreto del pasado -- el
     último chequeo real de cada agregador que ya existía EN ese momento.
     Pedido explícito del usuario 28/08: comparar el mapa de una fecha contra
     otra ("¿estaban todos disponibles o no?"), no solo ver el estado de
-    ahora mismo. Sin `hasta`, es exactamente el mismo mapa de siempre."""
+    ahora mismo. Sin `hasta`, es exactamente el mismo mapa de siempre.
+
+    `solo_completa` (solo si no se pasa `hasta`): para cada agregador,
+    ignora los chequeos que caen FUERA de la ventana de su última vuelta
+    completa (ver ventana_ultima_ronda_completa). Así comparar un agregador
+    con otro se hace siempre sobre pasadas enteras -- una vuelta a medias
+    (parada a mano, corte...) no ensucia el mapa pisando los pocos puntos
+    que llegó a comprobar sobre la última foto buena. Si un agregador nunca
+    ha tenido una vuelta completa, se le deja sin filtrar (comportamiento
+    de siempre)."""
     conn = get_connection()
+    ventanas: dict[str, tuple[str, str]] = {}
+    if solo_completa and not hasta:
+        for agr in AGREGADORES:
+            v = ventana_ultima_ronda_completa(conn, agr)
+            if v:
+                ventanas[agr] = v
     direcciones = conn.execute(
         "SELECT * FROM agregadores_direcciones WHERE tienda=? AND activo=1", (tienda,)
     ).fetchall()
@@ -2379,11 +2531,19 @@ def get_mapa_datos(tienda: str, hasta: str | None = None):
                 (d["id"], hasta),
             ).fetchall()
         else:
+            # LIMIT más alto con solo_completa: la lectura de la vuelta
+            # completa puede no estar entre los 50 chequeos más recientes de
+            # un punto que se comprueba muy a menudo.
             chequeos = conn.execute(
-                "SELECT * FROM agregadores_chequeos WHERE direccion_id=? ORDER BY timestamp DESC LIMIT 50",
-                (d["id"],),
+                "SELECT * FROM agregadores_chequeos WHERE direccion_id=? ORDER BY timestamp DESC LIMIT ?",
+                (d["id"], 300 if ventanas else 50),
             ).fetchall()
         for c in chequeos:
+            # solo_completa: descartar chequeos fuera de la ventana de la
+            # última vuelta completa de ese agregador (si tiene una).
+            v = ventanas.get(c["agregador"])
+            if v and not (v[0] <= c["timestamp"] <= v[1]):
+                continue
             if c["agregador"] not in ultimos_por_agregador:
                 ultimos_por_agregador[c["agregador"]] = c
 
@@ -2468,11 +2628,11 @@ def get_resumen_estados_todas() -> dict:
     return resultado
 
 
-def get_mapa_datos_todas(hasta: str | None = None):
+def get_mapa_datos_todas(hasta: str | None = None, solo_completa: bool = False):
     tiendas = []
     direcciones = []
     for slug in TIENDAS:
-        datos = get_mapa_datos(slug, hasta=hasta)
+        datos = get_mapa_datos(slug, hasta=hasta, solo_completa=solo_completa)
         if datos["tienda"]:
             tiendas.append(datos["tienda"])
         for d in datos["direcciones"]:

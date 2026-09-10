@@ -1002,9 +1002,14 @@ async function agrCargarMapa() {
   // día concreto (el último chequeo real de cada uno hasta esa hora) --
   // pedido explícito del usuario 28/08: "lo que queremos ver por fechas
   // realmente es una fecha vs otra, cómo estaba el mapa con los dots".
+  // solo_completa=true (solo sin filtro de fecha): el estado "actual" de
+  // cada agregador se toma de su última VUELTA COMPLETA, no del último
+  // chequeo suelto -- así comparar un agregador con otro se hace sobre
+  // pasadas enteras y una vuelta a medias (parada a mano, corte) no
+  // ensucia el mapa. Con filtro de fecha, se compara tal cual ese momento.
   const urlMapa = agrFiltroFechaActivo
     ? `${AGR_API}/mapa-datos-todas?hasta=${encodeURIComponent(agrFiltroFechaActivo.hasta)}`
-    : `${AGR_API}/mapa-datos-todas`;
+    : `${AGR_API}/mapa-datos-todas?solo_completa=true`;
   const res = await fetch(urlMapa, { credentials: "include" });
   const data = await res.json();
 

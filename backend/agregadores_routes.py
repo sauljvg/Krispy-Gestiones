@@ -677,6 +677,18 @@ def panel_historico_rondas_route():
     return agregadores_module.historico_rondas()
 
 
+@router.post("/panel/limpiar-ronda-incompleta", dependencies=[Depends(require_admin)])
+def panel_limpiar_ronda_incompleta_route(ronda_id: int, aplicar: bool = False):
+    """Borra los chequeos + el registro de una vuelta incompleta (parada a
+    mano, corte...) para que no ensucie las comparaciones. Se niega sobre
+    rondas completas. aplicar=false solo devuelve el plan. Ver
+    agregadores.limpiar_ronda_incompleta."""
+    try:
+        return agregadores_module.limpiar_ronda_incompleta(ronda_id, aplicar=aplicar)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.post("/admin/direcciones/deduplicar", dependencies=[Depends(require_api_key)])
 def deduplicar_direcciones_route(aplicar: bool = False, umbral_m: float = 100):
     """Encuentra (y si aplicar=true, fusiona) direcciones activas que son el mismo
@@ -946,17 +958,23 @@ def mapa_datos_horas_route(fecha: str, _user: dict = Depends(require_agregadores
 
 
 @router.get("/mapa-datos")
-def mapa_datos_route(tienda: str, hasta: str | None = None, _user: dict = Depends(require_agregadores)):
+def mapa_datos_route(
+    tienda: str, hasta: str | None = None, solo_completa: bool = False,
+    _user: dict = Depends(require_agregadores),
+):
     es_admin = _user["username"].lower() == "saul"
     hasta = agregadores_module.limitar_hasta_por_checkpoint(hasta, es_admin=es_admin)
-    return agregadores_module.get_mapa_datos(tienda, hasta=hasta)
+    return agregadores_module.get_mapa_datos(tienda, hasta=hasta, solo_completa=solo_completa)
 
 
 @router.get("/mapa-datos-todas")
-def mapa_datos_todas_route(hasta: str | None = None, _user: dict = Depends(require_agregadores)):
+def mapa_datos_todas_route(
+    hasta: str | None = None, solo_completa: bool = False,
+    _user: dict = Depends(require_agregadores),
+):
     es_admin = _user["username"].lower() == "saul"
     hasta = agregadores_module.limitar_hasta_por_checkpoint(hasta, es_admin=es_admin)
-    return agregadores_module.get_mapa_datos_todas(hasta=hasta)
+    return agregadores_module.get_mapa_datos_todas(hasta=hasta, solo_completa=solo_completa)
 
 
 @router.get("/admin/mapa-datos-todas", dependencies=[Depends(require_api_key)])
