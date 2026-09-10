@@ -50,9 +50,15 @@
   .plan-turno-fantasma { position: absolute; top: 6px; bottom: 6px; border-radius: 7px; background: color-mix(in srgb, var(--acento) 45%, transparent); border: 1px dashed var(--acento); pointer-events: none; }
   /* Bloque "negativo": día libre de la persona -- toda la franja en gris. */
   .plan-turno.libre { left: 0 !important; width: 100% !important; background: color-mix(in srgb, var(--text-secondary) 30%, var(--surface-1)); color: var(--text-secondary); cursor: default; box-shadow: none; font-weight: 500; text-transform: uppercase; letter-spacing: .08em; font-size: 10.5px; z-index: 0; }
-  .plan-libre-btn { align-self: flex-start; margin-top: 2px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary); border-radius: 5px; padding: 2px 7px; font-size: 10.5px; cursor: pointer; }
+  .plan-fila-acciones { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+  .plan-libre-btn { border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary); border-radius: 5px; padding: 2px 7px; font-size: 10.5px; cursor: pointer; }
   .plan-libre-btn:hover { border-color: var(--acento); }
   .plan-libre-btn.activo { background: color-mix(in srgb, var(--text-secondary) 30%, var(--surface-1)); color: var(--text-primary); }
+  /* Aviso de días de descanso semanales: 🌙 con ✓ (ok) o ✕ (menos de 2). */
+  .plan-descanso { position: relative; display: inline-flex; font-size: 15px; line-height: 1; cursor: help; }
+  .plan-descanso-marca { position: absolute; top: -4px; right: -6px; width: 12px; height: 12px; line-height: 12px; text-align: center; font-size: 9px; font-weight: 700; border-radius: 50%; color: #fff; }
+  .plan-descanso.ok .plan-descanso-marca { background: var(--status-good); }
+  .plan-descanso.mal .plan-descanso-marca { background: var(--status-bad, #d9534f); }
 
   /* --- Vista semana --- */
   .plan-semana { min-width: max-content; }
@@ -182,11 +188,11 @@
   <div class="plan-dialog-body">
     <div class="plan-config-campo">
       <label for="plan-cfg-apertura">Apertura</label>
-      <input type="time" id="plan-cfg-apertura" step="900">
+      <input type="time" id="plan-cfg-apertura" step="600">
     </div>
     <div class="plan-config-campo">
       <label for="plan-cfg-cierre">Cierre</label>
-      <input type="time" id="plan-cfg-cierre" step="900">
+      <input type="time" id="plan-cfg-cierre" step="600">
       <label style="display:inline-flex; align-items:center; gap:6px; margin-top:6px; font-size:13px;">
         <input type="checkbox" id="plan-cfg-cierre-siguiente"> cierra al día siguiente
       </label>
@@ -206,6 +212,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260910a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/planificador.js?v=20260910d"></script>
+<script src="js/planificador.js?v=20260910e"></script>
 </body>
 </html>

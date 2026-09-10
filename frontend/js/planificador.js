@@ -6,7 +6,7 @@
 const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" ? "saona" : "kk";
 const API = `${window.location.origin}/api/planificador`;
 const PX_POR_MIN = 1.15; // ancho en px de cada minuto de la línea de tiempo
-const SNAP = 15; // los bloques saltan de 15 en 15 minutos
+const SNAP = 10; // los bloques saltan de 10 en 10 minutos
 const LS_CENTRO = `plan-centro-${EMPRESA}`;
 const LS_VISTA = `plan-vista-${EMPRESA}`;
 
@@ -18,9 +18,12 @@ const S = {
   trabajadores: [],
   turnos: [],
   minutosSemana: {},
+  diasTrabajados: {},
   proyeccion: {},
   dias: [],
 };
+
+const DIAS_DESCANSO_MIN = 2; // 2 días de descanso semanales mínimo
 
 // ---------------------------------------------------------------- utilidades
 
@@ -105,6 +108,7 @@ async function cargarDia() {
   S.trabajadores = data.trabajadores;
   S.turnos = data.turnos;
   S.minutosSemana = data.minutos_semana || {};
+  S.diasTrabajados = data.dias_trabajados || {};
   S.proyeccion = normalizarProyeccion(data.proyeccion || {});
   S.dias = data.dias || [];
   document.getElementById("plan-fecha-txt").textContent =
@@ -232,6 +236,16 @@ function textoHoras(min, contrato) {
   return contrato ? `${h} h / ${contrato} h (${Math.round((min / 60 / contrato) * 100)}%)` : `${h} h / sin contrato`;
 }
 
+// 🌙 con ✓ verde si la persona tiene sus 2+ días de descanso esta semana,
+// o ✕ rojo si trabaja 6-7 días (aviso de conflicto en el horario).
+function descansoIndicadorHTML(trabId) {
+  const descanso = 7 - (S.diasTrabajados[String(trabId)] || 0);
+  const ok = descanso >= DIAS_DESCANSO_MIN;
+  const dxt = `${descanso} día${descanso === 1 ? "" : "s"} de descanso esta semana`;
+  const titulo = ok ? dxt : `${dxt} — mínimo ${DIAS_DESCANSO_MIN}: revisa el horario`;
+  return `<span class="plan-descanso ${ok ? "ok" : "mal"}" title="${titulo}">🌙<span class="plan-descanso-marca">${ok ? "✓" : "✕"}</span></span>`;
+}
+
 function filaTrabajador(t) {
   const min = S.minutosSemana[String(t.id)] || 0;
   const contrato = t.horas_contrato_semana;
@@ -247,7 +261,10 @@ function filaTrabajador(t) {
         <span class="plan-trab-nombre" title="${escapeHTML(t.nombre)}">${escapeHTML(t.nombre)}</span>
         <span class="plan-trab-horas">${textoHoras(min, contrato)}</span>
         <div class="plan-barra ${clase}"><i style="width:${Math.min(100, Math.round(pct * 100))}%;"></i></div>
-        <button type="button" class="plan-libre-btn ${tieneLibre ? "activo" : ""}" data-trab="${t.id}">${tieneLibre ? "Quitar libre" : "Día libre"}</button>
+        <div class="plan-fila-acciones">
+          <button type="button" class="plan-libre-btn ${tieneLibre ? "activo" : ""}" data-trab="${t.id}">${tieneLibre ? "Quitar libre" : "Día libre"}</button>
+          ${descansoIndicadorHTML(t.id)}
+        </div>
       </div>
       <div class="plan-lane" data-trab="${t.id}">
         <div class="plan-lane-lineas">${lineas}</div>
@@ -550,6 +567,7 @@ function renderSemana() {
             <span class="plan-trab-nombre" title="${escapeHTML(t.nombre)}">${escapeHTML(t.nombre)}</span>
             <span class="plan-trab-horas">${textoHoras(min, contrato)}</span>
             <div class="plan-barra ${claseBarra}"><i style="width:${Math.min(100, Math.round(pct * 100))}%;"></i></div>
+            <div class="plan-fila-acciones">${descansoIndicadorHTML(t.id)}</div>
           </div>
           ${celdas}
         </div>`;

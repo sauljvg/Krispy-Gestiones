@@ -48,6 +48,18 @@ HORAS_JORNADA_COMPLETA = 40  # pedido explícito del usuario
 # la plantilla activa como las bajas de ese centro antes de calcular nada.
 CENTROS_EXCLUIDOS = {"Oficina Central"}
 
+# Puestos de mando de área / dirección que en el Excel figuran asignados a
+# una tienda concreta pero NO son plantilla de esa tienda (p.ej. un "Area
+# Coach"). No cuentan para estos KPIs ni para el Planificador de turnos
+# (ver planificador.py, que reutiliza esta lista). Coincidencia por
+# subcadena, sin distinguir mayúsculas.
+PUESTOS_NO_OPERATIVOS = ("area coach", "area manager", "director")
+
+
+def puesto_no_operativo(puesto):
+    p = (puesto or "").strip().lower()
+    return any(x in p for x in PUESTOS_NO_OPERATIVOS)
+
 # Motivos SEPE de "no superó el periodo de prueba" -- por iniciativa de la
 # empresa o del propio trabajador cuentan igual para este KPI (NSPP no
 # distingue quién lo decidió, solo que la baja fue en periodo de prueba).
@@ -546,8 +558,11 @@ def compute_resumen():
     movimientos_puesto = [dict(r) for r in movimientos_puesto]
     conn.close()
 
-    codigos_excluidos = {e["codigo_empleado"] for e in empleados if e["centro"] in CENTROS_EXCLUIDOS}
-    empleados = [e for e in empleados if e["centro"] not in CENTROS_EXCLUIDOS]
+    codigos_excluidos = {
+        e["codigo_empleado"] for e in empleados
+        if e["centro"] in CENTROS_EXCLUIDOS or puesto_no_operativo(e.get("puesto"))
+    }
+    empleados = [e for e in empleados if e["codigo_empleado"] not in codigos_excluidos]
     bajas = [b for b in bajas if b["centro"] not in CENTROS_EXCLUIDOS]
     movimientos_puesto = [m for m in movimientos_puesto if m["codigo_empleado"] not in codigos_excluidos]
 

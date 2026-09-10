@@ -112,15 +112,10 @@ def ensure_planificador_tables():
 
 # Puestos que aparecen asignados a un centro en el Excel pero NO se
 # planifican ahí (mando de área / dirección) -- p.ej. un "Area Coach" que
-# figura en una tienda concreta. Coincidencia por subcadena, sin distinguir
-# mayúsculas. "Gerente de Tienda/Producción", "SubGerente", "Formador",
-# "JefeTurno"... SÍ son de tienda/fábrica y se quedan.
-_PUESTOS_NO_OPERATIVOS = ("area coach", "area manager", "director")
-
-
-def _puesto_no_operativo(puesto):
-    p = (puesto or "").strip().lower()
-    return any(x in p for x in _PUESTOS_NO_OPERATIVOS)
+# figura en una tienda concreta. Misma lista que el Dashboard KPIs.
+# "Gerente de Tienda/Producción", "SubGerente", "Formador", "JefeTurno"...
+# SÍ son de tienda/fábrica y se quedan.
+_puesto_no_operativo = kpis_module.puesto_no_operativo
 
 
 def _nombre_directo(nombre):
@@ -544,6 +539,17 @@ def _minutos_semana(turnos_sem):
     return out
 
 
+def _dias_trabajados_semana(turnos_sem):
+    """Nº de días distintos de la semana en que cada trabajador tiene algún
+    turno de trabajo -- para avisar si le quedan menos de 2 días de descanso."""
+    dias = {}
+    for t in turnos_sem:
+        if t.get("tipo") == "libre":
+            continue
+        dias.setdefault(t["trabajador_id"], set()).add(t["fecha"])
+    return {str(k): len(v) for k, v in dias.items()}
+
+
 def dia_completo(empresa, centro, fecha):
     turnos_sem = turnos_semana(empresa, centro, fecha)
     return {
@@ -551,6 +557,7 @@ def dia_completo(empresa, centro, fecha):
         "trabajadores": list_trabajadores(empresa, centro),
         "turnos": [t for t in turnos_sem if t["fecha"] == fecha],
         "minutos_semana": {str(k): v for k, v in _minutos_semana(turnos_sem).items()},
+        "dias_trabajados": _dias_trabajados_semana(turnos_sem),
         "proyeccion": {str(k): v for k, v in get_proyeccion(empresa, centro, fecha).items()},
         "lunes": _lunes_de(fecha),
     }
@@ -565,6 +572,7 @@ def semana_completa(empresa, centro, fecha):
         "trabajadores": list_trabajadores(empresa, centro),
         "turnos": turnos_sem,
         "minutos_semana": {str(k): v for k, v in _minutos_semana(turnos_sem).items()},
+        "dias_trabajados": _dias_trabajados_semana(turnos_sem),
         "lunes": lunes,
         "dias": dias,
     }

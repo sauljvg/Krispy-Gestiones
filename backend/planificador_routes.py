@@ -153,8 +153,8 @@ def crear_turno_route(body: TurnoIn, empresa: str = "kk", user: dict = Depends(r
     _exigir_centro(user, body.centro)
     if body.tipo not in ("trabajo", "libre"):
         raise HTTPException(status_code=400, detail="Tipo de turno inválido")
-    if body.tipo == "trabajo" and body.duracion_min < 15:
-        raise HTTPException(status_code=400, detail="Un turno dura como mínimo 15 minutos")
+    if body.tipo == "trabajo" and body.duracion_min < 10:
+        raise HTTPException(status_code=400, detail="Un turno dura como mínimo 10 minutos")
     t = planificador_module.get_trabajador(body.trabajador_id)
     if t is None or t["centro"] != body.centro or t["empresa"] != empresa:
         raise HTTPException(status_code=400, detail="Ese trabajador no es de este centro")
@@ -181,8 +181,8 @@ def actualizar_turno_route(
     if t is None:
         raise HTTPException(status_code=404, detail="Turno no encontrado")
     _exigir_centro(user, t["centro"])
-    if body.duracion_min is not None and body.duracion_min < 15:
-        raise HTTPException(status_code=400, detail="Un turno dura como mínimo 15 minutos")
+    if body.duracion_min is not None and body.duracion_min < 10:
+        raise HTTPException(status_code=400, detail="Un turno dura como mínimo 10 minutos")
     try:
         planificador_module.actualizar_turno(turno_id, inicio_min=body.inicio_min, duracion_min=body.duracion_min)
     except ValueError as exc:
