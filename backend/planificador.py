@@ -78,13 +78,34 @@ def ensure_planificador_tables():
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_turnos_busqueda ON planificador_turnos (empresa, centro, fecha)")
+    # Todo el mundo tiene contrato: quien se quedó sin horas (sin % de jornada
+    # en el Excel) pasa a jornada completa. Idempotente.
+    conn.execute(
+        "UPDATE planificador_trabajadores SET horas_contrato_semana = ? WHERE horas_contrato_semana IS NULL",
+        (HORAS_JORNADA_COMPLETA,),
+    )
     conn.commit()
     conn.close()
 
 
+# Puestos que aparecen asignados a un centro en el Excel pero NO se
+# planifican ahí (mando de área / dirección) -- p.ej. un "Area Coach" que
+# figura en una tienda concreta. Coincidencia por subcadena, sin distinguir
+# mayúsculas. "Gerente de Tienda/Producción", "SubGerente", "Formador",
+# "JefeTurno"... SÍ son de tienda/fábrica y se quedan.
+_PUESTOS_NO_OPERATIVOS = ("area coach", "area manager", "director")
+
+
+def _puesto_no_operativo(puesto):
+    p = (puesto or "").strip().lower()
+    return any(x in p for x in _PUESTOS_NO_OPERATIVOS)
+
+
 def _horas_contrato(pct):
+    # Sin "Porcentaje Jornada" en el Excel se asume jornada completa (40 h),
+    # mismo criterio que el Dashboard KPIs -- todo el mundo tiene contrato.
     if pct is None:
-        return None
+        return HORAS_JORNADA_COMPLETA
     h = round(pct / 100 * HORAS_JORNADA_COMPLETA, 1)
     return int(h) if h == int(h) else h
 
@@ -172,12 +193,14 @@ def cargar_desde_kpis(empresa, centro):
         return {"creados": 0, "actualizados": 0}
     conn = get_connection()
     empleados = conn.execute(
-        "SELECT codigo_empleado, nombre, porcentaje_jornada FROM kpi_empleados "
+        "SELECT codigo_empleado, nombre, porcentaje_jornada, puesto FROM kpi_empleados "
         "WHERE centro = ? AND (fecha_baja IS NULL OR fecha_baja = '')",
         (centro,),
     ).fetchall()
     creados = actualizados = 0
     for e in empleados:
+        if _puesto_no_operativo(e["puesto"]):
+            continue
         cod = str(e["codigo_empleado"]).strip()
         horas = _horas_contrato(e["porcentaje_jornada"])
         existente = conn.execute(
@@ -236,7 +259,11 @@ def importar_odoo_excel(empresa, contenido, nombre_archivo):
         nombre = kpis_module._texto(val("nombre"))
         centro = kpis_module._centro_normalizado(val("centro"))
         baja = kpis_module._fecha_a_iso(val("fecha_baja"))
-        if not cod or not nombre or not centro or centro in kpis_module.CENTROS_EXCLUIDOS or baja:
+        if (
+            not cod or not nombre or not centro
+            or centro in kpis_module.CENTROS_EXCLUIDOS or baja
+            or _puesto_no_operativo(kpis_module._texto(val("puesto")))
+        ):
             continue
         horas = _horas_contrato(kpis_module._numero(val("porcentaje_jornada")))
         existente = conn.execute(
@@ -267,6 +294,8 @@ def crear_trabajador_manual(empresa, centro, nombre, horas_contrato_semana):
     nombre = (nombre or "").strip()
     if not nombre:
         raise ValueError("Falta el nombre")
+    if horas_contrato_semana is None:
+        horas_contrato_semana = HORAS_JORNADA_COMPLETA
     conn = get_connection()
     cur = conn.execute(
         "INSERT INTO planificador_trabajadores (empresa, centro, nombre, horas_contrato_semana, origen) "

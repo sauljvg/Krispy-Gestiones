@@ -486,7 +486,7 @@ function wireRoster() {
   document.getElementById("plan-roster-nuevo").addEventListener("click", async () => {
     const nombre = await pedirTexto("Nombre de la persona:");
     if (!nombre || !nombre.trim()) return;
-    const horasStr = await pedirTexto("Horas de contrato por semana (deja vacío si no aplica):", "20");
+    const horasStr = await pedirTexto("Horas de contrato por semana:", "40");
     const body = { centro: S.centro, nombre: nombre.trim() };
     if (horasStr && !isNaN(Number(horasStr))) body.horas_contrato_semana = Number(horasStr);
     const r = await fetch(url("roster"), {
