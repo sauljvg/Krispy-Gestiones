@@ -1,6 +1,11 @@
 let currentOleada = null;
 let currentCentro = null;
 let currentSoloTipo = null;
+// Centros a los que este usuario está restringido (usuario_clima_centros).
+// Vacío = sin restricción (admin/RRHH, ve todos). Un gerente restringido a
+// su tienda: la vista entra directa a su centro, sin la tarjeta "Todos los
+// centros" ni "Todas las tiendas/fábricas" (pedido explícito del usuario).
+let CLIMA_CENTROS_USUARIO = [];
 
 const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" ? "saona" : "kk";
 function conEmpresa(params) {
@@ -140,13 +145,19 @@ async function loadCentros() {
   const res = await fetch(`${AUTH_API_BASE}/clima/${currentOleada}/centros`);
   const centros = await res.json();
   const grid = document.getElementById("centro-grid");
-  const cards = [`<div class="centro-card" data-centro="">🏢 Todos los centros</div>`];
-  // Botones "Todas las tiendas"/"Todas las fábricas" solo tienen sentido si
-  // de verdad hay al menos una fábrica en esta oleada — si no, dividir no
-  // aporta nada (sería idéntico a "Todos los centros").
-  if (centros.some((c) => /f[aá]brica/i.test(c))) {
-    cards.push(`<div class="centro-card" data-centro="" data-solo-tipo="tienda">🏬 Todas las tiendas</div>`);
-    cards.push(`<div class="centro-card" data-centro="" data-solo-tipo="fabrica">🏭 Todas las fábricas</div>`);
+  const restringido = CLIMA_CENTROS_USUARIO.length > 0;
+  const cards = [];
+  // Un usuario restringido a su(s) centro(s) no ve "Todos los centros" ni
+  // "Todas las tiendas/fábricas" -- entra directo al informe de su centro.
+  if (!restringido) {
+    cards.push(`<div class="centro-card" data-centro="">🏢 Todos los centros</div>`);
+    // Botones "Todas las tiendas"/"Todas las fábricas" solo tienen sentido si
+    // de verdad hay al menos una fábrica en esta oleada — si no, dividir no
+    // aporta nada (sería idéntico a "Todos los centros").
+    if (centros.some((c) => /f[aá]brica/i.test(c))) {
+      cards.push(`<div class="centro-card" data-centro="" data-solo-tipo="tienda">🏬 Todas las tiendas</div>`);
+      cards.push(`<div class="centro-card" data-centro="" data-solo-tipo="fabrica">🏭 Todas las fábricas</div>`);
+    }
   }
   cards.push(...centros.map((c) => `<div class="centro-card" data-centro="${escapeHTML(c)}">${escapeHTML(c)}</div>`));
   grid.innerHTML = cards.join("");
@@ -158,8 +169,9 @@ async function loadCentros() {
     });
   });
   if (centros.length > 0) {
-    grid.querySelector(".centro-card").classList.add("active");
-    await loadReporte(null, null);
+    const primera = grid.querySelector(".centro-card");
+    primera.classList.add("active");
+    await loadReporte(primera.dataset.centro || null, primera.dataset.soloTipo || null);
   }
 }
 
@@ -440,6 +452,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     window.location.href = "/";
     return;
   }
+  CLIMA_CENTROS_USUARIO = user.clima_centros || [];
   wireUserBar(user);
   aplicarBrandingEmpresa();
   const linkLanding = document.getElementById("link-clima-landing");

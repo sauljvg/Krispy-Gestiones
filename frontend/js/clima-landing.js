@@ -34,6 +34,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   aplicarBrandingEmpresaLanding();
 
   const sufijoEmpresa = EMPRESA_LANDING === "saona" ? "?empresa=saona" : "";
-  document.getElementById("link-clima-tests").href = `clima-tests.html${sufijoEmpresa}`;
+  const linkTests = document.getElementById("link-clima-tests");
+  linkTests.href = `clima-tests.html${sufijoEmpresa}`;
   document.getElementById("link-clima-informes").href = `clima-informes.html${sufijoEmpresa}`;
+
+  // La tarjeta "Test" (crear/editar oleadas) es solo para quien gestiona las
+  // encuestas -- necesita el módulo "tests". Un gerente entra a Clima
+  // Laboral solo para VER el informe de su centro; sin este filtro veía la
+  // tarjeta "Test", la pulsaba y clima-tests.html lo echaba fuera (no tiene
+  // el módulo tests) -- un callejón sin salida confuso.
+  const gestionaTests = user.rol === "admin" || (user.modulos || []).includes("tests");
+  if (!gestionaTests) {
+    linkTests.hidden = true;
+    document.querySelector(".clima-landing-grid")?.style.setProperty("max-width", "320px");
+  }
 });
