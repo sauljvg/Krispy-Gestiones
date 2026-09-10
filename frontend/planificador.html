@@ -49,8 +49,20 @@
   .plan-turno:hover .plan-turno-x { opacity: 1; }
   .plan-turno-fantasma { position: absolute; top: 6px; bottom: 6px; border-radius: 7px; background: color-mix(in srgb, var(--acento) 45%, transparent); border: 1px dashed var(--acento); pointer-events: none; }
   .plan-turno.sin-asignar { background: color-mix(in srgb, var(--status-warning) 30%, var(--surface-1)); color: var(--text-primary); border: 1px dashed var(--status-warning); }
+  .plan-turno.vacaciones { background: color-mix(in srgb, #2f8fd6 32%, var(--surface-1)); color: var(--text-primary); border-color: #2f8fd6; }
+  /* Vacaciones = mismo layout que el día libre (banda a toda la franja) pero en azul. Doble clase para ganar al .plan-turno.libre de más abajo. */
+  .plan-turno.libre.vacaciones { background: color-mix(in srgb, #2f8fd6 26%, var(--surface-1)); color: var(--text-primary); }
+  .plan-turno.slot-activo { outline: 2px solid var(--text-primary); outline-offset: 1px; }
   .plan-turno .plan-turno-asig { position: absolute; top: 1px; right: 20px; width: 15px; height: 15px; line-height: 14px; text-align: center; border-radius: 4px; background: rgba(0,0,0,.2); font-size: 11px; opacity: 0; transition: opacity .1s; }
   .plan-turno:hover .plan-turno-asig { opacity: 1; }
+  .plan-vac-btn { border-color: #2f8fd6 !important; }
+  .plan-dia-total { font-size: 13px; color: var(--text-secondary); margin: 0 0 8px; }
+  .plan-dia-total b { color: var(--text-primary); }
+  .plan-sem-total { background: color-mix(in srgb, var(--acento) 5%, var(--surface-1)); border-top: 2px solid var(--border); }
+  .plan-sem-total .plan-sem-celda b { font-size: 12.5px; }
+  .plan-sem-celda.vacaciones { background: color-mix(in srgb, #2f8fd6 18%, transparent); }
+  .plan-slots-total { text-align: center; font-size: 10.5px; color: var(--text-secondary); border-top: 1px solid var(--border); padding-top: 4px; margin-top: auto; }
+  .plan-slots-total b { color: var(--text-primary); }
   /* Bloque "negativo": día libre de la persona -- toda la franja en gris. */
   .plan-turno.libre { left: 0 !important; width: 100% !important; background: color-mix(in srgb, var(--text-secondary) 30%, var(--surface-1)); color: var(--text-secondary); cursor: default; box-shadow: none; font-weight: 500; text-transform: uppercase; letter-spacing: .08em; font-size: 10.5px; z-index: 0; }
   .plan-fila-acciones { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
@@ -272,12 +284,28 @@
   </div>
 </dialog>
 
+<dialog class="plan-dialog" id="plan-dialog-vacaciones">
+  <div class="plan-dialog-cab">
+    <h3>Vacaciones · <span class="plan-vac-nombre"></span></h3>
+    <button type="button" class="btn btn-ghost" data-cerrar>✕</button>
+  </div>
+  <div class="plan-dialog-body">
+    <p class="staff-hint">Cada día se marca como vacaciones (jornada completa). Por defecto la semana lunes–domingo; ajusta las fechas para días sueltos.</p>
+    <div class="plan-config-campo"><label for="plan-vac-desde">Desde</label><input type="date" id="plan-vac-desde"></div>
+    <div class="plan-config-campo"><label for="plan-vac-hasta">Hasta</label><input type="date" id="plan-vac-hasta"></div>
+    <div style="display:flex; gap:8px;">
+      <button type="button" class="btn btn-primary" id="plan-vac-guardar">Guardar vacaciones</button>
+      <button type="button" class="btn btn-ghost" id="plan-vac-quitar">Quitar</button>
+    </div>
+  </div>
+</dialog>
+
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/icons.js?v=20260903a"></script>
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260910a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/planificador.js?v=20260910g"></script>
+<script src="js/planificador.js?v=20260910j"></script>
 </body>
 </html>

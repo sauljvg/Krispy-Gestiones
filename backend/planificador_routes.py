@@ -151,10 +151,8 @@ class TurnoIn(BaseModel):
 @router.post("/turnos")
 def crear_turno_route(body: TurnoIn, empresa: str = "kk", user: dict = Depends(require_planificador)):
     _exigir_centro(user, body.centro)
-    if body.tipo not in ("trabajo", "libre"):
+    if body.tipo not in ("trabajo", "libre", "vacaciones"):
         raise HTTPException(status_code=400, detail="Tipo de turno inválido")
-    if body.tipo == "trabajo" and body.duracion_min < 10:
-        raise HTTPException(status_code=400, detail="Un turno dura como mínimo 10 minutos")
     # trabajador_id 0 = slot sin asignar (no hay que validar persona).
     if body.trabajador_id != planificador_module.SIN_ASIGNAR:
         t = planificador_module.get_trabajador(body.trabajador_id)
@@ -183,8 +181,6 @@ def actualizar_turno_route(
     if t is None:
         raise HTTPException(status_code=404, detail="Turno no encontrado")
     _exigir_centro(user, t["centro"])
-    if body.duracion_min is not None and body.duracion_min < 10:
-        raise HTTPException(status_code=400, detail="Un turno dura como mínimo 10 minutos")
     try:
         planificador_module.actualizar_turno(turno_id, inicio_min=body.inicio_min, duracion_min=body.duracion_min)
     except ValueError as exc:
@@ -236,6 +232,29 @@ def asignar_turno_route(
     return {"ok": True}
 
 
+class VacacionesIn(BaseModel):
+    centro: str
+    trabajador_id: int
+    desde: str
+    hasta: str
+    quitar: bool = False
+
+
+@router.post("/vacaciones")
+def vacaciones_route(body: VacacionesIn, empresa: str = "kk", user: dict = Depends(require_planificador)):
+    _exigir_centro(user, body.centro)
+    w = planificador_module.get_trabajador(body.trabajador_id)
+    if w is None or w["centro"] != body.centro or w["empresa"] != empresa:
+        raise HTTPException(status_code=400, detail="Esa persona no es de este centro")
+    try:
+        n = planificador_module.set_vacaciones(
+            empresa, body.centro, body.trabajador_id, body.desde, body.hasta, quitar=body.quitar
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "dias": n}
+
+
 @router.get("/sugerencias")
 def sugerencias_route(
     empresa: str = "kk", centro: str = "", fecha: str = "", inicio_min: int = 0, duracion_min: int = 0,
@@ -279,9 +298,12 @@ class SlotUpdateIn(BaseModel):
 def actualizar_slot_route(
     slot_id: int, body: SlotUpdateIn, empresa: str = "kk", user: dict = Depends(require_planificador)
 ):
-    planificador_module.actualizar_slot(
-        slot_id, nombre=body.nombre, inicio_min=body.inicio_min, duracion_min=body.duracion_min
-    )
+    try:
+        planificador_module.actualizar_slot(
+            slot_id, nombre=body.nombre, inicio_min=body.inicio_min, duracion_min=body.duracion_min
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True}
 
 

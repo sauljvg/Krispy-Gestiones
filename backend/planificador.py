@@ -25,6 +25,10 @@ APERTURA_DEFECTO_MIN = 8 * 60      # 08:00
 CIERRE_DEFECTO_MIN = 25 * 60       # 01:00 del día siguiente (25:00)
 
 SIN_ASIGNAR = 0  # trabajador_id de un turno/slot todavía sin persona
+MIN_TURNO_MIN = 60      # un turno de trabajo dura entre 1 h...
+MAX_TURNO_MIN = 600     # ...y 10 h
+DESCANSO_ENTRE_JORNADAS_MIN = 12 * 60   # 12 h de descanso entre el fin de una jornada y el inicio de la siguiente
+_TIPOS_NO_TRABAJO = ("libre", "vacaciones")   # bloques que no cuentan como horas trabajadas
 
 # Slots de horario "de siempre" -- se precargan la primera vez (empresa kk) a
 # partir de los patrones que más se repiten en la planificación real de Odoo.
@@ -453,19 +457,23 @@ def _solapa(conn, trabajador_id, fecha, ini, fin, excluir_id=None):
 
 def crear_turno(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, creado_por, tipo="trabajo"):
     conn = get_connection()
-    if tipo == "libre":
-        # Solo un "día libre" por persona y fecha -- si ya hay uno, no se duplica.
+    if tipo in _TIPOS_NO_TRABAJO:
+        # Solo un "día libre"/"vacaciones" por persona y fecha -- no se duplica.
         ya = conn.execute(
             "SELECT id FROM planificador_turnos WHERE empresa = ? AND centro = ? AND trabajador_id = ? "
-            "AND fecha = ? AND tipo = 'libre'",
-            (empresa, centro, trabajador_id, fecha),
+            "AND fecha = ? AND tipo = ?",
+            (empresa, centro, trabajador_id, fecha, tipo),
         ).fetchone()
         if ya:
             conn.close()
             return ya["id"]
-    elif _solapa(conn, trabajador_id, fecha, int(inicio_min), int(inicio_min) + int(duracion_min)):
-        conn.close()
-        raise ValueError("El turno se solapa con otro de esa persona")
+    else:
+        if not (MIN_TURNO_MIN <= int(duracion_min) <= MAX_TURNO_MIN):
+            conn.close()
+            raise ValueError("Un turno debe durar entre 1 y 10 horas")
+        if _solapa(conn, trabajador_id, fecha, int(inicio_min), int(inicio_min) + int(duracion_min)):
+            conn.close()
+            raise ValueError("El turno se solapa con otro de esa persona")
     cur = conn.execute(
         "INSERT INTO planificador_turnos "
         "(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, tipo, creado_por) "
@@ -489,9 +497,13 @@ def actualizar_turno(turno_id, inicio_min=None, duracion_min=None):
     row = dict(row)
     ini = int(inicio_min) if inicio_min is not None else row["inicio_min"]
     dur = int(duracion_min) if duracion_min is not None else row["duracion_min"]
-    if row["tipo"] == "trabajo" and _solapa(conn, row["trabajador_id"], row["fecha"], ini, ini + dur, excluir_id=turno_id):
-        conn.close()
-        raise ValueError("El turno se solapa con otro de esa persona")
+    if row["tipo"] == "trabajo":
+        if not (MIN_TURNO_MIN <= dur <= MAX_TURNO_MIN):
+            conn.close()
+            raise ValueError("Un turno debe durar entre 1 y 10 horas")
+        if _solapa(conn, row["trabajador_id"], row["fecha"], ini, ini + dur, excluir_id=turno_id):
+            conn.close()
+            raise ValueError("El turno se solapa con otro de esa persona")
     conn.execute(
         "UPDATE planificador_turnos SET inicio_min = ?, duracion_min = ?, actualizado_en = datetime('now') WHERE id = ?",
         (ini, dur, turno_id),
@@ -561,18 +573,64 @@ def asignar_turno(turno_id, trabajador_id):
             conn.close()
             raise ValueError("Esa persona ya tiene un turno a esa hora")
         libre = conn.execute(
-            "SELECT id FROM planificador_turnos WHERE trabajador_id = ? AND fecha = ? AND tipo = 'libre'",
+            "SELECT tipo FROM planificador_turnos WHERE trabajador_id = ? AND fecha = ? AND tipo IN ('libre', 'vacaciones')",
             (trabajador_id, t["fecha"]),
         ).fetchone()
         if libre:
             conn.close()
-            raise ValueError("Esa persona tiene el día libre")
+            raise ValueError("Esa persona tiene " + ("vacaciones" if libre["tipo"] == "vacaciones" else "el día libre"))
     conn.execute(
         "UPDATE planificador_turnos SET trabajador_id = ?, actualizado_en = datetime('now') WHERE id = ?",
         (trabajador_id, turno_id),
     )
     conn.commit()
     conn.close()
+
+
+def _rango_fechas(desde, hasta):
+    d0 = datetime.date.fromisoformat(desde)
+    d1 = datetime.date.fromisoformat(hasta)
+    if d1 < d0:
+        d0, d1 = d1, d0
+    if (d1 - d0).days > 120:
+        raise ValueError("El rango de fechas es demasiado largo")
+    n = (d1 - d0).days
+    return [(d0 + datetime.timedelta(days=i)).isoformat() for i in range(n + 1)]
+
+
+def set_vacaciones(empresa, centro, trabajador_id, desde, hasta, quitar=False):
+    """Marca (o quita) vacaciones de una persona en un rango de fechas. Cada
+    día es un bloque a jornada completa, como el día libre. No cuenta horas."""
+    fechas = _rango_fechas(desde, hasta)
+    cfg = get_config(empresa, centro)
+    conn = get_connection()
+    n = 0
+    for f in fechas:
+        if quitar:
+            cur = conn.execute(
+                "DELETE FROM planificador_turnos WHERE empresa = ? AND centro = ? AND trabajador_id = ? "
+                "AND fecha = ? AND tipo = 'vacaciones'",
+                (empresa, centro, trabajador_id, f),
+            )
+            n += cur.rowcount
+        else:
+            ya = conn.execute(
+                "SELECT id FROM planificador_turnos WHERE empresa = ? AND centro = ? AND trabajador_id = ? "
+                "AND fecha = ? AND tipo = 'vacaciones'",
+                (empresa, centro, trabajador_id, f),
+            ).fetchone()
+            if ya:
+                continue
+            conn.execute(
+                "INSERT INTO planificador_turnos "
+                "(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, tipo, creado_por) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'vacaciones', 'planificador')",
+                (empresa, centro, trabajador_id, f, cfg["apertura_min"], cfg["cierre_min"] - cfg["apertura_min"]),
+            )
+            n += 1
+    conn.commit()
+    conn.close()
+    return n
 
 
 # --- Biblioteca de slots (horarios predefinidos) ---
@@ -590,6 +648,8 @@ def crear_slot(empresa, nombre, inicio_min, duracion_min):
     nombre = (nombre or "").strip()
     if not nombre:
         raise ValueError("Falta el nombre del slot")
+    if not (MIN_TURNO_MIN <= int(duracion_min) <= MAX_TURNO_MIN):
+        raise ValueError("Un slot debe durar entre 1 y 10 horas")
     conn = get_connection()
     mx = conn.execute("SELECT COALESCE(MAX(orden), 0) FROM planificador_slots WHERE empresa = ?", (empresa,)).fetchone()[0]
     cur = conn.execute(
@@ -603,6 +663,8 @@ def crear_slot(empresa, nombre, inicio_min, duracion_min):
 
 
 def actualizar_slot(slot_id, nombre=None, inicio_min=None, duracion_min=None):
+    if duracion_min is not None and not (MIN_TURNO_MIN <= int(duracion_min) <= MAX_TURNO_MIN):
+        raise ValueError("Un slot debe durar entre 1 y 10 horas")
     sets, params = [], []
     if nombre is not None:
         sets.append("nombre = ?")
@@ -631,40 +693,83 @@ def eliminar_slot(slot_id):
 
 # --- Sugerencias de a quién poner en un slot ---
 
+def _turnos_ventana_por_trab(empresa, centro, fecha):
+    """Turnos de trabajo (con persona) del centro en [fecha-1, fecha+1],
+    agrupados por trabajador -- para comprobar el descanso de 12 h."""
+    d = datetime.date.fromisoformat(fecha)
+    ini = (d - datetime.timedelta(days=1)).isoformat()
+    fin = (d + datetime.timedelta(days=1)).isoformat()
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT trabajador_id, fecha, inicio_min, duracion_min FROM planificador_turnos "
+        "WHERE empresa = ? AND centro = ? AND tipo = 'trabajo' AND trabajador_id != 0 AND fecha BETWEEN ? AND ?",
+        (empresa, centro, ini, fin),
+    ).fetchall()
+    conn.close()
+    out = {}
+    for r in rows:
+        out.setdefault(r["trabajador_id"], []).append(dict(r))
+    return out
+
+
+def _descanso_12h_ko(turnos_persona, fecha, ini, fin):
+    """¿Poner [ini, fin) en `fecha` deja menos de 12 h entre esa jornada y una
+    adyacente (mismo día -- turno partido lejano no --, día anterior o
+    siguiente)? Los solapes ya los pilla otro chequeo, aquí se ignoran."""
+    d = datetime.date.fromisoformat(fecha)
+    for t in turnos_persona:
+        off = (datetime.date.fromisoformat(t["fecha"]) - d).days * 1440
+        tini = t["inicio_min"] + off
+        tfin = t["inicio_min"] + t["duracion_min"] + off
+        if tini >= fin and tini - fin < DESCANSO_ENTRE_JORNADAS_MIN:
+            return True
+        if ini >= tfin and ini - tfin < DESCANSO_ENTRE_JORNADAS_MIN:
+            return True
+    return False
+
+
 def sugerencias(empresa, centro, fecha, inicio_min, duracion_min):
     """Para un hueco [inicio, inicio+duracion) de un día concreto, devuelve la
     plantilla del centro ordenada: primero quien está DISPONIBLE (sin turno
-    solapado ni día libre ese día), de menos a más horas ya planificadas en
-    la semana; después el resto (en gris) con el motivo."""
-    fin = int(inicio_min) + int(duracion_min)
+    solapado, día libre ni vacaciones ese día), de menos a más horas ya
+    planificadas en la semana; después el resto (en gris) con el motivo. Cada
+    persona lleva avisos: se pasaría de contrato, o menos de 12 h de descanso
+    entre jornadas."""
+    ini, fin = int(inicio_min), int(inicio_min) + int(duracion_min)
     trabajadores = list_trabajadores(empresa, centro)
     turnos_sem = turnos_semana(empresa, centro, fecha)
     min_sem = _minutos_semana(turnos_sem)
     del_dia = [t for t in turnos_sem if t["fecha"] == fecha]
+    ventana = _turnos_ventana_por_trab(empresa, centro, fecha)
     out = []
     for w in trabajadores:
         wid = w["id"]
         ocupado = any(
             t["trabajador_id"] == wid and t["tipo"] == "trabajo"
-            and t["inicio_min"] < fin and t["inicio_min"] + t["duracion_min"] > int(inicio_min)
+            and t["inicio_min"] < fin and t["inicio_min"] + t["duracion_min"] > ini
             for t in del_dia
         )
-        libre = any(t["trabajador_id"] == wid and t["tipo"] == "libre" for t in del_dia)
+        fuera = next(
+            (t["tipo"] for t in del_dia if t["trabajador_id"] == wid and t["tipo"] in _TIPOS_NO_TRABAJO), None
+        )
         ms = min_sem.get(wid, 0)
         contrato = w["horas_contrato_semana"]
-        aviso = ""
+        avisos = []
         if contrato and (ms + int(duracion_min)) / 60 > contrato:
-            aviso = "se pasaría de contrato"
+            avisos.append("se pasaría de contrato")
+        if _descanso_12h_ko(ventana.get(wid, []), fecha, ini, fin):
+            avisos.append("No cumple el descanso mínimo de 12 h entre jornadas")
+        motivo = "ya trabaja ese día" if ocupado else ("vacaciones" if fuera == "vacaciones" else ("día libre" if fuera else ""))
         out.append({
             "trabajador_id": wid,
             "nombre": w["nombre"],
             "minutos_semana": ms,
             "horas_contrato": contrato,
-            "disponible": not ocupado and not libre,
-            "motivo": "ya trabaja ese día" if ocupado else ("día libre" if libre else ""),
-            "aviso": aviso,
+            "disponible": not ocupado and not fuera,
+            "motivo": motivo,
+            "aviso": " · ".join(avisos),
         })
-    out.sort(key=lambda x: (not x["disponible"], x["minutos_semana"], x["nombre"].lower()))
+    out.sort(key=lambda x: (not x["disponible"], bool(x["aviso"]), x["minutos_semana"], x["nombre"].lower()))
     return out
 
 
@@ -700,12 +805,16 @@ def set_proyeccion_celda(empresa, centro, fecha, franja_min, campo, valor):
 
 # --- Vista de un día (todo junto) ---
 
+def _es_trabajo(t):
+    return t.get("tipo", "trabajo") == "trabajo" and t["trabajador_id"] != SIN_ASIGNAR
+
+
 def _minutos_semana(turnos_sem):
-    """Suma de minutos de trabajo por trabajador -- los días libres y los
-    turnos sin asignar (SIN_ASIGNAR) NO cuentan como horas trabajadas."""
+    """Suma de minutos de trabajo por trabajador -- días libres, vacaciones y
+    turnos sin asignar NO cuentan como horas trabajadas."""
     out = {}
     for t in turnos_sem:
-        if t.get("tipo") == "libre" or t["trabajador_id"] == SIN_ASIGNAR:
+        if not _es_trabajo(t):
             continue
         out[t["trabajador_id"]] = out.get(t["trabajador_id"], 0) + t["duracion_min"]
     return out
@@ -716,7 +825,7 @@ def _dias_trabajados_semana(turnos_sem):
     turno de trabajo -- para avisar si le quedan menos de 2 días de descanso."""
     dias = {}
     for t in turnos_sem:
-        if t.get("tipo") == "libre" or t["trabajador_id"] == SIN_ASIGNAR:
+        if not _es_trabajo(t):
             continue
         dias.setdefault(t["trabajador_id"], set()).add(t["fecha"])
     return {str(k): len(v) for k, v in dias.items()}

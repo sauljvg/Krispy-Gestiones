@@ -7,6 +7,8 @@ const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" 
 const API = `${window.location.origin}/api/planificador`;
 const PX_POR_MIN = 1.15; // ancho en px de cada minuto de la línea de tiempo
 const SNAP = 10; // los bloques saltan de 10 en 10 minutos
+const MIN_DUR = 60; // un turno dura entre 1 h...
+const MAX_DUR = 600; // ...y 10 h
 const LS_CENTRO = `plan-centro-${EMPRESA}`;
 const LS_VISTA = `plan-vista-${EMPRESA}`;
 const LS_MODO = `plan-modo-${EMPRESA}`;
@@ -99,7 +101,12 @@ async function cargarCentros() {
 
 async function cargarDia() {
   const cont = document.getElementById("plan-contenido");
-  cont.innerHTML = `<p class="plan-vacia">Cargando…</p>`;
+  // Conserva la posición del scroll: al quitar un slot o un día libre no
+  // debe saltar arriba ni recargar visualmente toda la página.
+  const sy = window.scrollY;
+  const sx = document.querySelector(".plan-grid-scroll")?.scrollLeft || 0;
+  const primeraVez = !cont.querySelector(".plan-grid, .plan-semana, .plan-slots-layout");
+  if (primeraVez) cont.innerHTML = `<p class="plan-vacia">Cargando…</p>`;
   document.getElementById("plan-vista-dia").classList.toggle("activo", S.vista === "dia");
   document.getElementById("plan-vista-semana").classList.toggle("activo", S.vista === "semana");
   document.getElementById("plan-modo-turnos").classList.toggle("activo", S.modo === "turnos");
@@ -124,6 +131,19 @@ async function cargarDia() {
     S.vista === "semana" ? `Semana del ${fechaCorta(data.lunes || S.fecha)}` : fechaLarga(S.fecha);
   document.getElementById("plan-fecha-input").value = S.fecha;
   renderTodo();
+  window.scrollTo(0, sy);
+  const gs = document.querySelector(".plan-grid-scroll");
+  if (gs) gs.scrollLeft = sx;
+}
+
+function fmtHMM(min) {
+  const m = Math.max(0, Math.round(min));
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
+}
+function totalMinDia(fecha) {
+  return S.turnos
+    .filter((t) => t.fecha === fecha && t.tipo === "trabajo")
+    .reduce((s, t) => s + t.duracion_min, 0);
 }
 
 function turnosDia(fecha) {
@@ -201,6 +221,7 @@ function renderDia() {
       .join("");
 
   cont.innerHTML = `
+    <p class="plan-dia-total">Total del día: <b>${fmtHMM(totalMinDia(S.fecha))}</b></p>
     <div class="plan-grid-scroll">
       <div class="plan-grid" style="--plan-ancho:${ancho}px;">
         <div class="plan-horas-fila">
@@ -223,8 +244,11 @@ function renderDia() {
   wireInputsProyeccion();
   S.trabajadores.forEach((t) => wireLane(cont.querySelector(`.plan-lane[data-trab="${t.id}"]`), t.id));
   cont.querySelectorAll(".plan-turno").forEach(wireTurno);
-  cont.querySelectorAll(".plan-libre-btn").forEach((btn) => {
+  cont.querySelectorAll(".plan-libre-btn:not(.plan-vac-btn)").forEach((btn) => {
     btn.addEventListener("click", () => toggleLibre(Number(btn.dataset.trab), S.fecha));
+  });
+  cont.querySelectorAll(".plan-vac-btn").forEach((btn) => {
+    btn.addEventListener("click", () => abrirDialogoVacaciones(Number(btn.dataset.trab), btn.dataset.nombre));
   });
 }
 
@@ -251,7 +275,7 @@ function idealCalculado(m) {
 function planificadoEnFranja(m) {
   const ids = new Set();
   for (const t of S.turnos) {
-    if (t.tipo === "libre") continue;
+    if (t.tipo !== "trabajo" || t.trabajador_id === SIN_ASIGNAR) continue;
     if (t.inicio_min < m + 60 && t.inicio_min + t.duracion_min > m) ids.add(t.trabajador_id);
   }
   return ids.size;
@@ -296,6 +320,7 @@ function filaTrabajador(t) {
         <div class="plan-barra ${clase}"><i style="width:${Math.min(100, Math.round(pct * 100))}%;"></i></div>
         <div class="plan-fila-acciones">
           <button type="button" class="plan-libre-btn ${tieneLibre ? "activo" : ""}" data-trab="${t.id}">${tieneLibre ? "Quitar libre" : "Día libre"}</button>
+          <button type="button" class="plan-libre-btn plan-vac-btn" data-trab="${t.id}" data-nombre="${escapeHTML(t.nombre)}">🏖 Vacaciones</button>
           ${descansoIndicadorHTML(t.id, min, contrato)}
         </div>
       </div>
@@ -307,10 +332,11 @@ function filaTrabajador(t) {
 }
 
 function turnoHTML(t) {
-  if (t.tipo === "libre") {
-    return `<div class="plan-turno libre" data-id="${t.id}" data-tipo="libre">
-      <span class="plan-turno-txt">Libre</span>
-      <span class="plan-turno-x" title="Quitar día libre">✕</span>
+  if (t.tipo === "libre" || t.tipo === "vacaciones") {
+    const vac = t.tipo === "vacaciones";
+    return `<div class="plan-turno libre ${vac ? "vacaciones" : ""}" data-id="${t.id}" data-tipo="${t.tipo}">
+      <span class="plan-turno-txt">${vac ? "Vacaciones" : "Libre"}</span>
+      <span class="plan-turno-x" title="${vac ? "Quitar vacaciones (solo este día)" : "Quitar día libre"}">✕</span>
     </div>`;
   }
   const sin = t.trabajador_id === SIN_ASIGNAR;
@@ -398,7 +424,9 @@ function refrescarCalculadas() {
 // ---------------------------------------------------------------- arrastrar / crear
 
 function wireTurno(el) {
-  const esLibre = el.dataset.tipo === "libre";
+  // Día libre y vacaciones: bloque fijo a toda la franja -- no se mueve ni se
+  // estira, y la ✕ lo quita sin preguntar (como el botón "Quitar libre").
+  const esLibre = el.dataset.tipo === "libre" || el.dataset.tipo === "vacaciones";
   const btnAsig = el.querySelector(".plan-turno-asig");
   if (btnAsig) {
     btnAsig.addEventListener("pointerdown", (e) => e.stopPropagation());
@@ -447,15 +475,17 @@ function wireTurno(el) {
         ini = clamp(iniOrig + dMin, izq, der - durOrig);
         dur = durOrig;
       } else if (modo === "izq") {
-        ini = clamp(iniOrig + dMin, izq, iniOrig + durOrig - SNAP);
+        ini = clamp(iniOrig + dMin, Math.max(izq, iniOrig + durOrig - MAX_DUR), iniOrig + durOrig - MIN_DUR);
         dur = iniOrig + durOrig - ini;
       } else {
-        dur = clamp(durOrig + dMin, SNAP, der - iniOrig);
+        dur = clamp(durOrig + dMin, MIN_DUR, Math.min(der - iniOrig, MAX_DUR));
         ini = iniOrig;
       }
       el.style.left = minToX(ini) + "px";
       el.style.width = dur * PX_POR_MIN + "px";
-      el.querySelector(".plan-turno-txt").textContent = etiquetaTurno(ini, dur);
+      el.querySelector(".plan-turno-txt").textContent = el.classList.contains("sin-asignar")
+        ? `Sin asignar · ${fmtHoras(dur)}`
+        : etiquetaTurno(ini, dur);
     };
     const onUp = async () => {
       el.releasePointerCapture(e.pointerId);
@@ -492,21 +522,25 @@ function wireLane(lane, trabajadorId) {
     // el turno nuevo no puede pisar a otro de esa persona: se limita al
     // hueco libre alrededor del punto donde se ha pulsado.
     const { izq, der } = paredes(trabajadorId, null, iniClick, iniClick);
-    if (der - izq < SNAP) return; // no cabe nada aquí
+    if (der - izq < MIN_DUR) {
+      mostrarAviso("No cabe un turno de 1 h en este hueco.");
+      return;
+    }
     const fantasma = document.createElement("div");
     fantasma.className = "plan-turno-fantasma";
     fantasma.style.left = minToX(iniClick) + "px";
-    fantasma.style.width = SNAP * PX_POR_MIN + "px";
+    fantasma.style.width = MIN_DUR * PX_POR_MIN + "px";
     lane.appendChild(fantasma);
     let ini = iniClick;
-    let dur = SNAP;
+    let dur = MIN_DUR;
     let arrastrado = false;
+    const topeDer = Math.min(der, izq + MAX_DUR);
 
     const onMove = (ev) => {
       arrastrado = arrastrado || Math.abs(ev.clientX - startX) > 4;
-      const cursorMin = clamp(snap(xToMin(ev.clientX - laneRect.left)), izq, der);
-      ini = clamp(Math.min(iniClick, cursorMin), izq, der - SNAP);
-      dur = Math.max(SNAP, Math.abs(cursorMin - iniClick));
+      const cursorMin = clamp(snap(xToMin(ev.clientX - laneRect.left)), izq, topeDer);
+      ini = clamp(Math.min(iniClick, cursorMin), izq, der - MIN_DUR);
+      dur = clamp(Math.abs(cursorMin - iniClick), MIN_DUR, MAX_DUR);
       if (ini + dur > der) dur = der - ini;
       fantasma.style.left = minToX(ini) + "px";
       fantasma.style.width = dur * PX_POR_MIN + "px";
@@ -516,10 +550,10 @@ function wireLane(lane, trabajadorId) {
       window.removeEventListener("pointerup", onUp);
       fantasma.remove();
       if (!arrastrado) {
-        ini = clamp(iniClick, izq, der - SNAP);
-        dur = Math.min(240, der - ini);
+        ini = clamp(iniClick, izq, der - MIN_DUR);
+        dur = clamp(Math.min(240, der - ini), MIN_DUR, MAX_DUR);
       }
-      if (dur < SNAP) return;
+      if (dur < MIN_DUR) return;
       const res = await fetch(url("turnos"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -690,21 +724,16 @@ function renderSlotsDia() {
     .filter((t) => t.tipo === "trabajo")
     .sort((a, b) => a.inicio_min - b.inicio_min || a.duracion_min - b.duracion_min);
   const lanes = delDia
-    .map((t) => {
-      const sin = t.trabajador_id === SIN_ASIGNAR;
-      const activo = String(S.slotActivo) === String(t.id) ? "activo" : "";
-      return `<div class="plan-slot-lane" data-linea>
+    .map(
+      (t) => `<div class="plan-slot-lane" data-linea>
         <div class="plan-lane-lineas">${lineas}</div>
-        <div class="plan-slot-turno ${sin ? "sin-asignar" : ""} ${activo}" data-id="${t.id}"
-          style="left:${minToX(t.inicio_min)}px; width:${t.duracion_min * PX_POR_MIN}px;">
-          <span>${sin ? "Sin asignar" : escapeHTML(nombreTrabajador(t.trabajador_id))} · ${fmtHoras(t.duracion_min)}</span>
-          <span class="plan-turno-x" title="Quitar">✕</span>
-        </div>
-      </div>`;
-    })
+        ${turnoHTML(t)}
+      </div>`
+    )
     .join("");
 
   cont.innerHTML = `
+    <p class="plan-dia-total">Total del día: <b>${fmtHMM(totalMinDia(S.fecha))}</b></p>
     ${paletaHTML()}
     <div class="plan-slots-layout">
       <div class="plan-slots-main">
@@ -715,25 +744,20 @@ function renderSlotsDia() {
           </div>
         </div>
       </div>
-      <div class="plan-sugeridos"><h4>Elige un slot</h4><p class="staff-hint">Haz clic en un slot colocado para ver a quién puedes poner.</p></div>
+      <div class="plan-sugeridos"><h4>Elige un slot</h4><p class="staff-hint">Haz clic en un slot colocado para ver a quién puedes poner. Puedes estirarlo por los bordes.</p></div>
     </div>`;
 
   wirePaleta(cont);
   wireDrop(cont.querySelector("#plan-slots-zona"), S.fecha);
-  cont.querySelectorAll(".plan-slot-turno").forEach((el) => {
+  cont.querySelectorAll(".plan-turno").forEach((el) => {
+    if (String(S.slotActivo) === el.dataset.id) el.classList.add("slot-activo");
+    wireTurno(el);
     wireDrop(el, S.fecha, Number(el.dataset.id));
-    el.querySelector(".plan-turno-x").addEventListener("click", async (e) => {
-      e.stopPropagation();
-      if (!(await pedirConfirmacion("¿Quitar este slot?"))) return;
-      const r = await fetch(url(`turnos/${el.dataset.id}`), { method: "DELETE" });
-      if (!r.ok) return mostrarAviso("No se pudo quitar.");
-      cargarDia();
-    });
-    el.addEventListener("click", () => {
+    el.addEventListener("click", (e) => {
+      if (e.target.closest(".plan-turno-x, .plan-turno-asig")) return;
       S.slotActivo = Number(el.dataset.id);
-      cont.querySelectorAll(".plan-slot-turno").forEach((x) => x.classList.toggle("activo", x === el));
-      const turno = delDia.find((t) => String(t.id) === el.dataset.id);
-      pintarSugeridos(cont.querySelector(".plan-sugeridos"), turno);
+      cont.querySelectorAll(".plan-turno").forEach((x) => x.classList.toggle("slot-activo", x === el));
+      pintarSugeridos(cont.querySelector(".plan-sugeridos"), S.turnos.find((t) => String(t.id) === el.dataset.id));
     });
   });
 }
@@ -760,6 +784,7 @@ function renderSlotsSemana() {
       return `<div class="plan-slots-col" data-fecha="${d}">
         <h5 data-fecha="${d}">${nombresDia[i]} ${fechaCorta(d)}</h5>
         ${items}
+        <div class="plan-slots-total">Total <b>${fmtHMM(totalMinDia(d))}</b></div>
       </div>`;
     })
     .join("");
@@ -867,6 +892,46 @@ function wireSlots() {
   });
 }
 
+let _vacTrab = null;
+function abrirDialogoVacaciones(trabajadorId, nombre) {
+  _vacTrab = trabajadorId;
+  const dlg = document.getElementById("plan-dialog-vacaciones");
+  dlg.querySelector(".plan-vac-nombre").textContent = nombre || nombreTrabajador(trabajadorId);
+  const d = new Date(S.fecha + "T12:00:00");
+  const lun = new Date(d);
+  lun.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  const dom = new Date(lun);
+  dom.setDate(lun.getDate() + 6);
+  const iso = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+  dlg.querySelector("#plan-vac-desde").value = iso(lun);
+  dlg.querySelector("#plan-vac-hasta").value = iso(dom);
+  dlg.showModal();
+}
+
+function wireVacaciones() {
+  const dlg = document.getElementById("plan-dialog-vacaciones");
+  dlg.querySelector("[data-cerrar]").addEventListener("click", () => dlg.close());
+  const post = async (quitar) => {
+    const desde = dlg.querySelector("#plan-vac-desde").value;
+    const hasta = dlg.querySelector("#plan-vac-hasta").value;
+    if (!desde || !hasta || _vacTrab == null) return;
+    const r = await fetch(url("vacaciones"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ centro: S.centro, trabajador_id: _vacTrab, desde, hasta, quitar }),
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      mostrarAviso(e.detail || "No se pudo guardar las vacaciones.");
+      return;
+    }
+    dlg.close();
+    cargarDia();
+  };
+  dlg.querySelector("#plan-vac-guardar").addEventListener("click", () => post(false));
+  dlg.querySelector("#plan-vac-quitar").addEventListener("click", () => post(true));
+}
+
 async function toggleLibre(trabajadorId, fecha) {
   const existente = S.turnos.find(
     (t) => t.trabajador_id === trabajadorId && t.tipo === "libre" && t.fecha === fecha
@@ -944,13 +1009,15 @@ function renderSemana() {
         .map((d) => {
           const delDia = S.turnos.filter((x) => x.trabajador_id === t.id && x.fecha === d);
           const libre = delDia.some((x) => x.tipo === "libre");
-          const trabajo = delDia.filter((x) => x.tipo !== "libre").sort((a, b) => a.inicio_min - b.inicio_min);
+          const vac = delDia.some((x) => x.tipo === "vacaciones");
+          const trabajo = delDia.filter((x) => x.tipo === "trabajo").sort((a, b) => a.inicio_min - b.inicio_min);
           const chips = trabajo
             .map((x) => `<span class="plan-sem-chip">${fmtHHMM(x.inicio_min)}–${fmtHHMM(x.inicio_min + x.duracion_min)}</span>`)
             .join("");
-          return `<div class="plan-sem-celda ${libre ? "libre" : ""}" data-trab="${t.id}" data-fecha="${d}">
+          const fuera = vac ? "vacaciones" : libre ? "libre" : "";
+          return `<div class="plan-sem-celda ${fuera}" data-trab="${t.id}" data-fecha="${d}">
             <span class="plan-sem-luna ${libre ? "activo" : ""}" data-trab="${t.id}" data-fecha="${d}" title="Día libre">🌙</span>
-            ${libre ? `<span class="plan-sem-libre-txt">Libre</span>` : chips}
+            ${fuera ? `<span class="plan-sem-libre-txt">${vac ? "Vacaciones" : "Libre"}</span>` : chips}
           </div>`;
         })
         .join("");
@@ -967,12 +1034,20 @@ function renderSemana() {
     })
     .join("");
 
+  const filaTotal = `<div class="plan-sem-fila plan-sem-total">
+    <div class="plan-sem-nombre"><b>Total</b></div>
+    ${dias
+      .map((d) => `<div class="plan-sem-celda" style="align-items:center; justify-content:center;"><b>${fmtHMM(totalMinDia(d))}</b></div>`)
+      .join("")}
+  </div>`;
+
   cont.innerHTML = `
     <div class="plan-grid-scroll">
       <div class="plan-semana">
         ${cabecera}
         ${filaSin}
         ${S.trabajadores.length === 0 ? `<div class="plan-vacia">Este centro no tiene trabajadores en la plantilla.</div>` : filas}
+        ${S.trabajadores.length === 0 ? "" : filaTotal}
       </div>
     </div>`;
 
@@ -1190,6 +1265,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   wireRoster();
   wireConfig();
   wireSlots();
+  wireVacaciones();
   document
     .getElementById("plan-dialog-asignar")
     .querySelector("[data-cerrar]")
