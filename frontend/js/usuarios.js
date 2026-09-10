@@ -152,6 +152,15 @@ async function actualizarVisibilidadDependientesNuevoUsuario() {
     tiposWrap.dataset.cargado = "1";
     await renderNuTiposInformeChecklist();
   }
+  // Clima Laboral: igual que Reseñas revela el selector de tiendas, marcar
+  // "Clima Laboral" (o el de Saona) revela el selector de centros.
+  const tieneClima = modulos.includes("clima") || modulos.includes("saona_clima");
+  const climaWrap = document.getElementById("nu-clima-centros-wrap");
+  climaWrap.hidden = !tieneClima;
+  if (tieneClima && !climaWrap.dataset.cargado) {
+    climaWrap.dataset.cargado = "1";
+    await renderNuClimaCentrosChecklist();
+  }
 }
 
 function actualizarVisibilidadPorRol() {
@@ -162,6 +171,7 @@ function actualizarVisibilidadPorRol() {
   if (esAdmin) {
     document.getElementById("nu-tiendas-wrap").hidden = true;
     document.getElementById("nu-tipos-informe-wrap").hidden = true;
+    document.getElementById("nu-clima-centros-wrap").hidden = true;
   } else {
     actualizarVisibilidadDependientesNuevoUsuario();
   }
@@ -212,6 +222,32 @@ async function renderNuTiposInformeChecklist() {
 function tiposInformeSeleccionadosNuevoUsuario() {
   if (document.getElementById("nu-tipo-informe-todos").checked) return [];
   return [...document.querySelectorAll(".nu-tipo-informe-check:checked")].map((cb) => cb.value);
+}
+
+async function renderNuClimaCentrosChecklist() {
+  const centros = await loadClimaCentrosSiHaceFalta();
+  const wrap = document.getElementById("nu-clima-centros-checklist");
+  wrap.innerHTML = centros
+    .map(
+      (c, i) => `
+    <div class="checklist-row">
+      <input type="checkbox" id="nu-clima-centro-${i}" class="nu-clima-centro-check" value="${escapeHTML(c)}" disabled>
+      <label for="nu-clima-centro-${i}">${escapeHTML(c)}</label>
+    </div>`
+    )
+    .join("");
+  const todos = document.getElementById("nu-clima-centro-todos");
+  todos.onchange = () => {
+    wrap.querySelectorAll(".nu-clima-centro-check").forEach((cb) => {
+      cb.disabled = todos.checked;
+      if (todos.checked) cb.checked = false;
+    });
+  };
+}
+
+function climaCentrosSeleccionadosNuevoUsuario() {
+  if (document.getElementById("nu-clima-centro-todos").checked) return [];
+  return [...document.querySelectorAll(".nu-clima-centro-check:checked")].map((cb) => cb.value);
 }
 
 // --- Tabla de usuarios existentes ---
@@ -889,6 +925,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       tiendas: tiendasSeleccionadasNuevoUsuario(),
       modulos: modulosSeleccionadosNuevoUsuario(),
       tipos_informes: document.getElementById("nu-tipos-informe-wrap").hidden ? [] : tiposInformeSeleccionadosNuevoUsuario(),
+      clima_centros: document.getElementById("nu-clima-centros-wrap").hidden ? [] : climaCentrosSeleccionadosNuevoUsuario(),
     };
 
     const res = await fetch(`${AUTH_API_BASE}/auth/users`, {
@@ -908,6 +945,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     okEl.hidden = false;
     document.getElementById("new-user-form").reset();
     document.getElementById("nu-tienda-todas").checked = true;
+    document.getElementById("nu-clima-centro-todos").checked = true;
+    document.querySelectorAll(".nu-clima-centro-check").forEach((cb) => {
+      cb.checked = false;
+      cb.disabled = true;
+    });
     renderNuModulosChecklist();
     renderNuTiendasChecklist();
     actualizarVisibilidadPorRol();

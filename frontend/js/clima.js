@@ -455,8 +455,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   CLIMA_CENTROS_USUARIO = user.clima_centros || [];
   wireUserBar(user);
   aplicarBrandingEmpresa();
-  const linkLanding = document.getElementById("link-clima-landing");
-  if (linkLanding && EMPRESA === "saona") linkLanding.href = "clima.html?empresa=saona";
+  // Enlace a la gestión del test/oleadas: solo para quien gestiona encuestas
+  // (admin o módulo "tests"). El resto entra únicamente a ver el informe —
+  // por eso "Clima Laboral" ya no muestra una landing con tarjetas.
+  const linkGestionTest = document.getElementById("link-clima-gestion-test");
+  if (linkGestionTest && (user.rol === "admin" || (user.modulos || []).includes("tests"))) {
+    linkGestionTest.href = `clima-tests.html${EMPRESA === "saona" ? "?empresa=saona" : ""}`;
+    linkGestionTest.hidden = false;
+  }
   if (user.rol !== "admin") {
     document.getElementById("btn-renombrar-oleada").hidden = true;
     document.getElementById("btn-eliminar-oleada").hidden = true;

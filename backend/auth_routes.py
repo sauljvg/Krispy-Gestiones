@@ -146,6 +146,7 @@ class NewUserBody(BaseModel):
     tiendas: list[str] = []
     modulos: list[str] = []
     tipos_informes: list[str] = []
+    clima_centros: list[str] = []
 
 
 class UpdateRoleBody(BaseModel):
@@ -268,6 +269,8 @@ def create_user_route(body: NewUserBody, _admin: dict = Depends(require_admin)):
         auth_module.set_modulos_permitidos(user_id, body.modulos)
     if body.tipos_informes:
         informes_module.set_tipos_permitidos(user_id, body.tipos_informes)
+    if body.clima_centros:
+        clima_module.set_centros_permitidos(user_id, body.clima_centros)
     return {"ok": True, "id": user_id}
 
 

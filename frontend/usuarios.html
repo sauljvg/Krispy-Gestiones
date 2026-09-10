@@ -151,6 +151,17 @@
         <div id="nu-tipos-informe-checklist" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px,1fr)); gap:4px;"></div>
       </div>
 
+      <div id="nu-clima-centros-wrap" style="margin-top:12px;" hidden>
+        <label style="display:block; font-size:12px; color:var(--text-secondary); margin-bottom:6px;">
+          Centros con acceso en Clima Laboral
+        </label>
+        <div class="checklist-row" style="border-bottom:1px solid var(--border); padding-bottom:8px; margin-bottom:6px;">
+          <input type="checkbox" id="nu-clima-centro-todos" checked>
+          <label for="nu-clima-centro-todos">Todos los centros</label>
+        </div>
+        <div id="nu-clima-centros-checklist" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:4px;"></div>
+      </div>
+
       <p class="staff-hint">El usuario crea su propio PIN de 4 dígitos la primera vez que entra.</p>
       <p class="config-error" id="new-user-error" hidden></p>
       <p class="config-ok" id="new-user-ok" hidden></p>
@@ -169,6 +180,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/usuarios.js?v=20260902e"></script>
+<script src="js/usuarios.js?v=20260910a"></script>
 </body>
 </html>
