@@ -29,6 +29,12 @@
   .plan-fila { display: flex; min-height: 54px; }
   .plan-fila-cabecera { min-height: 34px; }
   .plan-fila:not(:last-child) { border-bottom: 1px solid var(--border); }
+  /* Cabecera de grupo por rol (fábrica) -- clic para plegar/desplegar. */
+  .plan-fila.plan-rol-cab { min-height: 32px; }
+  .plan-fila.plan-rol-cab .plan-celda-izq, .plan-sem-fila.plan-rol-cab .plan-sem-nombre { background: color-mix(in srgb, var(--acento) 14%, var(--surface-1)); justify-content: center; }
+  .plan-fila.plan-rol-cab, .plan-sem-fila.plan-rol-cab { background: color-mix(in srgb, var(--acento) 8%, var(--surface-1)); }
+  .plan-rol-toggle { border: none; background: none; color: var(--text-primary); font-weight: 700; font-size: 11px; letter-spacing: .01em; cursor: pointer; padding: 3px 0; display: inline-flex; align-items: center; gap: 5px; text-transform: uppercase; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .plan-rol-n { flex: none; font-weight: 600; color: var(--text-secondary); background: var(--surface-page); border-radius: 999px; padding: 0 6px; font-size: 10.5px; }
   .plan-celda-izq { width: 210px; flex: none; padding: 6px 10px; font-size: 12.5px; display: flex; flex-direction: column; justify-content: center; gap: 3px; background: var(--surface-1); position: sticky; left: 0; z-index: 2; border-right: 2px solid var(--border); box-sizing: border-box; }
   .plan-lane { position: relative; flex: none; width: var(--plan-ancho, 1200px); }
   .plan-fila-cabecera { background: color-mix(in srgb, var(--acento) 7%, var(--surface-1)); }
@@ -176,7 +182,7 @@
   .plan-dialog-cab { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border); }
   .plan-dialog-cab h3 { margin: 0; font-size: 16px; }
   .plan-dialog-body { padding: 16px; max-height: 70vh; overflow-y: auto; }
-  .plan-roster-fila { display: grid; grid-template-columns: 1fr 90px 70px 34px; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .plan-roster-fila { display: grid; grid-template-columns: 1fr 120px 78px 68px 34px; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
   .plan-roster-fila input[type="text"], .plan-roster-fila input[type="number"] { width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 13px; box-sizing: border-box; }
   .plan-roster-fila.inactivo { opacity: .5; }
   .plan-roster-acciones { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
@@ -254,6 +260,9 @@
       <button type="button" class="btn btn-ghost" id="plan-roster-kpis">⬇ Cargar de KPIs</button>
       <label class="btn btn-ghost btn-upload">⬆ Importar Excel de Odoo
         <input type="file" id="plan-roster-odoo" accept=".xls,.xlsx" hidden>
+      </label>
+      <label class="btn btn-ghost btn-upload">📅 Importar planificación (Odoo)
+        <input type="file" id="plan-roster-planificacion" accept=".xlsx" hidden>
       </label>
       <button type="button" class="btn btn-primary" id="plan-roster-nuevo">＋ Añadir persona</button>
     </div>
@@ -346,6 +355,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260910a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/planificador.js?v=20260911c"></script>
+<script src="js/planificador.js?v=20260911d"></script>
 </body>
 </html>

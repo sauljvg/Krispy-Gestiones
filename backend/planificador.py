@@ -14,6 +14,10 @@ contra sus horas de contrato.
 """
 import datetime
 import io
+import json
+import os
+import re
+import unicodedata
 
 from db import get_connection
 
@@ -65,11 +69,11 @@ def _bocadillo(duracion_min):
 
 def _bocadillo_lado(inicio_min, duracion_min, cierre_min):
     """El bocadillo de 20 min de un turno de 6 h+ va al FINAL de la jornada
-    (turnos de apertura / mañana) salvo que eso empujaría la presencia más allá
-    del cierre de la tienda -- entonces va al PRINCIPIO (turnos de cierre)."""
+    (turnos de apertura / mañana) salvo que eso empujaría la presencia hasta el
+    cierre de la tienda o más allá -- entonces va al PRINCIPIO (turnos de cierre)."""
     if _bocadillo(duracion_min) == 0:
         return ""
-    if int(inicio_min) + int(duracion_min) + BOCADILLO_MIN > int(cierre_min):
+    if int(inicio_min) + int(duracion_min) + BOCADILLO_MIN >= int(cierre_min):
         return "inicio"
     return "fin"
 
@@ -263,6 +267,11 @@ def ensure_planificador_tables():
     cols_turnos = {r[1] for r in conn.execute("PRAGMA table_info(planificador_turnos)")}
     if "tipo" not in cols_turnos:
         conn.execute("ALTER TABLE planificador_turnos ADD COLUMN tipo TEXT NOT NULL DEFAULT 'trabajo'")
+    # Rol del trabajador (Producción, Decoración, Limpieza, Supervisores... en
+    # fábrica; Retail / Jefe de Turno en tienda). Para agrupar la plantilla.
+    cols_trab = {r[1] for r in conn.execute("PRAGMA table_info(planificador_trabajadores)")}
+    if "rol" not in cols_trab:
+        conn.execute("ALTER TABLE planificador_trabajadores ADD COLUMN rol TEXT")
     # Datos para el export a Odoo (planning.slot): "Dirección de trabajo" y "Rol",
     # uno por centro. Se rellenan en "Horario del centro"; ParqueSur precargado.
     cols_config = {r[1] for r in conn.execute("PRAGMA table_info(planificador_config)")}
@@ -303,6 +312,23 @@ def ensure_planificador_tables():
         if _puesto_no_operativo(row["puesto"]):
             conn.execute("DELETE FROM planificador_turnos WHERE trabajador_id = ?", (row["id"],))
             conn.execute("DELETE FROM planificador_trabajadores WHERE id = ?", (row["id"],))
+    # Bootstrap único: carga la planificación real de Odoo que Saul pasó
+    # (backend/seed_planificacion_odoo.json) para que los gerentes vean sus
+    # horarios ya montados. Solo la 1ª vez (marca creado_por = 'odoo-seed').
+    seed = os.path.join(os.path.dirname(__file__), "seed_planificacion_odoo.json")
+    ya_sembrado = conn.execute(
+        "SELECT 1 FROM planificador_turnos WHERE creado_por = 'odoo-seed' LIMIT 1"
+    ).fetchone()
+    if os.path.exists(seed) and not ya_sembrado:
+        try:
+            with open(seed, encoding="utf-8") as f:
+                filas = json.load(f)
+            cierres = {
+                r[0]: r[1] for r in conn.execute("SELECT centro, cierre_min FROM planificador_config WHERE empresa = 'kk'")
+            }
+            _importar_planificacion(conn, "kk", filas, "odoo-seed", cierres)
+        except Exception as exc:  # nunca romper el arranque por el seed
+            print(f"[planificador] no se pudo cargar seed_planificacion_odoo.json: {exc}")
     conn.commit()
     conn.close()
 
@@ -315,6 +341,137 @@ def ensure_planificador_tables():
 _puesto_no_operativo = kpis_module.puesto_no_operativo
 
 
+def _importar_planificacion(conn, empresa, filas, creado_por, cierre_por_centro):
+    """Crea turnos (y los trabajadores que falten) a partir de filas
+    {centro, rol, recurso, fecha, inicio_min, tiempo_min, descanso_min} donde
+    inicio_min es el inicio de PRESENCIA. Idempotente: no duplica turnos ya
+    existentes (mismo trabajador+fecha+horario). Devuelve un resumen."""
+    creados_t = creados_w = 0
+    cache_w = {}  # (centro, nkey) -> id
+    for r in filas:
+        centro = (r.get("centro") or "").strip()
+        nombre = _nombre_directo(str(r.get("recurso") or "")).strip()
+        if not centro or not nombre:
+            continue
+        cierre = int(cierre_por_centro.get(centro, CIERRE_DEFECTO_MIN) or CIERRE_DEFECTO_MIN)
+        rol = _rol_normalizado(r.get("rol"))
+        nkey = _norm_nombre(nombre)
+        wid = cache_w.get((centro, nkey))
+        if wid is None:
+            row = None
+            for cand in conn.execute(
+                "SELECT id, nombre, rol FROM planificador_trabajadores WHERE empresa = ? AND centro = ?",
+                (empresa, centro),
+            ):
+                if _norm_nombre(cand["nombre"]) == nkey:
+                    row = cand
+                    break
+            if row:
+                wid = row["id"]
+                if rol and not (row["rol"] or "").strip():
+                    conn.execute("UPDATE planificador_trabajadores SET rol = ? WHERE id = ?", (rol, wid))
+            else:
+                cur = conn.execute(
+                    "INSERT INTO planificador_trabajadores "
+                    "(empresa, centro, nombre, horas_contrato_semana, rol, origen) VALUES (?, ?, ?, ?, ?, 'odoo')",
+                    (empresa, centro, nombre, HORAS_JORNADA_COMPLETA, rol or None),
+                )
+                wid = cur.lastrowid
+                creados_w += 1
+            cache_w[(centro, nkey)] = wid
+        # presencia -> trabajo efectivo (el bocadillo puede ir al principio)
+        pres_ini = int(r.get("inicio_min") or 0)
+        dur_ef = int(r.get("tiempo_min") or 0)
+        desc = int(r.get("descanso_min") or 0)
+        if dur_ef <= 0:
+            continue
+        lado = _bocadillo_lado(pres_ini, dur_ef, cierre) if desc else ""
+        inicio_ef = pres_ini + (BOCADILLO_MIN if lado == "inicio" else 0)
+        fecha = r.get("fecha")
+        existe = conn.execute(
+            "SELECT 1 FROM planificador_turnos WHERE empresa = ? AND centro = ? AND trabajador_id = ? "
+            "AND fecha = ? AND inicio_min = ? AND duracion_min = ? LIMIT 1",
+            (empresa, centro, wid, fecha, inicio_ef, dur_ef),
+        ).fetchone()
+        if existe:
+            continue
+        conn.execute(
+            "INSERT INTO planificador_turnos "
+            "(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, tipo, creado_por) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'trabajo', ?)",
+            (empresa, centro, wid, fecha, inicio_ef, dur_ef, creado_por),
+        )
+        creados_t += 1
+    return {"turnos": creados_t, "trabajadores": creados_w}
+
+
+def importar_planificacion_odoo(empresa, contenido, nombre_archivo):
+    """Importa un Excel de planificación de Odoo (planning.slot) a turnos. El
+    centro sale de la columna "Dirección de trabajo". Reutilizable desde la UI."""
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(contenido), read_only=True, data_only=True)
+        ws = wb.active
+        filas_xl = list(ws.iter_rows(values_only=True))
+    except Exception as exc:
+        raise ValueError(f"No se pudo leer el Excel: {exc}")
+    if not filas_xl:
+        raise ValueError("El archivo está vacío")
+    hdr = [str(c or "").strip().lower() for c in filas_xl[0]]
+
+    def col(*nombres):
+        for n in nombres:
+            if n in hdr:
+                return hdr.index(n)
+        return None
+
+    i_dir = col("dirección de trabajo", "direccion de trabajo")
+    i_ini = col("fecha de inicio")
+    i_rec = col("recurso")
+    i_rol = col("rol")
+    i_asig = col("tiempo asignado")
+    i_desc = col("descanso")
+    if None in (i_dir, i_ini, i_rec, i_asig):
+        raise ValueError("No parece un Excel de planificación de Odoo (faltan columnas).")
+
+    conn = get_connection()
+    dir_map = dict(_CENTRO_POR_DIRECCION)
+    for c, d in conn.execute("SELECT centro, direccion_odoo FROM planificador_config WHERE empresa = ? AND direccion_odoo IS NOT NULL", (empresa,)):
+        if d:
+            dir_map[d.strip().lower()] = c
+    cierres = {r[0]: r[1] for r in conn.execute("SELECT centro, cierre_min FROM planificador_config WHERE empresa = ?", (empresa,))}
+
+    filas = []
+    sin_centro = set()
+    for row in filas_xl[1:]:
+        if i_ini >= len(row) or not isinstance(row[i_ini], datetime.datetime):
+            continue
+        rol = str(row[i_rol] or "").strip() if i_rol is not None else ""
+        if rol.lower() == "ausencia":
+            continue
+        direccion = str(row[i_dir] or "").strip().lower()
+        centro = dir_map.get(direccion)
+        if not centro:
+            sin_centro.add(direccion)
+            continue
+        dt = row[i_ini]
+        filas.append({
+            "centro": centro,
+            "rol": rol,
+            "recurso": str(row[i_rec] or "").strip(),
+            "fecha": dt.date().isoformat(),
+            "inicio_min": dt.hour * 60 + dt.minute,
+            "tiempo_min": round(float(row[i_asig] or 0) * 60),
+            "descanso_min": round(float(row[i_desc] or 0) * 60) if i_desc is not None else 0,
+        })
+    res = _importar_planificacion(conn, empresa, filas, "odoo-import", cierres)
+    conn.commit()
+    conn.close()
+    if sin_centro:
+        res["sin_centro"] = sorted(sin_centro)
+    return res
+
+
 def _nombre_directo(nombre):
     """El Excel trae "APELLIDO1 APELLIDO2, NOMBRE"; se muestra "NOMBRE
     APELLIDO1 APELLIDO2". Si no hay coma se deja tal cual (alta manual)."""
@@ -323,6 +480,24 @@ def _nombre_directo(nombre):
         apellidos, pila = nombre.split(", ", 1)
         return f"{pila.strip()} {apellidos.strip()}".strip()
     return nombre
+
+
+def _norm_nombre(s):
+    """Para cruzar nombres entre fuentes: sin tildes, mayúsculas, un espacio."""
+    s = unicodedata.normalize("NFKD", (s or "")).encode("ascii", "ignore").decode()
+    return " ".join(s.upper().replace(",", " ").split())
+
+
+def _rol_normalizado(rol):
+    """"Decoración (40hs)" / "Limpieza (20hs)" -> "Decoración" / "Limpieza".
+    El resto (Producción, Supervisores - Producción, Retail, Jefe de Turno...)
+    se deja igual."""
+    r = (rol or "").strip()
+    return re.sub(r"\s*\(\s*\d+\s*h?s?\s*\)\s*$", "", r, flags=re.I).strip()
+
+
+# Dirección de trabajo de Odoo -> centro de la app (para importar planificación).
+_CENTRO_POR_DIRECCION = {v.strip().lower(): k for k, v in _DIRECCION_ODOO_DEFECTO.items()}
 
 
 def _horas_contrato(pct):
@@ -598,7 +773,7 @@ def importar_odoo_excel(empresa, contenido, nombre_archivo):
     return {"creados": creados, "actualizados": actualizados}
 
 
-def crear_trabajador_manual(empresa, centro, nombre, horas_contrato_semana):
+def crear_trabajador_manual(empresa, centro, nombre, horas_contrato_semana, rol=None):
     nombre = (nombre or "").strip()
     if not nombre:
         raise ValueError("Falta el nombre")
@@ -606,9 +781,9 @@ def crear_trabajador_manual(empresa, centro, nombre, horas_contrato_semana):
         horas_contrato_semana = HORAS_JORNADA_COMPLETA
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO planificador_trabajadores (empresa, centro, nombre, horas_contrato_semana, origen) "
-        "VALUES (?, ?, ?, ?, 'manual')",
-        (empresa, centro, nombre, horas_contrato_semana),
+        "INSERT INTO planificador_trabajadores (empresa, centro, nombre, horas_contrato_semana, rol, origen) "
+        "VALUES (?, ?, ?, ?, ?, 'manual')",
+        (empresa, centro, nombre, horas_contrato_semana, (rol or "").strip() or None),
     )
     conn.commit()
     tid = cur.lastrowid
@@ -616,7 +791,7 @@ def crear_trabajador_manual(empresa, centro, nombre, horas_contrato_semana):
     return tid
 
 
-def actualizar_trabajador(trabajador_id, nombre=None, horas_contrato_semana=None, activo=None):
+def actualizar_trabajador(trabajador_id, nombre=None, horas_contrato_semana=None, activo=None, rol=None):
     sets, params = [], []
     if nombre is not None:
         sets.append("nombre = ?")
@@ -627,6 +802,9 @@ def actualizar_trabajador(trabajador_id, nombre=None, horas_contrato_semana=None
     if activo is not None:
         sets.append("activo = ?")
         params.append(1 if activo else 0)
+    if rol is not None:
+        sets.append("rol = ?")
+        params.append(rol.strip() or None)
     if not sets:
         return
     params.append(trabajador_id)
@@ -1015,6 +1193,52 @@ def _descanso_12h_ko(turnos_persona, fecha, ini, fin, cierre_min):
     return False
 
 
+def _descanso_corto_semana(turnos_sem, cierre_min):
+    """{str(trabajador_id): aviso} para quien tiene menos de 12 h de presencia
+    entre dos de sus jornadas de la semana (día a día). Para pintar el aviso
+    en un horario que YA está montado, no solo al crear."""
+    por_trab = {}
+    for t in turnos_sem:
+        if not _es_trabajo(t):
+            continue
+        por_trab.setdefault(t["trabajador_id"], []).append(t)
+    out = {}
+    for wid, ts in por_trab.items():
+        eventos = []
+        for t in ts:
+            d = datetime.date.fromisoformat(t["fecha"]).toordinal()
+            pi, pf = _presencia(t["inicio_min"], t["duracion_min"], cierre_min)
+            eventos.append((d * 1440 + pi, d * 1440 + pf))
+        eventos.sort()
+        for (a_ini, a_fin), (b_ini, b_fin) in zip(eventos, eventos[1:]):
+            if b_ini >= a_fin and b_ini - a_fin < DESCANSO_ENTRE_JORNADAS_MIN:
+                out[str(wid)] = "menos de 12 h entre dos jornadas"
+                break
+    return out
+
+
+def chequear_descanso_persona(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, excluir_id=None):
+    """(ko, mensaje): ¿poner ese turno a esa persona deja menos de 12 h respecto
+    a otra jornada suya del día anterior / mismo día / siguiente?"""
+    if int(trabajador_id or 0) == SIN_ASIGNAR:
+        return False, ""
+    cierre_min = get_config(empresa, centro).get("cierre_min", CIERRE_DEFECTO_MIN)
+    d = datetime.date.fromisoformat(fecha)
+    conn = get_connection()
+    q = ("SELECT fecha, inicio_min, duracion_min FROM planificador_turnos "
+         "WHERE empresa = ? AND centro = ? AND trabajador_id = ? AND tipo = 'trabajo' AND fecha BETWEEN ? AND ?")
+    p = [empresa, centro, int(trabajador_id),
+         (d - datetime.timedelta(days=1)).isoformat(), (d + datetime.timedelta(days=1)).isoformat()]
+    if excluir_id is not None:
+        q += " AND id != ?"
+        p.append(int(excluir_id))
+    otros = [dict(r) for r in conn.execute(q, p).fetchall()]
+    conn.close()
+    ini = int(inicio_min)
+    ko = _descanso_12h_ko(otros, fecha, ini, ini + int(duracion_min), cierre_min)
+    return ko, ("No cumple el descanso mínimo de 12 h entre jornadas." if ko else "")
+
+
 def sugerencias(empresa, centro, fecha, inicio_min, duracion_min):
     """Para un hueco [inicio, inicio+duracion) de un día concreto, devuelve la
     plantilla del centro ordenada: primero quien está DISPONIBLE (sin turno
@@ -1207,13 +1431,15 @@ def _dias_trabajados_semana(turnos_sem):
 
 
 def dia_completo(empresa, centro, fecha):
+    cfg = get_config(empresa, centro)
     turnos_sem = turnos_semana(empresa, centro, fecha)
     return {
-        "config": get_config(empresa, centro),
+        "config": cfg,
         "trabajadores": list_trabajadores(empresa, centro),
         "turnos": [t for t in turnos_sem if t["fecha"] == fecha],
         "minutos_semana": {str(k): v for k, v in _minutos_semana(turnos_sem).items()},
         "dias_trabajados": _dias_trabajados_semana(turnos_sem),
+        "descanso_corto": _descanso_corto_semana(turnos_sem, cfg["cierre_min"]),
         "proyeccion": {str(k): v for k, v in get_proyeccion(empresa, centro, fecha).items()},
         "slots": list_slots(empresa, centro),
         "lunes": _lunes_de(fecha),
@@ -1223,13 +1449,15 @@ def dia_completo(empresa, centro, fecha):
 def semana_completa(empresa, centro, fecha):
     lunes = _lunes_de(fecha)
     dias = [(datetime.date.fromisoformat(lunes) + datetime.timedelta(days=i)).isoformat() for i in range(7)]
+    cfg = get_config(empresa, centro)
     turnos_sem = turnos_semana(empresa, centro, fecha)
     return {
-        "config": get_config(empresa, centro),
+        "config": cfg,
         "trabajadores": list_trabajadores(empresa, centro),
         "turnos": turnos_sem,
         "minutos_semana": {str(k): v for k, v in _minutos_semana(turnos_sem).items()},
         "dias_trabajados": _dias_trabajados_semana(turnos_sem),
+        "descanso_corto": _descanso_corto_semana(turnos_sem, cfg["cierre_min"]),
         "slots": list_slots(empresa, centro),
         "lunes": lunes,
         "dias": dias,

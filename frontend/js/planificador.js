@@ -29,6 +29,7 @@ const S = {
   turnos: [],
   minutosSemana: {},
   diasTrabajados: {},
+  descansoCorto: {},
   proyeccion: {},
   slots: [],
   slotActivo: null, // id del turno-slot seleccionado en modo Slots
@@ -83,7 +84,7 @@ function presenciaMin(dur) {
 // PRINCIPIO (turnos de cierre).
 function bocLado(inicioMin, dur) {
   if (!boc(dur)) return "";
-  return inicioMin + dur + BOCADILLO_MIN > S.config.cierre_min ? "inicio" : "fin";
+  return inicioMin + dur + BOCADILLO_MIN >= S.config.cierre_min ? "inicio" : "fin";
 }
 // Geometría del bloque en la línea de tiempo: inicio/fin de PRESENCIA (con
 // bocadillo donde corresponda) y el lado en que va la franja rayada.
@@ -159,6 +160,7 @@ async function cargarDia() {
   S.turnos = data.turnos;
   S.minutosSemana = data.minutos_semana || {};
   S.diasTrabajados = data.dias_trabajados || {};
+  S.descansoCorto = data.descanso_corto || {};
   S.proyeccion = normalizarProyeccion(data.proyeccion || {});
   S.slots = data.slots || [];
   S.dias = data.dias || [];
@@ -270,11 +272,16 @@ function renderDia() {
         ${
           S.trabajadores.length === 0
             ? `<div class="plan-vacia">Este centro no tiene trabajadores en la plantilla. Ábrela con el botón <b>Plantilla</b>.</div>`
-            : S.trabajadores.map(filaTrabajador).join("")
+            : filasConRoles(filaTrabajador, (g, col) => `
+                <div class="plan-fila plan-rol-cab">
+                  <div class="plan-celda-izq"><button type="button" class="plan-rol-toggle" data-rol="${escapeHTML(g.rol)}">${col ? "▸" : "▾"} ${escapeHTML(g.rol)} <span class="plan-rol-n">${g.trabajadores.length}</span></button></div>
+                  <div class="plan-lane"></div>
+                </div>`)
         }
       </div>
     </div>`;
 
+  wireGruposRol(cont);
   wireInputsProyeccion();
   S.trabajadores.forEach((t) => wireLane(cont.querySelector(`.plan-lane[data-trab="${t.id}"]`), t.id));
   cont.querySelectorAll(".plan-turno").forEach(wireTurno);
@@ -361,6 +368,34 @@ async function confirmarComplementarias(contrato, prevMin, nuevoMin) {
   );
 }
 
+// Antes de poner un turno a alguien: si deja menos de 12 h entre jornadas,
+// pide confirmación. Devuelve true si se sigue adelante.
+async function chequearDescanso(trabId, fecha, iniMin, durMin, excluirId) {
+  if (!trabId || trabId === SIN_ASIGNAR) return true;
+  try {
+    const r = await fetch(
+      url("chequeo-descanso", {
+        centro: S.centro,
+        fecha,
+        trabajador_id: trabId,
+        inicio_min: Math.round(iniMin),
+        duracion_min: Math.round(durMin),
+        excluir_id: excluirId || 0,
+      })
+    );
+    if (!r.ok) return true;
+    const d = await r.json();
+    if (!d.ko) return true;
+    const nombre = nombreTrabajador(trabId) || "esta persona";
+    return pedirConfirmacion(
+      `${nombre}: quedan menos de 12 h de descanso entre esa jornada y otra suya. ` +
+        `El convenio pide un mínimo de 12 h. ¿Lo pones igual?`
+    );
+  } catch {
+    return true;
+  }
+}
+
 // Barra de horas: 3 tramos (verde contrato / amarillo pactadas / rojo
 // voluntarias) para tiempo parcial; barra simple para jornada completa.
 function barraHorasHTML(min, contrato) {
@@ -384,8 +419,8 @@ function barraHorasHTML(min, contrato) {
 }
 
 // 🛏 con ✓ verde si el horario de la persona esta semana es correcto, o ✕
-// rojo si hay conflicto: menos de 2 días de descanso, o más horas
-// planificadas que las de su contrato.
+// rojo si hay conflicto: menos de 2 días de descanso, más horas planificadas
+// que las de contrato, o menos de 12 h entre dos jornadas.
 function descansoIndicadorHTML(trabId, minSemana, contrato) {
   const descanso = 7 - (S.diasTrabajados[String(trabId)] || 0);
   const pocosDescansos = descanso < DIAS_DESCANSO_MIN;
@@ -393,14 +428,66 @@ function descansoIndicadorHTML(trabId, minSemana, contrato) {
   // complementarias; solo es conflicto pasar del 145%.
   const limite = admiteComplementarias(contrato) ? contrato * COMP_TECHO : contrato;
   const sobreContrato = contrato && minSemana / 60 > limite;
-  const ok = !pocosDescansos && !sobreContrato;
+  const descansoCorto = !!S.descansoCorto[String(trabId)];
+  const ok = !pocosDescansos && !sobreContrato && !descansoCorto;
   const motivos = [];
   if (pocosDescansos) motivos.push(`solo ${descanso} día${descanso === 1 ? "" : "s"} de descanso (mínimo ${DIAS_DESCANSO_MIN})`);
   if (sobreContrato) motivos.push(`${fmtHMM(minSemana)} h planificadas / ${fmtHMM(contrato * 60)} h de contrato`);
+  if (descansoCorto) motivos.push("menos de 12 h entre dos jornadas");
   const titulo = ok
-    ? `${descanso} días de descanso esta semana · dentro de contrato`
+    ? `${descanso} días de descanso esta semana · dentro de contrato · 12 h entre jornadas`
     : `Conflicto en el horario: ${motivos.join(" · ")} — revísalo`;
   return `<span class="plan-descanso ${ok ? "ok" : "mal"}" title="${titulo}">🛏<span class="plan-descanso-marca">${ok ? "✓" : "✕"}</span></span>`;
+}
+
+// --- Agrupación de la plantilla por rol (fábrica: Supervisores, Producción...) ---
+const _ROL_ORDEN = ["Supervisores - Producción", "Producción", "Decoración", "Limpieza", "Jefe de Turno", "Retail"];
+function gruposPorRol() {
+  const roles = [...new Set(S.trabajadores.map((t) => (t.rol || "").trim()).filter(Boolean))];
+  if (roles.length < 2) return [{ rol: "", trabajadores: S.trabajadores }];
+  roles.sort((a, b) => {
+    const ia = _ROL_ORDEN.indexOf(a);
+    const ib = _ROL_ORDEN.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
+  });
+  const grupos = roles.map((r) => ({ rol: r, trabajadores: S.trabajadores.filter((t) => (t.rol || "").trim() === r) }));
+  const sinRol = S.trabajadores.filter((t) => !(t.rol || "").trim());
+  if (sinRol.length) grupos.push({ rol: "Sin rol", trabajadores: sinRol });
+  return grupos;
+}
+function rolColapsado(rol) {
+  try {
+    return localStorage.getItem(`plan-rol-${EMPRESA}-${S.centro}-${rol}`) === "1";
+  } catch {
+    return false;
+  }
+}
+function setRolColapsado(rol, v) {
+  try {
+    localStorage.setItem(`plan-rol-${EMPRESA}-${S.centro}-${rol}`, v ? "1" : "0");
+  } catch {
+    /* localStorage no disponible */
+  }
+}
+// filaFn(t) -> HTML de una fila de trabajador. cabFn(grupo, colapsado) -> HTML
+// de la fila cabecera de rol. Sin agrupación devuelve solo las filas.
+function filasConRoles(filaFn, cabFn) {
+  const grupos = gruposPorRol();
+  if (grupos.length === 1 && !grupos[0].rol) return grupos[0].trabajadores.map(filaFn).join("");
+  return grupos
+    .map((g) => {
+      const col = rolColapsado(g.rol);
+      return cabFn(g, col) + (col ? "" : g.trabajadores.map(filaFn).join(""));
+    })
+    .join("");
+}
+function wireGruposRol(cont) {
+  cont.querySelectorAll(".plan-rol-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setRolColapsado(btn.dataset.rol, !rolColapsado(btn.dataset.rol));
+      renderTodo();
+    });
+  });
 }
 
 function filaTrabajador(t) {
@@ -624,6 +711,18 @@ function wireTurno(el) {
           return;
         }
       }
+      // Descanso de 12 h: al mover/estirar puede quedar pegado a otra jornada.
+      const idsAChequear = esGrupo
+        ? ids.map((gid) => S.turnos.find((t) => String(t.id) === gid)).filter((t) => t && t.trabajador_id !== SIN_ASIGNAR)
+        : trabId !== SIN_ASIGNAR
+        ? [{ id: el.dataset.id, trabajador_id: trabId }]
+        : [];
+      for (const t of idsAChequear) {
+        if (!(await chequearDescanso(t.trabajador_id, S.fecha, ini, dur, t.id))) {
+          cargarDia();
+          return;
+        }
+      }
       const rs = await Promise.all(
         ids.map((id) =>
           fetch(url(`turnos/${id}`), {
@@ -697,6 +796,7 @@ function wireLane(lane, trabajadorId) {
       const w = S.trabajadores.find((x) => x.id === trabajadorId);
       const prev = S.minutosSemana[String(trabajadorId)] || 0;
       if (w && !(await confirmarComplementarias(w.horas_contrato_semana, prev, prev + dur))) return;
+      if (!(await chequearDescanso(trabajadorId, S.fecha, ini, dur))) return;
       const res = await fetch(url("turnos"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -782,6 +882,7 @@ async function asignarTurno(turnoId, trabajadorId) {
     if (turno && w) {
       const prev = S.minutosSemana[String(trabajadorId)] || 0;
       if (!(await confirmarComplementarias(w.horas_contrato_semana, prev, prev + turno.duracion_min))) return;
+      if (!(await chequearDescanso(trabajadorId, turno.fecha, turno.inicio_min, turno.duracion_min, turno.id))) return;
     }
   }
   const res = await fetch(url(`turnos/${turnoId}/asignar`), {
@@ -945,6 +1046,7 @@ async function asignarAGrupo(g, trabajadorId) {
   if (w) {
     const prev = S.minutosSemana[String(trabajadorId)] || 0;
     if (!(await confirmarComplementarias(w.horas_contrato_semana, prev, prev + g.dur))) return;
+    if (!(await chequearDescanso(trabajadorId, g.fecha || S.fecha, g.ini, g.dur))) return;
   }
   const libre = grupoLibres(g)[0];
   let res;
@@ -1272,38 +1374,41 @@ function renderSemana() {
           .join("")}
       </div>`;
 
-  const filas = S.trabajadores
-    .map((t) => {
-      const min = S.minutosSemana[String(t.id)] || 0;
-      const contrato = t.horas_contrato_semana;
-      const celdas = dias
-        .map((d) => {
-          const delDia = S.turnos.filter((x) => x.trabajador_id === t.id && x.fecha === d);
-          const libre = delDia.some((x) => x.tipo === "libre");
-          const vac = delDia.some((x) => x.tipo === "vacaciones");
-          const trabajo = delDia.filter((x) => x.tipo === "trabajo").sort((a, b) => a.inicio_min - b.inicio_min);
-          const chips = trabajo
-            .map((x) => `<span class="plan-sem-chip">${fmtHHMM(x.inicio_min)}–${fmtHHMM(x.inicio_min + presenciaMin(x.duracion_min))}</span>`)
-            .join("");
-          const fuera = vac ? "vacaciones" : libre ? "libre" : "";
-          return `<div class="plan-sem-celda ${fuera}" data-trab="${t.id}" data-fecha="${d}">
-            <span class="plan-sem-luna ${libre ? "activo" : ""}" data-trab="${t.id}" data-fecha="${d}" title="Día libre">🛏</span>
-            ${fuera ? `<span class="plan-sem-libre-txt">${vac ? "Vacaciones" : "Libre"}</span>` : chips}
-          </div>`;
-        })
-        .join("");
-      return `
-        <div class="plan-sem-fila">
-          <div class="plan-sem-nombre">
-            <span class="plan-trab-nombre" title="${escapeHTML(t.nombre)}">${escapeHTML(t.nombre)}</span>
-            <span class="plan-trab-horas">${textoHoras(min, contrato)}</span>
-            ${barraHorasHTML(min, contrato)}
-            <div class="plan-fila-acciones">${descansoIndicadorHTML(t.id, min, contrato)}</div>
-          </div>
-          ${celdas}
+  const filaSemHTML = (t) => {
+    const min = S.minutosSemana[String(t.id)] || 0;
+    const contrato = t.horas_contrato_semana;
+    const celdas = dias
+      .map((d) => {
+        const delDia = S.turnos.filter((x) => x.trabajador_id === t.id && x.fecha === d);
+        const libre = delDia.some((x) => x.tipo === "libre");
+        const vac = delDia.some((x) => x.tipo === "vacaciones");
+        const trabajo = delDia.filter((x) => x.tipo === "trabajo").sort((a, b) => a.inicio_min - b.inicio_min);
+        const chips = trabajo
+          .map((x) => `<span class="plan-sem-chip">${fmtHHMM(x.inicio_min)}–${fmtHHMM(x.inicio_min + presenciaMin(x.duracion_min))}</span>`)
+          .join("");
+        const fuera = vac ? "vacaciones" : libre ? "libre" : "";
+        return `<div class="plan-sem-celda ${fuera}" data-trab="${t.id}" data-fecha="${d}">
+          <span class="plan-sem-luna ${libre ? "activo" : ""}" data-trab="${t.id}" data-fecha="${d}" title="Día libre">🛏</span>
+          ${fuera ? `<span class="plan-sem-libre-txt">${vac ? "Vacaciones" : "Libre"}</span>` : chips}
         </div>`;
-    })
-    .join("");
+      })
+      .join("");
+    return `
+      <div class="plan-sem-fila">
+        <div class="plan-sem-nombre">
+          <span class="plan-trab-nombre" title="${escapeHTML(t.nombre)}">${escapeHTML(t.nombre)}</span>
+          <span class="plan-trab-horas">${textoHoras(min, contrato)}</span>
+          ${barraHorasHTML(min, contrato)}
+          <div class="plan-fila-acciones">${descansoIndicadorHTML(t.id, min, contrato)}</div>
+        </div>
+        ${celdas}
+      </div>`;
+  };
+  const filas = filasConRoles(filaSemHTML, (g, col) => `
+    <div class="plan-sem-fila plan-rol-cab">
+      <div class="plan-sem-nombre"><button type="button" class="plan-rol-toggle" data-rol="${escapeHTML(g.rol)}">${col ? "▸" : "▾"} ${escapeHTML(g.rol)} <span class="plan-rol-n">${g.trabajadores.length}</span></button></div>
+      ${dias.map(() => `<div class="plan-sem-celda"></div>`).join("")}
+    </div>`);
 
   const filaTotal = `<div class="plan-sem-fila plan-sem-total">
     <div class="plan-sem-nombre"><b>Total</b></div>
@@ -1322,6 +1427,7 @@ function renderSemana() {
       </div>
     </div>`;
 
+  wireGruposRol(cont);
   cont.querySelectorAll(".sin-asignar-chip").forEach((el) => {
     el.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1367,6 +1473,7 @@ async function pintarRoster() {
       (t) => `
     <div class="plan-roster-fila ${t.activo ? "" : "inactivo"}" data-id="${t.id}">
       <input type="text" class="pr-nombre" value="${escapeHTML(t.nombre)}">
+      <input type="text" class="pr-rol" value="${escapeHTML(t.rol || "")}" placeholder="rol" title="Rol (fábrica: Producción, Decoración…)">
       <input type="number" class="pr-horas" min="0" step="0.5" value="${t.horas_contrato_semana ?? ""}" placeholder="h/sem">
       <button type="button" class="btn btn-ghost pr-activo" style="font-size:11px; padding:4px 6px;">${t.activo ? "Activo" : "Inactivo"}</button>
       <button type="button" class="btn btn-ghost pr-borrar" title="Eliminar" style="font-size:12px; padding:4px 6px;">🗑</button>
@@ -1384,6 +1491,7 @@ async function pintarRoster() {
       if (!r.ok) mostrarAviso("No se pudo guardar el cambio.");
     };
     fila.querySelector(".pr-nombre").addEventListener("change", (e) => patch({ nombre: e.target.value }));
+    fila.querySelector(".pr-rol").addEventListener("change", (e) => patch({ rol: e.target.value }));
     fila.querySelector(".pr-horas").addEventListener("change", (e) =>
       patch({ horas_contrato_semana: e.target.value === "" ? null : Number(e.target.value) })
     );
@@ -1438,6 +1546,26 @@ function wireRoster() {
     const d = await r.json().catch(() => ({}));
     aviso.textContent = r.ok ? `Importado: ${d.creados} nuevos, ${d.actualizados} actualizados.` : d.detail || "No se pudo importar.";
     aviso.hidden = false;
+    e.target.value = "";
+    pintarRoster();
+  });
+  document.getElementById("plan-roster-planificacion").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const aviso = document.getElementById("plan-roster-aviso");
+    aviso.textContent = "Importando planificación…";
+    aviso.hidden = false;
+    const fd = new FormData();
+    fd.append("file", file);
+    const r = await fetch(url("roster/importar-planificacion"), { method: "POST", body: fd });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) {
+      aviso.textContent =
+        `Planificación importada: ${d.turnos} turnos, ${d.trabajadores} personas nuevas.` +
+        (d.sin_centro ? ` Sin centro reconocido: ${d.sin_centro.join(", ")}.` : "");
+    } else {
+      aviso.textContent = d.detail || "No se pudo importar la planificación.";
+    }
     e.target.value = "";
     pintarRoster();
   });
