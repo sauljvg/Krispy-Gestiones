@@ -171,6 +171,13 @@ _SLOTS_SEED_POR_CENTRO = {
     ],
 }
 
+# Sube cuando `seed_plantillas_semana.json` mejora (más meses de Odoo, patrón
+# alta/valle más claro) -- cada centro se resiembra hasta llegar a esta
+# versión. v1: una semana suelta por tienda (2-3 semanas de origen). v2: la
+# semana más típica de 7 meses reales (marzo-octubre), filtrando turnos fuera
+# de 1-10 h.
+_PLANTILLA_SEED_VERSION = 2
+
 
 def ensure_planificador_tables():
     conn = get_connection()
@@ -280,31 +287,6 @@ def ensure_planificador_tables():
             "ON CONFLICT (empresa, centro) DO NOTHING",
             (centro, ap, ci),
         )
-    # Plantilla de la semana: se siembra desde la semana más completa de cada
-    # tienda en la planificación de Odoo (misma para 'alta' y 'valle' -- el
-    # gerente la ajusta / la sobrescribe con "Guardar esta semana"). Solo la 1ª
-    # vez por centro.
-    seed_pl = os.path.join(os.path.dirname(__file__), "seed_plantillas_semana.json")
-    if os.path.exists(seed_pl):
-        try:
-            with open(seed_pl, encoding="utf-8") as f:
-                pl = json.load(f)
-            for centro, tipos in pl.items():
-                if conn.execute(
-                    "SELECT 1 FROM planificador_plantillas WHERE empresa = 'kk' AND centro = ? LIMIT 1", (centro,)
-                ).fetchone():
-                    continue
-                for tipo in ("alta", "valle"):
-                    for dow, filas in (tipos.get(tipo) or {}).items():
-                        for ini, dur, cant in filas:
-                            conn.execute(
-                                "INSERT OR IGNORE INTO planificador_plantillas "
-                                "(empresa, centro, tipo, dow, inicio_min, duracion_min, cantidad) "
-                                "VALUES ('kk', ?, ?, ?, ?, ?, ?)",
-                                (centro, tipo, int(dow), int(ini), int(dur), int(cant)),
-                            )
-        except Exception as exc:
-            print(f"[planificador] no se pudo cargar seed_plantillas_semana.json: {exc}")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_turnos_busqueda ON planificador_turnos (empresa, centro, fecha)")
     cols_turnos = {r[1] for r in conn.execute("PRAGMA table_info(planificador_turnos)")}
     if "tipo" not in cols_turnos:
@@ -330,6 +312,45 @@ def ensure_planificador_tables():
         conn.execute(
             "ALTER TABLE planificador_config ADD COLUMN complementarias_jornada_completa INTEGER NOT NULL DEFAULT 0"
         )
+    if "plantilla_seed_version" not in cols_config:
+        conn.execute("ALTER TABLE planificador_config ADD COLUMN plantilla_seed_version INTEGER NOT NULL DEFAULT 0")
+    # Plantilla de la semana: se siembra desde una semana típica de cada tienda
+    # (la que tiene el total de horas más cercano a la mediana de 7 meses de
+    # planificación real de Odoo) -- misma para 'alta' y 'valle', el gerente la
+    # ajusta o la sobrescribe con "Guardar esta semana". `_PLANTILLA_SEED_VERSION`
+    # sube cuando hay datos mejores (más meses, patrón alta/valle más claro);
+    # cada centro se resiembra (se sobrescribe) hasta que llegue a esa versión,
+    # así no hace falta tocar la BD a mano cuando mejora el Excel de origen.
+    seed_pl = os.path.join(os.path.dirname(__file__), "seed_plantillas_semana.json")
+    if os.path.exists(seed_pl):
+        try:
+            with open(seed_pl, encoding="utf-8") as f:
+                pl = json.load(f)
+            for centro, tipos in pl.items():
+                fila_cfg = conn.execute(
+                    "SELECT plantilla_seed_version FROM planificador_config WHERE empresa = 'kk' AND centro = ?",
+                    (centro,),
+                ).fetchone()
+                version_actual = fila_cfg[0] if fila_cfg else 0
+                if version_actual >= _PLANTILLA_SEED_VERSION:
+                    continue
+                conn.execute("DELETE FROM planificador_plantillas WHERE empresa = 'kk' AND centro = ?", (centro,))
+                for tipo in ("alta", "valle"):
+                    for dow, filas in (tipos.get(tipo) or {}).items():
+                        for ini, dur, cant in filas:
+                            conn.execute(
+                                "INSERT OR IGNORE INTO planificador_plantillas "
+                                "(empresa, centro, tipo, dow, inicio_min, duracion_min, cantidad) "
+                                "VALUES ('kk', ?, ?, ?, ?, ?, ?)",
+                                (centro, tipo, int(dow), int(ini), int(dur), int(cant)),
+                            )
+                conn.execute(
+                    "INSERT INTO planificador_config (empresa, centro, plantilla_seed_version) VALUES ('kk', ?, ?) "
+                    "ON CONFLICT (empresa, centro) DO UPDATE SET plantilla_seed_version = excluded.plantilla_seed_version",
+                    (centro, _PLANTILLA_SEED_VERSION),
+                )
+        except Exception as exc:
+            print(f"[planificador] no se pudo cargar seed_plantillas_semana.json: {exc}")
     # Todo el mundo tiene contrato: quien se quedó sin horas (sin % de jornada
     # en el Excel) pasa a jornada completa. Idempotente.
     conn.execute(
