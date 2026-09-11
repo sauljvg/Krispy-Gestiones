@@ -181,10 +181,25 @@ _PLANTILLA_SEED_VERSION = 2
 # Igual que _PLANTILLA_SEED_VERSION pero para el histórico de turnos reales
 # (seed_planificacion_odoo.json): v1 = 6 Excel de 1 tienda cada uno (~1379
 # turnos, sep-oct). v2 = el Excel completo de las 7 tiendas (~7800 turnos,
-# marzo-octubre) que sustituye al anterior. `_importar_planificacion` no
-# duplica (mismo trabajador+fecha+horario), así que subir de v1 a v2 solo
-# añade lo que falta, no repite lo ya cargado.
-_TURNOS_SEED_VERSION = 2
+# marzo-octubre) que sustituye al anterior. v3 = añade las filas "Ausencia"
+# del mismo Excel como turnos tipo='vacaciones' (señal de que alguien sigue
+# de baja/vacaciones, no desaparecido) y, tras cargarlas, recalcula qué
+# trabajadores importados de Odoo llevan sin actividad en el centro más de
+# _ROSTER_INACTIVO_DIAS -- ver _desactivar_trabajadores_obsoletos.
+# `_importar_planificacion` no duplica (mismo trabajador+fecha+horario), así
+# que subir de versión solo añade lo que falta, no repite lo ya cargado.
+_TURNOS_SEED_VERSION = 3
+
+# Un trabajador importado de Odoo (origen='odoo') sin ningún turno ni
+# vacaciones en su centro desde hace más de esto, contando desde la fecha
+# más reciente que haya EN ESE CENTRO (no "hoy": el Excel es una
+# planificación a futuro) se considera que ya no forma parte de la plantilla
+# actual -- típicamente porque se fue de la empresa o cambió de centro -- y
+# se marca activo=0 (deja de listarse como parte del equipo, pero su
+# histórico de turnos no se toca ni se borra). El margen cubre de sobra dos
+# semanas de vacaciones seguidas, que además cuentan como actividad (quedan
+# marcadas como turnos tipo='vacaciones', no como silencio).
+_ROSTER_INACTIVO_DIAS = 21
 
 
 def ensure_planificador_tables():
@@ -402,6 +417,9 @@ def ensure_planificador_tables():
             cierres = {
                 r[0]: r[1] for r in conn.execute("SELECT centro, cierre_min FROM planificador_config WHERE empresa = 'kk'")
             }
+            aperturas = {
+                r[0]: r[1] for r in conn.execute("SELECT centro, apertura_min FROM planificador_config WHERE empresa = 'kk'")
+            }
             for centro, filas in filas_por_centro.items():
                 if not centro:
                     continue
@@ -412,7 +430,8 @@ def ensure_planificador_tables():
                 version_actual = fila_cfg[0] if fila_cfg else 0
                 if version_actual >= _TURNOS_SEED_VERSION:
                     continue
-                _importar_planificacion(conn, "kk", filas, "odoo-seed", cierres)
+                _importar_planificacion(conn, "kk", filas, "odoo-seed", cierres, aperturas)
+                _desactivar_trabajadores_obsoletos(conn, "kk", centro)
                 conn.execute(
                     "INSERT INTO planificador_config (empresa, centro, turnos_seed_version) VALUES ('kk', ?, ?) "
                     "ON CONFLICT (empresa, centro) DO UPDATE SET turnos_seed_version = excluded.turnos_seed_version",
@@ -432,11 +451,17 @@ def ensure_planificador_tables():
 _puesto_no_operativo = kpis_module.puesto_no_operativo
 
 
-def _importar_planificacion(conn, empresa, filas, creado_por, cierre_por_centro):
+def _importar_planificacion(conn, empresa, filas, creado_por, cierre_por_centro, apertura_por_centro=None):
     """Crea turnos (y los trabajadores que falten) a partir de filas
     {centro, rol, recurso, fecha, inicio_min, tiempo_min, descanso_min} donde
-    inicio_min es el inicio de PRESENCIA. Idempotente: no duplica turnos ya
-    existentes (mismo trabajador+fecha+horario). Devuelve un resumen."""
+    inicio_min es el inicio de PRESENCIA -- o, si la fila trae "tipo":
+    "ausencia" (viene de las filas "Rol"="Ausencia" del Excel: baja,
+    vacaciones...), {centro, recurso, fecha, tipo} y se crea como un turno
+    tipo='vacaciones' de día completo (no cuenta horas, pero SÍ cuenta como
+    actividad para _desactivar_trabajadores_obsoletos). Idempotente: no
+    duplica turnos ya existentes (mismo trabajador+fecha+horario/tipo).
+    Devuelve un resumen."""
+    apertura_por_centro = apertura_por_centro or {}
     creados_t = creados_w = 0
     cache_w = {}  # (centro, nkey) -> id
     for r in filas:
@@ -470,6 +495,24 @@ def _importar_planificacion(conn, empresa, filas, creado_por, cierre_por_centro)
                 wid = cur.lastrowid
                 creados_w += 1
             cache_w[(centro, nkey)] = wid
+        fecha = r.get("fecha")
+        if r.get("tipo") == "ausencia":
+            existe = conn.execute(
+                "SELECT 1 FROM planificador_turnos WHERE empresa = ? AND centro = ? AND trabajador_id = ? "
+                "AND fecha = ? AND tipo = 'vacaciones' LIMIT 1",
+                (empresa, centro, wid, fecha),
+            ).fetchone()
+            if existe:
+                continue
+            apertura = int(apertura_por_centro.get(centro, APERTURA_DEFECTO_MIN) or APERTURA_DEFECTO_MIN)
+            conn.execute(
+                "INSERT INTO planificador_turnos "
+                "(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, tipo, creado_por) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'vacaciones', ?)",
+                (empresa, centro, wid, fecha, apertura, max(0, cierre - apertura), creado_por),
+            )
+            creados_t += 1
+            continue
         # presencia -> trabajo efectivo (el bocadillo puede ir al principio)
         pres_ini = int(r.get("inicio_min") or 0)
         dur_ef = int(r.get("tiempo_min") or 0)
@@ -478,7 +521,6 @@ def _importar_planificacion(conn, empresa, filas, creado_por, cierre_por_centro)
             continue
         lado = _bocadillo_lado(pres_ini, dur_ef, cierre) if desc else ""
         inicio_ef = pres_ini + (BOCADILLO_MIN if lado == "inicio" else 0)
-        fecha = r.get("fecha")
         existe = conn.execute(
             "SELECT 1 FROM planificador_turnos WHERE empresa = ? AND centro = ? AND trabajador_id = ? "
             "AND fecha = ? AND inicio_min = ? AND duracion_min = ? LIMIT 1",
@@ -494,6 +536,42 @@ def _importar_planificacion(conn, empresa, filas, creado_por, cierre_por_centro)
         )
         creados_t += 1
     return {"turnos": creados_t, "trabajadores": creados_w}
+
+
+def _desactivar_trabajadores_obsoletos(conn, empresa, centro):
+    """Tras (re)cargar el histórico de un centro: un trabajador importado de
+    Odoo (origen='odoo') cuya última actividad (turno de trabajo o
+    vacaciones) en ESE centro se quedó muy atrás respecto a la fecha más
+    reciente que haya en el centro -- típicamente porque se fue de la
+    empresa o cambió de tienda -- deja de listarse como parte de la
+    plantilla actual (activo=0). Su histórico no se toca ni se borra: sigue
+    viéndose al entrar en las semanas donde sí trabajó (ver
+    _trabajadores_para_vista), solo deja de aparecer como alguien a quien
+    asignar turnos nuevos.
+
+    Es puro cálculo derivado (no borra ni edita turnos) así que se puede
+    recalcular sin problema: si más adelante se importa un Excel más
+    reciente con turnos nuevos para esa persona, se reactiva sola."""
+    ultima = conn.execute(
+        "SELECT MAX(fecha) FROM planificador_turnos WHERE empresa = ? AND centro = ?", (empresa, centro)
+    ).fetchone()[0]
+    if not ultima:
+        return
+    limite = (datetime.date.fromisoformat(ultima) - datetime.timedelta(days=_ROSTER_INACTIVO_DIAS)).isoformat()
+    for w in conn.execute(
+        "SELECT id, activo FROM planificador_trabajadores WHERE empresa = ? AND centro = ? AND origen = 'odoo'",
+        (empresa, centro),
+    ).fetchall():
+        ult_actividad = conn.execute(
+            "SELECT MAX(fecha) FROM planificador_turnos WHERE empresa = ? AND centro = ? AND trabajador_id = ?",
+            (empresa, centro, w["id"]),
+        ).fetchone()[0]
+        deberia_activo = bool(ult_actividad) and ult_actividad >= limite
+        if deberia_activo != bool(w["activo"]):
+            conn.execute(
+                "UPDATE planificador_trabajadores SET activo = ? WHERE id = ?",
+                (1 if deberia_activo else 0, w["id"]),
+            )
 
 
 def importar_planificacion_odoo(empresa, contenido, nombre_archivo):
@@ -531,31 +609,43 @@ def importar_planificacion_odoo(empresa, contenido, nombre_archivo):
         if d:
             dir_map[d.strip().lower()] = c
     cierres = {r[0]: r[1] for r in conn.execute("SELECT centro, cierre_min FROM planificador_config WHERE empresa = ?", (empresa,))}
+    aperturas = {r[0]: r[1] for r in conn.execute("SELECT centro, apertura_min FROM planificador_config WHERE empresa = ?", (empresa,))}
 
     filas = []
     sin_centro = set()
+    centros_tocados = set()
     for row in filas_xl[1:]:
         if i_ini >= len(row) or not isinstance(row[i_ini], datetime.datetime):
             continue
         rol = str(row[i_rol] or "").strip() if i_rol is not None else ""
-        if rol.lower() == "ausencia":
-            continue
         direccion = str(row[i_dir] or "").strip().lower()
         centro = dir_map.get(direccion)
         if not centro:
             sin_centro.add(direccion)
             continue
         dt = row[i_ini]
+        recurso = str(row[i_rec] or "").strip()
+        if not recurso:
+            continue
+        centros_tocados.add(centro)
+        if rol.lower() == "ausencia":
+            # Baja / vacaciones: se guarda como turno tipo='vacaciones', no
+            # como turno de trabajo (así cuenta como actividad para no dar
+            # de baja a alguien que solo está fuera unos días).
+            filas.append({"centro": centro, "recurso": recurso, "fecha": dt.date().isoformat(), "tipo": "ausencia"})
+            continue
         filas.append({
             "centro": centro,
             "rol": rol,
-            "recurso": str(row[i_rec] or "").strip(),
+            "recurso": recurso,
             "fecha": dt.date().isoformat(),
             "inicio_min": dt.hour * 60 + dt.minute,
             "tiempo_min": round(float(row[i_asig] or 0) * 60),
             "descanso_min": round(float(row[i_desc] or 0) * 60) if i_desc is not None else 0,
         })
-    res = _importar_planificacion(conn, empresa, filas, "odoo-import", cierres)
+    res = _importar_planificacion(conn, empresa, filas, "odoo-import", cierres, aperturas)
+    for centro in centros_tocados:
+        _desactivar_trabajadores_obsoletos(conn, empresa, centro)
     conn.commit()
     conn.close()
     if sin_centro:
@@ -1387,10 +1477,29 @@ def _descanso_12h_ko(turnos_persona, fecha, ini, fin, cierre_min):
     return False
 
 
+_DIAS_ES = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+
+
+def _hhmm(min_dia):
+    """Minutos-del-día (puede pasarse de 1440 si es presencia que cruza la
+    medianoche) a 'HH:MM'."""
+    m = int(min_dia) % 1440
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
+def _dur_hmm(minutos):
+    m = max(0, int(round(minutos)))
+    return f"{m // 60}:{m % 60:02d} h"
+
+
 def _descanso_corto_semana(turnos_sem, cierre_min):
-    """{str(trabajador_id): aviso} para quien tiene menos de 12 h de presencia
-    entre dos de sus jornadas de la semana (día a día). Para pintar el aviso
-    en un horario que YA está montado, no solo al crear."""
+    """{str(trabajador_id): aviso detallado} para quien tiene menos de 12 h de
+    presencia entre dos de sus jornadas de la semana (día a día). Para pintar
+    el aviso en un horario que YA está montado, no solo al crear. El aviso
+    nombra los días y horas concretas y cuánto descanso hay de verdad -- para
+    que alguien que no montó el horario (RR.HH., el area manager) entienda el
+    conflicto con solo pasar el ratón por encima, sin tener que repasar toda
+    la semana."""
     por_trab = {}
     for t in turnos_sem:
         if not _es_trabajo(t):
@@ -1400,14 +1509,22 @@ def _descanso_corto_semana(turnos_sem, cierre_min):
     for wid, ts in por_trab.items():
         eventos = []
         for t in ts:
-            d = datetime.date.fromisoformat(t["fecha"]).toordinal()
+            d = datetime.date.fromisoformat(t["fecha"])
             pi, pf = _presencia(t["inicio_min"], t["duracion_min"], cierre_min)
-            eventos.append((d * 1440 + pi, d * 1440 + pf))
+            eventos.append((d.toordinal() * 1440 + pi, d.toordinal() * 1440 + pf, d.weekday()))
         eventos.sort()
-        for (a_ini, a_fin), (b_ini, b_fin) in zip(eventos, eventos[1:]):
+        frases = []
+        for (a_ini, a_fin, a_dow), (b_ini, b_fin, b_dow) in zip(eventos, eventos[1:]):
             if b_ini >= a_fin and b_ini - a_fin < DESCANSO_ENTRE_JORNADAS_MIN:
-                out[str(wid)] = "menos de 12 h entre dos jornadas"
-                break
+                gap = b_ini - a_fin
+                falta = DESCANSO_ENTRE_JORNADAS_MIN - gap
+                if a_dow == b_dow:
+                    cuando = f"el {_DIAS_ES[a_dow]}, entre las {_hhmm(a_fin)} y las {_hhmm(b_ini)}"
+                else:
+                    cuando = f"del {_DIAS_ES[a_dow]} (hasta las {_hhmm(a_fin)}) al {_DIAS_ES[b_dow]} (desde las {_hhmm(b_ini)})"
+                frases.append(f"{cuando}: solo {_dur_hmm(gap)} de descanso (faltan {_dur_hmm(falta)} para las 12 h)")
+        if frases:
+            out[str(wid)] = " · ".join(frases)
     return out
 
 
@@ -1624,12 +1741,28 @@ def _dias_trabajados_semana(turnos_sem):
     return {str(k): len(v) for k, v in dias.items()}
 
 
+def _trabajadores_para_vista(empresa, centro, turnos_sem):
+    """El roster activo de ese centro + cualquier persona inactiva que tenga
+    algún turno en la semana que se está viendo. Así se conserva el
+    histórico completo (una persona que se fue sigue viéndose, con sus
+    turnos, en las semanas en las que sí trabajó) sin que aparezca como
+    parte de la plantilla actual en las semanas de ahora en adelante, donde
+    ya no tiene turnos."""
+    activos = list_trabajadores(empresa, centro)
+    ids_en_semana = {t["trabajador_id"] for t in turnos_sem if t["trabajador_id"] != SIN_ASIGNAR}
+    faltan = ids_en_semana - {w["id"] for w in activos}
+    if not faltan:
+        return activos
+    extra = [w for w in list_trabajadores(empresa, centro, incluir_inactivos=True) if w["id"] in faltan]
+    return sorted(activos + extra, key=lambda w: (w["nombre"] or "").lower())
+
+
 def dia_completo(empresa, centro, fecha):
     cfg = get_config(empresa, centro)
     turnos_sem = turnos_semana(empresa, centro, fecha)
     return {
         "config": cfg,
-        "trabajadores": list_trabajadores(empresa, centro),
+        "trabajadores": _trabajadores_para_vista(empresa, centro, turnos_sem),
         "turnos": [t for t in turnos_sem if t["fecha"] == fecha],
         "minutos_semana": {str(k): v for k, v in _minutos_semana(turnos_sem).items()},
         "dias_trabajados": _dias_trabajados_semana(turnos_sem),
@@ -1647,7 +1780,7 @@ def semana_completa(empresa, centro, fecha):
     turnos_sem = turnos_semana(empresa, centro, fecha)
     return {
         "config": cfg,
-        "trabajadores": list_trabajadores(empresa, centro),
+        "trabajadores": _trabajadores_para_vista(empresa, centro, turnos_sem),
         "turnos": turnos_sem,
         "minutos_semana": {str(k): v for k, v in _minutos_semana(turnos_sem).items()},
         "dias_trabajados": _dias_trabajados_semana(turnos_sem),

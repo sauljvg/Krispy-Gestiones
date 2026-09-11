@@ -433,7 +433,7 @@ function descansoIndicadorHTML(trabId, minSemana, contrato) {
   const motivos = [];
   if (pocosDescansos) motivos.push(`solo ${descanso} día${descanso === 1 ? "" : "s"} de descanso (mínimo ${DIAS_DESCANSO_MIN})`);
   if (sobreContrato) motivos.push(`${fmtHMM(minSemana)} h planificadas / ${fmtHMM(contrato * 60)} h de contrato`);
-  if (descansoCorto) motivos.push("menos de 12 h entre dos jornadas");
+  if (descansoCorto) motivos.push(S.descansoCorto[String(trabId)]);
   const titulo = ok
     ? `${descanso} días de descanso esta semana · dentro de contrato · 12 h entre jornadas`
     : `Conflicto en el horario: ${motivos.join(" · ")} — revísalo`;
