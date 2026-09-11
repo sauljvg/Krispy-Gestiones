@@ -291,6 +291,9 @@ function renderDia() {
   cont.querySelectorAll(".plan-vac-btn").forEach((btn) => {
     btn.addEventListener("click", () => abrirDialogoVacaciones(Number(btn.dataset.trab), btn.dataset.nombre));
   });
+  cont.querySelectorAll(".plan-trab-nombre[data-trab]").forEach((el) => {
+    el.addEventListener("click", () => abrirFichaTrabajador(Number(el.dataset.trab)));
+  });
 }
 
 function celdasPlanificado() {
@@ -500,7 +503,7 @@ function filaTrabajador(t) {
   return `
     <div class="plan-fila">
       <div class="plan-celda-izq">
-        <span class="plan-trab-nombre" title="${escapeHTML(t.nombre)}">${escapeHTML(t.nombre)}</span>
+        <span class="plan-trab-nombre" data-trab="${t.id}" title="Ver ficha de ${escapeHTML(t.nombre)}">${escapeHTML(t.nombre)}</span>
         <span class="plan-trab-horas">${textoHoras(min, contrato)}</span>
         ${barraHorasHTML(min, contrato)}
         <div class="plan-fila-acciones">
@@ -1374,6 +1377,75 @@ function wireVacaciones() {
   dlg.querySelector("#plan-vac-quitar").addEventListener("click", () => post(true));
 }
 
+// "Ficha" rápida de un trabajador (clic en su nombre): editar rol / horas de
+// contrato / activo sin abrir todo "Plantilla del centro" -- pensada para
+// subidas o bajadas temporales de jornada (p.ej. alguien con 15 h/semana
+// que quedó a 40 por defecto al importarlo). Pide el PIN de quien está
+// logueado como confirmación antes de guardar (POST /verificar-pin, no
+// crea sesión nueva, solo comprueba el PIN de la propia persona).
+let _fichaTrab = null;
+function abrirFichaTrabajador(trabajadorId) {
+  const t = S.trabajadores.find((w) => w.id === trabajadorId);
+  if (!t) return;
+  _fichaTrab = trabajadorId;
+  const dlg = document.getElementById("plan-dialog-ficha");
+  dlg.querySelector("#plan-ficha-nombre").textContent = t.nombre;
+  dlg.querySelector("#plan-ficha-rol").value = t.rol || "";
+  dlg.querySelector("#plan-ficha-horas").value = t.horas_contrato_semana ?? "";
+  dlg.querySelector("#plan-ficha-activo").checked = !!t.activo;
+  dlg.querySelector("#plan-ficha-error").hidden = true;
+  dlg.showModal();
+}
+
+function wireFichaTrabajador() {
+  const dlg = document.getElementById("plan-dialog-ficha");
+  dlg.querySelector("[data-cerrar]").addEventListener("click", () => dlg.close());
+  dlg.querySelector("#plan-ficha-guardar").addEventListener("click", async () => {
+    const t = S.trabajadores.find((w) => w.id === _fichaTrab);
+    if (!t) return;
+    const error = dlg.querySelector("#plan-ficha-error");
+    error.hidden = true;
+    const rol = dlg.querySelector("#plan-ficha-rol").value.trim();
+    const horasStr = dlg.querySelector("#plan-ficha-horas").value;
+    const horas = horasStr === "" ? null : Number(horasStr);
+    const activo = dlg.querySelector("#plan-ficha-activo").checked;
+    const cambios = {};
+    if (rol !== (t.rol || "")) cambios.rol = rol;
+    if (horas !== (t.horas_contrato_semana ?? null)) cambios.horas_contrato_semana = horas;
+    if (activo !== !!t.activo) cambios.activo = activo;
+    if (Object.keys(cambios).length === 0) {
+      dlg.close();
+      return;
+    }
+    const pin = await pedirPin(`Introduce tu PIN para confirmar el cambio en ${t.nombre}.`);
+    if (pin === null) return;
+    const rVerif = await fetch(url("verificar-pin"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin }),
+    });
+    const verif = rVerif.ok ? await rVerif.json() : { ok: false };
+    if (!verif.ok) {
+      error.textContent = "PIN incorrecto. No se ha guardado el cambio.";
+      error.hidden = false;
+      return;
+    }
+    const r = await fetch(url(`roster/${_fichaTrab}`), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cambios),
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      error.textContent = e.detail || "No se pudo guardar el cambio.";
+      error.hidden = false;
+      return;
+    }
+    dlg.close();
+    cargarDia();
+  });
+}
+
 async function toggleLibre(trabajadorId, fecha) {
   const existente = S.turnos.find(
     (t) => t.trabajador_id === trabajadorId && t.tipo === "libre" && t.fecha === fecha
@@ -1463,7 +1535,7 @@ function renderSemana() {
     return `
       <div class="plan-sem-fila">
         <div class="plan-sem-nombre">
-          <span class="plan-trab-nombre" title="${escapeHTML(t.nombre)}">${escapeHTML(t.nombre)}</span>
+          <span class="plan-trab-nombre" data-trab="${t.id}" title="Ver ficha de ${escapeHTML(t.nombre)}">${escapeHTML(t.nombre)}</span>
           <span class="plan-trab-horas">${textoHoras(min, contrato)}</span>
           ${barraHorasHTML(min, contrato)}
           <div class="plan-fila-acciones">${descansoIndicadorHTML(t.id, min, contrato)}</div>
@@ -1495,6 +1567,12 @@ function renderSemana() {
     </div>`;
 
   wireGruposRol(cont);
+  cont.querySelectorAll(".plan-trab-nombre[data-trab]").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      abrirFichaTrabajador(Number(el.dataset.trab));
+    });
+  });
   cont.querySelectorAll(".sin-asignar-chip").forEach((el) => {
     el.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1738,6 +1816,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   wireConfig();
   wireSlots();
   wireVacaciones();
+  wireFichaTrabajador();
   document
     .getElementById("plan-dialog-asignar")
     .querySelector("[data-cerrar]")

@@ -145,6 +145,22 @@ def actualizar_trabajador_route(
     return {"ok": True}
 
 
+class VerificarPinIn(BaseModel):
+    pin: str
+
+
+@router.post("/verificar-pin")
+def verificar_pin_route(body: VerificarPinIn, user: dict = Depends(get_current_user)):
+    """Reautentica con el PIN a quien YA tiene sesión abierta, sin crear una
+    sesión nueva -- para pedir una confirmación extra antes de un cambio
+    sensible (p.ej. la jornada de contrato de alguien) desde la "ficha" de
+    un trabajador, sin montar un flujo de permisos aparte. Solo comprueba el
+    PIN de la propia persona logueada (el username sale de su sesión, no del
+    body), así que no sirve para adivinar el PIN de otra persona."""
+    ok = auth_module.authenticate_pin(user["username"], body.pin) is not None
+    return {"ok": ok}
+
+
 @router.delete("/roster/{trabajador_id}")
 def eliminar_trabajador_route(trabajador_id: int, empresa: str = "kk", user: dict = Depends(require_planificador)):
     t = planificador_module.get_trabajador(trabajador_id)

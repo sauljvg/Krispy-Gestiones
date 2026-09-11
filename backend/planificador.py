@@ -475,7 +475,7 @@ def ensure_planificador_tables():
             )
     except Exception as exc:  # nunca romper el arranque por la fusión
         print(f"[planificador] no se pudo fusionar trabajadores duplicados: {exc}")
-    _aplicar_correcciones_rol(conn, "kk")
+    _aplicar_correcciones_trabajadores(conn, "kk")
     conn.commit()
     conn.close()
 
@@ -630,13 +630,16 @@ def _es_variante_nombre(k1, k2):
     return all(w in it for w in corto)
 
 
-def _mover_turnos(conn, origen_id, destino_id):
+def _mover_turnos(conn, origen_id, destino_id, forzar=False):
     """Traspasa los turnos de `origen_id` a `destino_id`. Si `destino_id` ya
     tiene un turno idéntico ese día (mismo tipo/hora, o mismo tipo de día no
     trabajado) se descarta el del origen como duplicado; si de verdad se
     solaparía con un turno de trabajo suyo (no es la misma jornada, son dos
-    a la vez) se deja donde está -- mejor una fila de más que perder o
-    corromper un turno real. Devuelve cuántos se movieron o descartaron."""
+    a la vez) por defecto se deja donde está -- mejor una fila de más que
+    perder o corromper un turno real. Con `forzar=True` (fusión confirmada a
+    mano, no una detectada sola) ese turno que se solapa se descarta en vez
+    de dejarse, para poder completar la fusión del todo -- se asume bueno el
+    que ya tenía el principal. Devuelve cuántos se movieron o descartaron."""
     movidos = 0
     for t in conn.execute("SELECT * FROM planificador_turnos WHERE trabajador_id = ?", (origen_id,)).fetchall():
         if t["tipo"] == "trabajo":
@@ -655,6 +658,9 @@ def _mover_turnos(conn, origen_id, destino_id):
                 (destino_id, t["fecha"], t["inicio_min"] + t["duracion_min"], t["inicio_min"]),
             ).fetchone()
             if solapa:
+                if forzar:
+                    conn.execute("DELETE FROM planificador_turnos WHERE id = ?", (t["id"],))
+                    movidos += 1
                 continue
         else:
             dup = conn.execute(
@@ -670,16 +676,45 @@ def _mover_turnos(conn, origen_id, destino_id):
     return movidos
 
 
+def _fusionar_en(conn, principal, otro, forzar=False):
+    """Fusiona la fila `otro` (dict de planificador_trabajadores) dentro de
+    `principal`: le traspasa los turnos (_mover_turnos) y rellena rol /
+    código de empleado / horas de contrato que a `principal` le falten. Con
+    `forzar=False` (detección automática) solo borra la fila de `otro` si se
+    le pudieron mover TODOS sus turnos, dejando sin mover los que de verdad
+    se solapen (para revisar a mano); con `forzar=True` (confirmada a mano)
+    esos turnos que se solapan se descartan también, así la fusión siempre
+    se completa. `principal` (dict) se actualiza in-place; devuelve el resumen."""
+    movidos = _mover_turnos(conn, otro["id"], principal["id"], forzar=forzar)
+    restantes = conn.execute(
+        "SELECT COUNT(*) FROM planificador_turnos WHERE trabajador_id = ?", (otro["id"],)
+    ).fetchone()[0]
+    campos = {}
+    if not (principal["rol"] or "").strip() and (otro["rol"] or "").strip():
+        campos["rol"] = otro["rol"]
+    if not principal["codigo_empleado"] and otro["codigo_empleado"]:
+        campos["codigo_empleado"] = otro["codigo_empleado"]
+    # Las horas de contrato de un alta por Odoo son un valor por defecto
+    # (jornada completa); si la duplicada viene de KPIs o de alta manual,
+    # sus horas son las reales -- se prefieren.
+    if principal["origen"] == "odoo" and otro["origen"] != "odoo" and otro["horas_contrato_semana"]:
+        campos["horas_contrato_semana"] = otro["horas_contrato_semana"]
+    if campos:
+        sets = ", ".join(f"{c} = ?" for c in campos)
+        conn.execute(f"UPDATE planificador_trabajadores SET {sets} WHERE id = ?", (*campos.values(), principal["id"]))
+        principal.update(campos)
+    borrado = restantes == 0
+    if borrado:
+        conn.execute("DELETE FROM planificador_trabajadores WHERE id = ?", (otro["id"],))
+    return {"turnos_movidos": movidos, "turnos_sin_mover": restantes, "borrado": borrado}
+
+
 def _fusionar_trabajadores_duplicados(conn, empresa, centro):
     """Detecta, dentro de un mismo centro, trabajadores que en realidad son
     la misma persona con el nombre ligeramente distinto (ver
-    _es_variante_nombre) y los fusiona: se queda la fila con más turnos (más
-    señal real) como principal, le traspasa los turnos de la otra
-    (_mover_turnos) y rellena el rol / código de empleado / horas de
-    contrato que le falten con los de la duplicada. Solo se borra la fila
-    duplicada si se le pudieron mover TODOS sus turnos; si queda alguno sin
-    mover (solape real) se deja tal cual para revisar a mano. Devuelve la
-    lista de fusiones hechas, para dejar constancia en el log de arranque."""
+    _es_variante_nombre) y los fusiona con _fusionar_en (se queda como
+    principal la fila con más turnos, más señal real). Devuelve la lista de
+    fusiones hechas, para dejar constancia en el log de arranque."""
     filas = conn.execute(
         "SELECT id, nombre, rol, codigo_empleado, horas_contrato_semana, origen "
         "FROM planificador_trabajadores WHERE empresa = ? AND centro = ?",
@@ -700,52 +735,96 @@ def _fusionar_trabajadores_duplicados(conn, empresa, centro):
             n2 = conn.execute("SELECT COUNT(*) FROM planificador_turnos WHERE trabajador_id = ?", (id2,)).fetchone()[0]
             primario_id, otro_id = (id1, id2) if n1 >= n2 else (id2, id1)
             primario, otro = vivos[primario_id], vivos[otro_id]
-            movidos = _mover_turnos(conn, otro_id, primario_id)
-            restantes = conn.execute(
-                "SELECT COUNT(*) FROM planificador_turnos WHERE trabajador_id = ?", (otro_id,)
-            ).fetchone()[0]
-            campos = {}
-            if not (primario["rol"] or "").strip() and (otro["rol"] or "").strip():
-                campos["rol"] = otro["rol"]
-            if not primario["codigo_empleado"] and otro["codigo_empleado"]:
-                campos["codigo_empleado"] = otro["codigo_empleado"]
-            # Las horas de contrato de un alta por Odoo son un valor por
-            # defecto (jornada completa); si la duplicada viene de KPIs o de
-            # alta manual, sus horas son las reales -- se prefieren.
-            if primario["origen"] == "odoo" and otro["origen"] != "odoo" and otro["horas_contrato_semana"]:
-                campos["horas_contrato_semana"] = otro["horas_contrato_semana"]
-            if campos:
-                sets = ", ".join(f"{c} = ?" for c in campos)
-                conn.execute(f"UPDATE planificador_trabajadores SET {sets} WHERE id = ?", (*campos.values(), primario_id))
-                primario.update(campos)
-            borrado = restantes == 0
-            if borrado:
-                conn.execute("DELETE FROM planificador_trabajadores WHERE id = ?", (otro_id,))
+            resumen = _fusionar_en(conn, primario, otro)
+            if resumen["borrado"]:
                 del vivos[otro_id]
-            fusiones.append({
-                "centro": centro, "primario": primario["nombre"], "duplicado": otro["nombre"],
-                "turnos_movidos": movidos, "turnos_sin_mover": restantes, "borrado": borrado,
-            })
+            fusiones.append({"centro": centro, "primario": primario["nombre"], "duplicado": otro["nombre"], **resumen})
     return fusiones
 
 
-# Correcciones puntuales de rol que Saul confirmó a mano porque el Excel de
-# Odoo lo traía mal, vacío, o distinto a lo que es en realidad. Se aplican
-# siempre (no pisan lo que el gerente edite después a mano en Plantilla,
-# solo corrigen el valor sembrado si sigue siendo el de antes de corregir).
-_ROL_CORRECCIONES = {
-    ("ParqueSur Fabrica", "JARED RINCON"): "Decoración",
-}
+def _palabra_coincide(a, b):
+    """Compara dos palabras de nombre con tolerancia de prefijo (para
+    erratas/abreviaturas al escribir un alias a mano), exigiendo al menos 3
+    letras en común para no pegar palabras cortas sueltas por casualidad."""
+    if a == b:
+        return True
+    corta, larga = (a, b) if len(a) <= len(b) else (b, a)
+    return len(corta) >= 3 and larga.startswith(corta)
 
 
-def _aplicar_correcciones_rol(conn, empresa):
-    for (centro, nkey), rol in _ROL_CORRECCIONES.items():
-        for w in conn.execute(
-            "SELECT id, nombre, rol FROM planificador_trabajadores WHERE empresa = ? AND centro = ?",
+def _nombre_contiene_alias(nombre_norm, alias_norm):
+    """¿Aparecen (en cualquier orden, con tolerancia de prefijo) todas las
+    palabras de `alias_norm` dentro de `nombre_norm`?"""
+    palabras_nombre = nombre_norm.split()
+    return all(any(_palabra_coincide(pa, pn) for pn in palabras_nombre) for pa in alias_norm.split())
+
+
+# Correcciones puntuales que Saul confirmó a mano porque el Excel de Odoo
+# las traía mal, incompletas, o repartidas en dos filas que en realidad son
+# la misma persona -- casos que _fusionar_trabajadores_duplicados, por ser
+# más estricta (exige que 1ª y última palabra coincidan), no puede resolver
+# sola: le falta el apellido entero a una de las dos filas, o el orden de
+# los apellidos no coincide. Cada entrada: uno o más `alias` (para localizar
+# TODAS las filas que son esa persona -- si hay más de una se fusionan) y,
+# si hace falta, el `rol`/`activo` correcto. Se aplica siempre al arrancar
+# (no pisa lo que un gerente edite después a mano si ya coincide).
+_TRABAJADOR_CORRECCIONES = [
+    {"centro": "ParqueSur Fabrica", "alias": ["abdikani issa ali"], "rol": "Producción"},
+    {"centro": "ParqueSur Fabrica", "alias": ["diego armando"], "activo": False},
+    {"centro": "ParqueSur Fabrica", "alias": ["dulce milagros tovar"], "rol": "Decoración"},
+    {"centro": "ParqueSur Fabrica", "alias": ["jackelin castillo"], "rol": "Decoración"},
+    {"centro": "ParqueSur Fabrica", "alias": ["jared rincon"], "rol": "Decoración"},
+    {"centro": "ParqueSur Fabrica", "alias": ["luislaidy carolina"], "rol": "Supervisores - Producción"},
+    {"centro": "ParqueSur Fabrica", "alias": ["raymond jose", "raymond rodriguez"]},
+    {"centro": "ParqueSur Fabrica", "alias": ["zyrille cruz"], "rol": "Decoración"},
+    # Estas dos ya las había detectado la fusión automática
+    # (_fusionar_trabajadores_duplicados) pero se quedaron a medias porque
+    # tenían un turno que de verdad se solapaba entre las dos filas -- Saul
+    # confirmó que son la misma persona, así que aquí SÍ se fuerza del todo
+    # (se descarta el turno que se solapaba, se asume bueno el que ya tenía
+    # la fila con más turnos).
+    {"centro": "ParqueSur Tienda", "alias": ["valeria olivares"]},
+    {"centro": "ParqueSur Tienda", "alias": ["ariadne cedeño duran"]},
+]
+
+
+def _aplicar_correcciones_trabajadores(conn, empresa):
+    for corr in _TRABAJADOR_CORRECCIONES:
+        centro = corr["centro"]
+        alias_norm = [_norm_nombre(a) for a in corr["alias"]]
+        filas = conn.execute(
+            "SELECT id, nombre, rol, codigo_empleado, horas_contrato_semana, origen, activo "
+            "FROM planificador_trabajadores WHERE empresa = ? AND centro = ?",
             (empresa, centro),
-        ).fetchall():
-            if _norm_nombre(w["nombre"]) == nkey and (w["rol"] or "") != rol:
-                conn.execute("UPDATE planificador_trabajadores SET rol = ? WHERE id = ?", (rol, w["id"]))
+        ).fetchall()
+        encontrados = {
+            w["id"]: dict(w) for w in filas
+            if any(_nombre_contiene_alias(_norm_nombre(w["nombre"]), a) for a in alias_norm)
+        }
+        if not encontrados:
+            print(f"[planificador] corrección manual sin ninguna fila que encaje: {centro} {corr['alias']}")
+            continue
+        orden = sorted(
+            encontrados,
+            key=lambda i: conn.execute(
+                "SELECT COUNT(*) FROM planificador_turnos WHERE trabajador_id = ?", (i,)
+            ).fetchone()[0],
+            reverse=True,
+        )
+        principal = encontrados[orden[0]]
+        for otro_id in orden[1:]:
+            resumen = _fusionar_en(conn, principal, encontrados[otro_id], forzar=True)
+            print(f"[planificador] corrección manual, fusión: {centro} '{principal['nombre']}' <- "
+                  f"'{encontrados[otro_id]['nombre']}' {resumen}")
+        cambios = {}
+        if corr.get("rol") and (principal.get("rol") or "") != corr["rol"]:
+            cambios["rol"] = corr["rol"]
+        if "activo" in corr and bool(principal.get("activo")) != bool(corr["activo"]):
+            cambios["activo"] = 1 if corr["activo"] else 0
+        if cambios:
+            cols = ", ".join(f"{c} = ?" for c in cambios)
+            conn.execute(f"UPDATE planificador_trabajadores SET {cols} WHERE id = ?", (*cambios.values(), principal["id"]))
+            print(f"[planificador] corrección manual: {centro} '{principal['nombre']}' -> {cambios}")
 
 
 def importar_planificacion_odoo(empresa, contenido, nombre_archivo):

@@ -157,4 +157,51 @@
       });
     });
   };
+
+  // Como pedirTexto pero pensado para un PIN: teclado numérico, se oculta al
+  // escribir, máximo 4 dígitos. null si se cancela, el texto tal cual si se
+  // acepta (la validación del PIN en sí la hace el backend).
+  window.pedirPin = function (mensaje) {
+    asegurarOverlay();
+    return new Promise((resolve) => {
+      mensajeEl.textContent = mensaje;
+      accionesEl.innerHTML = "";
+      let resuelto = false;
+      const input = document.createElement("input");
+      input.type = "password";
+      input.inputMode = "numeric";
+      input.autocomplete = "off";
+      input.maxLength = 4;
+      input.className = "kdialog-input";
+      mensajeEl.insertAdjacentElement("afterend", input);
+      const terminar = (valor) => {
+        if (resuelto) return;
+        resuelto = true;
+        overlay.classList.remove("visible");
+        document.removeEventListener("keydown", onKeydown);
+        input.remove();
+        resolve(valor);
+      };
+      const aceptar = document.createElement("button");
+      aceptar.type = "button";
+      aceptar.className = "btn btn-primary";
+      aceptar.textContent = "Confirmar";
+      aceptar.addEventListener("click", () => terminar(input.value));
+      const cancelar = document.createElement("button");
+      cancelar.type = "button";
+      cancelar.className = "btn btn-ghost";
+      cancelar.textContent = "Cancelar";
+      cancelar.addEventListener("click", () => terminar(null));
+      accionesEl.appendChild(cancelar);
+      accionesEl.appendChild(aceptar);
+      overlay.querySelector(".kdialog-cerrar").onclick = () => terminar(null);
+      function onKeydown(e) {
+        if (e.key === "Escape") terminar(null);
+        else if (e.key === "Enter") terminar(input.value);
+      }
+      document.addEventListener("keydown", onKeydown);
+      overlay.classList.add("visible");
+      requestAnimationFrame(() => input.focus());
+    });
+  };
 })();

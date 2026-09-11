@@ -115,6 +115,8 @@
 
   /* --- Contador semanal --- */
   .plan-trab-nombre { font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .plan-trab-nombre[data-trab] { cursor: pointer; }
+  .plan-trab-nombre[data-trab]:hover { text-decoration: underline; }
   .plan-trab-horas { font-size: 11px; color: var(--text-secondary); }
   .plan-barra { height: 5px; border-radius: 3px; background: var(--border); overflow: hidden; }
   .plan-barra > i { display: block; height: 100%; background: var(--status-good); }
@@ -362,12 +364,37 @@
   </div>
 </dialog>
 
+<dialog class="plan-dialog" id="plan-dialog-ficha">
+  <div class="plan-dialog-cab">
+    <h3>Ficha · <span id="plan-ficha-nombre"></span></h3>
+    <button type="button" class="btn btn-ghost" data-cerrar>✕</button>
+  </div>
+  <div class="plan-dialog-body">
+    <p class="staff-hint">Para subidas o bajadas temporales de jornada, cambios de rol, o dar de baja a alguien sin esperar a que lo detecte el sistema solo. El cambio pide tu PIN para confirmarlo.</p>
+    <div class="plan-config-campo">
+      <label for="plan-ficha-rol">Rol</label>
+      <input type="text" id="plan-ficha-rol" placeholder="rol" style="width:220px;">
+    </div>
+    <div class="plan-config-campo">
+      <label for="plan-ficha-horas">Horas de contrato / semana</label>
+      <input type="number" id="plan-ficha-horas" min="0" step="0.5" style="width:120px;">
+    </div>
+    <div class="plan-config-campo">
+      <label style="display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--text-primary);">
+        <input type="checkbox" id="plan-ficha-activo"> Activo (forma parte de la plantilla actual)
+      </label>
+    </div>
+    <button type="button" class="btn btn-primary" id="plan-ficha-guardar">Guardar</button>
+    <p class="config-error" id="plan-ficha-error" hidden></p>
+  </div>
+</dialog>
+
 <script src="js/theme.js?v=20260723g"></script>
-<script src="js/dialogs.js?v=20260818a"></script>
+<script src="js/dialogs.js?v=20260911b"></script>
 <script src="js/icons.js?v=20260911a"></script>
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260910a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/planificador.js?v=20260911f"></script>
+<script src="js/planificador.js?v=20260911g"></script>
 </body>
 </html>
