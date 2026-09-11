@@ -178,6 +178,14 @@ _SLOTS_SEED_POR_CENTRO = {
 # de 1-10 h.
 _PLANTILLA_SEED_VERSION = 2
 
+# Igual que _PLANTILLA_SEED_VERSION pero para el histórico de turnos reales
+# (seed_planificacion_odoo.json): v1 = 6 Excel de 1 tienda cada uno (~1379
+# turnos, sep-oct). v2 = el Excel completo de las 7 tiendas (~7800 turnos,
+# marzo-octubre) que sustituye al anterior. `_importar_planificacion` no
+# duplica (mismo trabajador+fecha+horario), así que subir de v1 a v2 solo
+# añade lo que falta, no repite lo ya cargado.
+_TURNOS_SEED_VERSION = 2
+
 
 def ensure_planificador_tables():
     conn = get_connection()
@@ -314,6 +322,8 @@ def ensure_planificador_tables():
         )
     if "plantilla_seed_version" not in cols_config:
         conn.execute("ALTER TABLE planificador_config ADD COLUMN plantilla_seed_version INTEGER NOT NULL DEFAULT 0")
+    if "turnos_seed_version" not in cols_config:
+        conn.execute("ALTER TABLE planificador_config ADD COLUMN turnos_seed_version INTEGER NOT NULL DEFAULT 0")
     # Plantilla de la semana: se siembra desde una semana típica de cada tienda
     # (la que tiene el total de horas más cercano a la mediana de 7 meses de
     # planificación real de Odoo) -- misma para 'alta' y 'valle', el gerente la
@@ -375,21 +385,39 @@ def ensure_planificador_tables():
         if _puesto_no_operativo(row["puesto"]):
             conn.execute("DELETE FROM planificador_turnos WHERE trabajador_id = ?", (row["id"],))
             conn.execute("DELETE FROM planificador_trabajadores WHERE id = ?", (row["id"],))
-    # Bootstrap único: carga la planificación real de Odoo que Saul pasó
-    # (backend/seed_planificacion_odoo.json) para que los gerentes vean sus
-    # horarios ya montados. Solo la 1ª vez (marca creado_por = 'odoo-seed').
+    # Bootstrap del histórico real de Odoo (backend/seed_planificacion_odoo.json)
+    # para que los gerentes vean sus horarios ya montados al entrar. Por centro
+    # y versionado como la plantilla: `_importar_planificacion` no duplica
+    # (mismo trabajador+fecha+horario), así que al subir de versión con un
+    # Excel más completo solo se añade lo que falta -- y un centro que ya está
+    # al día no se vuelve a tocar (no pisa turnos que un gerente haya borrado
+    # a propósito).
     seed = os.path.join(os.path.dirname(__file__), "seed_planificacion_odoo.json")
-    ya_sembrado = conn.execute(
-        "SELECT 1 FROM planificador_turnos WHERE creado_por = 'odoo-seed' LIMIT 1"
-    ).fetchone()
-    if os.path.exists(seed) and not ya_sembrado:
+    if os.path.exists(seed):
         try:
             with open(seed, encoding="utf-8") as f:
-                filas = json.load(f)
+                filas_por_centro = {}
+                for fila in json.load(f):
+                    filas_por_centro.setdefault(fila.get("centro"), []).append(fila)
             cierres = {
                 r[0]: r[1] for r in conn.execute("SELECT centro, cierre_min FROM planificador_config WHERE empresa = 'kk'")
             }
-            _importar_planificacion(conn, "kk", filas, "odoo-seed", cierres)
+            for centro, filas in filas_por_centro.items():
+                if not centro:
+                    continue
+                fila_cfg = conn.execute(
+                    "SELECT turnos_seed_version FROM planificador_config WHERE empresa = 'kk' AND centro = ?",
+                    (centro,),
+                ).fetchone()
+                version_actual = fila_cfg[0] if fila_cfg else 0
+                if version_actual >= _TURNOS_SEED_VERSION:
+                    continue
+                _importar_planificacion(conn, "kk", filas, "odoo-seed", cierres)
+                conn.execute(
+                    "INSERT INTO planificador_config (empresa, centro, turnos_seed_version) VALUES ('kk', ?, ?) "
+                    "ON CONFLICT (empresa, centro) DO UPDATE SET turnos_seed_version = excluded.turnos_seed_version",
+                    (centro, _TURNOS_SEED_VERSION),
+                )
         except Exception as exc:  # nunca romper el arranque por el seed
             print(f"[planificador] no se pudo cargar seed_planificacion_odoo.json: {exc}")
     conn.commit()
