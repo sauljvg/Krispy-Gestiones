@@ -1382,29 +1382,44 @@ function wireVacaciones() {
 // subidas o bajadas temporales de jornada (p.ej. alguien con 15 h/semana
 // que quedó a 40 por defecto al importarlo). Pide el PIN de quien está
 // logueado como confirmación antes de guardar (POST /verificar-pin, no
-// crea sesión nueva, solo comprueba el PIN de la propia persona).
+// crea sesión nueva, solo comprueba el PIN de la propia persona). El PIN se
+// pide en un 2º paso DENTRO del mismo <dialog> (no con pedirPin/dialogs.js):
+// un <dialog> abierto con showModal() vive en el "top layer" del navegador,
+// por delante de CUALQUIER otro elemento por mucho z-index que tenga, así
+// que un overlay aparte se quedaría siempre detrás y tapado.
 let _fichaTrab = null;
+let _fichaCambiosPendientes = null;
+
+function fichaMostrarPaso(paso) {
+  const dlg = document.getElementById("plan-dialog-ficha");
+  dlg.querySelector("#plan-ficha-paso-datos").hidden = paso !== "datos";
+  dlg.querySelector("#plan-ficha-paso-pin").hidden = paso !== "pin";
+}
+
 function abrirFichaTrabajador(trabajadorId) {
   const t = S.trabajadores.find((w) => w.id === trabajadorId);
   if (!t) return;
   _fichaTrab = trabajadorId;
+  _fichaCambiosPendientes = null;
   const dlg = document.getElementById("plan-dialog-ficha");
   dlg.querySelector("#plan-ficha-nombre").textContent = t.nombre;
   dlg.querySelector("#plan-ficha-rol").value = t.rol || "";
   dlg.querySelector("#plan-ficha-horas").value = t.horas_contrato_semana ?? "";
   dlg.querySelector("#plan-ficha-activo").checked = !!t.activo;
   dlg.querySelector("#plan-ficha-error").hidden = true;
+  dlg.querySelector("#plan-ficha-pin").value = "";
+  dlg.querySelector("#plan-ficha-pin-error").hidden = true;
+  fichaMostrarPaso("datos");
   dlg.showModal();
 }
 
 function wireFichaTrabajador() {
   const dlg = document.getElementById("plan-dialog-ficha");
   dlg.querySelector("[data-cerrar]").addEventListener("click", () => dlg.close());
-  dlg.querySelector("#plan-ficha-guardar").addEventListener("click", async () => {
+  dlg.querySelector("#plan-ficha-guardar").addEventListener("click", () => {
     const t = S.trabajadores.find((w) => w.id === _fichaTrab);
     if (!t) return;
-    const error = dlg.querySelector("#plan-ficha-error");
-    error.hidden = true;
+    dlg.querySelector("#plan-ficha-error").hidden = true;
     const rol = dlg.querySelector("#plan-ficha-rol").value.trim();
     const horasStr = dlg.querySelector("#plan-ficha-horas").value;
     const horas = horasStr === "" ? null : Number(horasStr);
@@ -1417,8 +1432,20 @@ function wireFichaTrabajador() {
       dlg.close();
       return;
     }
-    const pin = await pedirPin(`Introduce tu PIN para confirmar el cambio en ${t.nombre}.`);
-    if (pin === null) return;
+    _fichaCambiosPendientes = cambios;
+    const pinInput = dlg.querySelector("#plan-ficha-pin");
+    pinInput.value = "";
+    dlg.querySelector("#plan-ficha-pin-error").hidden = true;
+    fichaMostrarPaso("pin");
+    pinInput.focus();
+  });
+  dlg.querySelector("#plan-ficha-pin-cancelar").addEventListener("click", () => fichaMostrarPaso("datos"));
+  const confirmarPin = async () => {
+    const cambios = _fichaCambiosPendientes;
+    if (!cambios) return;
+    const pin = dlg.querySelector("#plan-ficha-pin").value;
+    const errorPin = dlg.querySelector("#plan-ficha-pin-error");
+    errorPin.hidden = true;
     const rVerif = await fetch(url("verificar-pin"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1426,8 +1453,8 @@ function wireFichaTrabajador() {
     });
     const verif = rVerif.ok ? await rVerif.json() : { ok: false };
     if (!verif.ok) {
-      error.textContent = "PIN incorrecto. No se ha guardado el cambio.";
-      error.hidden = false;
+      errorPin.textContent = "PIN incorrecto.";
+      errorPin.hidden = false;
       return;
     }
     const r = await fetch(url(`roster/${_fichaTrab}`), {
@@ -1437,12 +1464,18 @@ function wireFichaTrabajador() {
     });
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
-      error.textContent = e.detail || "No se pudo guardar el cambio.";
-      error.hidden = false;
+      const errorDatos = dlg.querySelector("#plan-ficha-error");
+      errorDatos.textContent = e.detail || "No se pudo guardar el cambio.";
+      errorDatos.hidden = false;
+      fichaMostrarPaso("datos");
       return;
     }
     dlg.close();
     cargarDia();
+  };
+  dlg.querySelector("#plan-ficha-pin-confirmar").addEventListener("click", confirmarPin);
+  dlg.querySelector("#plan-ficha-pin").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") confirmarPin();
   });
 }
 

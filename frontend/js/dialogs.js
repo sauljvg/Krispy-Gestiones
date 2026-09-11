@@ -161,6 +161,14 @@
   // Como pedirTexto pero pensado para un PIN: teclado numérico, se oculta al
   // escribir, máximo 4 dígitos. null si se cancela, el texto tal cual si se
   // acepta (la validación del PIN en sí la hace el backend).
+  // OJO: este overlay es un <div> normal (con z-index), NO un <dialog> del
+  // navegador -- si se llama mientras hay un <dialog> abierto con
+  // showModal() (p.ej. desde dentro de otro modal de la página), ese
+  // <dialog> vive en el "top layer" y se queda SIEMPRE por delante, tape lo
+  // que tape el z-index. Para pedir un PIN desde dentro de un <dialog> ya
+  // abierto, mejor un 2º "paso" dentro de ese mismo <dialog> (ver
+  // #plan-dialog-ficha / wireFichaTrabajador en planificador.js) en vez de
+  // esta función.
   window.pedirPin = function (mensaje) {
     asegurarOverlay();
     return new Promise((resolve) => {

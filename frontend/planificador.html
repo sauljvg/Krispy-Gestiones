@@ -369,7 +369,7 @@
     <h3>Ficha · <span id="plan-ficha-nombre"></span></h3>
     <button type="button" class="btn btn-ghost" data-cerrar>✕</button>
   </div>
-  <div class="plan-dialog-body">
+  <div class="plan-dialog-body" id="plan-ficha-paso-datos">
     <p class="staff-hint">Para subidas o bajadas temporales de jornada, cambios de rol, o dar de baja a alguien sin esperar a que lo detecte el sistema solo. El cambio pide tu PIN para confirmarlo.</p>
     <div class="plan-config-campo">
       <label for="plan-ficha-rol">Rol</label>
@@ -387,14 +387,23 @@
     <button type="button" class="btn btn-primary" id="plan-ficha-guardar">Guardar</button>
     <p class="config-error" id="plan-ficha-error" hidden></p>
   </div>
+  <div class="plan-dialog-body" id="plan-ficha-paso-pin" hidden>
+    <p class="staff-hint">Introduce tu PIN para confirmar el cambio.</p>
+    <input type="password" inputmode="numeric" autocomplete="off" maxlength="4" id="plan-ficha-pin" class="plan-config-campo" style="width:120px; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--surface-page); color:var(--text-primary); font-size:16px; letter-spacing:4px;">
+    <div style="display:flex; gap:8px; margin-top:14px;">
+      <button type="button" class="btn btn-ghost" id="plan-ficha-pin-cancelar">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="plan-ficha-pin-confirmar">Confirmar</button>
+    </div>
+    <p class="config-error" id="plan-ficha-pin-error" hidden></p>
+  </div>
 </dialog>
 
 <script src="js/theme.js?v=20260723g"></script>
-<script src="js/dialogs.js?v=20260911b"></script>
+<script src="js/dialogs.js?v=20260911c"></script>
 <script src="js/icons.js?v=20260911a"></script>
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260910a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/planificador.js?v=20260911g"></script>
+<script src="js/planificador.js?v=20260911h"></script>
 </body>
 </html>
