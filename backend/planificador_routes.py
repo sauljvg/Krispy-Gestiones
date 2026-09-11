@@ -353,6 +353,40 @@ def eliminar_slot_route(slot_id: int, empresa: str = "kk", user: dict = Depends(
     return {"ok": True}
 
 
+# --- Plantilla de la semana ---
+
+@router.get("/plantilla")
+def plantilla_route(empresa: str = "kk", centro: str = "", fecha: str = "", user: dict = Depends(require_planificador)):
+    if not centro or not fecha:
+        raise HTTPException(status_code=400, detail="Faltan centro o fecha")
+    _exigir_centro(user, centro)
+    return planificador_module.plantilla_resumen(empresa, centro, fecha)
+
+
+class PlantillaIn(BaseModel):
+    centro: str
+    fecha: str
+    tipo: str
+
+
+@router.post("/plantilla/guardar")
+def plantilla_guardar_route(body: PlantillaIn, empresa: str = "kk", user: dict = Depends(require_planificador)):
+    _exigir_centro(user, body.centro)
+    try:
+        return planificador_module.guardar_plantilla(empresa, body.centro, body.fecha, body.tipo)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/plantilla/aplicar")
+def plantilla_aplicar_route(body: PlantillaIn, empresa: str = "kk", user: dict = Depends(require_planificador)):
+    _exigir_centro(user, body.centro)
+    try:
+        return planificador_module.aplicar_plantilla(empresa, body.centro, body.fecha, body.tipo)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 # --- Proyección ---
 
 class ProyeccionCeldaIn(BaseModel):

@@ -935,7 +935,9 @@ function paletaHTML() {
         <small>${fmtHHMM(g.presIni)}–${fmtHHMM(g.presFin)}</small></div>`;
     })
     .join("");
-  return `<div class="plan-paleta">${chips}<button type="button" class="plan-btn-icono" id="plan-slots-editar">＋ Editar slots</button></div>`;
+  return `<div class="plan-paleta">${chips}
+    <button type="button" class="plan-btn-icono" id="plan-plantilla-btn">📋 Plantilla de la semana</button>
+    <button type="button" class="plan-btn-icono" id="plan-slots-editar">＋ Editar slots</button></div>`;
 }
 
 function wirePaleta(root) {
@@ -947,6 +949,71 @@ function wirePaleta(root) {
   });
   const btn = root.querySelector("#plan-slots-editar");
   if (btn) btn.addEventListener("click", abrirDialogoSlots);
+  const pl = root.querySelector("#plan-plantilla-btn");
+  if (pl) pl.addEventListener("click", abrirDialogoPlantilla);
+}
+
+async function abrirDialogoPlantilla() {
+  if (!S.centro) return;
+  const dlg = document.getElementById("plan-dialog-plantilla");
+  const body = dlg.querySelector(".plan-dialog-body");
+  body.innerHTML = `<p class="staff-hint">Cargando…</p>`;
+  dlg.showModal();
+  const r = await fetch(url("plantilla", { centro: S.centro, fecha: S.fecha }));
+  if (!r.ok) {
+    body.innerHTML = `<p class="staff-hint">No se pudo cargar la plantilla.</p>`;
+    return;
+  }
+  const d = await r.json();
+  const lunISO = lunesDe(S.fecha);
+  const bloque = (tipo, etiqueta) => {
+    const t = d[tipo] || { turnos: 0, minutos: 0, dias: 0 };
+    const esActual = d.tipo_semana === tipo;
+    return `<div class="plan-plantilla-bloque ${esActual ? "actual" : ""}">
+      <div>
+        <b>${etiqueta}</b>${esActual ? ` <span class="plan-plantilla-tag">esta semana</span>` : ""}
+        <div class="staff-hint">${t.turnos ? `${t.turnos} turnos · ${fmtHMM(t.minutos)} h · ${t.dias}/7 días` : "sin guardar todavía"}</div>
+      </div>
+      <div class="plan-plantilla-btns">
+        <button type="button" class="btn btn-primary" data-plantilla-aplicar="${tipo}" ${t.turnos ? "" : "disabled"}>Aplicar a esta semana</button>
+        <button type="button" class="btn btn-ghost" data-plantilla-guardar="${tipo}">Guardar esta semana aquí</button>
+      </div>
+    </div>`;
+  };
+  body.innerHTML = `
+    <p class="staff-hint">La 1ª y la última semana de cada mes son de <b>alta demanda</b>; las de en medio, <b>valle</b>. La semana visible (del ${fechaCorta(lunISO)}) es de <b>${d.tipo_semana === "alta" ? "alta demanda" : "valle"}</b>.</p>
+    ${bloque("alta", "Semana de alta demanda")}
+    ${bloque("valle", "Semana valle")}
+    <p class="staff-hint">«Aplicar» pone todos los slots de esa plantilla en la semana visible (sin asignar); luego arrastras a cada persona. «Guardar» sobrescribe la plantilla con lo que tengas montado esta semana.</p>`;
+  body.querySelectorAll("[data-plantilla-aplicar]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      const tipo = b.dataset.plantillaAplicar;
+      const rr = await fetch(url("plantilla/aplicar"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ centro: S.centro, fecha: S.fecha, tipo }),
+      });
+      const dd = await rr.json().catch(() => ({}));
+      if (!rr.ok) return mostrarAviso(dd.detail || "No se pudo aplicar.");
+      dlg.close();
+      mostrarAviso(`Plantilla aplicada: ${dd.creados} slots nuevos en la semana.`);
+      cargarDia();
+    })
+  );
+  body.querySelectorAll("[data-plantilla-guardar]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      const tipo = b.dataset.plantillaGuardar;
+      if (!(await pedirConfirmacion(`¿Guardar la semana visible como plantilla "${tipo === "alta" ? "alta demanda" : "valle"}"? Se sobrescribe la que hubiera.`))) return;
+      const rr = await fetch(url("plantilla/guardar"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ centro: S.centro, fecha: S.fecha, tipo }),
+      });
+      const dd = await rr.json().catch(() => ({}));
+      if (!rr.ok) return mostrarAviso(dd.detail || "No se pudo guardar.");
+      abrirDialogoPlantilla();
+    })
+  );
 }
 
 // Maneja soltar en una zona: un chip de slot (crea turno sin asignar) o un
@@ -1675,6 +1742,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     .getElementById("plan-dialog-asignar")
     .querySelector("[data-cerrar]")
     .addEventListener("click", () => document.getElementById("plan-dialog-asignar").close());
+  document
+    .getElementById("plan-dialog-plantilla")
+    .querySelector("[data-cerrar]")
+    .addEventListener("click", () => document.getElementById("plan-dialog-plantilla").close());
 
   document.getElementById("plan-centro").addEventListener("change", (e) => {
     S.centro = e.target.value;

@@ -12,6 +12,7 @@ contra sus horas de contrato.
   calcula como transacciones_previstas / objetivo_transacciones_hora (config
   por centro), con override manual opcional.
 """
+import calendar
 import datetime
 import io
 import json
@@ -235,6 +236,22 @@ def ensure_planificador_tables():
             creado_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # Plantilla de la semana por centro y tipo ('alta' de alta demanda -- 1ª y
+    # última semana de mes -- o 'valle'). Un slot por (día de la semana,
+    # inicio, duración) con la cantidad que se pone ese día.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS planificador_plantillas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            empresa TEXT NOT NULL DEFAULT 'kk',
+            centro TEXT NOT NULL,
+            tipo TEXT NOT NULL,
+            dow INTEGER NOT NULL,
+            inicio_min INTEGER NOT NULL,
+            duracion_min INTEGER NOT NULL,
+            cantidad INTEGER NOT NULL DEFAULT 1,
+            UNIQUE (empresa, centro, tipo, dow, inicio_min, duracion_min)
+        )
+    """)
     # Los slots pasan a ser POR CENTRO (cada tienda tiene sus patrones). Los
     # que ya había eran los globales auto-sembrados de ParqueSur Tienda con el
     # modelo antiguo -- se descartan y se vuelven a sembrar bien más abajo.
@@ -263,6 +280,31 @@ def ensure_planificador_tables():
             "ON CONFLICT (empresa, centro) DO NOTHING",
             (centro, ap, ci),
         )
+    # Plantilla de la semana: se siembra desde la semana más completa de cada
+    # tienda en la planificación de Odoo (misma para 'alta' y 'valle' -- el
+    # gerente la ajusta / la sobrescribe con "Guardar esta semana"). Solo la 1ª
+    # vez por centro.
+    seed_pl = os.path.join(os.path.dirname(__file__), "seed_plantillas_semana.json")
+    if os.path.exists(seed_pl):
+        try:
+            with open(seed_pl, encoding="utf-8") as f:
+                pl = json.load(f)
+            for centro, tipos in pl.items():
+                if conn.execute(
+                    "SELECT 1 FROM planificador_plantillas WHERE empresa = 'kk' AND centro = ? LIMIT 1", (centro,)
+                ).fetchone():
+                    continue
+                for tipo in ("alta", "valle"):
+                    for dow, filas in (tipos.get(tipo) or {}).items():
+                        for ini, dur, cant in filas:
+                            conn.execute(
+                                "INSERT OR IGNORE INTO planificador_plantillas "
+                                "(empresa, centro, tipo, dow, inicio_min, duracion_min, cantidad) "
+                                "VALUES ('kk', ?, ?, ?, ?, ?, ?)",
+                                (centro, tipo, int(dow), int(ini), int(dur), int(cant)),
+                            )
+        except Exception as exc:
+            print(f"[planificador] no se pudo cargar seed_plantillas_semana.json: {exc}")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_turnos_busqueda ON planificador_turnos (empresa, centro, fecha)")
     cols_turnos = {r[1] for r in conn.execute("PRAGMA table_info(planificador_turnos)")}
     if "tipo" not in cols_turnos:
@@ -834,6 +876,109 @@ def get_trabajador(trabajador_id):
 def _lunes_de(fecha_iso):
     d = datetime.date.fromisoformat(fecha_iso)
     return (d - datetime.timedelta(days=d.weekday())).isoformat()
+
+
+# --- Plantilla de la semana (alta demanda / valle) ---
+
+def tipo_semana(fecha_iso):
+    """Una semana (lun-dom) es de ALTA demanda si contiene el día 1 o los
+    últimos 7 días de algún mes (1ª y última semana del mes); si no, VALLE."""
+    lunes = datetime.date.fromisoformat(_lunes_de(fecha_iso))
+    for i in range(7):
+        d = lunes + datetime.timedelta(days=i)
+        ultimos = calendar.monthrange(d.year, d.month)[1]
+        if d.day <= 7 or d.day > ultimos - 7:
+            return "alta"
+    return "valle"
+
+
+def _plantilla_filas(conn, empresa, centro, tipo):
+    return [
+        dict(r)
+        for r in conn.execute(
+            "SELECT dow, inicio_min, duracion_min, cantidad FROM planificador_plantillas "
+            "WHERE empresa = ? AND centro = ? AND tipo = ? ORDER BY dow, inicio_min",
+            (empresa, centro, tipo),
+        )
+    ]
+
+
+def plantilla_resumen(empresa, centro, fecha_iso):
+    """Para el diálogo: qué tipo es la semana visible y qué hay guardado en
+    cada plantilla (nº de turnos y horas efectivas de una semana entera)."""
+    conn = get_connection()
+    out = {"tipo_semana": tipo_semana(fecha_iso)}
+    for tipo in ("alta", "valle"):
+        filas = _plantilla_filas(conn, empresa, centro, tipo)
+        out[tipo] = {
+            "turnos": sum(f["cantidad"] for f in filas),
+            "minutos": sum(f["cantidad"] * f["duracion_min"] for f in filas),
+            "dias": len({f["dow"] for f in filas}),
+        }
+    conn.close()
+    return out
+
+
+def guardar_plantilla(empresa, centro, fecha_iso, tipo):
+    """Guarda la semana visible como plantilla `tipo`: agrupa los turnos de
+    trabajo (con o sin persona) por (día de la semana, inicio, duración)."""
+    if tipo not in ("alta", "valle"):
+        raise ValueError("Tipo de plantilla inválido")
+    lunes = datetime.date.fromisoformat(_lunes_de(fecha_iso))
+    domingo = (lunes + datetime.timedelta(days=6)).isoformat()
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT fecha, inicio_min, duracion_min FROM planificador_turnos "
+        "WHERE empresa = ? AND centro = ? AND tipo = 'trabajo' AND fecha BETWEEN ? AND ?",
+        (empresa, centro, lunes.isoformat(), domingo),
+    ).fetchall()
+    agg = {}
+    for r in rows:
+        dow = datetime.date.fromisoformat(r["fecha"]).weekday()
+        agg[(dow, r["inicio_min"], r["duracion_min"])] = agg.get((dow, r["inicio_min"], r["duracion_min"]), 0) + 1
+    conn.execute("DELETE FROM planificador_plantillas WHERE empresa = ? AND centro = ? AND tipo = ?", (empresa, centro, tipo))
+    for (dow, ini, dur), cant in agg.items():
+        conn.execute(
+            "INSERT INTO planificador_plantillas (empresa, centro, tipo, dow, inicio_min, duracion_min, cantidad) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (empresa, centro, tipo, dow, ini, dur, cant),
+        )
+    conn.commit()
+    conn.close()
+    return {"turnos": sum(agg.values())}
+
+
+def aplicar_plantilla(empresa, centro, fecha_iso, tipo):
+    """Vuelca la plantilla `tipo` en la semana de `fecha_iso` como slots SIN
+    ASIGNAR. No duplica: si un día ya tiene turnos con ese horario, solo
+    completa hasta la cantidad de la plantilla."""
+    if tipo not in ("alta", "valle"):
+        raise ValueError("Tipo de plantilla inválido")
+    lunes = datetime.date.fromisoformat(_lunes_de(fecha_iso))
+    conn = get_connection()
+    filas = _plantilla_filas(conn, empresa, centro, tipo)
+    if not filas:
+        conn.close()
+        raise ValueError("Esa plantilla todavía no tiene nada guardado")
+    creados = 0
+    for f in filas:
+        fecha = (lunes + datetime.timedelta(days=int(f["dow"]))).isoformat()
+        ya = conn.execute(
+            "SELECT COUNT(*) FROM planificador_turnos WHERE empresa = ? AND centro = ? AND fecha = ? "
+            "AND tipo = 'trabajo' AND inicio_min = ? AND duracion_min = ?",
+            (empresa, centro, fecha, f["inicio_min"], f["duracion_min"]),
+        ).fetchone()[0]
+        for _ in range(max(0, int(f["cantidad"]) - ya)):
+            conn.execute(
+                "INSERT INTO planificador_turnos "
+                "(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, tipo, creado_por) "
+                "VALUES (?, ?, 0, ?, ?, ?, 'trabajo', 'plantilla')",
+                (empresa, centro, fecha, f["inicio_min"], f["duracion_min"]),
+            )
+            creados += 1
+    conn.commit()
+    conn.close()
+    return {"creados": creados}
 
 
 def turnos_semana(empresa, centro, fecha_iso):
