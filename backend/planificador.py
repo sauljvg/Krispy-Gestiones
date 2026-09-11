@@ -785,6 +785,7 @@ _TRABAJADOR_CORRECCIONES = [
     # la fila con más turnos).
     {"centro": "ParqueSur Tienda", "alias": ["valeria olivares"]},
     {"centro": "ParqueSur Tienda", "alias": ["ariadne cedeño duran"]},
+    {"centro": "Gran Plaza 2", "alias": ["alfonso rodriguez"]},
 ]
 
 
