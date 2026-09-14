@@ -41,10 +41,20 @@ de los de Krispy Kreme. Resenas de Saona todavia esta deshabilitada ("Proximamen
 Analitica de resenas de Google Maps. Para importar resenas nuevas: boton "Importar Takeout", que
 acepta el .zip exportado desde Google Takeout (Perfil de Empresa) -- solo anade las resenas que
 faltan, no duplica. Para descargar lo que se esta viendo: "Exportar Excel". Hay filtros de estrellas,
-sentimiento, fecha, texto/autor y orden, con "Limpiar filtros". Graficas: Timeline, Distribucion de
-estrellas, Horario de resenas (boton "Mostrar"). Barra lateral: Ranking de Krispy Team (clic en un
-nombre filtra sus resenas), Ranking de tiendas (boton "Excel" para importar datos de transacciones
-por tienda/mes), Valoracion media por tienda.
+sentimiento, fecha, texto/autor y orden, con "Limpiar filtros".
+
+Tarjetas de arriba: Total de resenas, Promedio, Positivas, Resenas recientes (120 dias). Debajo,
+"True Rating": Google redondea la valoracion publica a un decimal (4.7★), pero por dentro lleva la
+cifra real con 3 decimales -- eso es el True Rating. La tarjeta dice cuantas resenas de 5★ SEGUIDAS
+harian falta para que el redondeo publico suba al siguiente escalon (p.ej. de 4.7 a 4.8), con una
+barra de progreso hacia ese escalon y la tendencia de los ultimos 90 dias.
+
+Graficas: Timeline, Distribucion de estrellas (ambas con un desplegable "Ver tabla" debajo para los
+numeros exactos), Horario de resenas (boton "Mostrar", clic en una barra filtra el listado de abajo
+por esa hora/dia), y "Palabras mas mencionadas" (lista de frecuencia, no es clicable). Barra lateral:
+Ranking de Krispy Team (clic en un nombre filtra sus resenas; "Mostrar anteriores" revela debajo el
+personal que ya no esta), Ranking de tiendas (boton "Excel" para importar datos de transacciones por
+tienda/mes), Valoracion media por tienda.
 
 Solo admin: boton "Gestionar personal" abre un panel aparte para el personal cuyo nombre se busca
 dentro del texto de las resenas (lo que alimenta el Ranking de Krispy Team) -- alta manual, editar
@@ -55,8 +65,9 @@ traslado de tienda, y fusionar dos fichas duplicadas de la misma persona en una 
 
 Mapa de cobertura de reparto a domicilio en JustEat, Glovo y Uber Eats: comprueba automaticamente,
 tienda por tienda, si cada punto del mapa esta disponible en cada agregador ahora mismo. Filtros por
-agregador (botones "Todos"/"JustEat"/"Glovo"/"Uber Eats") y por dia ("Dia" + "Ver ese dia" para ver
-como estaba la cobertura en un momento pasado, "Volver a ahora mismo" para quitar ese filtro).
+agregador (botones "Todos"/"JustEat"/"Glovo"/"Uber Eats"), por tienda (chips "Tiendas:" arriba, "Todas"
+o una en concreto, para no saturar el mapa con las 6 a la vez) y por dia ("Dia" + "Ver ese dia" para
+ver como estaba la cobertura en un momento pasado, "Volver a ahora mismo" para quitar ese filtro).
 Herramientas para editar el mapa: "Anadir punto", "Unir puntos" (cuando dos puntos son en realidad el
 mismo sitio) y "Pincel: rellenar hueco" (copia el estado de un punto ya comprobado a varios puntos
 cercanos de golpe).
@@ -202,20 +213,38 @@ tocar desde dos sitios distintos. Si alguien pregunta como crear un test de Clim
 respuesta es siempre clima.html > "Test", nunca tests.html.
 
 "Nuevo test" crea uno. En el editor: Titulo, a que informe/Entrevista de Salida alimenta (opcional,
-para que las respuestas puntuen ese informe), color, y el campo "Enlace publico"
-(https://.../encuesta.html?slug=CODIGO) que se COPIA A MANO para compartir -- no hay envio por email
-integrado en Test. Tambien se puede guardar un "Enlace corto" (tipo TinyURL) opcional. Acciones:
-"Guardar", "Publicar (abrir)" / "Despublicar (cerrar)", "Ver respuestas", "Ver estadisticas de
-abandono", "Eliminar". Las paginas del test se arman con "Anadir pagina" y preguntas arrastrables,
-con saltos condicionales. La persona responde sin login en encuesta.html?slug=CODIGO.
+para que las respuestas puntuen ese informe -- si es para una oleada de Clima Laboral aparece
+ademas "Empleados esperados por centro", para calcular el % de participacion: el nombre de cada
+centro debe coincidir tal cual con las opciones de la pregunta "¿Cual es tu centro de trabajo?" del
+test, e incluir "Fabrica" u "Oficina" cuando aplique para distinguirlo de una tienda), color del
+boton, y el campo "Enlace publico" (https://.../encuesta.html?slug=CODIGO) que se COPIA A MANO para
+compartir -- no hay envio por email integrado en Test. Tambien: "Enlace corto" (tipo TinyURL)
+opcional, "No permitir responder mas de una vez" (por IP, nombre, telefono o email), "Fecha de
+caducidad" (se cierra solo a las 23:59 de ese dia, sin despublicarlo a mano), y "Mensaje final" (al
+terminar el test).
+
+Para tests que se evaluan (por puntuacion o por una opcion descalificatoria en alguna pregunta):
+"Mostrar un mensaje distinto si el resultado es 'No apto'" (con su propio texto), y "Ofrecer
+reservar cita de entrevista a quien resulte apto" -- justo en la pantalla de confirmacion de quien
+aprueba. Esto ultimo abre "Configurar franjas, direccion y condicion": direccion (con enlace directo
+a buscarla en Google Maps) y franjas sueltas (fecha, hora, cupo de personas) que la persona apta
+puede reservar sin cuenta -- las franjas se guardan al momento, hace falta guardar el test primero
+para poder anadirlas. Tambien se puede subir una "Imagen de fondo" para la pantalla del test.
+
+Acciones: "Guardar", "Publicar (abrir)" / "Despublicar (cerrar)", "Ver respuestas", "Ver estadisticas
+de abandono" (con "Reiniciar estadisticas" dentro, por si se quiere volver a medir desde cero),
+"Eliminar". Las paginas del test se arman con "Anadir pagina" y preguntas arrastrables, con saltos
+condicionales. La persona responde sin login en encuesta.html?slug=CODIGO.
 
 ## Perfil DISC (disc_form.html)
 
 Pestana "Enviar test": copia el enlace publico con el boton "Copiar" y se lo pasas a la persona
 (responde sin cuenta en disc_publico.html, arrastrando frases). Tambien se puede guardar un "Enlace
-corto". Alternativa: "Rellenar el test manualmente (RRHH)" -- alguien de RRHH lo hace por la persona,
-con "Atras" / "Siguiente" y "Guardar resultado" al final. El resultado (tipo D/I/S/C + grafica) tiene
-boton "Exportar PDF". Pestana "Historico": tabla con todos los resultados guardados.
+corto". Alternativa (desplegando "Rellenar el test manualmente (RRHH)"): alguien de RRHH escribe el
+nombre y lo hace por la persona, con "Atras" / "Siguiente" y "Guardar resultado" al final. El
+resultado (tipo D/I/S/C + grafica, mas un informe de interpretacion escrito debajo) tiene botones
+"Exportar PDF" y "＋ Nuevo test". Pestana "Historico": tabla con todos los resultados guardados, con
+buscador por nombre arriba.
 
 ## Clima Laboral (clima.html, clima-tests.html, clima-informes.html)
 
@@ -227,13 +256,22 @@ permite crear tests cuyo destino sea una oleada de Clima Laboral -- el desplegab
 tampoco ofrece Informes ni Entrevista de Salida, solo oleadas de Clima Laboral (Encuesta completa o
 Pulso) existentes o "+ Nueva". Un enlace "Clima Laboral" arriba vuelve a la landing.
 
-"Informes" (clima-informes.html) es el dashboard de resultados: selector "Oleada" arriba, boton
-"Importar Excel" (hoja llamada "Respuestas") con el checkbox "Nuevo Registro" (decide si esa
-importacion abre una OLEADA NUEVA marcado, o se SUMA a la ultima oleada existente de esa empresa sin
-marcar), boton "Exportar PDF" (aparece solo cuando ya hay datos cargados) y botones "PNG" en cada
-grafico para descargarlo como imagen. La satisfaccion del cliente (comparada con Resenas) solo se
-muestra en oleadas de fase "Encuesta completa" -- en Pulso y en fabricas no aplica (no hay con que
-comparar, o no tienen clientes propios) y no aparece.
+"Informes" (clima-informes.html) es el dashboard de resultados: selector "Oleada" arriba (con "✏️
+Renombrar" y "🗑️ Eliminar" esa oleada, y un enlace "🛠️ Gestionar test y oleadas" que lleva a
+clima-tests.html), boton "Importar Excel" (hoja llamada "Respuestas") con el checkbox "Nuevo
+Registro" (decide si esa importacion abre una OLEADA NUEVA marcado, o se SUMA a la ultima oleada
+existente de esa empresa sin marcar), boton "Exportar PDF" (aparece solo cuando ya hay datos
+cargados). Debajo del selector, una rejilla de tarjetas por centro para elegir de cual ver el
+informe.
+
+Contenido del informe: graficos "Engagement por tienda" y "Participacion por tienda" (o "por
+fabrica" en centros de fabrica) con boton "📊 Ocultar/mostrar graficos" y "⬇ PNG" en cada uno para
+descargarlo como imagen; "Puntuacion Global de Engagement" (comparado con la oleada anterior) y, si
+aplica, "Satisfaccion del cliente" al lado (comparada con Resenas, SOLO en oleadas de fase "Encuesta
+completa" -- en Pulso y en fabricas no hay con que comparar y no aparece); graficos "Resultados de
+Engagement" e "Impulsores de Engagement"; "Fortalezas / Oportunidades" (el ⓘ explica que es la suma
+de "Totalmente de acuerdo" + "De acuerdo" de cada pregunta); y "Preguntas abiertas" con los
+comentarios en texto libre.
 
 ## Entrevista de Salida (entrevistas.html)
 
@@ -281,11 +319,14 @@ contacto" o "Importar Excel". El boletin publicado se lee en blog.html?post=ID, 
 ## Informes (informes.html)
 
 Tarjetas de "tipos de informe" (encuestas externas importadas, ej. Valores y Competencias). Boton
-"Nuevo tipo" para crear uno. Dentro de un tipo: "Importar Excel" para cargar/actualizar respuestas.
-Hay filtros (buscar, ordenar, fechas), selector de columnas visibles ("Columnas"). Se pueden marcar
-filas con checkbox y compartirlas con otro usuario del portal (pasan a su seccion Reclutamiento)
-mediante el boton "Compartir con...". Cada candidato puede tener un CV adjunto (ver o subir). Informes
-NO tiene boton de exportar PDF.
+"Nuevo tipo" para crear uno. Dentro de un tipo: "Importar Excel" para cargar/actualizar respuestas --
+si ese Excel trae varias hojas, cada una aparece como su propia pestana arriba (con el numero de
+filas al lado); "⚙ Hojas" (solo si hay mas de una) deja elegir cuales de esas pestanas se muestran.
+Dos vistas: "Lista completa" (todo junto) o "Por vacante" (agrupado por vacante, para tipos ligados a
+un proceso de seleccion). Hay filtros (buscar, ordenar, fechas), selector de columnas visibles
+("Columnas"). Se pueden marcar filas con checkbox y compartirlas con otro usuario del portal (pasan a
+su seccion Reclutamiento) mediante el boton "Compartir con...". Cada candidato puede tener un CV
+adjunto (ver o subir). Informes NO tiene boton de exportar PDF.
 
 ## Reclutamiento (compartidos.html) -- lo ve cualquiera logueado, no depende de modulo (aunque tener
 el modulo Informes o Reclutamiento cambia MUCHO lo que se ve, ver mas abajo)
