@@ -66,6 +66,18 @@ detalles correctos" para ver tambien los que SI estaban disponibles, no solo los
 estar disponibles (24h)". El boton "Dashboard del scraper" (arriba) muestra el progreso en vivo de
 las rondas de comprobacion automaticas: cuando empezaron, cuantas tiendas llevan hechas.
 
+"Pedidos por hora (segun agregador)" (panel aparte, mas abajo, sin relacion con la disponibilidad
+de arriba): cuantos pedidos reales se hacen a cada hora, para decidir en que horas conviene
+programar los scrapers sin pisar el tramo fuerte del dia. Se alimenta subiendo los informes que
+cada agregador deja exportar -- CSV de "Historial de pedidos" de Uber Eats (las fechas se sacan
+solas del archivo) o Excel del heatmap por horas de Glovo/JustEat (ese archivo no trae fechas, hay
+que indicarlas a mano al subirlo). Cada subida es una "tanda" (listada abajo, con boton para
+borrarla); el grafico muestra el promedio por hora de cada agregador, afinandose cuantas mas tandas
+se suban con el tiempo. Filtro "Filtrar por fecha": solo funciona para Uber Eats (su archivo si trae
+fecha por pedido; Glovo/JustEat no, y se avisa en pantalla en vez de fallar). Con datos de Uber Eats
+tambien aparece "Pedidos por dia", un segundo grafico con el total real de cada dia -- para ver de
+un vistazo que dia concreto subio o bajo, en vez de solo el promedio.
+
 ## Evaluaciones 360° (evaluaciones360.html)
 
 Cualquiera con el modulo ve la pestana "Mis evaluaciones": lo que le han asignado evaluar y sigue sin
@@ -287,11 +299,15 @@ solo puede ver/descargar el CV que ya hay, no gestionar ficheros.
 ## Usuarios (usuarios.html) -- solo rol admin
 
 Aqui se gestiona TODO el acceso: crear usuarios (Usuario, Nombre, Rol, y checklists de Modulos,
-Tiendas de Resenas, Tipos de Informes que puede ver), editar esos permisos de cualquier usuario
-existente ("Editar" -> "Guardar" en cada bloque), cambiar o resetear su PIN, y eliminarlo. El PIN
-inicial siempre lo crea el propio usuario la primera vez que entra, el admin no lo asigna. Tambien
-aqui: "Descargar copia de seguridad" / "Restaurar desde copia" de toda la base de datos, y el borrado
-de candidatos descartados por antiguedad (retencion de datos de Reclutamiento).
+Tiendas de Resenas, Tipos de Informes que puede ver). La tabla de usuarios existentes tiene una
+barra de busqueda por nombre o usuario arriba, y esta agrupada por Admin / marca (Krispy Kreme,
+Saona) / rol. Para editar los permisos de un usuario existente, el boton "Editar" de su fila abre
+un unico popup con todos los modulos y las opciones que dependan de ellos (tiendas de Resenas,
+centros de Clima Laboral y Planificador, tipos de informe) y un solo "Guardar" para todo junto.
+Cambiar o resetear el PIN y eliminar el usuario se hace directo en la fila, sin abrir el popup. El
+PIN inicial siempre lo crea el propio usuario la primera vez que entra, el admin no lo asigna.
+Tambien aqui: "Descargar copia de seguridad" / "Restaurar desde copia" de toda la base de datos, y
+el borrado de candidatos descartados por antiguedad (retencion de datos de Reclutamiento).
 
 ## Roles y modulos (quien puede ver que)
 
