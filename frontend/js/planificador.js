@@ -264,7 +264,6 @@ function renderDia() {
           <div class="plan-esquina"></div>
           <div class="plan-horas">${ticksHTML}</div>
         </div>
-        ${cabFila("Venta prevista (€)", celdasInput("venta_prevista", "any"))}
         ${
           S.config.tipo_centro === "fabrica"
             ? cabFila("Docenas previstas", celdasInput("docenas_prevista", "1"))
