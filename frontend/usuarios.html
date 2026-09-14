@@ -35,9 +35,13 @@
      con % sobre un contenedor ancho, columnas cortas como Accesos/PIN
      reservaban muchísimo más hueco del que necesitaban mientras la de
      acciones (3 botones) se quedaba corta y forzaba scroll de todos modos.
-     width:auto en la tabla (en vez del 100% de .staff-table) para que no
-     se estire más de lo que suman estas columnas. */
-  .staff-table-usuarios { table-layout: fixed; width: auto; }
+     Ancho fijo en la tabla (suma de las columnas, en vez del 100% de
+     .staff-table) para que no se estire más de lo que suman estas columnas
+     -- con width:auto, en pantallas estrechas el navegador encogía la
+     tabla entera (y con ella cada columna, desproporcionadamente) para
+     intentar caber en el hueco disponible en vez de desbordar con scroll,
+     dejando columnas de pocos px donde el texto se partía letra a letra. */
+  .staff-table-usuarios { table-layout: fixed; width: 1145px; }
   .staff-table-usuarios th, .staff-table-usuarios td { vertical-align: middle; text-align: center; font-variant-numeric: normal; }
   .staff-table-usuarios th:not(:first-child), .staff-table-usuarios td:not(:first-child) { text-align: center; font-variant-numeric: normal; }
   .staff-table-usuarios th:nth-child(1), .staff-table-usuarios td:nth-child(1) { width: 120px; }
@@ -259,6 +263,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/usuarios.js?v=20260914e"></script>
+<script src="js/usuarios.js?v=20260914f"></script>
 </body>
 </html>
