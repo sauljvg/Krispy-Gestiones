@@ -15,7 +15,7 @@
 </script>
 <link rel="stylesheet" href="css/styles.css?v=20260907a">
 <style>
-  .config-wrap { max-width: 900px; margin: 0 auto; padding: 0 0 60px; }
+  .config-wrap { max-width: 1300px; margin: 0 auto; padding: 0 0 60px; }
   .config-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: end; }
   .config-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
   .config-field input, .config-field select {
@@ -27,8 +27,23 @@
     color: var(--text-primary);
     font-size: 14px;
   }
-  #users-table td, #users-table th { vertical-align: middle; }
-  #users-table select { padding: 5px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); }
+
+  /* Tabla de usuarios: columnas fijas y centradas (antes heredaba el
+     text-align:right de .staff-table, pensado para tablas numéricas, y sin
+     anchos fijos los inputs/botones no quedaban alineados entre sí). */
+  .staff-table-usuarios { table-layout: fixed; }
+  .staff-table-usuarios th, .staff-table-usuarios td { vertical-align: middle; text-align: center; font-variant-numeric: normal; }
+  .staff-table-usuarios th:not(:first-child), .staff-table-usuarios td:not(:first-child) { text-align: center; font-variant-numeric: normal; }
+  .staff-table-usuarios th:nth-child(1), .staff-table-usuarios td:nth-child(1) { width: 12%; }
+  .staff-table-usuarios th:nth-child(2), .staff-table-usuarios td:nth-child(2) { width: 16%; }
+  .staff-table-usuarios th:nth-child(3), .staff-table-usuarios td:nth-child(3) { width: 12%; }
+  .staff-table-usuarios th:nth-child(4), .staff-table-usuarios td:nth-child(4) { width: 10%; }
+  .staff-table-usuarios th:nth-child(5), .staff-table-usuarios td:nth-child(5) { width: 14%; }
+  .staff-table-usuarios th:nth-child(6), .staff-table-usuarios td:nth-child(6) { width: 10%; }
+  .staff-table-usuarios th:nth-child(7), .staff-table-usuarios td:nth-child(7) { width: 26%; white-space: normal; }
+  .staff-table-usuarios td:nth-child(2) { white-space: normal; word-break: break-word; }
+  .staff-table-usuarios td input { text-align: center; }
+  .staff-table-usuarios select { padding: 5px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); }
   .config-error { color: var(--status-critical); font-size: 13px; margin: 10px 0 0; }
   .config-ok { color: var(--status-good); font-size: 13px; margin: 10px 0 0; }
 
@@ -228,6 +243,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/usuarios.js?v=20260914b"></script>
+<script src="js/usuarios.js?v=20260914c"></script>
 </body>
 </html>

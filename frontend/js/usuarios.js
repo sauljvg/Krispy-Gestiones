@@ -254,9 +254,9 @@ function climaCentrosSeleccionadosNuevoUsuario() {
 function filaUsuarioHTML(u, currentUserId) {
   return `
       <tr data-id="${u.id}">
-        <td><input type="text" class="username-input" data-id="${u.id}" value="${escapeHTML(u.username)}" style="width:110px;"></td>
+        <td><input type="text" class="username-input" data-id="${u.id}" value="${escapeHTML(u.username)}" style="width:90%;"></td>
         <td>${escapeHTML(u.nombre)}</td>
-        <td><input type="text" class="rol-input" list="roles-datalist" data-id="${u.id}" value="${escapeHTML(u.rol)}" style="width:130px;" ${u.id === currentUserId ? "disabled" : ""}></td>
+        <td><input type="text" class="rol-input" list="roles-datalist" data-id="${u.id}" value="${escapeHTML(u.rol)}" style="width:90%;" ${u.id === currentUserId ? "disabled" : ""}></td>
         <td>
           ${
             u.rol === "admin"
@@ -503,7 +503,7 @@ function renderUsuariosFiltrados() {
   function tablaHTML(usuariosGrupo) {
     return `
       <div class="store-ranking-wrap">
-        <table class="staff-table">
+        <table class="staff-table staff-table-usuarios">
           ${cabecera}
           <tbody>${usuariosGrupo.map((u) => filaUsuarioHTML(u, currentUserId)).join("")}</tbody>
         </table>
