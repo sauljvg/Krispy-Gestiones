@@ -51,7 +51,24 @@ AGREGADORES = ["ubereats", "glovo", "justeat"]
 FRECUENCIA_CHEQUEO_CERCANO_MIN = 10
 FRECUENCIA_CHEQUEO_COMPLETO_MIN = 60
 
-HORARIOS_APERTURA = [{"inicio": 9, "fin": 22}]
+def _parsear_horarios_apertura(raw: str) -> list[dict]:
+    rangos = []
+    for tramo in raw.split(","):
+        tramo = tramo.strip()
+        if not tramo:
+            continue
+        inicio, fin = tramo.split("-")
+        rangos.append({"inicio": float(inicio), "fin": float(fin)})
+    return rangos
+
+
+# Se puede acotar por .env (SCRAPER_HORARIOS_APERTURA="12.0-13.5", admite varios
+# tramos separados por coma) para una prueba puntual en una instalación concreta
+# sin tocar el valor por defecto de las demás -- p.ej. una primera prueba del
+# daemon en el VPS corriendo solo un rato al día en vez de todo el horario de
+# apertura, mientras se confirma que no da problemas de bloqueo (14/09).
+_horarios_env = os.getenv("SCRAPER_HORARIOS_APERTURA", "")
+HORARIOS_APERTURA = _parsear_horarios_apertura(_horarios_env) if _horarios_env else [{"inicio": 9, "fin": 22}]
 
 # Pausa entre chequeos individuales (dirección x agregador) para reducir el riesgo de
 # bloqueo anti-bot al no lanzar ráfagas de peticiones seguidas contra el mismo sitio.

@@ -74,7 +74,8 @@ def _agregadores_por_tienda() -> dict[str, list[str]]:
 
 def es_horario_apertura(ahora: datetime = None) -> bool:
     ahora = ahora or datetime.now()
-    return any(rango["inicio"] <= ahora.hour < rango["fin"] for rango in config.HORARIOS_APERTURA)
+    hora_actual = ahora.hour + ahora.minute / 60
+    return any(rango["inicio"] <= hora_actual < rango["fin"] for rango in config.HORARIOS_APERTURA)
 
 
 async def _chequear_agregador_aislado(
