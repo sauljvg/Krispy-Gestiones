@@ -742,14 +742,42 @@ def _fusionar_trabajadores_duplicados(conn, empresa, centro):
     return fusiones
 
 
+def _a_una_letra(a, b):
+    """¿La distancia de edición entre `a` y `b` es como mucho 1 (una sola
+    letra de más, de menos, o distinta)? Cubre variantes reales del Excel
+    como "ISA" vs "ISSA" que un prefijo no pilla (la diferencia está en
+    medio de la palabra, no al final)."""
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        return sum(1 for x, y in zip(a, b) if x != y) <= 1
+    corta, larga = (a, b) if len(a) < len(b) else (b, a)
+    i = j = difs = 0
+    while i < len(corta) and j < len(larga):
+        if corta[i] == larga[j]:
+            i += 1
+            j += 1
+        else:
+            difs += 1
+            j += 1
+            if difs > 1:
+                return False
+    return True
+
+
 def _palabra_coincide(a, b):
     """Compara dos palabras de nombre con tolerancia de prefijo (para
-    erratas/abreviaturas al escribir un alias a mano), exigiendo al menos 3
-    letras en común para no pegar palabras cortas sueltas por casualidad."""
+    erratas/abreviaturas al escribir un alias a mano) o de una sola letra de
+    más/menos/distinta (variante real del nombre en el Excel), exigiendo un
+    mínimo de letras para no pegar palabras cortas sueltas por casualidad."""
     if a == b:
         return True
     corta, larga = (a, b) if len(a) <= len(b) else (b, a)
-    return len(corta) >= 3 and larga.startswith(corta)
+    if len(corta) >= 3 and larga.startswith(corta):
+        return True
+    return max(len(a), len(b)) >= 4 and _a_una_letra(a, b)
 
 
 def _nombre_contiene_alias(nombre_norm, alias_norm):
