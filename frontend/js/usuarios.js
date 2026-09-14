@@ -115,10 +115,6 @@ async function loadClimaCentrosSiHaceFalta() {
   return CLIMA_CENTROS_CACHE;
 }
 
-function moduloLabel(clave) {
-  return MODULOS_CACHE.find((m) => m.value === clave)?.label || clave;
-}
-
 // --- Formulario de creación ---
 
 function renderNuModulosChecklist() {
@@ -255,12 +251,6 @@ function climaCentrosSeleccionadosNuevoUsuario() {
 
 // --- Tabla de usuarios existentes ---
 
-function modulosResumenHTML(u) {
-  if (u.rol === "admin") return `<span class="staff-hint">Todo (admin)</span>`;
-  if (!u.modulos || u.modulos.length === 0) return `<span class="staff-hint">Ninguno</span>`;
-  return escapeHTML(u.modulos.map(moduloLabel).join(", "));
-}
-
 function filaUsuarioHTML(u, currentUserId) {
   return `
       <tr data-id="${u.id}">
@@ -270,9 +260,8 @@ function filaUsuarioHTML(u, currentUserId) {
         <td>
           ${
             u.rol === "admin"
-              ? modulosResumenHTML(u)
-              : `<span class="modulos-resumen" data-id="${u.id}">${modulosResumenHTML(u)}</span>
-                 <button type="button" class="btn btn-ghost btn-editar-permisos" data-id="${u.id}" style="font-size:11px; padding:3px 8px; margin-left:6px;">Editar</button>`
+              ? `<span class="staff-hint">Todo (admin)</span>`
+              : `<button type="button" class="btn btn-ghost btn-editar-permisos" data-id="${u.id}">Editar</button>`
           }
         </td>
         <td>
