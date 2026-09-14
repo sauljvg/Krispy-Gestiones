@@ -343,6 +343,26 @@ def ensure_tables():
         "CREATE INDEX IF NOT EXISTS idx_agr_pedidos_hora_tanda ON agregadores_pedidos_hora(tanda_id)"
     )
 
+    # Desglose día a día -- solo se rellena para agregadores cuyo archivo de
+    # origen SÍ trae fecha por pedido (Uber Eats); el heatmap de Glovo/JustEat
+    # no la trae, así que esos agregadores nunca tienen filas aquí y el
+    # filtro por fecha simplemente no aplica para ellos (se avisa en la UI).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agregadores_pedidos_dia_hora (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tanda_id INTEGER NOT NULL REFERENCES agregadores_pedidos_tanda(id) ON DELETE CASCADE,
+            fecha TEXT NOT NULL,
+            hora INTEGER NOT NULL,
+            pedidos INTEGER NOT NULL
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agr_pedidos_dia_hora_tanda ON agregadores_pedidos_dia_hora(tanda_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agr_pedidos_dia_hora_fecha ON agregadores_pedidos_dia_hora(fecha)"
+    )
+
     conn.commit()
     conn.close()
 
@@ -2820,31 +2840,41 @@ def procesar_pedidos_uber_csv(contenido: bytes) -> dict:
     Saca pedidos por hora de la columna 'Hora del pedido del cliente' y el
     rango de fechas de 'Fecha del pedido' (dd/mm/aaaa) -- a diferencia de
     Glovo, aquí el rango sale directo de los datos, no hay que pedírselo al
-    usuario."""
+    usuario. También guarda el desglose día a día (fecha -> hora -> pedidos)
+    porque el CSV sí trae esa granularidad -- a diferencia del heatmap de
+    Glovo, que solo trae el total por hora de todo el periodo y no permite
+    saber qué día concreto subió o bajó."""
     texto = contenido.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(texto), delimiter=";")
     hora_counts = {h: 0 for h in range(24)}
+    dia_hora_counts = {}
     fechas = []
     total = 0
     for fila in reader:
         ts = (fila.get("Hora del pedido del cliente") or "").strip()
         fecha_txt = (fila.get("Fecha del pedido") or "").strip()
-        if len(ts) >= 13 and ts[11:13].isdigit():
-            hora_counts[int(ts[11:13])] += 1
-            total += 1
+        fecha_iso = None
         if fecha_txt:
             try:
-                fechas.append(datetime.strptime(fecha_txt, "%d/%m/%Y").date())
+                fecha_iso = datetime.strptime(fecha_txt, "%d/%m/%Y").date().isoformat()
+                fechas.append(fecha_iso)
             except ValueError:
                 pass
+        if len(ts) >= 13 and ts[11:13].isdigit():
+            hora = int(ts[11:13])
+            hora_counts[hora] += 1
+            total += 1
+            if fecha_iso:
+                dia_hora_counts.setdefault(fecha_iso, {h: 0 for h in range(24)})[hora] += 1
     if not fechas:
         raise ValueError("No se encontraron fechas válidas en el CSV (columna 'Fecha del pedido').")
     fecha_inicio, fecha_fin = min(fechas), max(fechas)
     return {
         "hora_counts": hora_counts,
-        "fecha_inicio": fecha_inicio.isoformat(),
-        "fecha_fin": fecha_fin.isoformat(),
-        "dias": (fecha_fin - fecha_inicio).days + 1,
+        "dia_hora_counts": dia_hora_counts,
+        "fecha_inicio": fecha_inicio,
+        "fecha_fin": fecha_fin,
+        "dias": (date.fromisoformat(fecha_fin) - date.fromisoformat(fecha_inicio)).days + 1,
         "total_pedidos": total,
     }
 
@@ -2911,6 +2941,17 @@ def guardar_tanda_pedidos(agregador: str, nombre_archivo: str, datos: dict, subi
         "INSERT INTO agregadores_pedidos_hora (tanda_id, hora, pedidos) VALUES (?, ?, ?)",
         [(tanda_id, h, c) for h, c in datos["hora_counts"].items()],
     )
+    dia_hora_counts = datos.get("dia_hora_counts")
+    if dia_hora_counts:
+        conn.executemany(
+            "INSERT INTO agregadores_pedidos_dia_hora (tanda_id, fecha, hora, pedidos) VALUES (?, ?, ?, ?)",
+            [
+                (tanda_id, fecha, h, c)
+                for fecha, horas in dia_hora_counts.items()
+                for h, c in horas.items()
+                if c > 0
+            ],
+        )
     conn.commit()
     conn.close()
     return tanda_id
@@ -2933,19 +2974,87 @@ def eliminar_tanda_pedidos(tanda_id: int) -> bool:
         conn.close()
         return False
     conn.execute("DELETE FROM agregadores_pedidos_hora WHERE tanda_id=?", (tanda_id,))
+    conn.execute("DELETE FROM agregadores_pedidos_dia_hora WHERE tanda_id=?", (tanda_id,))
     conn.execute("DELETE FROM agregadores_pedidos_tanda WHERE id=?", (tanda_id,))
     conn.commit()
     conn.close()
     return True
 
 
-def resumen_pedidos_por_hora() -> dict:
-    """Promedio de pedidos por hora de cada agregador: suma de pedidos de
-    todas las tandas subidas de ese agregador en esa hora, dividido por la
-    suma de días cubiertos -- así cuantas más tandas se vayan subiendo con
-    el tiempo, más se afina el promedio en vez de solo acumular un total
-    que crece sin parar."""
+def agregadores_con_desglose_dia() -> set:
+    """Qué agregadores tienen al menos una tanda con desglose día a día (solo
+    los que vienen de un archivo con fecha por pedido, hoy en día Uber Eats)
+    -- para que la UI sepa a cuáles sí les puede aplicar el filtro de fechas
+    y a cuáles no (Glovo/JustEat con el heatmap solo dan el total del
+    periodo entero, no hay fecha que filtrar)."""
     conn = get_connection()
+    filas = conn.execute(
+        """SELECT DISTINCT t.agregador FROM agregadores_pedidos_dia_hora h
+           JOIN agregadores_pedidos_tanda t ON t.id = h.tanda_id"""
+    ).fetchall()
+    conn.close()
+    return {f["agregador"] for f in filas}
+
+
+def resumen_pedidos_por_hora(desde: str | None = None, hasta: str | None = None) -> dict:
+    """Promedio de pedidos por hora de cada agregador.
+
+    Sin filtro de fechas: suma de pedidos de todas las tandas subidas de ese
+    agregador en esa hora, dividido por la suma de días cubiertos -- así
+    cuantas más tandas se vayan subiendo con el tiempo, más se afina el
+    promedio en vez de solo acumular un total que crece sin parar.
+
+    Con filtro (desde/hasta): solo para agregadores con desglose día a día
+    (ver agregadores_con_desglose_dia) -- se recalcula usando solo los días
+    reales dentro del rango pedido. Los agregadores sin ese desglose
+    (Glovo/JustEat con el heatmap) no pueden filtrarse por fecha y se dejan
+    fuera del resultado; el llamador decide cómo avisarlo."""
+    conn = get_connection()
+    if desde or hasta:
+        con_desglose = agregadores_con_desglose_dia()
+        agregadores_con_tandas = {
+            f["agregador"] for f in conn.execute("SELECT DISTINCT agregador FROM agregadores_pedidos_tanda").fetchall()
+        }
+        condiciones = ["1=1"]
+        parametros = []
+        if desde:
+            condiciones.append("h.fecha >= ?")
+            parametros.append(desde)
+        if hasta:
+            condiciones.append("h.fecha <= ?")
+            parametros.append(hasta)
+        where = " AND ".join(condiciones)
+        dias_por_agregador = {}
+        for fila in conn.execute(
+            f"""SELECT t.agregador AS agregador, COUNT(DISTINCT h.fecha) AS dias
+                FROM agregadores_pedidos_dia_hora h
+                JOIN agregadores_pedidos_tanda t ON t.id = h.tanda_id
+                WHERE {where}
+                GROUP BY t.agregador""",
+            parametros,
+        ).fetchall():
+            dias_por_agregador[fila["agregador"]] = fila["dias"]
+        horas_pedidos = conn.execute(
+            f"""SELECT t.agregador AS agregador, h.hora AS hora, SUM(h.pedidos) AS total
+                FROM agregadores_pedidos_dia_hora h
+                JOIN agregadores_pedidos_tanda t ON t.id = h.tanda_id
+                WHERE {where}
+                GROUP BY t.agregador, h.hora""",
+            parametros,
+        ).fetchall()
+        conn.close()
+        resultado = {
+            agregador: {"dias_totales": dias, "promedio_por_hora": [0.0] * 24}
+            for agregador, dias in dias_por_agregador.items()
+        }
+        for fila in horas_pedidos:
+            agregador, hora, total = fila["agregador"], fila["hora"], fila["total"]
+            dias = dias_por_agregador.get(agregador, 0)
+            if dias > 0 and agregador in resultado:
+                resultado[agregador]["promedio_por_hora"][hora] = round(total / dias, 2)
+        resultado["_sin_filtro_de_fecha"] = sorted(agregadores_con_tandas - con_desglose)
+        return resultado
+
     tandas = conn.execute(
         "SELECT id, agregador, dias FROM agregadores_pedidos_tanda"
     ).fetchall()
@@ -2973,6 +3082,33 @@ def resumen_pedidos_por_hora() -> dict:
         if dias_totales > 0 and agregador in resultado:
             resultado[agregador]["promedio_por_hora"][hora] = round(total / dias_totales, 2)
     return resultado
+
+
+def pedidos_por_dia(agregador: str, desde: str | None = None, hasta: str | None = None) -> list:
+    """Total de pedidos por fecha (solo agregadores con desglose día a día)
+    -- la vista "qué día concreto sube o baja" que el mapa de horas solo
+    promediado no puede responder."""
+    conn = get_connection()
+    condiciones = ["t.agregador = ?"]
+    parametros = [agregador]
+    if desde:
+        condiciones.append("h.fecha >= ?")
+        parametros.append(desde)
+    if hasta:
+        condiciones.append("h.fecha <= ?")
+        parametros.append(hasta)
+    where = " AND ".join(condiciones)
+    filas = conn.execute(
+        f"""SELECT h.fecha AS fecha, SUM(h.pedidos) AS total
+            FROM agregadores_pedidos_dia_hora h
+            JOIN agregadores_pedidos_tanda t ON t.id = h.tanda_id
+            WHERE {where}
+            GROUP BY h.fecha
+            ORDER BY h.fecha""",
+        parametros,
+    ).fetchall()
+    conn.close()
+    return [{"fecha": f["fecha"], "total_pedidos": f["total"]} for f in filas]
 
 
 ensure_tables()

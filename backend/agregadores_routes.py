@@ -365,12 +365,32 @@ def subir_pedidos_horas_route(
         raise HTTPException(status_code=400, detail=str(e))
     subido_por = user.get("nombre") or user["username"]
     tanda_id = agregadores_module.guardar_tanda_pedidos(agregador, archivo.filename, datos, subido_por)
-    return {"ok": True, "tanda_id": tanda_id, **{k: v for k, v in datos.items() if k != "hora_counts"}}
+    return {
+        "ok": True,
+        "tanda_id": tanda_id,
+        **{k: v for k, v in datos.items() if k not in ("hora_counts", "dia_hora_counts")},
+    }
 
 
 @router.get("/pedidos-horas/resumen")
-def resumen_pedidos_horas_route(_user: dict = Depends(require_agregadores)):
-    return agregadores_module.resumen_pedidos_por_hora()
+def resumen_pedidos_horas_route(
+    desde: str | None = None, hasta: str | None = None, _user: dict = Depends(require_agregadores)
+):
+    return agregadores_module.resumen_pedidos_por_hora(desde, hasta)
+
+
+@router.get("/pedidos-horas/dias")
+def pedidos_por_dia_route(
+    agregador: str, desde: str | None = None, hasta: str | None = None, _user: dict = Depends(require_agregadores)
+):
+    if agregador not in agregadores_module.AGREGADORES_PEDIDOS_VALIDOS:
+        raise HTTPException(status_code=400, detail=f"Agregador no reconocido: {agregador}")
+    return agregadores_module.pedidos_por_dia(agregador, desde, hasta)
+
+
+@router.get("/pedidos-horas/con-desglose-dia")
+def agregadores_con_desglose_dia_route(_user: dict = Depends(require_agregadores)):
+    return sorted(agregadores_module.agregadores_con_desglose_dia())
 
 
 @router.get("/pedidos-horas/tandas")

@@ -2442,6 +2442,7 @@ async function agrCargarDashboardScraper() {
 // cambia cuando alguien sube o borra una tanda.
 
 let agrPhChart = null;
+let agrPhFiltro = { desde: null, hasta: null };
 
 function agrPhAdivinarFechasDesdeArchivo(nombre) {
   // heatmap_20260716-20260731-....xlsx (patrón de exportación de Glovo)
@@ -2501,7 +2502,17 @@ async function agrPhSubir(e) {
 function agrPhRenderChart(resumen) {
   const ctx = document.getElementById("agr-ph-chart");
   const labels = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, "0")}:00`);
-  const agregadores = Object.keys(resumen);
+  const sinFiltro = resumen._sin_filtro_de_fecha || [];
+  const agregadores = Object.keys(resumen).filter((k) => k !== "_sin_filtro_de_fecha");
+
+  const notaSinFiltro = document.getElementById("agr-ph-sin-filtro");
+  if (sinFiltro.length > 0) {
+    notaSinFiltro.textContent = `${sinFiltro.map((a) => AGR_NOMBRE_AGREGADOR[a] || a).join(", ")}: este archivo no trae fecha por pedido, así que no se puede filtrar por rango -- no aparece en el gráfico mientras el filtro esté activo.`;
+    notaSinFiltro.hidden = false;
+  } else {
+    notaSinFiltro.hidden = true;
+  }
+
   if (agrPhChart) { agrPhChart.destroy(); agrPhChart = null; }
   if (agregadores.length === 0) return;
   const datasets = agregadores.map((ag) => ({
@@ -2519,6 +2530,55 @@ function agrPhRenderChart(resumen) {
       plugins: { legend: { display: true } },
     },
   });
+}
+
+let agrPhDiaChart = null;
+
+function agrPhRenderDiaChart(dias) {
+  const ctx = document.getElementById("agr-ph-dia-chart");
+  if (agrPhDiaChart) { agrPhDiaChart.destroy(); agrPhDiaChart = null; }
+  const agregador = document.getElementById("agr-ph-dia-agregador").value;
+  agrPhDiaChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: dias.map((d) => d.fecha),
+      datasets: [{
+        label: `Pedidos por día -- ${AGR_NOMBRE_AGREGADOR[agregador] || agregador}`,
+        data: dias.map((d) => d.total_pedidos),
+        backgroundColor: AGR_COLOR_MARCA[agregador] || "#999",
+        borderRadius: 3,
+      }],
+    },
+    options: {
+      responsive: true,
+      scales: { y: { beginAtZero: true, title: { display: true, text: "Pedidos" } }, x: { ticks: { maxRotation: 60, minRotation: 60 } } },
+      plugins: { legend: { display: false } },
+    },
+  });
+}
+
+async function agrPhCargarDiaChart() {
+  const select = document.getElementById("agr-ph-dia-agregador");
+  if (!select.value) return;
+  const params = new URLSearchParams({ agregador: select.value });
+  if (agrPhFiltro.desde) params.set("desde", agrPhFiltro.desde);
+  if (agrPhFiltro.hasta) params.set("hasta", agrPhFiltro.hasta);
+  const res = await fetch(`${AGR_API}/pedidos-horas/dias?${params.toString()}`, { credentials: "include" });
+  agrPhRenderDiaChart(await res.json());
+}
+
+async function agrPhCargarDesgloseDia() {
+  const res = await fetch(`${AGR_API}/pedidos-horas/con-desglose-dia`, { credentials: "include" });
+  const agregadores = await res.json();
+  const wrap = document.getElementById("agr-ph-dia-wrap");
+  const select = document.getElementById("agr-ph-dia-agregador");
+  if (agregadores.length === 0) {
+    wrap.hidden = true;
+    return;
+  }
+  wrap.hidden = false;
+  select.innerHTML = agregadores.map((a) => `<option value="${a}">${AGR_NOMBRE_AGREGADOR[a] || a}</option>`).join("");
+  await agrPhCargarDiaChart();
 }
 
 function agrPhRenderTandas(tandas) {
@@ -2552,13 +2612,39 @@ function agrPhRenderTandas(tandas) {
   });
 }
 
+async function agrPhCargarResumen() {
+  const params = new URLSearchParams();
+  if (agrPhFiltro.desde) params.set("desde", agrPhFiltro.desde);
+  if (agrPhFiltro.hasta) params.set("hasta", agrPhFiltro.hasta);
+  const res = await fetch(`${AGR_API}/pedidos-horas/resumen${params.toString() ? "?" + params.toString() : ""}`, { credentials: "include" });
+  agrPhRenderChart(await res.json());
+}
+
 async function agrPhCargarTodo() {
-  const [resumenRes, tandasRes] = await Promise.all([
-    fetch(`${AGR_API}/pedidos-horas/resumen`, { credentials: "include" }),
-    fetch(`${AGR_API}/pedidos-horas/tandas`, { credentials: "include" }),
-  ]);
-  agrPhRenderChart(await resumenRes.json());
+  const tandasRes = await fetch(`${AGR_API}/pedidos-horas/tandas`, { credentials: "include" });
   agrPhRenderTandas(await tandasRes.json());
+  await Promise.all([agrPhCargarResumen(), agrPhCargarDesgloseDia()]);
+}
+
+function agrPhAplicarFiltro() {
+  const desde = document.getElementById("agr-ph-filtro-desde").value;
+  const hasta = document.getElementById("agr-ph-filtro-hasta").value;
+  if (!desde && !hasta) return;
+  agrPhFiltro = { desde: desde || null, hasta: hasta || null };
+  document.getElementById("agr-ph-filtro-quitar").hidden = false;
+  document.getElementById("agr-ph-filtro-activo").textContent = `Filtrando: ${desde || "…"} a ${hasta || "…"}`;
+  agrPhCargarResumen();
+  agrPhCargarDiaChart();
+}
+
+function agrPhQuitarFiltro() {
+  agrPhFiltro = { desde: null, hasta: null };
+  document.getElementById("agr-ph-filtro-desde").value = "";
+  document.getElementById("agr-ph-filtro-hasta").value = "";
+  document.getElementById("agr-ph-filtro-quitar").hidden = true;
+  document.getElementById("agr-ph-filtro-activo").textContent = "";
+  agrPhCargarResumen();
+  agrPhCargarDiaChart();
 }
 
 function agrPhWire() {
@@ -2571,6 +2657,9 @@ function agrPhWire() {
     if (e.target.files[0]) agrPhSugerirFechas(e.target.files[0].name);
   });
   document.getElementById("agr-ph-form").addEventListener("submit", agrPhSubir);
+  document.getElementById("agr-ph-filtro-aplicar").addEventListener("click", agrPhAplicarFiltro);
+  document.getElementById("agr-ph-filtro-quitar").addEventListener("click", agrPhQuitarFiltro);
+  document.getElementById("agr-ph-dia-agregador").addEventListener("change", agrPhCargarDiaChart);
   agrPhActualizarVisibilidadFechas();
 }
 
