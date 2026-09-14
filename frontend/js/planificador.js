@@ -48,11 +48,20 @@ function url(path, params = {}) {
   const p = new URLSearchParams({ empresa: EMPRESA, ...params });
   return `${API}/${path}?${p.toString()}`;
 }
+// Origen visual de la línea de tiempo: la hora en punto de la que sale la
+// apertura (p.ej. Gran Plaza 2 abre a las 09:30 -> origen 09:00). Si se
+// usara la apertura tal cual, la primera celda de la regla/rejilla (que
+// siempre empieza en una hora en punto, ver franjas()) se dibujaría desde
+// una x negativa y se vería cortada por el borde izquierdo -- el "1" de
+// personal planificado a medias, por ejemplo.
+function origenTimeline() {
+  return Math.floor(S.config.apertura_min / 60) * 60;
+}
 function minToX(min) {
-  return (min - S.config.apertura_min) * PX_POR_MIN;
+  return (min - origenTimeline()) * PX_POR_MIN;
 }
 function xToMin(x) {
-  return x / PX_POR_MIN + S.config.apertura_min;
+  return x / PX_POR_MIN + origenTimeline();
 }
 function snap(min) {
   return Math.round(min / SNAP) * SNAP;
@@ -95,12 +104,11 @@ function bloqueGeom(inicioMin, dur) {
   return { lado, presIni, presFin, left: minToX(presIni), width: (presFin - presIni) * PX_POR_MIN };
 }
 function anchoTimeline() {
-  return (S.config.cierre_min - S.config.apertura_min) * PX_POR_MIN;
+  return (S.config.cierre_min - origenTimeline()) * PX_POR_MIN;
 }
 function franjas() {
   const out = [];
-  const ini = Math.floor(S.config.apertura_min / 60) * 60;
-  for (let m = ini; m < S.config.cierre_min; m += 60) out.push(m);
+  for (let m = origenTimeline(); m < S.config.cierre_min; m += 60) out.push(m);
   return out;
 }
 // Las "y media" de cada hora de franjas() -- solo para las rayas guía y las
