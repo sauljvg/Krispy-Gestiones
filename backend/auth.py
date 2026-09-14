@@ -585,5 +585,86 @@ def sembrar_admin_inicial():
     print(f"[auth] Base de datos vacía: creado admin de arranque '{username}' desde ADMIN_PIN.", flush=True)
 
 
+# --- Alta automática del Planificador de turnos para gerentes ---
+
+# "ParqueSur" en usuario_tiendas (restricción de Reseñas) es siempre la
+# Tienda: la Fábrica no tiene reseñas de Google propias (Saul lo confirmó),
+# así que no hay ambigüedad real -- a diferencia de lo que se pensó al
+# principio.
+_TIENDA_A_CENTRO_PLANIFICADOR = {
+    "caleido": "Caleido",
+    "gran plaza 2": "Gran Plaza 2",
+    "la gavia": "La Gavia",
+    "parquesur": "ParqueSur Tienda",
+    "plenilunio": "Plenilunio",
+    "princesa": "Princesa",
+}
+
+# Gerentes cuyo centro NO se puede sacar de usuario_tiendas (ParqueSur
+# Fábrica no está ahí, al no tener reseñas) -- confirmados a mano por Saul.
+# Coincide por substring en el nombre (sin distinguir mayúsculas).
+_CENTRO_PLANIFICADOR_GERENTE_MANUAL = {
+    "raymond": "ParqueSur Fabrica",
+    "elisabeth": "ParqueSur Tienda",
+}
+
+
+def _resolver_centro_planificador(nombre, tiendas_kk):
+    """El centro del Planificador para este gerente: primero por nombre
+    confirmado a mano (_CENTRO_PLANIFICADOR_GERENTE_MANUAL, para los que no
+    se pueden sacar de sus tiendas), si no por su tienda de Reseñas (solo si
+    tiene EXACTAMENTE una). None si no se puede determinar de ninguna de las
+    dos formas."""
+    nombre_norm = (nombre or "").strip().lower()
+    for clave, centro in _CENTRO_PLANIFICADOR_GERENTE_MANUAL.items():
+        if clave in nombre_norm:
+            return centro
+    if len(tiendas_kk) != 1:
+        return None
+    return _TIENDA_A_CENTRO_PLANIFICADOR.get(tiendas_kk[0].strip().lower())
+
+
+def asignar_planificador_a_gerentes():
+    """Da el módulo Planificador de turnos a todos los gerentes (rol
+    'gerente'), restringido a su tienda -- para no tener que dárselo uno a
+    uno a mano desde Ajustes > Usuarios (pedido explícito). Se procesa una
+    sola vez por gerente: si ya tiene el módulo (se lo dio esto antes, o lo
+    puso a mano un admin) no se vuelve a tocar, así que nunca pisa un ajuste
+    posterior. Si no se puede determinar su tienda sin ambigüedad, se le da
+    el módulo igualmente pero SIN restricción de centro -- mejor eso que
+    restringirlo a la tienda equivocada -- y se deja constancia en el log
+    para revisarlo a mano."""
+    conn = get_connection()
+    gerentes = conn.execute("SELECT id, nombre FROM usuarios WHERE rol = 'gerente'").fetchall()
+    for g in gerentes:
+        uid = g["id"]
+        ya_tiene = conn.execute(
+            "SELECT 1 FROM usuario_modulos WHERE usuario_id = ? AND modulo IN ('planificador', 'saona_planificador')",
+            (uid,),
+        ).fetchone()
+        if ya_tiene:
+            continue
+        tiendas = [r[0] for r in conn.execute("SELECT tienda FROM usuario_tiendas WHERE usuario_id = ?", (uid,))]
+        tiendas_saona = [t for t in tiendas if t.strip().lower().startswith("saona")]
+        tiendas_kk = [t for t in tiendas if t not in tiendas_saona]
+        modulo = "saona_planificador" if tiendas_saona and not tiendas_kk else "planificador"
+        conn.execute("INSERT OR IGNORE INTO usuario_modulos (usuario_id, modulo) VALUES (?, ?)", (uid, modulo))
+        centro = _resolver_centro_planificador(g["nombre"], tiendas_kk) if modulo == "planificador" else None
+        if centro:
+            conn.execute(
+                "INSERT OR IGNORE INTO usuario_clima_centros (usuario_id, centro) VALUES (?, ?)", (uid, centro)
+            )
+            print(f"[auth] planificador: {g['nombre']!r} -> módulo {modulo}, restringido a {centro!r}", flush=True)
+        else:
+            print(
+                f"[auth] planificador: {g['nombre']!r} -> módulo {modulo}, SIN restricción de centro "
+                f"(tiendas={tiendas!r}) -- revisar a mano en Ajustes > Usuarios",
+                flush=True,
+            )
+    conn.commit()
+    conn.close()
+
+
 ensure_auth_tables()
 sembrar_admin_inicial()
+asignar_planificador_a_gerentes()
