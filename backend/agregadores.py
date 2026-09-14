@@ -4,6 +4,8 @@ El scraper corre en un portátil aparte (necesita un navegador real, headed
 para Uber Eats — ver scraper_agregadores/ en la raíz del repo) y llama a la
 API en vivo (POST /api/agregadores/chequeo) con cada resultado; aquí solo se
 guarda y se sirve. Nada de esto toca Selenium ni el scraper de Reseñas."""
+import csv
+import io
 import json
 import math
 import os
@@ -11,8 +13,10 @@ import re
 import sqlite3
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+
+import openpyxl
 
 MADRID_TZ = ZoneInfo("Europe/Madrid")
 
@@ -306,6 +310,39 @@ def ensure_tables():
         # fiable con el histórico ya existente sin ronda_id), pero tenerlo
         # marcado deja la puerta abierta a un filtro exacto más adelante.
         conn.execute("ALTER TABLE agregadores_chequeos ADD COLUMN ronda_id INTEGER")
+
+    # Pedidos por hora, alimentado a mano subiendo los informes que cada
+    # agregador deja exportar (historial de pedidos de Uber Eats, heatmap de
+    # Glovo...) -- no tiene nada que ver con el scraper de disponibilidad de
+    # arriba. Cada subida es una "tanda" con su propio rango de fechas; el
+    # promedio por hora se calcula sumando pedidos de todas las tandas de un
+    # agregador y dividiendo por la suma de días cubiertos, así que cuantas
+    # más tandas se suban con el tiempo, más fino sale el promedio.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agregadores_pedidos_tanda (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agregador TEXT NOT NULL,
+            nombre_archivo TEXT,
+            fecha_inicio TEXT NOT NULL,
+            fecha_fin TEXT NOT NULL,
+            dias INTEGER NOT NULL,
+            total_pedidos INTEGER NOT NULL,
+            subido_en TEXT NOT NULL,
+            subido_por TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agregadores_pedidos_hora (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tanda_id INTEGER NOT NULL REFERENCES agregadores_pedidos_tanda(id) ON DELETE CASCADE,
+            hora INTEGER NOT NULL,
+            pedidos INTEGER NOT NULL
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agr_pedidos_hora_tanda ON agregadores_pedidos_hora(tanda_id)"
+    )
+
     conn.commit()
     conn.close()
 
@@ -2767,6 +2804,174 @@ def get_estado():
         "completo": _estado_modo("completo", FRECUENCIA_CHEQUEO_COMPLETO_MIN),
     }
     conn.close()
+    return resultado
+
+
+# --- Pedidos por hora (alimentado a mano subiendo informes de cada agregador) ---
+# No confundir con AGREGADORES (disponibilidad) de arriba -- reusa el mismo
+# vocabulario de nombres ("ubereats", "glovo", "justeat") para no inventar
+# otro, pero es una tabla y un flujo totalmente aparte.
+
+AGREGADORES_PEDIDOS_VALIDOS = set(AGREGADORES)
+
+
+def procesar_pedidos_uber_csv(contenido: bytes) -> dict:
+    """CSV de 'historial de pedidos' que exporta Uber Eats (separado por ';').
+    Saca pedidos por hora de la columna 'Hora del pedido del cliente' y el
+    rango de fechas de 'Fecha del pedido' (dd/mm/aaaa) -- a diferencia de
+    Glovo, aquí el rango sale directo de los datos, no hay que pedírselo al
+    usuario."""
+    texto = contenido.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(texto), delimiter=";")
+    hora_counts = {h: 0 for h in range(24)}
+    fechas = []
+    total = 0
+    for fila in reader:
+        ts = (fila.get("Hora del pedido del cliente") or "").strip()
+        fecha_txt = (fila.get("Fecha del pedido") or "").strip()
+        if len(ts) >= 13 and ts[11:13].isdigit():
+            hora_counts[int(ts[11:13])] += 1
+            total += 1
+        if fecha_txt:
+            try:
+                fechas.append(datetime.strptime(fecha_txt, "%d/%m/%Y").date())
+            except ValueError:
+                pass
+    if not fechas:
+        raise ValueError("No se encontraron fechas válidas en el CSV (columna 'Fecha del pedido').")
+    fecha_inicio, fecha_fin = min(fechas), max(fechas)
+    return {
+        "hora_counts": hora_counts,
+        "fecha_inicio": fecha_inicio.isoformat(),
+        "fecha_fin": fecha_fin.isoformat(),
+        "dias": (fecha_fin - fecha_inicio).days + 1,
+        "total_pedidos": total,
+    }
+
+
+def procesar_pedidos_glovo_xlsx(contenido: bytes, fecha_inicio: str, fecha_fin: str) -> dict:
+    """Heatmap que exporta Glovo: una fila por hora (0-23) con el total de
+    pedidos de todo el periodo -- no trae fechas dentro del archivo, así que
+    el rango lo indica el usuario en el formulario (se lo sugerimos a partir
+    del nombre del archivo, pero él lo confirma)."""
+    wb = openpyxl.load_workbook(io.BytesIO(contenido), data_only=True)
+    ws = wb.active
+    hora_counts = {h: 0 for h in range(24)}
+    total = 0
+    encontro_alguna = False
+    for fila in ws.iter_rows(min_row=2, values_only=True):
+        if not fila or fila[0] is None:
+            continue
+        try:
+            hora = int(str(fila[0]).strip())
+            pedidos = int(str(fila[1]).strip())
+        except (ValueError, IndexError, TypeError):
+            continue
+        if 0 <= hora <= 23:
+            hora_counts[hora] += pedidos
+            total += pedidos
+            encontro_alguna = True
+    if not encontro_alguna:
+        raise ValueError("No se reconoció el formato del Excel -- se esperaban columnas 'Hour'/'Orders'.")
+    try:
+        f_inicio = date.fromisoformat(fecha_inicio)
+        f_fin = date.fromisoformat(fecha_fin)
+    except ValueError:
+        raise ValueError("Fecha de inicio o fin inválida (formato esperado AAAA-MM-DD).")
+    if f_fin < f_inicio:
+        raise ValueError("La fecha de fin no puede ser anterior a la de inicio.")
+    return {
+        "hora_counts": hora_counts,
+        "fecha_inicio": f_inicio.isoformat(),
+        "fecha_fin": f_fin.isoformat(),
+        "dias": (f_fin - f_inicio).days + 1,
+        "total_pedidos": total,
+    }
+
+
+def guardar_tanda_pedidos(agregador: str, nombre_archivo: str, datos: dict, subido_por: str) -> int:
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO agregadores_pedidos_tanda
+           (agregador, nombre_archivo, fecha_inicio, fecha_fin, dias, total_pedidos, subido_en, subido_por)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            agregador,
+            nombre_archivo,
+            datos["fecha_inicio"],
+            datos["fecha_fin"],
+            datos["dias"],
+            datos["total_pedidos"],
+            datetime.now(timezone.utc).isoformat(),
+            subido_por,
+        ),
+    )
+    tanda_id = cur.lastrowid
+    conn.executemany(
+        "INSERT INTO agregadores_pedidos_hora (tanda_id, hora, pedidos) VALUES (?, ?, ?)",
+        [(tanda_id, h, c) for h, c in datos["hora_counts"].items()],
+    )
+    conn.commit()
+    conn.close()
+    return tanda_id
+
+
+def listar_tandas_pedidos() -> list:
+    conn = get_connection()
+    filas = conn.execute(
+        "SELECT id, agregador, nombre_archivo, fecha_inicio, fecha_fin, dias, total_pedidos, subido_en, subido_por "
+        "FROM agregadores_pedidos_tanda ORDER BY subido_en DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(f) for f in filas]
+
+
+def eliminar_tanda_pedidos(tanda_id: int) -> bool:
+    conn = get_connection()
+    existe = conn.execute("SELECT 1 FROM agregadores_pedidos_tanda WHERE id=?", (tanda_id,)).fetchone()
+    if not existe:
+        conn.close()
+        return False
+    conn.execute("DELETE FROM agregadores_pedidos_hora WHERE tanda_id=?", (tanda_id,))
+    conn.execute("DELETE FROM agregadores_pedidos_tanda WHERE id=?", (tanda_id,))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def resumen_pedidos_por_hora() -> dict:
+    """Promedio de pedidos por hora de cada agregador: suma de pedidos de
+    todas las tandas subidas de ese agregador en esa hora, dividido por la
+    suma de días cubiertos -- así cuantas más tandas se vayan subiendo con
+    el tiempo, más se afina el promedio en vez de solo acumular un total
+    que crece sin parar."""
+    conn = get_connection()
+    tandas = conn.execute(
+        "SELECT id, agregador, dias FROM agregadores_pedidos_tanda"
+    ).fetchall()
+    dias_por_agregador = {}
+    for t in tandas:
+        dias_por_agregador[t["agregador"]] = dias_por_agregador.get(t["agregador"], 0) + t["dias"]
+
+    horas_pedidos = conn.execute(
+        """SELECT t.agregador AS agregador, h.hora AS hora, SUM(h.pedidos) AS total
+           FROM agregadores_pedidos_hora h
+           JOIN agregadores_pedidos_tanda t ON t.id = h.tanda_id
+           GROUP BY t.agregador, h.hora"""
+    ).fetchall()
+    conn.close()
+
+    resultado = {}
+    for agregador, dias_totales in dias_por_agregador.items():
+        resultado[agregador] = {
+            "dias_totales": dias_totales,
+            "promedio_por_hora": [0.0] * 24,
+        }
+    for fila in horas_pedidos:
+        agregador, hora, total = fila["agregador"], fila["hora"], fila["total"]
+        dias_totales = dias_por_agregador.get(agregador, 0)
+        if dias_totales > 0 and agregador in resultado:
+            resultado[agregador]["promedio_por_hora"][hora] = round(total / dias_totales, 2)
     return resultado
 
 

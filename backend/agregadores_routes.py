@@ -4,7 +4,7 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
@@ -332,6 +332,57 @@ def transiciones_route(
     tienda: str | None = None, horas: int = 24, _user: dict = Depends(require_agregadores)
 ):
     return agregadores_module.get_transiciones(tienda, horas)
+
+
+# --- Pedidos por hora: se alimenta a mano subiendo los informes que cada
+# agregador deja exportar (historial de Uber Eats, heatmap de Glovo...),
+# para ir viendo en qué horas conviene programar los scrapers sin pisar las
+# horas fuertes de pedidos de verdad. Nada que ver con el chequeo de
+# disponibilidad de arriba.
+
+@router.post("/pedidos-horas/subir")
+def subir_pedidos_horas_route(
+    agregador: str = Form(...),
+    archivo: UploadFile = File(...),
+    fecha_inicio: str | None = Form(None),
+    fecha_fin: str | None = Form(None),
+    user: dict = Depends(require_agregadores),
+):
+    if agregador not in agregadores_module.AGREGADORES_PEDIDOS_VALIDOS:
+        raise HTTPException(status_code=400, detail=f"Agregador no reconocido: {agregador}")
+    contenido = archivo.file.read()
+    try:
+        if agregador == "ubereats":
+            datos = agregadores_module.procesar_pedidos_uber_csv(contenido)
+        else:
+            if not fecha_inicio or not fecha_fin:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Este archivo no trae fechas dentro -- indica fecha de inicio y fin del periodo.",
+                )
+            datos = agregadores_module.procesar_pedidos_glovo_xlsx(contenido, fecha_inicio, fecha_fin)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    subido_por = user.get("nombre") or user["username"]
+    tanda_id = agregadores_module.guardar_tanda_pedidos(agregador, archivo.filename, datos, subido_por)
+    return {"ok": True, "tanda_id": tanda_id, **{k: v for k, v in datos.items() if k != "hora_counts"}}
+
+
+@router.get("/pedidos-horas/resumen")
+def resumen_pedidos_horas_route(_user: dict = Depends(require_agregadores)):
+    return agregadores_module.resumen_pedidos_por_hora()
+
+
+@router.get("/pedidos-horas/tandas")
+def listar_pedidos_horas_tandas_route(_user: dict = Depends(require_agregadores)):
+    return agregadores_module.listar_tandas_pedidos()
+
+
+@router.delete("/pedidos-horas/tandas/{tanda_id}")
+def eliminar_pedidos_horas_tanda_route(tanda_id: int, _user: dict = Depends(require_agregadores)):
+    if not agregadores_module.eliminar_tanda_pedidos(tanda_id):
+        raise HTTPException(status_code=404, detail="No existe esa tanda")
+    return {"ok": True}
 
 
 @router.get("/direcciones/{tienda}", dependencies=[Depends(require_api_key)])

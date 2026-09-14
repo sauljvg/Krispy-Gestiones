@@ -2436,6 +2436,144 @@ async function agrCargarDashboardScraper() {
   }
 }
 
+// --- Pedidos por hora (subida manual de informes de cada agregador) ---
+// Independiente del resto de la página (disponibilidad) -- se carga una vez
+// al entrar, no en el intervalo de 30s como agrCargarTodo, porque solo
+// cambia cuando alguien sube o borra una tanda.
+
+let agrPhChart = null;
+
+function agrPhAdivinarFechasDesdeArchivo(nombre) {
+  // heatmap_20260716-20260731-....xlsx (patrón de exportación de Glovo)
+  const m = /(\d{4})(\d{2})(\d{2})-(\d{4})(\d{2})(\d{2})/.exec(nombre || "");
+  if (!m) return null;
+  return { inicio: `${m[1]}-${m[2]}-${m[3]}`, fin: `${m[4]}-${m[5]}-${m[6]}` };
+}
+
+function agrPhActualizarVisibilidadFechas() {
+  const agregador = document.getElementById("agr-ph-agregador").value;
+  document.getElementById("agr-ph-fechas").hidden = agregador === "ubereats";
+}
+
+function agrPhSugerirFechas(nombreArchivo) {
+  if (document.getElementById("agr-ph-agregador").value === "ubereats") return;
+  const fechas = agrPhAdivinarFechasDesdeArchivo(nombreArchivo);
+  if (!fechas) return;
+  document.getElementById("agr-ph-fecha-inicio").value = fechas.inicio;
+  document.getElementById("agr-ph-fecha-fin").value = fechas.fin;
+}
+
+async function agrPhSubir(e) {
+  e.preventDefault();
+  const error = document.getElementById("agr-ph-error");
+  error.hidden = true;
+  const agregador = document.getElementById("agr-ph-agregador").value;
+  const archivo = document.getElementById("agr-ph-archivo").files[0];
+  if (!archivo) return;
+
+  const formData = new FormData();
+  formData.append("agregador", agregador);
+  formData.append("archivo", archivo);
+  if (agregador !== "ubereats") {
+    const inicio = document.getElementById("agr-ph-fecha-inicio").value;
+    const fin = document.getElementById("agr-ph-fecha-fin").value;
+    if (!inicio || !fin) {
+      error.textContent = "Indica la fecha de inicio y fin del periodo -- este archivo no las trae dentro.";
+      error.hidden = false;
+      return;
+    }
+    formData.append("fecha_inicio", inicio);
+    formData.append("fecha_fin", fin);
+  }
+
+  const res = await fetch(`${AGR_API}/pedidos-horas/subir`, { method: "POST", credentials: "include", body: formData });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    error.textContent = data.detail || "No se pudo procesar el archivo.";
+    error.hidden = false;
+    return;
+  }
+  document.getElementById("agr-ph-form").reset();
+  agrPhActualizarVisibilidadFechas();
+  await agrPhCargarTodo();
+}
+
+function agrPhRenderChart(resumen) {
+  const ctx = document.getElementById("agr-ph-chart");
+  const labels = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, "0")}:00`);
+  const agregadores = Object.keys(resumen);
+  if (agrPhChart) { agrPhChart.destroy(); agrPhChart = null; }
+  if (agregadores.length === 0) return;
+  const datasets = agregadores.map((ag) => ({
+    label: `${AGR_NOMBRE_AGREGADOR[ag] || ag} (${resumen[ag].dias_totales} días)`,
+    data: resumen[ag].promedio_por_hora,
+    backgroundColor: AGR_COLOR_MARCA[ag] || "#999",
+    borderRadius: 4,
+  }));
+  agrPhChart = new Chart(ctx, {
+    type: "bar",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      scales: { y: { beginAtZero: true, title: { display: true, text: "Promedio de pedidos" } } },
+      plugins: { legend: { display: true } },
+    },
+  });
+}
+
+function agrPhRenderTandas(tandas) {
+  const cont = document.getElementById("agr-ph-tandas");
+  if (tandas.length === 0) {
+    cont.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">Todavía no se ha subido ningún informe.</p>';
+    return;
+  }
+  cont.innerHTML = `
+    <table class="agr-ph-tandas-tabla">
+      <thead><tr><th>Agregador</th><th>Periodo</th><th>Días</th><th>Pedidos</th><th>Archivo</th><th>Subido</th><th></th></tr></thead>
+      <tbody>
+        ${tandas.map((t) => `
+          <tr>
+            <td>${AGR_NOMBRE_AGREGADOR[t.agregador] || t.agregador}</td>
+            <td>${t.fecha_inicio} a ${t.fecha_fin}</td>
+            <td>${t.dias}</td>
+            <td>${t.total_pedidos}</td>
+            <td>${escapeHTML(t.nombre_archivo || "")}</td>
+            <td>${new Date(t.subido_en).toLocaleDateString("es-ES")} · ${escapeHTML(t.subido_por || "")}</td>
+            <td><button type="button" class="agr-ph-tandas-borrar" data-id="${t.id}" title="Eliminar esta tanda">🗑</button></td>
+          </tr>`).join("")}
+      </tbody>
+    </table>`;
+  cont.querySelectorAll(".agr-ph-tandas-borrar").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("¿Eliminar esta tanda de pedidos? No se puede deshacer.")) return;
+      await fetch(`${AGR_API}/pedidos-horas/tandas/${btn.dataset.id}`, { method: "DELETE", credentials: "include" });
+      await agrPhCargarTodo();
+    });
+  });
+}
+
+async function agrPhCargarTodo() {
+  const [resumenRes, tandasRes] = await Promise.all([
+    fetch(`${AGR_API}/pedidos-horas/resumen`, { credentials: "include" }),
+    fetch(`${AGR_API}/pedidos-horas/tandas`, { credentials: "include" }),
+  ]);
+  agrPhRenderChart(await resumenRes.json());
+  agrPhRenderTandas(await tandasRes.json());
+}
+
+function agrPhWire() {
+  document.getElementById("agr-ph-agregador").addEventListener("change", () => {
+    agrPhActualizarVisibilidadFechas();
+    const archivo = document.getElementById("agr-ph-archivo").files[0];
+    if (archivo) agrPhSugerirFechas(archivo.name);
+  });
+  document.getElementById("agr-ph-archivo").addEventListener("change", (e) => {
+    if (e.target.files[0]) agrPhSugerirFechas(e.target.files[0].name);
+  });
+  document.getElementById("agr-ph-form").addEventListener("submit", agrPhSubir);
+  agrPhActualizarVisibilidadFechas();
+}
+
 async function agrCargarTodo() {
   // agrCargarMapa() debe ir primero: fija agrTiendaCentro/agrCentrosPorTienda,
   // que agrActualizarPoligonoLimite() usa para calcular los vértices del polígono.
@@ -2465,6 +2603,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   agrWireFiltroAgregador();
   agrAplicarColapsoTabla();
+  agrPhWire();
+  agrPhCargarTodo();
 
   await agrCargarTiendas();
   await agrCargarTodo();
