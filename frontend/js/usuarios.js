@@ -270,9 +270,11 @@ function filaUsuarioHTML(u, currentUserId) {
         </td>
         <td>${fmtFecha(u.creado)}</td>
         <td>
-          <button type="button" class="btn btn-ghost btn-guardar-pin" data-id="${u.id}">Guardar PIN</button>
-          ${u.pin ? `<button type="button" class="btn btn-ghost btn-reset-pin" data-id="${u.id}" title="Borra el PIN — al volver a entrar, el usuario crea uno nuevo">Resetear PIN</button>` : ""}
-          ${u.id === currentUserId ? "" : `<button type="button" class="btn btn-ghost btn-delete-user" data-id="${u.id}">Eliminar</button>`}
+          <div class="usr-acciones">
+            <button type="button" class="btn btn-ghost btn-guardar-pin" data-id="${u.id}">Guardar PIN</button>
+            ${u.pin ? `<button type="button" class="btn btn-ghost btn-reset-pin" data-id="${u.id}" title="Borra el PIN — al volver a entrar, el usuario crea uno nuevo">Resetear PIN</button>` : ""}
+            ${u.id === currentUserId ? "" : `<button type="button" class="btn btn-ghost btn-delete-user" data-id="${u.id}">Eliminar</button>`}
+          </div>
         </td>
       </tr>`;
 }

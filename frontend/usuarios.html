@@ -40,8 +40,19 @@
   .staff-table-usuarios th:nth-child(4), .staff-table-usuarios td:nth-child(4) { width: 10%; }
   .staff-table-usuarios th:nth-child(5), .staff-table-usuarios td:nth-child(5) { width: 14%; }
   .staff-table-usuarios th:nth-child(6), .staff-table-usuarios td:nth-child(6) { width: 10%; }
-  .staff-table-usuarios th:nth-child(7), .staff-table-usuarios td:nth-child(7) { width: 26%; white-space: normal; }
+  .staff-table-usuarios th:nth-child(7), .staff-table-usuarios td:nth-child(7) { width: 26%; white-space: normal; text-align: left; }
   .staff-table-usuarios td:nth-child(2) { white-space: normal; word-break: break-word; }
+
+  /* Botones de la última columna (Guardar PIN / Resetear PIN / Eliminar):
+     una rejilla con ancho fijo por botón para que quede alineado con la
+     fila de arriba y abajo aunque falte alguno (p.ej. sin PIN, o es el
+     usuario que tiene la sesión abierta) -- si no, al faltar uno el
+     siguiente botón se corría hacia la izquierda y la columna quedaba
+     descuadrada entre filas. */
+  .usr-acciones { display: grid; grid-template-columns: 106px 118px 88px; column-gap: 8px; justify-content: start; align-items: center; }
+  .usr-acciones .btn-guardar-pin { grid-column: 1; justify-self: start; }
+  .usr-acciones .btn-reset-pin { grid-column: 2; justify-self: start; }
+  .usr-acciones .btn-delete-user { grid-column: 3; justify-self: start; }
   .staff-table-usuarios td input { text-align: center; }
   .staff-table-usuarios select { padding: 5px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); }
   .config-error { color: var(--status-critical); font-size: 13px; margin: 10px 0 0; }
@@ -243,6 +254,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/usuarios.js?v=20260914c"></script>
+<script src="js/usuarios.js?v=20260914d"></script>
 </body>
 </html>
