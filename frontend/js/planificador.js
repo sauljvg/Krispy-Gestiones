@@ -24,7 +24,7 @@ const S = {
   fecha: hoyISO(),
   vista: localStorage.getItem(LS_VISTA) === "semana" ? "semana" : "dia",
   modo: localStorage.getItem(LS_MODO) === "slots" ? "slots" : "turnos",
-  config: { apertura_min: 480, cierre_min: 1500, objetivo_transacciones_hora: null },
+  config: { apertura_min: 480, cierre_min: 1500, objetivo_transacciones_hora: null, tipo_centro: "tienda", objetivo_docenas_hora: null },
   trabajadores: [],
   turnos: [],
   minutosSemana: {},
@@ -265,7 +265,11 @@ function renderDia() {
           <div class="plan-horas">${ticksHTML}</div>
         </div>
         ${cabFila("Venta prevista (€)", celdasInput("venta_prevista", "any"))}
-        ${cabFila("Transacciones prev.", celdasInput("transacciones_prevista", "1"))}
+        ${
+          S.config.tipo_centro === "fabrica"
+            ? cabFila("Docenas previstas", celdasInput("docenas_prevista", "1"))
+            : cabFila("Transacciones prev.", celdasInput("transacciones_prevista", "1"))
+        }
         ${cabFila("Personal ideal", celdasIdeal())}
         ${cabFila("Personal planificado", `<div id="plan-fila-planificado">${celdasPlanificado()}</div>`)}
         ${filaSinAsignar()}
@@ -311,6 +315,11 @@ function celdasPlanificado() {
 function idealCalculado(m) {
   const p = S.proyeccion[m] || {};
   if (p.personal_ideal_manual != null && p.personal_ideal_manual !== "") return Number(p.personal_ideal_manual);
+  if (S.config.tipo_centro === "fabrica") {
+    const obj = S.config.objetivo_docenas_hora;
+    if (!obj || p.docenas_prevista == null) return null;
+    return Math.round((p.docenas_prevista / obj) * 10) / 10;
+  }
   const obj = S.config.objetivo_transacciones_hora;
   if (!obj || p.transacciones_prevista == null) return null;
   return Math.round((p.transacciones_prevista / obj) * 10) / 10;
@@ -1771,15 +1780,25 @@ function wireRoster() {
 
 // ---------------------------------------------------------------- config
 
+function actualizarCamposObjetivo() {
+  const esFabrica = document.getElementById("plan-cfg-tipo").value === "fabrica";
+  document.getElementById("plan-cfg-objetivo-tienda-campo").hidden = esFabrica;
+  document.getElementById("plan-cfg-objetivo-fabrica-campo").hidden = !esFabrica;
+}
+
 function wireConfig() {
   const dlg = document.getElementById("plan-dialog-config");
   dlg.querySelector("[data-cerrar]").addEventListener("click", () => dlg.close());
+  document.getElementById("plan-cfg-tipo").addEventListener("change", actualizarCamposObjetivo);
   document.getElementById("plan-btn-config").addEventListener("click", () => {
     if (!S.centro) return;
     document.getElementById("plan-cfg-apertura").value = fmtHHMM(S.config.apertura_min);
     document.getElementById("plan-cfg-cierre").value = fmtHHMM(S.config.cierre_min);
     document.getElementById("plan-cfg-cierre-siguiente").checked = S.config.cierre_min >= 1440;
+    document.getElementById("plan-cfg-tipo").value = S.config.tipo_centro || "tienda";
     document.getElementById("plan-cfg-objetivo").value = S.config.objetivo_transacciones_hora ?? "";
+    document.getElementById("plan-cfg-objetivo-docenas").value = S.config.objetivo_docenas_hora ?? "";
+    actualizarCamposObjetivo();
     document.getElementById("plan-cfg-direccion").value = S.config.direccion_odoo ?? "";
     document.getElementById("plan-cfg-rol").value = S.config.rol_odoo ?? "";
     document.getElementById("plan-cfg-complementarias-jc").checked = !!S.config.complementarias_jornada_completa;
@@ -1795,6 +1814,7 @@ function wireConfig() {
     let cierre = toMin(document.getElementById("plan-cfg-cierre").value || "23:00");
     if (document.getElementById("plan-cfg-cierre-siguiente").checked) cierre += 1440;
     const objStr = document.getElementById("plan-cfg-objetivo").value;
+    const objDocenasStr = document.getElementById("plan-cfg-objetivo-docenas").value;
     const err = document.getElementById("plan-cfg-error");
     if (cierre <= apertura) {
       err.textContent = "El cierre debe ser posterior a la apertura (marca 'cierra al día siguiente' si cierra pasada la medianoche).";
@@ -1809,6 +1829,8 @@ function wireConfig() {
         apertura_min: apertura,
         cierre_min: cierre,
         objetivo_transacciones_hora: objStr === "" ? null : Number(objStr),
+        tipo_centro: document.getElementById("plan-cfg-tipo").value,
+        objetivo_docenas_hora: objDocenasStr === "" ? null : Number(objDocenasStr),
         direccion_odoo: document.getElementById("plan-cfg-direccion").value.trim(),
         rol_odoo: document.getElementById("plan-cfg-rol").value.trim(),
         complementarias_jornada_completa: document.getElementById("plan-cfg-complementarias-jc").checked,

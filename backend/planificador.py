@@ -352,6 +352,21 @@ def ensure_planificador_tables():
         conn.execute("ALTER TABLE planificador_config ADD COLUMN turnos_seed_version INTEGER NOT NULL DEFAULT 0")
     if "fusion_nombres_version" not in cols_config:
         conn.execute("ALTER TABLE planificador_config ADD COLUMN fusion_nombres_version INTEGER NOT NULL DEFAULT 0")
+    # "Personal ideal" no se mide igual en fábrica que en tienda: fábrica no
+    # tiene "transacciones", produce en docenas -- objetivo_docenas_hora
+    # (docenas por hora-persona) en vez de objetivo_transacciones_hora (el
+    # TPLH -- tickets por hora de labor -- de las tiendas). `tipo_centro` se
+    # siembra 1 sola vez (ParqueSur Fábrica -> 'fabrica', el resto 'tienda'
+    # por el DEFAULT) y luego el gerente lo puede cambiar en "Horario del
+    # centro" sin que se vuelva a pisar.
+    if "tipo_centro" not in cols_config:
+        conn.execute("ALTER TABLE planificador_config ADD COLUMN tipo_centro TEXT NOT NULL DEFAULT 'tienda'")
+        conn.execute("UPDATE planificador_config SET tipo_centro = 'fabrica' WHERE centro = 'ParqueSur Fabrica'")
+    if "objetivo_docenas_hora" not in cols_config:
+        conn.execute("ALTER TABLE planificador_config ADD COLUMN objetivo_docenas_hora REAL")
+    cols_proy = {r[1] for r in conn.execute("PRAGMA table_info(planificador_proyeccion)")}
+    if "docenas_prevista" not in cols_proy:
+        conn.execute("ALTER TABLE planificador_proyeccion ADD COLUMN docenas_prevista REAL")
     # Plantilla de la semana: se siembra desde una semana típica de cada tienda
     # (la que tiene el total de horas más cercano a la mediana de 7 meses de
     # planificación real de Odoo) -- misma para 'alta' y 'valle', el gerente la
@@ -1067,7 +1082,7 @@ def get_config(empresa, centro):
     conn = get_connection()
     row = conn.execute(
         "SELECT apertura_min, cierre_min, objetivo_transacciones_hora, direccion_odoo, rol_odoo, "
-        "complementarias_jornada_completa "
+        "complementarias_jornada_completa, tipo_centro, objetivo_docenas_hora "
         "FROM planificador_config WHERE empresa = ? AND centro = ?",
         (empresa, centro),
     ).fetchone()
@@ -1080,6 +1095,8 @@ def get_config(empresa, centro):
             direccion_odoo=None,
             rol_odoo=None,
             complementarias_jornada_completa=0,
+            tipo_centro="tienda",
+            objetivo_docenas_hora=None,
         )
     else:
         d = dict(row)
@@ -1088,29 +1105,35 @@ def get_config(empresa, centro):
     if not d.get("rol_odoo"):
         d["rol_odoo"] = "Retail"
     d["complementarias_jornada_completa"] = int(d.get("complementarias_jornada_completa") or 0)
+    d["tipo_centro"] = d.get("tipo_centro") or "tienda"
     return d
 
 
 def set_config(empresa, centro, apertura_min, cierre_min, objetivo_transacciones_hora,
-               direccion_odoo=None, rol_odoo=None, complementarias_jornada_completa=False):
+               direccion_odoo=None, rol_odoo=None, complementarias_jornada_completa=False,
+               tipo_centro="tienda", objetivo_docenas_hora=None):
     if cierre_min <= apertura_min:
         raise ValueError("La hora de cierre debe ser posterior a la de apertura")
+    if tipo_centro not in ("tienda", "fabrica"):
+        raise ValueError("Tipo de centro inválido")
     conn = get_connection()
     conn.execute("""
         INSERT INTO planificador_config
             (empresa, centro, apertura_min, cierre_min, objetivo_transacciones_hora, direccion_odoo, rol_odoo,
-             complementarias_jornada_completa)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             complementarias_jornada_completa, tipo_centro, objetivo_docenas_hora)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (empresa, centro) DO UPDATE SET
             apertura_min = excluded.apertura_min,
             cierre_min = excluded.cierre_min,
             objetivo_transacciones_hora = excluded.objetivo_transacciones_hora,
+            tipo_centro = excluded.tipo_centro,
+            objetivo_docenas_hora = excluded.objetivo_docenas_hora,
             direccion_odoo = excluded.direccion_odoo,
             rol_odoo = excluded.rol_odoo,
             complementarias_jornada_completa = excluded.complementarias_jornada_completa
     """, (empresa, centro, apertura_min, cierre_min, objetivo_transacciones_hora,
           (direccion_odoo or "").strip() or None, (rol_odoo or "").strip() or None,
-          1 if complementarias_jornada_completa else 0))
+          1 if complementarias_jornada_completa else 0, tipo_centro, objetivo_docenas_hora))
     conn.commit()
     conn.close()
 
@@ -1967,13 +1990,13 @@ def exportar_odoo_xlsx(empresa, centro, desde, hasta):
 
 # --- Proyección ---
 
-_CAMPOS_PROYECCION = ("transacciones_prevista", "venta_prevista", "personal_ideal_manual")
+_CAMPOS_PROYECCION = ("transacciones_prevista", "docenas_prevista", "venta_prevista", "personal_ideal_manual")
 
 
 def get_proyeccion(empresa, centro, fecha):
     conn = get_connection()
     rows = conn.execute(
-        "SELECT franja_min, transacciones_prevista, venta_prevista, personal_ideal_manual "
+        "SELECT franja_min, transacciones_prevista, docenas_prevista, venta_prevista, personal_ideal_manual "
         "FROM planificador_proyeccion WHERE empresa = ? AND centro = ? AND fecha = ?",
         (empresa, centro, fecha),
     ).fetchall()
