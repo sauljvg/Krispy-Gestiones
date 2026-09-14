@@ -30,18 +30,23 @@
 
   /* Tabla de usuarios: columnas fijas y centradas (antes heredaba el
      text-align:right de .staff-table, pensado para tablas numéricas, y sin
-     anchos fijos los inputs/botones no quedaban alineados entre sí). */
-  .staff-table-usuarios { table-layout: fixed; }
+     anchos fijos los inputs/botones no quedaban alineados entre sí).
+     Anchos en px (no %) ajustados al contenido real de cada columna --
+     con % sobre un contenedor ancho, columnas cortas como Accesos/PIN
+     reservaban muchísimo más hueco del que necesitaban mientras la de
+     acciones (3 botones) se quedaba corta y forzaba scroll de todos modos.
+     width:auto en la tabla (en vez del 100% de .staff-table) para que no
+     se estire más de lo que suman estas columnas. */
+  .staff-table-usuarios { table-layout: fixed; width: auto; }
   .staff-table-usuarios th, .staff-table-usuarios td { vertical-align: middle; text-align: center; font-variant-numeric: normal; }
   .staff-table-usuarios th:not(:first-child), .staff-table-usuarios td:not(:first-child) { text-align: center; font-variant-numeric: normal; }
-  .staff-table-usuarios th:nth-child(1), .staff-table-usuarios td:nth-child(1) { width: 12%; }
-  .staff-table-usuarios th:nth-child(2), .staff-table-usuarios td:nth-child(2) { width: 16%; }
-  .staff-table-usuarios th:nth-child(3), .staff-table-usuarios td:nth-child(3) { width: 12%; }
-  .staff-table-usuarios th:nth-child(4), .staff-table-usuarios td:nth-child(4) { width: 10%; }
-  .staff-table-usuarios th:nth-child(5), .staff-table-usuarios td:nth-child(5) { width: 14%; }
-  .staff-table-usuarios th:nth-child(6), .staff-table-usuarios td:nth-child(6) { width: 10%; }
-  .staff-table-usuarios th:nth-child(7), .staff-table-usuarios td:nth-child(7) { width: 26%; white-space: normal; text-align: left; }
-  .staff-table-usuarios td:nth-child(2) { white-space: normal; word-break: break-word; }
+  .staff-table-usuarios th:nth-child(1), .staff-table-usuarios td:nth-child(1) { width: 120px; }
+  .staff-table-usuarios th:nth-child(2), .staff-table-usuarios td:nth-child(2) { width: 190px; white-space: normal; word-break: break-word; }
+  .staff-table-usuarios th:nth-child(3), .staff-table-usuarios td:nth-child(3) { width: 165px; }
+  .staff-table-usuarios th:nth-child(4), .staff-table-usuarios td:nth-child(4) { width: 100px; }
+  .staff-table-usuarios th:nth-child(5), .staff-table-usuarios td:nth-child(5) { width: 130px; }
+  .staff-table-usuarios th:nth-child(6), .staff-table-usuarios td:nth-child(6) { width: 100px; }
+  .staff-table-usuarios th:nth-child(7), .staff-table-usuarios td:nth-child(7) { width: 340px; text-align: left; }
 
   /* Botones de la última columna (Guardar PIN / Resetear PIN / Eliminar):
      una rejilla con ancho fijo por botón para que quede alineado con la
@@ -254,6 +259,6 @@
 <script src="js/auth-common.js?v=20260824a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/usuarios.js?v=20260914d"></script>
+<script src="js/usuarios.js?v=20260914e"></script>
 </body>
 </html>
