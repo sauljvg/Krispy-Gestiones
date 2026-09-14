@@ -15,8 +15,9 @@ Home (index.html) tiene una tarjeta propia y directa por cada modulo: "Resenas" 
 "Informes" (informes.html), "Clima Laboral" (clima.html, una landing con 2 tarjetas propias --
 "Test" y "Informes", ver mas abajo), "Entrevista de Salida" (entrevistas.html),
 "Reclutamiento" (compartidos.html), "Test" (tests.html), "Perfil DISC" (disc_form.html),
-"Agregadores" (agregadores.html), "Evaluaciones 360°" (evaluaciones360.html), y "SAONA" (si tiene
-algun modulo saona_* o es admin). IMPORTANTE: "Informes" y "Entrevista de Salida" son DOS TARJETAS
+"Agregadores" (agregadores.html), "Evaluaciones 360°" (evaluaciones360.html), "Manuales"
+(manuales.html), "Dashboard KPI's" (kpis.html), "Planificador de turnos" (planificador.html), y
+"SAONA" (si tiene algun modulo saona_* o es admin). IMPORTANTE: "Informes" y "Entrevista de Salida" son DOS TARJETAS
 DISTINTAS que llevan a DOS PAGINAS DISTINTAS (informes.html no tiene nada de Entrevista de Salida) --
 solo comparten el mismo permiso de acceso por detras (el modulo "informes"), pero para entrar a
 Entrevista de Salida se pulsa DIRECTAMENTE su propia tarjeta "Entrevista de Salida" en el Home, nunca
@@ -77,6 +78,88 @@ se suban con el tiempo. Filtro "Filtrar por fecha": solo funciona para Uber Eats
 fecha por pedido; Glovo/JustEat no, y se avisa en pantalla en vez de fallar). Con datos de Uber Eats
 tambien aparece "Pedidos por dia", un segundo grafico con el total real de cada dia -- para ver de
 un vistazo que dia concreto subio o bajo, en vez de solo el promedio.
+
+## Manuales (manuales.html)
+
+Catalogo de guias paso a paso (de Odoo y otras herramientas), agrupadas por categoria en tarjetas con
+portada. Al abrir una guia se ve un solo paso a la vez: captura de pantalla (con un circulo marcado
+opcionalmente senalando donde mirar/hacer clic), un pictograma corto arriba (opcional) y una frase
+debajo. Se navega con "Anterior"/"Siguiente" o los puntos de abajo.
+
+Solo admin ve "＋ Nuevo manual" (pide Titulo y Categoria en dos ventanas emergentes y abre ya el
+editor) y, dentro de una guia, "✏️ Editar". El editor deja: cambiar Titulo/Categoria, la lista de
+pasos ya creados (cada uno editable/borrable), y anadir un paso nuevo -- captura de pantalla
+(opcional), marcar en ella donde mirar/hacer clic (toca la imagen para poner el circulo, control
+deslizante para el tamano, "Quitar marca"), pictograma (opcional, de una lista predefinida) y la
+frase del paso. "Eliminar manual" borra la guia entera.
+
+## Dashboard KPI's (kpis.html)
+
+Se alimenta importando un Excel del informe de plantilla de Odoo (boton "Importar Excel de
+plantilla", solo lo ve admin). Tarjetas de arriba: Plantilla activa, Rotacion acumulada del periodo,
+Rotacion del ultimo mes del rango, Horas contratadas (el boton ⓘ al lado abre un desglose por tipo de
+jornada), y % Promocion interna. Un filtro de fechas ("Desde"/"Hasta", cada uno un selector de
+mes/ano desplegable, mas los atajos "Ultimos 12 meses" y "Ano en curso") afecta a todo lo de abajo,
+incluidas esas tarjetas.
+
+Graficos: "Rotacion mensual global" (toggle "Numero"/"%"), "Rotacion por centro de trabajo", "Horas
+contratadas por centro" y "Bajas por motivo" (los datos de bajas vienen en vivo de Entrevista de
+Salida, no del Excel de plantilla -- si no hay bajas registradas ahi para el periodo, avisa en vez de
+mostrar un grafico vacio).
+
+"Movimientos internos": registra traslados de centro y promociones de puesto (de ahi sale el % de
+promocion interna) -- dos pestanas, "Traslados de centro" y "Promociones de puesto". Formulario:
+Codigo de empleado (boton "Buscar" para autocompletar "De" con su centro/puesto actual), "De", "A",
+Fecha, y "Registrar". Solo sirve para movimientos de ahora en adelante, no reconstruye el historico
+anterior a la primera importacion. Solo admin puede borrar un movimiento ya registrado (boton ✕ en su
+fila).
+
+## Planificador de turnos (planificador.html)
+
+Cuadrante de horario por centro, del dia o de la semana, con turnos que se arrastran. Barra de
+herramientas: navegar de dia en dia (‹ › o el propio selector de fecha), selector de "Centro"
+(gerentes normalmente solo ven el suyo -- se les restringe al configurar su usuario en Ajustes >
+Usuarios), toggle "Turnos"/"Slots" (ver mas abajo), toggle "Dia"/"Semana", "👥 Plantilla" (gestion de
+personal del centro), "⚙ Horario del centro" y "⬇ Exportar a Odoo" (descarga la semana visible en el
+formato que importa Odoo, planning.slot).
+
+En la rejilla: arrastrar el centro de un bloque lo mueve, arrastrar un borde lo alarga/acorta, pasar
+el raton por encima y pulsar ✕ lo quita, clic en una fila vacia crea un turno de 4h. Un bloque gris
+que ocupa toda la franja es un dia libre de esa persona; uno azul son vacaciones (toda la semana por
+defecto, se puede acotar a dias sueltos). Junto al nombre de cada persona hay un icono de cama: ✓
+verde si cumple el descanso minimo entre turnos (12h) y al menos 2 dias libres en la semana, ✕ rojo
+si no -- pasar el raton por encima explica por que en concreto. La barra de horas de cada persona se
+pone roja solo si se pasa de su jornada contratada (verde hasta el 100%, sin tramo intermedio); en
+contratos a tiempo parcial con horas complementarias permitidas, la barra tiene ademas un tramo
+amarillo (100-130%, complementarias pactadas) y uno rojo mas alla (130-145%, voluntarias).
+
+Modo "Slots": en vez de turnos libres, se arrastran horarios predefinidos (la paleta de arriba, o
+"Slots de horario" en el dialogo que crea/edita esos horarios base, validos para todos los centros)
+a un dia -- cada slot puede llevar varias personas a la vez, con un contador. Sirve para puestos
+donde varias personas comparten literalmente el mismo horario.
+
+"👥 Plantilla": lista el personal del centro (rol, horas de contrato, activo o no). Se puede anadir
+a mano ("＋ Anadir persona") o importar de golpe con "⬇ Cargar de KPIs" (trae la plantilla ya
+importada en el Dashboard KPI's), "⬆ Importar Excel de Odoo" o "📅 Importar planificacion (Odoo)".
+Clic en una persona (fuera de sus botones) abre su ficha: cambiar Rol, Horas de contrato/semana, o
+marcarla inactiva -- para subidas/bajadas temporales de jornada, cambios de rol, o dar de baja a
+alguien sin esperar a que el sistema lo detecte solo; el cambio pide el PIN de quien lo hace para
+confirmarlo.
+
+Plantilla de la semana (alta demanda / valle) -- SOLO en modo Slots (no aparece en modo Turnos): la
+1a y la ultima semana de cada mes se consideran de alta demanda, las de en medio valle. El boton "📋
+Plantilla de la semana" esta en la paleta de arriba del todo (junto a los slots arrastrables y "＋
+Editar slots") y abre un dialogo con "Aplicar a esta semana" (pone los slots de esa plantilla en la
+semana visible, sin asignar todavia a nadie) o "Guardar esta semana aqui" (sobrescribe la plantilla
+con lo que haya montado ahora mismo) -- distinto del boton "👥 Plantilla" de la barra superior, que
+es la plantilla de PERSONAL del centro (quien trabaja ahi), no la de horarios de la semana.
+
+"⚙ Horario del centro": Apertura/Cierre (con checkbox "cierra al dia siguiente" para turnos de
+noche), Tipo de centro (Tienda o Fabrica -- cambia que dato se pide para el "personal ideal": TPLH
+-- tickets por hora de labor -- en tiendas, docenas por hora y persona en fabricas), Direccion de
+trabajo y Rol en Odoo (para que el export salga bien casado con Odoo), y el checkbox de si los
+contratos a jornada completa tambien pueden hacer horas complementarias (por defecto solo las hacen
+los de tiempo parcial).
 
 ## Evaluaciones 360° (evaluaciones360.html)
 
