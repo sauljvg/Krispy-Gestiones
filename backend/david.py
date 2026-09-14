@@ -182,25 +182,31 @@ anonimas para la persona evaluada.
 SOLO el rol admin ve ademas cuatro pestanas de gestion (a cualquier otro rol ni le aparecen, y el
 backend rechaza igualmente si intenta llamarlas por su cuenta):
 
-"Organigrama": arbol de puestos y personas -- arrastrar una caja sobre otra cambia a quien reporta,
-arrastrar el fondo vacio mueve la vista. "+ Nuevo puesto" / "+ Nueva persona" (una persona puede tener
-mas de un puesto a la vez, y opcionalmente una cuenta de portal vinculada para que le aparezcan sus
-evaluaciones al entrar). "Reparar organigrama" corrige de golpe los puestos que no coinciden con quien
-reporta a quien.
+"Organigrama" tiene dos subpestanas del mismo organigrama, vistas de dos formas distintas: "Por
+persona" (lista simple, "+ Nueva persona" -- Nombre, uno o mas Puestos, Jefe directo, cuenta de
+portal vinculada opcional para que le aparezcan sus evaluaciones al entrar, Email; para borrar hay
+dos opciones bien distintas, "Quitar del organigrama" que NO toca su cuenta de portal si tiene una
+vinculada, y "🗑️ Borrar cuenta y persona" que si la borra tambien, igual que hacerlo desde Ajustes)
+y "Por puesto de trabajo" (arbol visual arrastrable -- arrastrar una caja sobre otra cambia a quien
+reporta ese puesto, arrastrar el fondo vacio mueve la vista, botones de zoom, "+ Nuevo puesto"; "🔧
+Reparar organigrama" corrige de golpe los puestos que no coinciden con el jefe directo puesto en
+"Por persona").
 
 "Campanas": "+ Nueva campana" (Nombre, Periodo desde/hasta). Dentro de una campana en borrador:
-"+ Anadir evaluados" (elegir a quien se evalua) y "Lanzar campana" (genera automaticamente quien
+"+ Anadir evaluados" (elegir a quien se evalua) y "🚀 Lanzar campana" (genera automaticamente quien
 evalua a quien: su jefe, sus companeros con el mismo jefe, y sus reportes). Con la campana ya
-lanzada: "Cerrar campana" / "Reabrir campana", "Recordatorio" (como en Entrevista de Salida, abre un
-correo -mailto- a quien le falte responder) y "Eliminar campana". Los resultados agregados (pestanas
-"Por persona" / "Por puesto de trabajo") solo se ven, y solo el admin los ve, cuando la campana ya no
-esta en borrador -- hoy no hay boton para exportarlos a PDF.
+lanzada: "Cerrar campana" / "Reabrir campana", "✉️ Recordatorio" (como en Entrevista de Salida, abre
+un correo -mailto- a quien le falte responder) y "🗑️ Eliminar campana". Clic en un evaluado de la
+lista abre sus evaluadores (con buscador para anadir uno mas a mano) y, SOLO admin y SOLO cuando la
+campana ya no esta en borrador, sus "Resultados" con boton "📄 Exportar PDF" -- es un PDF por cada
+persona evaluada, no un informe conjunto de toda la campana.
 
 "Preguntas": banco de preguntas comun a todas las campanas, "+ Nueva pregunta", los cambios de texto
 se guardan solos al salir del campo.
 
 "Accesos": todas las personas del organigrama, tengan o no cuenta de portal ya creada -- usuario y
-PIN se editan aqui mismo (se sincronizan con Ajustes -> Usuarios). "Autocompletar emails que faltan"
+PIN se editan aqui mismo (se sincronizan con Ajustes -> Usuarios), el nombre se edita desde su ficha
+en "Por persona". Se puede filtrar por "Campaña" (una en concreto o "Todas las personas"). "Autocompletar emails que faltan"
 y "Crear todos los accesos que faltan" (crea, para quien todavia no tiene cuenta, una con rol
 "colaborador" y UNICAMENTE el modulo Evaluaciones 360° -- es la forma de que alguien que no usa el
 resto del portal pueda entrar solo a responder sus evaluaciones).
@@ -337,7 +343,9 @@ nada de Reclutamiento, y responde solo con la vista que le corresponde.
 
 ### Vista completa (con el modulo Informes o Reclutamiento) -- RRHH, admin...
 
-"Vacantes": boton "+ Nueva vacante" (Puesto, Centro, notas, y opcionalmente subir ya el CV de una
+"Vacantes": filtro por estado (Abiertas por defecto, Todas, Cubiertas, Canceladas) y checkbox "Ver
+archivadas" (las archivadas quedan ocultas por defecto aunque el filtro de estado las incluiria).
+Boton "+ Nueva vacante" (Puesto, Centro, notas, y opcionalmente subir ya el CV de una
 persona o un PDF con varios juntos para crearla con candidatos dentro). Cada tarjeta muestra cuantos
 dias lleva abierta y cuantos candidatos tiene, y un aviso ⚠️ junto al puesto si todavia no tiene NINGUN
 "Responsable" asignado (pasar el raton por encima dice "Esta vacante no tiene responsable asignado") --
@@ -348,7 +356,11 @@ lo note. Al abrir una vacante: "Guardar", "Mensaje" (WhatsApp a todos sus candid
 (gerentes que veran TODOS los candidatos de esa vacante, incluidos los que se anadan despues, sin
 compartirlos uno a uno).
 
-"Base de candidatos": buscador (nombre, telefono, email o puesto), filtro por vacante y por estado,
+"Base de candidatos": tres formas de ver el listado (botones arriba a la derecha) -- "📃 Lista",
+"📃➕ Lista + CV" (con el curriculum al lado de cada fila) y "🗂️ Tarjetas". Buscador (nombre, telefono,
+email o puesto), pestanas por estado (con el numero de candidatos en cada una), filtro por vacante, y
+filtro por resultado del test asociado ("Solo aptos" / "Solo no aptos" / "Sin responder test" -- para
+tests con puntuacion u opcion descalificatoria, ver Test),
 "+ Nuevo candidato", "Buscar tests ya respondidos" (reintenta enlazar respuestas de test sueltas con
 fichas sin enlace), "Adjuntar PDF a fichas existentes" (un PDF con varios CVs que ya se uso para crear
 esas fichas, reparte cada recorte por nombre sin duplicar a nadie), "Reextraer CV filtrados" (vuelve a
