@@ -390,6 +390,30 @@ def info_almacenamiento_route():
     return agregadores_module.info_almacenamiento()
 
 
+@router.get("/admin/almacenamiento/uploads.zip", dependencies=[Depends(require_api_key)])
+def descargar_uploads_route():
+    """Zip de DATA_DIR/uploads (CVs, imágenes de boletines, fondos de
+    encuestas...) -- el backup normal de Ajustes > Usuarios solo exporta la
+    base de datos, no estos archivos. Pensado para una migración puntual de
+    servidor, no para uso habitual."""
+    import zipfile
+
+    uploads_dir = os.path.join(agregadores_module.DATA_DIR, "uploads")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        if os.path.isdir(uploads_dir):
+            for root, _dirs, files in os.walk(uploads_dir):
+                for nombre in files:
+                    ruta = os.path.join(root, nombre)
+                    zf.write(ruta, arcname=os.path.relpath(ruta, agregadores_module.DATA_DIR))
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=uploads.zip"},
+    )
+
+
 @router.get("/admin/almacenamiento/candidatos-huerfanos", dependencies=[Depends(require_api_key)])
 def info_candidatos_huerfanos_route():
     import reclutamiento
