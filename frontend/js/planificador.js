@@ -405,10 +405,10 @@ function barraHorasHTML(min, contrato) {
   if (!contrato) return `<div class="plan-barra"><i style="width:0%;"></i></div>`;
   const pct = min / 60 / contrato;
   if (!admiteComplementarias(contrato)) {
-    // Ojo: ">" y no ">=" -- llegar justo al 100% del contrato (jornada
-    // completa) es la jornada normal, no un problema; solo pasarse de las
-    // horas de contrato (horas extra no planeadas) es lo que se marca en rojo.
-    const clase = pct > 1 ? "rojo" : pct >= 0.85 ? "ambar" : "";
+    // Llegar hasta el 100% del contrato (jornada completa) es la jornada
+    // normal -- verde, no ámbar. Solo pasarse de las horas de contrato
+    // (horas extra no planeadas) se marca en rojo.
+    const clase = pct > 1 ? "rojo" : "";
     return `<div class="plan-barra ${clase}"><i style="width:${Math.min(100, Math.round(pct * 100))}%;"></i></div>`;
   }
   const esc = (p) => (Math.max(0, Math.min(p, COMP_TECHO)) / COMP_TECHO) * 100;
