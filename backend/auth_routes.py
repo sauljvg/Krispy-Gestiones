@@ -16,7 +16,9 @@ COOKIE_NAME = "kt_session"
 
 def public_user(row: dict) -> dict:
     return {
-        "id": row["id"], "username": row["username"], "nombre": row["nombre"], "rol": row["rol"],
+        "id": row["id"], "username": row["username"], "nombre": row["nombre"],
+        "apodo": row["apodo"] if "apodo" in row.keys() else None,
+        "rol": row["rol"],
         "tiendas": auth_module.get_tiendas_permitidas(row["id"]),
         "modulos": list(auth_module.MODULOS) if row["rol"] == "admin" else auth_module.get_modulos_permitidos(row["id"]),
         "tipos_informes": informes_module.get_tipos_permitidos(row["id"]),
@@ -233,7 +235,7 @@ def list_users(_admin: dict = Depends(require_admin)):
     esa cuenta se le da algún otro módulo, deja de ser "exclusiva" y pasa a
     verse también en Ajustes."""
     conn = get_connection()
-    rows = conn.execute("SELECT id, username, pin, nombre, rol, creado FROM usuarios ORDER BY id").fetchall()
+    rows = conn.execute("SELECT id, username, pin, nombre, apodo, rol, creado FROM usuarios ORDER BY id").fetchall()
     conn.close()
     resultado = []
     for r in rows:
@@ -379,6 +381,7 @@ def delete_user_route(user_id: int, admin: dict = Depends(require_admin)):
 class UpdateUserBody(BaseModel):
     nombre: str | None = None
     username: str | None = None
+    apodo: str | None = None
 
 
 @router.patch("/users/{user_id}")
@@ -390,7 +393,7 @@ def update_user_route(user_id: int, body: UpdateUserBody, _admin: dict = Depends
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     nombre = body.nombre.strip() if body.nombre else None
     username = body.username.strip() if body.username else None
-    error = auth_module.actualizar_usuario(user_id, nombre=nombre, username=username)
+    error = auth_module.actualizar_usuario(user_id, nombre=nombre, username=username, apodo=body.apodo)
     if error:
         raise HTTPException(status_code=400, detail=error)
     # Espejo con Evaluaciones 360: si renombran a alguien desde Ajustes, se

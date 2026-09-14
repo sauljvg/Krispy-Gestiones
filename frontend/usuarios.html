@@ -225,7 +225,12 @@
     <button type="button" class="btn btn-ghost" id="up-cerrar">✕</button>
   </div>
   <div class="usr-dialog-body">
-    <div>
+    <div class="usr-dialog-seccion" style="margin-top:0; padding-top:0; border-top:none;">
+      <label class="usr-titulo" for="up-apodo">Cómo se le llama al entrar (opcional)</label>
+      <input type="text" id="up-apodo" placeholder="p.ej. Maru, Eli, Ildi... -- vacío = usa su nombre normal" style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--surface-page); color:var(--text-primary); font-size:14px; box-sizing:border-box;">
+    </div>
+
+    <div class="usr-dialog-seccion">
       <label class="usr-titulo">Módulos a los que tiene acceso</label>
       <div id="up-modulos-checklist" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:4px;"></div>
     </div>
@@ -260,9 +265,9 @@
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/icons.js?v=20260911a"></script>
-<script src="js/auth-common.js?v=20260824a"></script>
+<script src="js/auth-common.js?v=20260915a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/usuarios.js?v=20260914f"></script>
+<script src="js/usuarios.js?v=20260915a"></script>
 </body>
 </html>

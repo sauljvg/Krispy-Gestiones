@@ -33,7 +33,7 @@ async function aplicarVisibilidadEval360(card, user, tieneModulo) {
 function wireUserBar(user) {
   const userLabel = document.getElementById("topbar-user");
   if (userLabel) {
-    userLabel.textContent = `${user.nombre} (${user.rol})`;
+    userLabel.textContent = `${user.apodo || user.nombre} (${user.rol})`;
     userLabel.hidden = false;
   }
   const logoutBtn = document.getElementById("btn-logout");

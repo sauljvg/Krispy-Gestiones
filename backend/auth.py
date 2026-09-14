@@ -71,6 +71,12 @@ def ensure_auth_tables():
             creado TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    cols_usuarios = {row[1] for row in conn.execute("PRAGMA table_info(usuarios)")}
+    if "apodo" not in cols_usuarios:
+        # Como se llama a la persona al entrar (topbar) -- puede ser un
+        # diminutivo ("Maru", "Eli") distinto del nombre formal que se usa en
+        # informes/organigrama. Vacío = se sigue mostrando el nombre normal.
+        conn.execute("ALTER TABLE usuarios ADD COLUMN apodo TEXT")
     # A diferencia de usuario_tiendas (sin filas = ve todas), aquí sin filas
     # significa SIN acceso — el checkbox de cada módulo tiene que marcarse a
     # propósito, que es justo el problema que esto resuelve (un usuario nuevo
@@ -221,10 +227,15 @@ def eliminar_usuario(usuario_id: int):
     conn.close()
 
 
-def actualizar_usuario(usuario_id: int, nombre: str | None = None, username: str | None = None) -> str | None:
-    """Editar nombre y/o username de una cuenta ya creada -- antes solo se
-    podían fijar al crearla, así que renombrar a alguien obligaba a borrar
-    la cuenta y crearla de nuevo (perdiendo módulos, tiendas, PIN...).
+def actualizar_usuario(
+    usuario_id: int, nombre: str | None = None, username: str | None = None, apodo: str | None = None
+) -> str | None:
+    """Editar nombre, username y/o apodo de una cuenta ya creada -- antes
+    nombre/username solo se podían fijar al crearla, así que renombrar a
+    alguien (p.ej. al sustituir a un gerente) obligaba a borrar la cuenta y
+    crearla de nuevo (perdiendo módulos, tiendas, PIN...). apodo es cómo se
+    la llama al entrar (topbar) si es distinto de su nombre formal -- pasar
+    "" (cadena vacía, no None) lo borra y vuelve a mostrar el nombre normal.
     Devuelve un mensaje de error si el username ya lo tiene otra cuenta, o
     None si fue bien."""
     sets, params = [], []
@@ -237,6 +248,9 @@ def actualizar_usuario(usuario_id: int, nombre: str | None = None, username: str
             return "Ese nombre de usuario ya lo tiene otra cuenta"
         sets.append("username = ?")
         params.append(username)
+    if apodo is not None:
+        sets.append("apodo = ?")
+        params.append(apodo.strip() or None)
     if not sets:
         return None
     conn = get_connection()

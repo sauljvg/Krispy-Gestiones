@@ -255,7 +255,7 @@ function filaUsuarioHTML(u, currentUserId) {
   return `
       <tr data-id="${u.id}">
         <td><input type="text" class="username-input" data-id="${u.id}" value="${escapeHTML(u.username)}" style="width:90%;"></td>
-        <td>${escapeHTML(u.nombre)}</td>
+        <td><input type="text" class="nombre-input" data-id="${u.id}" value="${escapeHTML(u.nombre)}" style="width:90%;"></td>
         <td><input type="text" class="rol-input" list="roles-datalist" data-id="${u.id}" value="${escapeHTML(u.rol)}" style="width:90%;" ${u.id === currentUserId ? "disabled" : ""}></td>
         <td>
           ${
@@ -396,6 +396,7 @@ async function renderUpClimaCentrosChecklist(u) {
 async function abrirDialogoPermisos(u) {
   EDITANDO_USUARIO = u;
   document.getElementById("up-nombre").textContent = `${u.nombre} (${u.username})`;
+  document.getElementById("up-apodo").value = u.apodo || "";
   document.getElementById("up-error").hidden = true;
   document.getElementById("up-ok").hidden = true;
   renderUpModulosChecklist(u);
@@ -437,6 +438,10 @@ async function guardarPermisos() {
     }),
     fetch(`${AUTH_API_BASE}/auth/users/${id}/clima-centros`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ centros }),
+    }),
+    fetch(`${AUTH_API_BASE}/auth/users/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apodo: document.getElementById("up-apodo").value.trim() }),
     }),
   ];
   const resultados = await Promise.all(peticiones);
@@ -610,22 +615,27 @@ function renderUsuariosFiltrados() {
     });
   });
 
-  // El usuario se guarda solo al salir del campo (blur) -- si no cambió, no
-  // llama a la API. El nombre de la persona es texto plano a propósito: se
-  // edita desde la ficha de la persona en Evaluaciones 360, no desde aquí.
-  tbody.querySelectorAll(".username-input").forEach((input) => {
+  // Usuario y nombre se guardan solos al salir del campo (blur) -- si no
+  // cambió, no llama a la API. Antes el nombre solo se podía editar desde la
+  // ficha de la persona en Evaluaciones 360 (se sincronizaba hacia aquí);
+  // ahora también se puede editar aquí directamente y se sincroniza hacia
+  // allá (mismo endpoint, ver auth_routes.py) -- pedido explícito del
+  // usuario 15/09 para poder sustituir a un gerente sin borrar y crear la
+  // cuenta de cero (perdiendo módulos, tiendas, PIN...).
+  tbody.querySelectorAll(".username-input, .nombre-input").forEach((input) => {
+    const campo = input.classList.contains("username-input") ? "username" : "nombre";
     input.addEventListener("blur", async () => {
       const id = input.dataset.id;
       const valor = input.value.trim();
       const original = users.find((u) => String(u.id) === String(id));
-      if (!valor || (original && original.username === valor)) {
-        input.value = original ? original.username : valor;
+      if (!valor || (original && original[campo] === valor)) {
+        input.value = original ? original[campo] : valor;
         return;
       }
       const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: valor }),
+        body: JSON.stringify({ [campo]: valor }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
