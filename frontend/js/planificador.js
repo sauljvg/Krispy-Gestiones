@@ -103,6 +103,21 @@ function franjas() {
   for (let m = ini; m < S.config.cierre_min; m += 60) out.push(m);
   return out;
 }
+// Las "y media" de cada hora de franjas() -- solo para las rayas guía y las
+// marcas de la regla de horas, NO para las celdas de transacciones/docenas/
+// personal ideal (esas siguen siendo por hora completa). Muchos turnos
+// entran/salen a la media (apertura/cierre + 30 min de bocadillo o cuadre),
+// así que ayuda tener la referencia visual.
+function mediasHoras() {
+  return franjas()
+    .map((m) => m + 30)
+    .filter((m) => m >= S.config.apertura_min && m < S.config.cierre_min);
+}
+function lineasMediaHTML() {
+  return mediasHoras()
+    .map((m) => `<div class="plan-lane-linea media" style="left:${minToX(m)}px;"></div>`)
+    .join("");
+}
 function fechaLarga(iso) {
   const d = new Date(iso + "T12:00:00");
   const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
@@ -223,10 +238,15 @@ function renderDia() {
   const ancho = anchoTimeline();
   const anchoHora = 60 * PX_POR_MIN;
 
-  const ticksHTML = fr
-    .map((m) => `<div class="plan-hora-tick" style="left:${minToX(m)}px; width:${anchoHora}px;">${fmtHHMM(m)}</div>`)
-    .join("");
-  const lineasHTML = fr.map((m) => `<div class="plan-lane-linea hora" style="left:${minToX(m)}px;"></div>`).join("");
+  const ticksHTML =
+    fr
+      .map((m) => `<div class="plan-hora-tick" style="left:${minToX(m)}px; width:${anchoHora}px;">${fmtHHMM(m)}</div>`)
+      .join("") +
+    mediasHoras()
+      .map((m) => `<div class="plan-hora-tick media" style="left:${minToX(m)}px; width:${anchoHora}px;">${fmtHHMM(m)}</div>`)
+      .join("");
+  const lineasHTML =
+    fr.map((m) => `<div class="plan-lane-linea hora" style="left:${minToX(m)}px;"></div>`).join("") + lineasMediaHTML();
 
   const cabFila = (titulo, contenido) =>
     `<div class="plan-fila plan-fila-cabecera">
@@ -510,7 +530,9 @@ function filaTrabajador(t) {
   const misTurnos = S.turnos.filter((x) => x.trabajador_id === t.id);
   const tieneLibre = misTurnos.some((x) => x.tipo === "libre");
   const bloques = misTurnos.map(turnoHTML).join("");
-  const lineas = franjas().map((m) => `<div class="plan-lane-linea hora" style="left:${minToX(m)}px;"></div>`).join("");
+  const lineas =
+    franjas().map((m) => `<div class="plan-lane-linea hora" style="left:${minToX(m)}px;"></div>`).join("") +
+    lineasMediaHTML();
   return `
     <div class="plan-fila">
       <div class="plan-celda-izq">
@@ -835,7 +857,9 @@ function wireLane(lane, trabajadorId) {
 function filaSinAsignar() {
   const sin = turnosDia(S.fecha).filter((t) => t.trabajador_id === SIN_ASIGNAR && t.tipo === "trabajo");
   if (!sin.length) return "";
-  const lineas = franjas().map((m) => `<div class="plan-lane-linea hora" style="left:${minToX(m)}px;"></div>`).join("");
+  const lineas =
+    franjas().map((m) => `<div class="plan-lane-linea hora" style="left:${minToX(m)}px;"></div>`).join("") +
+    lineasMediaHTML();
   return `
     <div class="plan-fila">
       <div class="plan-celda-izq">
@@ -1163,10 +1187,15 @@ function renderSlotsDia() {
   const fr = franjas();
   const ancho = anchoTimeline();
   const anchoHora = 60 * PX_POR_MIN;
-  const ticksHTML = fr
-    .map((m) => `<div class="plan-hora-tick" style="left:${minToX(m)}px; width:${anchoHora}px;">${fmtHHMM(m)}</div>`)
-    .join("");
-  const lineas = fr.map((m) => `<div class="plan-lane-linea hora" style="left:${minToX(m)}px;"></div>`).join("");
+  const ticksHTML =
+    fr
+      .map((m) => `<div class="plan-hora-tick" style="left:${minToX(m)}px; width:${anchoHora}px;">${fmtHHMM(m)}</div>`)
+      .join("") +
+    mediasHoras()
+      .map((m) => `<div class="plan-hora-tick media" style="left:${minToX(m)}px; width:${anchoHora}px;">${fmtHHMM(m)}</div>`)
+      .join("");
+  const lineas =
+    fr.map((m) => `<div class="plan-lane-linea hora" style="left:${minToX(m)}px;"></div>`).join("") + lineasMediaHTML();
   const grupos = agruparSlots(turnosDia(S.fecha));
   const lanes = grupos
     .map(
