@@ -141,7 +141,7 @@ function modulosSeleccionadosNuevoUsuario() {
 
 async function actualizarVisibilidadDependientesNuevoUsuario() {
   const modulos = modulosSeleccionadosNuevoUsuario();
-  document.getElementById("nu-tiendas-wrap").hidden = !modulos.includes("resenas");
+  document.getElementById("nu-tiendas-wrap").hidden = !(modulos.includes("resenas") || modulos.includes("saona_resenas"));
   // "Tipos de informe" es el mismo checklist para las dos empresas (los
   // tipos de Saona ya vienen con el nombre prefijado "SAONA · " para
   // distinguirse) — se muestra si tiene cualquiera de los dos módulos.
@@ -152,9 +152,12 @@ async function actualizarVisibilidadDependientesNuevoUsuario() {
     tiposWrap.dataset.cargado = "1";
     await renderNuTiposInformeChecklist();
   }
-  // Clima Laboral: igual que Reseñas revela el selector de tiendas, marcar
-  // "Clima Laboral" (o el de Saona) revela el selector de centros.
-  const tieneClima = modulos.includes("clima") || modulos.includes("saona_clima");
+  // El mismo centro restringe Clima Laboral Y Planificador de turnos (ver
+  // usuario_clima_centros, reutilizada por los dos módulos) -- se muestra
+  // si tiene cualquiera de los cuatro.
+  const tieneClima =
+    modulos.includes("clima") || modulos.includes("saona_clima") ||
+    modulos.includes("planificador") || modulos.includes("saona_planificador");
   const climaWrap = document.getElementById("nu-clima-centros-wrap");
   climaWrap.hidden = !tieneClima;
   if (tieneClima && !climaWrap.dataset.cargado) {
@@ -252,73 +255,10 @@ function climaCentrosSeleccionadosNuevoUsuario() {
 
 // --- Tabla de usuarios existentes ---
 
-// Resumen compacto de una selección de tiendas/centros: si están TODAS las
-// de una marca, se colapsa a "Todas Krispy Kreme" / "Todas Saona" en vez de
-// listar los 7 nombres (que hacían la fila larguísima y disparaban el
-// scroll horizontal). `universo` = lista completa de opciones disponibles.
-function resumenSeleccionPorMarca(seleccionados, universo) {
-  if (!seleccionados || seleccionados.length === 0) return "Todas";
-  const sel = new Set(seleccionados);
-  const kk = (universo || []).filter((x) => !esDeSaona(x));
-  const saona = (universo || []).filter(esDeSaona);
-  const partes = [];
-  for (const [grupo, etiqueta] of [[kk, "Todas Krispy Kreme"], [saona, "Todas Saona"]]) {
-    const elegidos = grupo.filter((x) => sel.has(x));
-    if (elegidos.length === 0) continue;
-    partes.push(elegidos.length === grupo.length && grupo.length > 1 ? etiqueta : elegidos.join(", "));
-  }
-  // Cualquier seleccionado que no esté en el universo conocido (raro) se
-  // añade tal cual para no ocultarlo.
-  const sueltos = seleccionados.filter((x) => !(universo || []).includes(x));
-  return [...partes, ...sueltos].join(", ") || "Todas";
-}
-
-function tiendasResumenHTML(tiendas) {
-  if (!tiendas || tiendas.length === 0) return `<span class="staff-hint">Todas</span>`;
-  return escapeHTML(resumenSeleccionPorMarca(tiendas, TIENDAS_DISPONIBLES));
-}
-
 function modulosResumenHTML(u) {
   if (u.rol === "admin") return `<span class="staff-hint">Todo (admin)</span>`;
   if (!u.modulos || u.modulos.length === 0) return `<span class="staff-hint">Ninguno</span>`;
   return escapeHTML(u.modulos.map(moduloLabel).join(", "));
-}
-
-function tiposInformeResumenHTML(u) {
-  // Sin filas en tipos_informes normalmente significa "sin restricción, ve
-  // todos los tipos" — pero eso solo tiene sentido si el usuario tiene
-  // acceso al módulo Informes en primer lugar. Si no lo tiene, "Todos" es
-  // engañoso (parece que ve de todo cuando en realidad no entra a Informes).
-  const tieneInformes = u.rol === "admin" || (u.modulos || []).some((m) => m === "informes" || m === "saona_informes");
-  const tipos = u.tipos_informes;
-  const cache = TIPOS_INFORME_CACHE || [];
-  if (!tieneInformes) {
-    // Sin el módulo Informes, la restricción por tipo no hace nada -- pero
-    // si el admin ya la puso, hay que MOSTRARLA (antes salía "Ninguno" y
-    // parecía que no se había guardado), avisando de que falta el módulo.
-    if (!tipos || tipos.length === 0) return `<span class="staff-hint">Ninguno</span>`;
-    const nombres = tipos.map((clave) => cache.find((t) => t.clave === clave)?.nombre || clave);
-    return `${escapeHTML(nombres.join(", "))} <span class="staff-hint">· falta módulo Informes</span>`;
-  }
-  if (!tipos || tipos.length === 0) return `<span class="staff-hint">Todos</span>`;
-  const nombres = tipos.map((clave) => cache.find((t) => t.clave === clave)?.nombre || clave);
-  return escapeHTML(nombres.join(", "));
-}
-
-function climaCentrosResumenHTML(u) {
-  // Mismo razonamiento que tiposInformeResumenHTML.
-  const tieneClima = u.rol === "admin" || (u.modulos || []).some((m) => m === "clima" || m === "saona_clima");
-  const centros = u.clima_centros;
-  if (!tieneClima) {
-    // Sin el módulo Clima Laboral, la restricción por centro no hace nada,
-    // pero si ya está puesta se muestra igual (antes salía "Ninguno" y
-    // parecía que el Guardar no había funcionado). El aviso deja claro que
-    // además hace falta darle el módulo Clima Laboral en la columna Módulos.
-    if (!centros || centros.length === 0) return `<span class="staff-hint">Ninguno</span>`;
-    return `${escapeHTML(resumenSeleccionPorMarca(centros, CLIMA_CENTROS_CACHE || []))} <span class="staff-hint">· falta módulo Clima Laboral</span>`;
-  }
-  if (!centros || centros.length === 0) return `<span class="staff-hint">Todos</span>`;
-  return escapeHTML(resumenSeleccionPorMarca(centros, CLIMA_CENTROS_CACHE || []));
 }
 
 function filaUsuarioHTML(u, currentUserId) {
@@ -331,81 +271,9 @@ function filaUsuarioHTML(u, currentUserId) {
           ${
             u.rol === "admin"
               ? modulosResumenHTML(u)
-              : `
-          <div class="checklist-wrap">
-            <span class="modulos-resumen" data-id="${u.id}">${modulosResumenHTML(u)}</span>
-            <button type="button" class="btn btn-ghost btn-editar-modulos" data-id="${u.id}" style="font-size:11px; padding:3px 8px; margin-left:6px;">Editar</button>
-            <div class="checklist-popover" id="modulos-popover-${u.id}">
-              <div class="checklist-popover-actions">
-                <span style="font-size:11px; color:var(--text-secondary);">Módulos</span>
-                <button type="button" class="btn-modulos-cerrar" data-id="${u.id}">Cerrar</button>
-              </div>
-              ${MODULOS_CACHE.map(
-                (m, i) => `
-                <div class="checklist-row">
-                  <input type="checkbox" id="em-${u.id}-${i}" class="em-modulo" data-id="${u.id}" value="${m.value}"
-                    ${(u.modulos || []).includes(m.value) ? "checked" : ""}>
-                  <label for="em-${u.id}-${i}">${escapeHTML(m.label)}</label>
-                </div>`
-              ).join("")}
-              <button type="button" class="btn btn-primary btn-guardar-modulos" data-id="${u.id}" style="width:100%; margin-top:8px; font-size:12px;">Guardar</button>
-            </div>
-          </div>`
+              : `<span class="modulos-resumen" data-id="${u.id}">${modulosResumenHTML(u)}</span>
+                 <button type="button" class="btn btn-ghost btn-editar-permisos" data-id="${u.id}" style="font-size:11px; padding:3px 8px; margin-left:6px;">Editar</button>`
           }
-        </td>
-        <td>
-          <div class="checklist-wrap">
-            <span class="tiendas-resumen" data-id="${u.id}">${tiendasResumenHTML(u.tiendas)}</span>
-            <button type="button" class="btn btn-ghost btn-editar-tiendas" data-id="${u.id}" style="font-size:11px; padding:3px 8px; margin-left:6px;">Editar</button>
-            <div class="checklist-popover" id="tiendas-popover-${u.id}">
-              <div class="checklist-popover-actions">
-                <span style="font-size:11px; color:var(--text-secondary);">Tiendas</span>
-                <button type="button" class="btn-tiendas-cerrar" data-id="${u.id}">Cerrar</button>
-              </div>
-              ${checklistAgrupadoHTML({ prefix: "et", userId: u.id, items: TIENDAS_DISPONIBLES, seleccionados: u.tiendas, masterLabel: "Todas las tiendas (sin restricción)" })}
-              <button type="button" class="btn btn-primary btn-guardar-tiendas" data-id="${u.id}" style="width:100%; margin-top:8px; font-size:12px;">Guardar</button>
-            </div>
-          </div>
-        </td>
-        <td>
-          <div class="checklist-wrap">
-            <span class="tipos-informe-resumen" data-id="${u.id}">${tiposInformeResumenHTML(u)}</span>
-            <button type="button" class="btn btn-ghost btn-editar-tipos-informe" data-id="${u.id}" style="font-size:11px; padding:3px 8px; margin-left:6px;">Editar</button>
-            <div class="checklist-popover" id="tipos-informe-popover-${u.id}">
-              <div class="checklist-popover-actions">
-                <span style="font-size:11px; color:var(--text-secondary);">Informes</span>
-                <button type="button" class="btn-tipos-informe-cerrar" data-id="${u.id}">Cerrar</button>
-              </div>
-              <div class="checklist-row" style="border-bottom:1px solid var(--border); padding-bottom:6px; margin-bottom:4px;">
-                <input type="checkbox" id="eti-todos-${u.id}" class="eti-todos" data-id="${u.id}" ${!u.tipos_informes || u.tipos_informes.length === 0 ? "checked" : ""}>
-                <label for="eti-todos-${u.id}">Todos los tipos</label>
-              </div>
-              ${(TIPOS_INFORME_CACHE || []).map(
-                (t, i) => `
-                <div class="checklist-row">
-                  <input type="checkbox" id="eti-${u.id}-${i}" class="eti-tipo" data-id="${u.id}" value="${t.clave}"
-                    ${(u.tipos_informes || []).includes(t.clave) ? "checked" : ""}
-                    ${!u.tipos_informes || u.tipos_informes.length === 0 ? "disabled" : ""}>
-                  <label for="eti-${u.id}-${i}">${escapeHTML(t.nombre)}</label>
-                </div>`
-              ).join("")}
-              <button type="button" class="btn btn-primary btn-guardar-tipos-informe" data-id="${u.id}" style="width:100%; margin-top:8px; font-size:12px;">Guardar</button>
-            </div>
-          </div>
-        </td>
-        <td>
-          <div class="checklist-wrap">
-            <span class="clima-centros-resumen" data-id="${u.id}">${climaCentrosResumenHTML(u)}</span>
-            <button type="button" class="btn btn-ghost btn-editar-clima-centros" data-id="${u.id}" style="font-size:11px; padding:3px 8px; margin-left:6px;">Editar</button>
-            <div class="checklist-popover" id="clima-centros-popover-${u.id}">
-              <div class="checklist-popover-actions">
-                <span style="font-size:11px; color:var(--text-secondary);">Clima Laboral</span>
-                <button type="button" class="btn-clima-centros-cerrar" data-id="${u.id}">Cerrar</button>
-              </div>
-              ${checklistAgrupadoHTML({ prefix: "ecc", userId: u.id, items: (CLIMA_CENTROS_CACHE || []), seleccionados: u.clima_centros, masterLabel: "Todos los centros (sin restricción)" })}
-              <button type="button" class="btn btn-primary btn-guardar-clima-centros" data-id="${u.id}" style="width:100%; margin-top:8px; font-size:12px;">Guardar</button>
-            </div>
-          </div>
         </td>
         <td>
           <input type="password" class="pin-input" data-id="${u.id}" value="${u.pin || ""}" placeholder="sin PIN" maxlength="4" style="width:60px; text-align:center;">
@@ -418,6 +286,181 @@ function filaUsuarioHTML(u, currentUserId) {
           ${u.id === currentUserId ? "" : `<button type="button" class="btn btn-ghost btn-delete-user" data-id="${u.id}">Eliminar</button>`}
         </td>
       </tr>`;
+}
+
+// --- Modal "Editar permisos" (módulos + tiendas/informes/centros) ---
+// Un único modal para toda la fila, en vez de 4 popovers por columna (uno
+// por módulo restringible) -- así la tabla no tiene scroll horizontal y
+// se guarda todo de una vez.
+
+let EDITANDO_USUARIO = null; // el usuario que está abierto en el modal ahora mismo
+
+// Marca/desmarca en bloque un checklist agrupado por marca (KK/Saona) --
+// misma lógica que se usaba por fila, generalizada a cualquier `root` (aquí
+// siempre el modal, que solo tiene una instancia en el DOM a la vez).
+function wireChecklistAgrupadoEn(root, prefix) {
+  root.querySelectorAll(`.${prefix}-todas`).forEach((cb) => {
+    cb.addEventListener("change", () => {
+      root.querySelectorAll(`.${prefix}-item, .${prefix}-grupo`).forEach((x) => {
+        x.disabled = cb.checked;
+        if (cb.checked) x.checked = false;
+      });
+    });
+  });
+  root.querySelectorAll(`.${prefix}-grupo`).forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const grupo = cb.dataset.grupo;
+      root.querySelectorAll(`.${prefix}-item[data-grupo="${grupo}"]`).forEach((x) => {
+        x.checked = cb.checked;
+      });
+    });
+  });
+  root.querySelectorAll(`.${prefix}-item`).forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const grupo = cb.dataset.grupo;
+      const items = [...root.querySelectorAll(`.${prefix}-item[data-grupo="${grupo}"]`)];
+      const grupoCb = root.querySelector(`.${prefix}-grupo[data-grupo="${grupo}"]`);
+      if (grupoCb) grupoCb.checked = items.length > 0 && items.every((x) => x.checked);
+    });
+  });
+}
+
+function upModulosSeleccionados() {
+  return [...document.querySelectorAll(".up-modulo-check:checked")].map((cb) => cb.value);
+}
+
+// Un módulo puede estar checkeado ahora mismo en el modal aunque el usuario
+// no lo tuviera al abrirlo (el admin lo acaba de marcar) -- por eso mira el
+// checkbox en vivo, no u.modulos.
+function actualizarVisibilidadDependientesEditar() {
+  const modulos = upModulosSeleccionados();
+  document.getElementById("up-tiendas-wrap").hidden = !(modulos.includes("resenas") || modulos.includes("saona_resenas"));
+  const tieneInformes = modulos.includes("informes") || modulos.includes("saona_informes");
+  document.getElementById("up-tipos-informe-wrap").hidden = !tieneInformes;
+  // El mismo centro restringe Clima Laboral Y Planificador de turnos (ver
+  // usuario_clima_centros, reutilizada por los dos módulos) -- se muestra
+  // si tiene cualquiera de los cuatro.
+  const tieneClimaOPlanificador =
+    modulos.includes("clima") || modulos.includes("saona_clima") ||
+    modulos.includes("planificador") || modulos.includes("saona_planificador");
+  document.getElementById("up-clima-centros-wrap").hidden = !tieneClimaOPlanificador;
+}
+
+function renderUpModulosChecklist(u) {
+  const wrap = document.getElementById("up-modulos-checklist");
+  wrap.innerHTML = MODULOS_CACHE.map(
+    (m, i) => `
+    <div class="checklist-row">
+      <input type="checkbox" id="up-modulo-${i}" class="up-modulo-check" value="${m.value}" ${(u.modulos || []).includes(m.value) ? "checked" : ""}>
+      <label for="up-modulo-${i}">${escapeHTML(m.label)}</label>
+    </div>`
+  ).join("");
+  wrap.querySelectorAll(".up-modulo-check").forEach((cb) => {
+    cb.addEventListener("change", actualizarVisibilidadDependientesEditar);
+  });
+}
+
+function renderUpTiendasChecklist(u) {
+  const wrap = document.getElementById("up-tiendas-wrap");
+  wrap.querySelector("#up-tiendas-checklist").innerHTML = checklistAgrupadoHTML({
+    prefix: "up-et", userId: "x", items: TIENDAS_DISPONIBLES, seleccionados: u.tiendas,
+    masterLabel: "Todas las tiendas (sin restricción)",
+  });
+  wireChecklistAgrupadoEn(wrap, "up-et");
+}
+
+async function renderUpTiposInformeChecklist(u) {
+  const tipos = await loadTiposInformeSiHaceFalta();
+  const wrap = document.getElementById("up-tipos-informe-checklist");
+  const sinRestriccion = !u.tipos_informes || u.tipos_informes.length === 0;
+  const sel = new Set(u.tipos_informes || []);
+  wrap.innerHTML = tipos.map(
+    (t, i) => `
+    <div class="checklist-row">
+      <input type="checkbox" id="up-tipo-informe-${i}" class="up-tipo-informe-check" value="${t.clave}"
+        ${sel.has(t.clave) ? "checked" : ""} ${sinRestriccion ? "disabled" : ""}>
+      <label for="up-tipo-informe-${i}">${escapeHTML(t.nombre)}</label>
+    </div>`
+  ).join("");
+  const todos = document.getElementById("up-tipo-informe-todos");
+  todos.checked = sinRestriccion;
+  todos.onchange = () => {
+    wrap.querySelectorAll(".up-tipo-informe-check").forEach((cb) => {
+      cb.disabled = todos.checked;
+      if (todos.checked) cb.checked = false;
+    });
+  };
+}
+
+async function renderUpClimaCentrosChecklist(u) {
+  const centros = await loadClimaCentrosSiHaceFalta();
+  const wrap = document.getElementById("up-clima-centros-wrap");
+  wrap.querySelector("#up-clima-centros-checklist").innerHTML = checklistAgrupadoHTML({
+    prefix: "up-ecc", userId: "x", items: centros, seleccionados: u.clima_centros,
+    masterLabel: "Todos los centros (sin restricción)",
+  });
+  wireChecklistAgrupadoEn(wrap, "up-ecc");
+}
+
+async function abrirDialogoPermisos(u) {
+  EDITANDO_USUARIO = u;
+  document.getElementById("up-nombre").textContent = `${u.nombre} (${u.username})`;
+  document.getElementById("up-error").hidden = true;
+  document.getElementById("up-ok").hidden = true;
+  renderUpModulosChecklist(u);
+  renderUpTiendasChecklist(u);
+  await renderUpTiposInformeChecklist(u);
+  await renderUpClimaCentrosChecklist(u);
+  actualizarVisibilidadDependientesEditar();
+  document.getElementById("usr-dialog-permisos").showModal();
+}
+
+async function guardarPermisos() {
+  if (!EDITANDO_USUARIO) return;
+  const id = EDITANDO_USUARIO.id;
+  const error = document.getElementById("up-error");
+  const ok = document.getElementById("up-ok");
+  error.hidden = true;
+  ok.hidden = true;
+
+  const modulos = upModulosSeleccionados();
+  const tiendas = document.getElementById("up-et-todas-x").checked
+    ? []
+    : [...document.querySelectorAll(".up-et-item:checked")].map((cb) => cb.value);
+  const tipos_informes = document.getElementById("up-tipo-informe-todos").checked
+    ? []
+    : [...document.querySelectorAll(".up-tipo-informe-check:checked")].map((cb) => cb.value);
+  const centros = document.getElementById("up-ecc-todas-x").checked
+    ? []
+    : [...document.querySelectorAll(".up-ecc-item:checked")].map((cb) => cb.value);
+
+  const peticiones = [
+    fetch(`${AUTH_API_BASE}/auth/users/${id}/modulos`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modulos }),
+    }),
+    fetch(`${AUTH_API_BASE}/auth/users/${id}/tiendas`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tiendas }),
+    }),
+    fetch(`${AUTH_API_BASE}/auth/users/${id}/tipos-informes`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tipos_informes }),
+    }),
+    fetch(`${AUTH_API_BASE}/auth/users/${id}/clima-centros`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ centros }),
+    }),
+  ];
+  const resultados = await Promise.all(peticiones);
+  if (resultados.some((r) => !r.ok)) {
+    error.textContent = "No se pudieron guardar todos los cambios. Vuelve a intentarlo.";
+    error.hidden = false;
+    return;
+  }
+  document.getElementById("usr-dialog-permisos").close();
+  loadUsers(CURRENT_USER_ID);
+}
+
+function wireDialogoPermisos() {
+  document.getElementById("up-cerrar").addEventListener("click", () => document.getElementById("usr-dialog-permisos").close());
+  document.getElementById("up-guardar").addEventListener("click", guardarPermisos);
 }
 
 const ORDEN_ROLES_AGRUPADO = ["admin", "director_operaciones", "area_manager", "rrhh", "gerente", "colaborador"];
@@ -460,7 +503,7 @@ function renderUsuariosFiltrados() {
     ? users.filter((u) => normalizarBusqueda(u.username).includes(q) || normalizarBusqueda(u.nombre).includes(q))
     : users;
 
-  const cabecera = `<thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Módulos</th><th>Tiendas (Reseñas)</th><th>Informes</th><th>Clima Laboral</th><th>PIN</th><th>Creado</th><th></th></tr></thead>`;
+  const cabecera = `<thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Accesos</th><th>PIN</th><th>Creado</th><th></th></tr></thead>`;
 
   const tbody = document.getElementById("users-list");
   if (filtrados.length === 0) {
@@ -541,157 +584,13 @@ function renderUsuariosFiltrados() {
   }
   tbody.innerHTML = html;
 
-  function wirePopoverToggle(btnClass, popoverPrefix) {
-    tbody.querySelectorAll(btnClass).forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = btn.dataset.id;
-        tbody.querySelectorAll(".checklist-popover").forEach((p) => {
-          if (p.id !== `${popoverPrefix}-${id}`) p.classList.remove("visible");
-        });
-        const popover = document.getElementById(`${popoverPrefix}-${id}`);
-        const abrir = !popover.classList.contains("visible");
-        popover.classList.toggle("visible");
-        if (abrir) {
-          POPOVER_BOTON.set(popover, btn);
-          posicionarPopover(popover, btn);
-        }
-      });
-    });
-  }
-  function wirePopoverClose(btnClass, popoverPrefix) {
-    tbody.querySelectorAll(btnClass).forEach((btn) => {
-      btn.addEventListener("click", () => {
-        document.getElementById(`${popoverPrefix}-${btn.dataset.id}`).classList.remove("visible");
-      });
-    });
-  }
-
-  wirePopoverToggle(".btn-editar-modulos", "modulos-popover");
-  wirePopoverClose(".btn-modulos-cerrar", "modulos-popover");
-  wirePopoverToggle(".btn-editar-tiendas", "tiendas-popover");
-  wirePopoverClose(".btn-tiendas-cerrar", "tiendas-popover");
-  wirePopoverToggle(".btn-editar-tipos-informe", "tipos-informe-popover");
-  wirePopoverClose(".btn-tipos-informe-cerrar", "tipos-informe-popover");
-  wirePopoverToggle(".btn-editar-clima-centros", "clima-centros-popover");
-  wirePopoverClose(".btn-clima-centros-cerrar", "clima-centros-popover");
-
-  // Checklists agrupados por marca (Tiendas de Reseñas y Centros de Clima):
-  // "sin restricción" (master) desactiva y desmarca TODO; "Todas las de
-  // <marca>" solo marca/desmarca su grupo; y al tocar una casilla suelta se
-  // recalcula si su grupo queda entero marcado. prefix = "et" | "ecc".
-  function wireChecklistAgrupado(prefix) {
-    tbody.querySelectorAll(`.${prefix}-todas`).forEach((cb) => {
-      cb.addEventListener("change", () => {
-        const id = cb.dataset.id;
-        tbody.querySelectorAll(`.${prefix}-item[data-id="${id}"], .${prefix}-grupo[data-id="${id}"]`).forEach((x) => {
-          x.disabled = cb.checked;
-          if (cb.checked) x.checked = false;
-        });
-      });
-    });
-    tbody.querySelectorAll(`.${prefix}-grupo`).forEach((cb) => {
-      cb.addEventListener("change", () => {
-        const { id, grupo } = cb.dataset;
-        tbody.querySelectorAll(`.${prefix}-item[data-id="${id}"][data-grupo="${grupo}"]`).forEach((x) => {
-          x.checked = cb.checked;
-        });
-      });
-    });
-    tbody.querySelectorAll(`.${prefix}-item`).forEach((cb) => {
-      cb.addEventListener("change", () => {
-        const { id, grupo } = cb.dataset;
-        const items = [...tbody.querySelectorAll(`.${prefix}-item[data-id="${id}"][data-grupo="${grupo}"]`)];
-        const grupoCb = tbody.querySelector(`.${prefix}-grupo[data-id="${id}"][data-grupo="${grupo}"]`);
-        if (grupoCb) grupoCb.checked = items.length > 0 && items.every((x) => x.checked);
-      });
-    });
-  }
-  wireChecklistAgrupado("et");
-  wireChecklistAgrupado("ecc");
-
-  tbody.querySelectorAll(".eti-todos").forEach((cb) => {
-    cb.addEventListener("change", () => {
-      const id = cb.dataset.id;
-      tbody.querySelectorAll(`.eti-tipo[data-id="${id}"]`).forEach((tCb) => {
-        tCb.disabled = cb.checked;
-        if (cb.checked) tCb.checked = false;
-      });
-    });
-  });
-  tbody.querySelectorAll(".btn-guardar-modulos").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const id = btn.dataset.id;
-      const modulos = [...tbody.querySelectorAll(`.em-modulo[data-id="${id}"]:checked`)].map((cb) => cb.value);
-      const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}/modulos`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modulos }),
-      });
-      if (!res.ok) {
-        mostrarAviso("No se pudieron guardar los módulos.");
-        return;
-      }
-      loadUsers(currentUserId);
-    });
-  });
-
-  tbody.querySelectorAll(".btn-guardar-tiendas").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const id = btn.dataset.id;
-      const todas = document.getElementById(`et-todas-${id}`).checked;
-      const tiendas = todas
-        ? []
-        : [...tbody.querySelectorAll(`.et-item[data-id="${id}"]:checked`)].map((cb) => cb.value);
-      const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}/tiendas`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tiendas }),
-      });
-      if (!res.ok) {
-        mostrarAviso("No se pudieron guardar las tiendas.");
-        return;
-      }
-      loadUsers(currentUserId);
-    });
-  });
-
-  tbody.querySelectorAll(".btn-guardar-tipos-informe").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const id = btn.dataset.id;
-      const todos = document.getElementById(`eti-todos-${id}`).checked;
-      const tipos_informes = todos
-        ? []
-        : [...tbody.querySelectorAll(`.eti-tipo[data-id="${id}"]:checked`)].map((cb) => cb.value);
-      const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}/tipos-informes`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tipos_informes }),
-      });
-      if (!res.ok) {
-        mostrarAviso("No se pudieron guardar los informes.");
-        return;
-      }
-      loadUsers(currentUserId);
-    });
-  });
-
-  tbody.querySelectorAll(".btn-guardar-clima-centros").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const id = btn.dataset.id;
-      const todos = document.getElementById(`ecc-todas-${id}`).checked;
-      const centros = todos
-        ? []
-        : [...tbody.querySelectorAll(`.ecc-item[data-id="${id}"]:checked`)].map((cb) => cb.value);
-      const res = await fetch(`${AUTH_API_BASE}/auth/users/${id}/clima-centros`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ centros }),
-      });
-      if (!res.ok) {
-        mostrarAviso("No se pudieron guardar los centros de Clima Laboral.");
-        return;
-      }
-      loadUsers(currentUserId);
+  // Editar módulos/tiendas/informes/centros de este usuario -- todo junto
+  // en un único modal (antes eran 4 popovers, uno por columna, que hacían
+  // la tabla larguísima con scroll horizontal infinito).
+  tbody.querySelectorAll(".btn-editar-permisos").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const u = users.find((x) => String(x.id) === String(btn.dataset.id));
+      if (u) abrirDialogoPermisos(u);
     });
   });
 
@@ -892,6 +791,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadModulos();
   await loadUsers(user.id);
   document.getElementById("users-buscar").addEventListener("input", renderUsuariosFiltrados);
+  wireDialogoPermisos();
   renderNuModulosChecklist();
   renderNuTiendasChecklist();
   actualizarVisibilidadPorRol();

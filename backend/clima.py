@@ -6,6 +6,7 @@ import re
 from openpyxl import load_workbook
 
 from db import get_connection
+import kpis as kpis_module
 
 LIKERT_ORDEN = ["Totalmente de acuerdo", "De acuerdo", "Neutral", "En desacuerdo", "Totalmente en desacuerdo"]
 
@@ -594,14 +595,22 @@ def list_oleadas(empresa="kk"):
 
 
 def list_centros_conocidos():
-    """Todos los centros que han aparecido alguna vez en cualquier oleada (de
-    cualquier empresa) — a diferencia de Informes, Clima no tiene un catálogo
-    fijo de tipos, así que el checklist de restricción por centro en Usuarios
-    se arma a partir de lo que ya se ha importado."""
+    """Todos los centros que han aparecido alguna vez en cualquier oleada de
+    Clima (Saona, o KK sin oleada todavía) MÁS los centros de KK de siempre
+    (kpis.CENTROS_GO_A_CORTO) -- antes salía solo de clima_respuestas, así
+    que un centro de KK sin ninguna oleada importada (p.ej. ParqueSur
+    Fábrica, que no tiene Reseñas y podía no tener Clima tampoco) no
+    aparecía como opción en el checklist de restricción, aunque esta misma
+    tabla (usuario_clima_centros) es la que también restringe el
+    Planificador de turnos por centro -- y ahí sí hace falta poder elegir
+    Fábrica."""
     conn = get_connection()
     rows = conn.execute("SELECT DISTINCT centro FROM clima_respuestas ORDER BY centro").fetchall()
     conn.close()
-    return [r["centro"] for r in rows]
+    centros = {r["centro"] for r in rows}
+    centros.update(kpis_module.CENTROS_GO_A_CORTO.values())
+    centros.discard("Oficina Central")  # no es un centro operativo, no tiene sentido restringir a él
+    return sorted(centros)
 
 
 def list_centros(oleada_id, centros_permitidos=None):
