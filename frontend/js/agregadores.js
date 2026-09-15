@@ -1706,8 +1706,14 @@ function agrDibujarUnionCobertura(anillosPorAgregador) {
     // Turf/GeoJSON puede devolver Polygon o MultiPolygon (si hay tiendas
     // sin solape real entre sí, quedan como piezas separadas) -- Leaflet
     // entiende ambos directamente vía geoJSON().
+    // fillOpacity a 0.12 (valor original) es casi invisible contra el mapa
+    // base claro de OpenStreetMap -- los dots que sí caen dentro del área
+    // real (confirmado con turf.booleanPointInPolygon sobre esta misma capa,
+    // en vivo, 15/09) se veían "flotando fuera de la nada" simplemente
+    // porque el relleno no se notaba, no porque el polígono estuviera mal.
+    // 0.28 es el mismo valor que ya usa el polígono de una tienda sola.
     const capa = L.geoJSON(union, {
-      style: { color: "#1a1a1a", weight: 3, dashArray: "6 4", fillColor: color, fillOpacity: 0.12 },
+      style: { color: "#1a1a1a", weight: 3, dashArray: "6 4", fillColor: color, fillOpacity: 0.28 },
     }).addTo(agrMap);
     agrUnionLayers.push(capa);
   });
