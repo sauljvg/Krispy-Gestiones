@@ -521,6 +521,42 @@ def borrar_fotos_perfil_route():
     return reclutamiento.quitar_todas_las_fotos()
 
 
+@router.get("/admin/almacenamiento/diagnostico-rutas", dependencies=[Depends(require_api_key)])
+def diagnostico_rutas_route():
+    """TEMPORAL -- diagnóstico de solo lectura del desfase de rutas tras la
+    migración a VPS: compara lo que dice la DB (candidato_archivos.ruta,
+    candidatos.foto_ruta) contra lo que hay de verdad en disco, para
+    entender por qué se rompieron las fotos de perfil. Quitar cuando ya no
+    haga falta."""
+    import reclutamiento
+    conn = reclutamiento.get_connection()
+    candidatos_con_foto = conn.execute(
+        "SELECT id, foto_ruta FROM candidatos WHERE foto_ruta IS NOT NULL LIMIT 8"
+    ).fetchall()
+    archivos_pdf = conn.execute(
+        "SELECT id, candidato_id, ruta, nombre_original FROM candidato_archivos "
+        "WHERE nombre_original LIKE '%.pdf' LIMIT 8"
+    ).fetchall()
+    conn.close()
+    return {
+        "uploads_dir": reclutamiento.UPLOADS_DIR,
+        "uploads_dir_existe": os.path.isdir(reclutamiento.UPLOADS_DIR),
+        "candidatos_con_foto_ruta_en_db": [
+            {"id": r["id"], "foto_ruta": r["foto_ruta"], "existe": os.path.isfile(r["foto_ruta"])}
+            for r in candidatos_con_foto
+        ],
+        "archivos_pdf_muestra": [
+            {
+                "archivo_id": r["id"],
+                "candidato_id": r["candidato_id"],
+                "ruta": r["ruta"],
+                "existe": bool(r["ruta"]) and os.path.isfile(r["ruta"]),
+            }
+            for r in archivos_pdf
+        ],
+    }
+
+
 @router.get("/admin/capturas/info", dependencies=[Depends(require_api_key)])
 def info_capturas_route():
     """Diagnóstico: número de archivos y tamaño total en CAPTURAS_DIR."""
