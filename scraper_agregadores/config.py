@@ -112,17 +112,20 @@ MAX_TIENDAS_PARALELO = int(os.getenv("MAX_TIENDAS_PARALELO", "3"))
 #     con muchos workers seguidos desde la misma IP -- seguir insistiendo solo
 #     prolonga el bloqueo" (pedido explícito del usuario 26/08). Esto NO se
 #     toca al margen de lo que se pruebe con los otros dos.
-#   - ubereats=10: el mejor resultado medido en vivo fue con 4 workers (18.1
-#     puntos/min) -- a 20 workers el rendimiento por worker bajó a más de la
-#     mitad, y hay un corte de sesión sin resolver del todo a los ~13-15 min
-#     de ronda sostenida que persiste 10+ min tras pararse (ver 04/09). 10 es
-#     una prueba deliberada por encima del punto conocido como "mejor", para
-#     ver en vivo si el problema es proporcional al volumen o aparece igual
-#     -- vigilar de cerca (CPU/memoria del proceso, huecos largos en el log,
-#     racha de fallos técnicos) las primeras rondas con este valor.
+#   - ubereats=4: coincide con el mejor resultado medido en vivo en agosto
+#     (18.1 puntos/min). Probado en vivo a 10 en este VPS concreto el 15/09:
+#     el cuello de botella NO fue Uber Eats -- fue la CPU del propio VPS
+#     (solo 4 núcleos, ver `nproc`): load average subió a ~21 y CERO
+#     chequeos terminaron en 50s, los 10 navegadores reales se ahogaban entre
+#     sí compitiendo por CPU, con riesgo real de afectar también a la web en
+#     producción (mismo servidor). 4 dejó al menos 1 núcleo libre para el
+#     resto (backend, OS).
 #   - justeat=20: sin problemas de bloqueo documentados a ninguna
-#     concurrencia probada.
-MAX_WORKERS_POR_AGREGADOR = {"glovo": 1, "ubereats": 10, "justeat": 20}
+#     concurrencia probada -- pero es headless (sin ventana real que
+#     renderizar, mucho más barato de CPU que Uber Eats), así que el límite
+#     de 4 núcleos de arriba no tiene por qué aplicarle igual de mal; a
+#     confirmar en vivo (pedido explícito del usuario 15/09).
+MAX_WORKERS_POR_AGREGADOR = {"glovo": 1, "ubereats": 4, "justeat": 20}
 
 KG_API_BASE_URL = os.getenv("KG_API_BASE_URL", "http://localhost:8000")
 KG_API_KEY = os.getenv("KG_API_KEY", "")
