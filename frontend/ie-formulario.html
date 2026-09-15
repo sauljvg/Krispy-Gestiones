@@ -403,13 +403,19 @@ document.getElementById("f-cv").addEventListener("change", async () => {
       hint.textContent = datos.detail || "No se pudo leer el CV -- rellena el formulario a mano.";
       return;
     }
-    if (datos.nombre_completo) document.getElementById("f-nombre").value = datos.nombre_completo;
-    if (datos.telefono) document.getElementById("f-telefono").value = datos.telefono;
-    if (datos.email) document.getElementById("f-email").value = datos.email;
-    if (datos.fecha_nacimiento) document.getElementById("f-fecha-nacimiento").value = datos.fecha_nacimiento;
+    // Siempre se SOBRESCRIBE (con "" si esta extracción no encontró nada),
+    // nunca se deja el valor tal cual -- si no, al subir un segundo CV
+    // después de uno anterior, un campo que esta vez no se encontró se
+    // quedaba con el dato del CV de ANTES en vez de vaciarse (confirmado en
+    // vivo 16/09: el teléfono de un candidato aparecía relleno con el de
+    // otro candidato probado justo antes en la misma sesión del navegador).
+    document.getElementById("f-nombre").value = datos.nombre_completo || "";
+    document.getElementById("f-telefono").value = datos.telefono || "";
+    document.getElementById("f-email").value = datos.email || "";
+    document.getElementById("f-fecha-nacimiento").value = datos.fecha_nacimiento || "";
 
-    if (Array.isArray(datos.experiencia_json) && datos.experiencia_json.length > 0) {
-      document.getElementById("experiencia-filas").innerHTML = "";
+    document.getElementById("experiencia-filas").innerHTML = "";
+    if (Array.isArray(datos.experiencia_json)) {
       datos.experiencia_json.forEach((exp) => agregarFilaExperiencia(exp));
     }
 

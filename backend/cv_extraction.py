@@ -27,9 +27,12 @@ EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 # toda la vida" sin prefijo, 9 dígitos empezando por 6/7/8/9 -- se mantiene
 # aparte porque ahí SÍ hace falta exigir el prefijo 6/7/8/9 (si no, un DNI o
 # cualquier otra tira de 9 dígitos suelta se colaría como teléfono).
+# Agrupación de separadores libre (no fija 3-3-3) -- confirmado en vivo
+# 16/09 con un CV real agrupado 3-2-2-2 ("675 25 23 75") que el patrón
+# rígido anterior no reconocía en absoluto.
 PHONE_RE = re.compile(
     r"\+\d{1,3}[\s.-]?(?:\d[\s.-]?){6,12}\d"
-    r"|\b[6789]\d{2}[\s.-]?\d{3}[\s.-]?\d{3}\b"
+    r"|\b[6789](?:[\s.-]?\d){8}\b"
 )
 DNI_RE = re.compile(r"\b(\d{8}[A-Za-z]|[XYZxyz]\d{7}[A-Za-z])\b")
 DATE_RE = re.compile(r"\b\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}\b|\b\d{1,2}\s+de\s+[a-zA-Zé]+\s+de\s+\d{4}\b", re.IGNORECASE)
@@ -92,6 +95,22 @@ def _normalizar(s: str) -> str:
     return s.lower()
 
 
+# Encabezados de sección de CV que, por casualidad, tienen forma de nombre
+# propio (2-4 palabras con mayúscula inicial, p.ej. "PERFIL PROFESIONAL")
+# -- confirmado en vivo 16/09 con un CV real donde ese encabezado abre el
+# documento (antes que el nombre real, que en esa plantilla queda varias
+# líneas más abajo, junto a la foto) y _adivinar_nombre lo tomaba como si
+# fuera el nombre del candidato. Se unen a ALL_HEADER_KEYWORDS (que ya cubre
+# "experiencia profesional"/"formación académica" como sinónimos de sus
+# secciones) para tener una única lista de exclusión.
+ENCABEZADOS_NO_NOMBRE = {
+    "perfil profesional", "resumen profesional", "sobre mi", "acerca de mi",
+    "objetivo profesional", "datos personales", "informacion personal",
+    "perfil", "resumen", "extracto", "presentacion", "competencias",
+}
+_ENCABEZADOS_EXCLUIDOS_NORM = {_normalizar(kw) for kw in ALL_HEADER_KEYWORDS} | ENCABEZADOS_NO_NOMBRE
+
+
 # Muchos ATS (InfoJobs, Bizneo...) exportan cada candidato de una búsqueda
 # con una línea "Nombre Apellido NN%" (el % de encaje con la vacante) justo
 # debajo del encabezado de página, que además se REPITE IDÉNTICO en todas
@@ -113,14 +132,42 @@ def _nombre_por_marcador_porcentaje(lineas: list[str]) -> str:
     return ""
 
 
+# Nombre en MAYÚSCULAS SOSTENIDAS al principio de una línea (aunque el
+# resto de la línea no forme parte del nombre) -- fallback más permisivo
+# que el patrón estricto de abajo, ver su uso en _adivinar_nombre para el
+# motivo. Exige TODO mayúsculas (no solo la inicial) para no confundirse
+# con el arranque de una frase normal ("Educación Infantil y..."), que en
+# español casi nunca va en mayúsculas sostenidas.
+_NOMBRE_MAYUS_RE = re.compile(r"^([A-ZÁÉÍÓÚÑ]{2,}(?:\s+[A-ZÁÉÍÓÚÑ]{2,}){1,3})\b")
+
+
 def _adivinar_nombre(lineas: list[str]) -> str:
     nombre = _nombre_por_marcador_porcentaje(lineas)
     if nombre:
         return nombre
     patron = re.compile(r"^[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ'-]*(\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ'-]*){1,3}$")
-    for linea in lineas[:8]:
+    # 40 líneas (antes 8): algunas plantillas abren con un bloque de texto
+    # largo ("Perfil profesional", presentación...) antes del nombre real,
+    # que en ese caso queda bastante más abajo que las primeras 8 líneas
+    # (confirmado en vivo 16/09 con un CV real: el nombre aparecía en la
+    # línea ~30). Sigue acotado (no todo el documento) para no arriesgarse a
+    # coger, ya muy dentro del CV, el nombre de una empresa o un título de
+    # curso con esa misma forma.
+    for linea in lineas[:40]:
+        if _normalizar(linea) in _ENCABEZADOS_EXCLUIDOS_NORM:
+            continue
         if patron.match(linea):
             return linea
+    # Segundo intento, más permisivo -- confirmado en vivo 16/09 con un CV
+    # real donde pdfplumber fusionó el nombre (mayúsculas, en la barra
+    # lateral con la foto) con el texto de una viñeta de la columna
+    # principal en la MISMA línea ("DÉBORA RUIZ GARCÍA (caja y
+    # reposición)"), rompiendo el patrón estricto de arriba (exige que la
+    # línea entera sea el nombre, nada más).
+    for linea in lineas[:40]:
+        m = _NOMBRE_MAYUS_RE.match(linea)
+        if m and _normalizar(m.group(1)) not in _ENCABEZADOS_EXCLUIDOS_NORM:
+            return m.group(1)
     return ""
 
 
@@ -458,15 +505,25 @@ def _extraer_de_texto(texto_crudo: str) -> dict:
             extraido["experiencia_json"] = experiencia_json
 
     for nombre_extra, keywords, una_linea in EXTRA_KEYWORDS:
+        if nombre_extra == "Idiomas":
+            continue  # tratado aparte justo debajo (ver _idiomas_por_nivel)
         contenido = _contenido_de_seccion(texto, keywords, una_linea)
         if contenido:
             extra[nombre_extra] = contenido[:200]
-    if "Idiomas" not in extra:
-        # Ver NIVEL_IDIOMA_RE/_idiomas_por_nivel -- último recurso cuando la
-        # búsqueda por cabecera (arriba) no encontró nada.
-        idiomas_por_nivel = _idiomas_por_nivel(texto)
-        if idiomas_por_nivel:
-            extra["Idiomas"] = idiomas_por_nivel[:200]
+    # Idiomas: se prueba PRIMERO el patrón "Idioma + Nivel" (más preciso,
+    # independiente de encontrar bien los límites de la sección) y solo si
+    # no encuentra nada se cae al bloque completo por cabecera -- al revés
+    # sale peor: confirmado en vivo 16/09 con un CV real donde la sección
+    # "Idiomas" SÍ se reconocía por cabecera, pero al no haber otra cabecera
+    # detrás (era la última sección del documento) el bloque capturado se
+    # comía además la frase siguiente sin relación ("Experiencia en
+    # docencia en inglés..."), mientras que el patrón por nivel sacaba
+    # limpio "Inglés (B2)".
+    idiomas_valor = _idiomas_por_nivel(texto)
+    if not idiomas_valor:
+        idiomas_valor = _contenido_de_seccion(texto, ["idiomas"], False)
+    if idiomas_valor:
+        extra["Idiomas"] = idiomas_valor[:200]
 
     extraido["extra_fields"] = extra
     # Ni nombre, ni email, ni teléfono -- lo más probable es que el PDF sea
