@@ -35,6 +35,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   const tieneModuloReclutamiento = ["informes", "saona_informes", "reclutamiento", "saona_reclutamiento"].some((m) => modulos.includes(m));
   const cardCompartidos = document.getElementById("card-compartidos");
   cardCompartidos.hidden = !tieneModuloReclutamiento;
+  // BBDD no tiene bypass de "solo lo que me compartieron" (a diferencia de
+  // Compartidos justo arriba) -- es una vista completa de TODOS los
+  // candidatos, así que exige el módulo real de Reclutamiento/Informes de
+  // alguna de las dos marcas, igual que valida bbdd_routes.py en el backend.
+  document.getElementById("card-bbdd").hidden = !tieneModuloReclutamiento;
   if (!tieneModuloReclutamiento) {
     // Un gerente al que solo le compartieron un candidato o una vacante
     // suelta (sin ninguno de los módulos de arriba) no tenía, hasta ahora,

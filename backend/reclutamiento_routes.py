@@ -163,6 +163,9 @@ class CandidatoIn(BaseModel):
     puesto_solicitado: str | None = None
     fecha_solicitud: str | None = None
     notas: str | None = None
+    carrera: str | None = None
+    idiomas: str | None = None
+    nacionalidad: str | None = None
     extra_fields: dict[str, str] = {}
     formacion_json: list[dict[str, str]] = []
     experiencia_json: list[dict[str, str]] = []
@@ -208,6 +211,9 @@ class CandidatoUpdateIn(BaseModel):
     estado: str | None = None
     notas: str | None = None
     contacto_estado: str | None = None
+    carrera: str | None = None
+    idiomas: str | None = None
+    nacionalidad: str | None = None
     extra_fields: dict[str, str] | None = None
     formacion_json: list[dict[str, str]] | None = None
     experiencia_json: list[dict[str, str]] | None = None

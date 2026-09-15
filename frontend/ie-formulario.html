@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krispy Kreme × IE University</title>
+<link rel="icon" type="image/png" href="assets/favicon-kk.png">
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; font-family: system-ui, sans-serif;
+    background: #f5f0e8; color: #222; padding: 24px 12px;
+  }
+  .ie-pub-wrap { max-width: 560px; margin: 0 auto; }
+  .ie-pub-card {
+    background: rgba(255,255,255,0.97); border-radius: 18px; box-shadow: 0 12px 40px rgba(0,0,0,0.12);
+    padding: 32px 36px; margin-bottom: 20px;
+  }
+  @media (max-width: 480px) { .ie-pub-card { padding: 22px 18px; } }
+  .ie-pub-titulo { font-size: 22px; font-weight: 700; margin: 0 0 8px; }
+  .ie-pub-sub { font-size: 14px; color: #555; line-height: 1.55; margin: 0 0 4px; }
+
+  .ie-pub-cv-box {
+    border: 1px dashed #ccc; border-radius: 12px; padding: 16px; margin: 20px 0; text-align: center;
+  }
+  .ie-pub-cv-box input[type="file"] { display: block; margin: 0 auto 10px; font-size: 13px; }
+  .ie-pub-hint { font-size: 12px; color: #777; margin: 6px 0 0; }
+
+  .ie-pub-campo { margin: 14px 0; }
+  .ie-pub-campo label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; }
+  .ie-pub-campo label .opcional { font-weight: 400; color: #999; }
+  .ie-pub-campo input, .ie-pub-campo select, .ie-pub-campo textarea {
+    width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid #ccc;
+    font-size: 15px; font-family: inherit; background: #fff; color: #222;
+  }
+  .ie-pub-fila-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 480px) { .ie-pub-fila-2 { grid-template-columns: 1fr; } }
+
+  .ie-pub-btn {
+    width: 100%; background: #5b2a2a; color: #fff; border: none; border-radius: 10px; padding: 14px 24px;
+    font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 8px;
+  }
+  .ie-pub-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .ie-pub-btn:hover:not(:disabled) { filter: brightness(1.08); }
+  .ie-pub-btn-secundario {
+    width: 100%; background: #fff; color: #5b2a2a; border: 1px solid #5b2a2a; border-radius: 10px; padding: 11px 20px;
+    font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 8px;
+  }
+
+  .ie-pub-error { color: #900; font-size: 13px; margin-top: 10px; }
+  .ie-pub-gracias { text-align: center; padding: 10px 0; }
+  .ie-pub-gracias h2 { font-size: 22px; margin: 0 0 10px; }
+
+  .rgpd-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 50;
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  .rgpd-box {
+    background: #fff; border-radius: 16px; max-width: 460px; width: 100%; padding: 28px 26px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.3);
+  }
+  .rgpd-box h2 { font-size: 18px; margin: 0 0 10px; }
+  .rgpd-box p { font-size: 13.5px; line-height: 1.6; color: #444; margin: 0 0 14px; }
+  .rgpd-box a { color: #5b2a2a; }
+  .rgpd-salir { display: block; text-align: center; font-size: 13px; color: #888; margin-top: 10px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="rgpd-overlay" id="rgpd-overlay">
+  <div class="rgpd-box">
+    <h2>Antes de continuar</h2>
+    <p>
+      Krispy Kreme España va a tratar los datos que nos des en este formulario (nombre, contacto, formación,
+      idiomas y, si lo adjuntas, tu CV) con la única finalidad de evaluar tu candidatura a procesos de
+      selección, presentes o futuros -- no solo el de este momento, también cualquier CV o dato que nos hagas
+      llegar más adelante a través de este mismo canal. Puedes leer la política completa -- responsable del
+      tratamiento, cuánto tiempo se conservan tus datos y cómo ejercer tus derechos -- antes de decidir.
+    </p>
+    <p><a href="privacidad.html#bbdd-ie" target="_blank" rel="noopener">Ver condiciones completas de privacidad</a></p>
+    <button type="button" class="ie-pub-btn" id="btn-rgpd-aceptar">Acepto y continúo</button>
+    <a href="https://www.ie.edu" class="rgpd-salir">No acepto — salir</a>
+  </div>
+</div>
+
+<div class="ie-pub-wrap" id="ie-pub-wrap" hidden>
+  <div class="ie-pub-card">
+    <h1 class="ie-pub-titulo">Krispy Kreme × IE University</h1>
+    <p class="ie-pub-sub">Déjanos tus datos para futuros procesos de selección. Puedes subir tu CV para rellenar el formulario automáticamente, o escribir tus datos a mano.</p>
+
+    <div class="ie-pub-cv-box">
+      <input type="file" id="f-cv" accept="application/pdf">
+      <button type="button" class="ie-pub-btn-secundario" id="btn-extraer-cv">📄 Rellenar automáticamente desde mi CV</button>
+      <p class="ie-pub-hint" id="cv-hint"></p>
+    </div>
+
+    <form id="form-ie">
+      <div class="ie-pub-campo">
+        <label>Nombre completo</label>
+        <input type="text" id="f-nombre" required>
+      </div>
+      <div class="ie-pub-fila-2">
+        <div class="ie-pub-campo">
+          <label>Teléfono <span class="opcional">(opcional)</span></label>
+          <input type="tel" id="f-telefono">
+        </div>
+        <div class="ie-pub-campo">
+          <label>Email <span class="opcional">(opcional)</span></label>
+          <input type="email" id="f-email">
+        </div>
+      </div>
+      <div class="ie-pub-fila-2">
+        <div class="ie-pub-campo">
+          <label>Fecha de nacimiento <span class="opcional">(opcional)</span></label>
+          <input type="date" id="f-fecha-nacimiento">
+        </div>
+        <div class="ie-pub-campo">
+          <label>Nacionalidad <span class="opcional">(opcional)</span></label>
+          <input type="text" id="f-nacionalidad">
+        </div>
+      </div>
+      <div class="ie-pub-campo">
+        <label>Carrera</label>
+        <select id="f-carrera"></select>
+      </div>
+      <div class="ie-pub-campo">
+        <label>Idiomas <span class="opcional">(opcional)</span></label>
+        <input type="text" id="f-idiomas" placeholder="Ej. Español (nativo), Inglés (C1)">
+      </div>
+      <div class="ie-pub-campo">
+        <label>Disponibilidad geográfica <span class="opcional">(opcional)</span></label>
+        <input type="text" id="f-disponibilidad" placeholder="Ej. Madrid centro, coche propio">
+      </div>
+      <div class="ie-pub-campo">
+        <label>¿Algo más que quieras contarnos? <span class="opcional">(opcional)</span></label>
+        <textarea id="f-notas" rows="3"></textarea>
+      </div>
+      <button type="submit" class="ie-pub-btn" id="btn-enviar">Enviar</button>
+      <p class="ie-pub-error" id="ie-error" hidden></p>
+    </form>
+
+    <div class="ie-pub-gracias" id="ie-gracias" hidden>
+      <h2>¡Gracias!</h2>
+      <p>Hemos recibido tus datos. Nos pondremos en contacto contigo si surge una oportunidad que encaje.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_BASE = `${window.location.origin}/api`;
+
+async function cargarCarreras() {
+  const res = await fetch(`${API_BASE}/public/bbdd/carreras-ie`);
+  const carreras = res.ok ? await res.json() : [];
+  const select = document.getElementById("f-carrera");
+  select.innerHTML = '<option value="">Selecciona tu carrera</option>' + carreras.map((c) => `<option value="${c.replace(/"/g, "&quot;")}">${c}</option>`).join("");
+}
+
+document.getElementById("btn-rgpd-aceptar").addEventListener("click", () => {
+  document.getElementById("rgpd-overlay").hidden = true;
+  document.getElementById("ie-pub-wrap").hidden = false;
+});
+
+document.getElementById("btn-extraer-cv").addEventListener("click", async () => {
+  const input = document.getElementById("f-cv");
+  const hint = document.getElementById("cv-hint");
+  if (!input.files.length) {
+    hint.textContent = "Primero elige un archivo PDF.";
+    return;
+  }
+  hint.textContent = "Leyendo tu CV...";
+  const formData = new FormData();
+  formData.append("file", input.files[0]);
+  try {
+    const res = await fetch(`${API_BASE}/public/bbdd/ie/extraer-cv`, { method: "POST", body: formData });
+    const datos = await res.json();
+    if (!res.ok) {
+      hint.textContent = datos.detail || "No se pudo leer el CV -- rellena el formulario a mano.";
+      return;
+    }
+    if (datos.nombre_completo) document.getElementById("f-nombre").value = datos.nombre_completo;
+    if (datos.telefono) document.getElementById("f-telefono").value = datos.telefono;
+    if (datos.email) document.getElementById("f-email").value = datos.email;
+    if (datos.fecha_nacimiento) document.getElementById("f-fecha-nacimiento").value = datos.fecha_nacimiento;
+    if (datos.disponibilidad) document.getElementById("f-disponibilidad").value = datos.disponibilidad;
+    const idiomasExtra = datos.extra_fields && datos.extra_fields.Idiomas;
+    if (idiomasExtra) document.getElementById("f-idiomas").value = idiomasExtra;
+    hint.textContent = datos.sin_texto_extraible
+      ? "No hemos podido leer texto de ese PDF -- rellena el formulario a mano."
+      : "Listo -- revisa que los datos sean correctos antes de enviar.";
+  } catch {
+    hint.textContent = "No se pudo leer el CV -- rellena el formulario a mano.";
+  }
+});
+
+document.getElementById("form-ie").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const errorEl = document.getElementById("ie-error");
+  const btn = document.getElementById("btn-enviar");
+  errorEl.hidden = true;
+  const nombre = document.getElementById("f-nombre").value.trim();
+  if (!nombre) return;
+
+  btn.disabled = true;
+  btn.textContent = "Enviando...";
+  const formData = new FormData();
+  formData.append("nombre_completo", nombre);
+  formData.append("telefono", document.getElementById("f-telefono").value.trim());
+  formData.append("email", document.getElementById("f-email").value.trim());
+  formData.append("fecha_nacimiento", document.getElementById("f-fecha-nacimiento").value);
+  formData.append("carrera", document.getElementById("f-carrera").value);
+  formData.append("idiomas", document.getElementById("f-idiomas").value.trim());
+  formData.append("nacionalidad", document.getElementById("f-nacionalidad").value.trim());
+  formData.append("disponibilidad", document.getElementById("f-disponibilidad").value.trim());
+  formData.append("notas", document.getElementById("f-notas").value.trim());
+  formData.append("rgpd_aceptado", "true");
+  const cvInput = document.getElementById("f-cv");
+  if (cvInput.files.length) formData.append("cv", cvInput.files[0]);
+
+  try {
+    const res = await fetch(`${API_BASE}/public/bbdd/ie`, { method: "POST", body: formData });
+    const datos = await res.json();
+    if (!res.ok) {
+      errorEl.textContent = datos.detail || "No se pudo enviar el formulario.";
+      errorEl.hidden = false;
+      btn.disabled = false;
+      btn.textContent = "Enviar";
+      return;
+    }
+    document.getElementById("form-ie").hidden = true;
+    document.querySelector(".ie-pub-cv-box").hidden = true;
+    document.getElementById("ie-gracias").hidden = false;
+  } catch {
+    errorEl.textContent = "No se pudo enviar el formulario -- comprueba tu conexión e inténtalo de nuevo.";
+    errorEl.hidden = false;
+    btn.disabled = false;
+    btn.textContent = "Enviar";
+  }
+});
+
+cargarCarreras();
+</script>
+</body>
+</html>

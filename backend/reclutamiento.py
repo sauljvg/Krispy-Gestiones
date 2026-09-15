@@ -40,15 +40,23 @@ CAMPOS_EXPORTABLES = {
     "fecha_solicitud": "Fecha de solicitud",
     "contacto_estado": "Estado de contacto",
     "notas": "Notas",
+    "carrera": "Carrera",
+    "idiomas": "Idiomas",
+    "nacionalidad": "Nacionalidad",
 }
 
 # Campos "conocidos" del candidato — el resto de datos (de un CV, de un
 # Excel de Informes o de un alta manual) se guarda en extra_fields (JSON),
 # igual que el patrón extraFields de BBDD SV.
+#
+# carrera/idiomas/nacionalidad: añadidos para el módulo BBDD (ver bbdd.py) --
+# columnas propias de candidatos en vez de vivir en extra_fields para poder
+# filtrarlas con SQL normal, aunque cualquier candidato (no solo los del
+# formulario del IE) puede tenerlas rellenas.
 CAMPOS = [
     "nombre_completo", "telefono", "email", "direccion", "fecha_nacimiento",
     "dni", "formacion", "experiencia", "disponibilidad", "puesto_solicitado",
-    "fecha_solicitud", "estado", "notas",
+    "fecha_solicitud", "estado", "notas", "carrera", "idiomas", "nacionalidad",
 ]
 
 FIELD_LABELS = {
@@ -65,6 +73,9 @@ FIELD_LABELS = {
     "fecha_solicitud": "Fecha de solicitud",
     "estado": "Estado",
     "notas": "Notas",
+    "carrera": "Carrera",
+    "idiomas": "Idiomas",
+    "nacionalidad": "Nacionalidad",
 }
 
 # Usado para mapear las columnas libres de un Excel de Informes (datos_json)

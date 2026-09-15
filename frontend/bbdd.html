@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krispy Gestiones · BBDD</title>
+<link rel="icon" type="image/png" href="assets/favicon-kk.png">
+<script>
+  (function () {
+    var guardado = localStorage.getItem("kt-theme");
+    if (guardado === "light" || guardado === "dark") {
+      document.documentElement.dataset.theme = guardado;
+    }
+  })();
+</script>
+<link rel="stylesheet" href="css/styles.css?v=20260915a">
+<style>
+  .bbdd-wrap { max-width: 1100px; margin: 0 auto; padding: 0 0 60px; }
+  .bbdd-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .bbdd-toolbar input, .bbdd-toolbar select {
+    padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 13px;
+  }
+  .bbdd-toolbar input[type="text"] { flex: 1; min-width: 180px; }
+  .bbdd-toolbar input[type="number"] { width: 70px; }
+  .bbdd-contador { margin: 0 0 14px; font-size: 12px; color: var(--text-muted); }
+
+  .bbdd-etiquetas-bar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 3px 10px;
+    font-size: 11px; font-weight: 600; color: #fff; white-space: nowrap;
+  }
+  .pill-x { cursor: pointer; opacity: .8; font-size: 11px; }
+  .pill-x:hover { opacity: 1; }
+  .pill-ghost {
+    display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 3px 10px;
+    font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: var(--surface-page);
+    color: var(--text-secondary); cursor: pointer;
+  }
+  .pill-ghost.activa { border-color: var(--acento); color: var(--acento); background: color-mix(in srgb, var(--acento) 10%, transparent); }
+
+  .bbdd-lista { display: flex; flex-direction: column; gap: 10px; }
+  .bbdd-card {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
+    cursor: pointer; transition: border-color 0.15s;
+  }
+  .bbdd-card:hover { border-color: var(--acento); }
+  .bbdd-card.abierta { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 6%, var(--surface-1)); }
+  .bbdd-card-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .bbdd-card-top h4 { margin: 0; font-size: 14px; }
+  .bbdd-card-meta { margin: 4px 0 0; font-size: 12px; color: var(--text-secondary); display: flex; gap: 12px; flex-wrap: wrap; }
+  .bbdd-card-etiquetas { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
+  .badge-empresa { padding: 2px 7px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: .02em; }
+  .badge-empresa-kk { background: color-mix(in srgb, var(--acento) 18%, transparent); color: var(--acento); }
+  .badge-empresa-saona { background: color-mix(in srgb, #b5651d 20%, transparent); color: #b5651d; }
+  .badge-estado { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .badge-pendiente { background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-secondary); }
+  .badge-entrevistado { background: color-mix(in srgb, var(--acento) 18%, transparent); color: var(--acento); }
+  .badge-contratado { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
+  .badge-descartado { background: color-mix(in srgb, var(--status-critical) 16%, transparent); color: var(--status-critical); }
+
+  .bbdd-ficha { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin: -2px 0 10px; }
+  .bbdd-ficha h3 { margin: 0 0 14px; }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 14px; margin-bottom: 12px; }
+  .form-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+  .form-field input, .form-field select, .form-field textarea {
+    width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 13px; font-family: inherit; box-sizing: border-box;
+  }
+  .form-field-full { grid-column: 1 / -1; }
+  .form-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .bbdd-ficha-etiquetas { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+  .bbdd-select-etiqueta { padding: 5px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 12px; }
+
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none;
+    align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal-overlay.visible { display: flex; }
+  .modal-box {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 24px; width: 100%; max-width: 360px;
+  }
+  .modal-box h3 { margin: 0 0 14px; font-size: 16px; }
+  .modal-box input[type="text"] {
+    width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); margin-bottom: 10px; box-sizing: border-box;
+  }
+  .modal-color-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon" id="brand-icon">🍩</span>
+      <div>
+        <h1 id="brand-title">Krispy Gestiones</h1>
+        <p class="subtitle">BBDD</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="btn btn-ghost hamburger-btn" title="Atrás" aria-label="Atrás" onclick="history.back()">←</button>
+      <a href="/" class="btn btn-ghost hamburger-btn" title="Inicio" aria-label="Inicio">🏠</a>
+      <div class="hamburger-wrap">
+        <button id="btn-hamburger" class="btn btn-ghost hamburger-btn" aria-label="Menú" aria-haspopup="true" aria-expanded="false">☰</button>
+        <div id="hamburger-menu" class="hamburger-menu" hidden>
+          <span id="topbar-user" class="topbar-user" hidden></span>
+          <button id="btn-theme-toggle" class="btn btn-ghost" aria-label="Cambiar tema">🌙 Cambiar tema</button>
+          <button id="btn-logout" class="btn btn-ghost" hidden>Salir</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="bbdd-wrap">
+    <div class="hero-banner">
+      <span class="eyebrow">Portal interno</span>
+      <h1>BBDD</h1>
+      <p>Todos los candidatos de Krispy Kreme y Saona en un único sitio -- pendientes, entrevistados, contratados y descartados, con su último estado y sus etiquetas.</p>
+    </div>
+
+    <p class="staff-hint">
+      Enlace del formulario público del evento IE (compártelo por QR o NFC):
+      <a href="ie-formulario.html" target="_blank" rel="noopener" id="link-formulario-ie"></a>
+      <button type="button" class="btn-mini" id="btn-copiar-enlace-ie" style="margin-left:6px;">Copiar</button>
+    </p>
+
+    <div class="bbdd-etiquetas-bar" id="bbdd-etiquetas-bar"></div>
+
+    <div class="bbdd-toolbar">
+      <input type="text" id="bbdd-buscar" placeholder="Buscar por nombre, teléfono, email...">
+      <select id="bbdd-filtro-estado">
+        <option value="">Todos los estados</option>
+        <option value="pendiente">Pendiente</option>
+        <option value="entrevistado">Entrevistado</option>
+        <option value="contratado">Contratado</option>
+        <option value="descartado">Descartado</option>
+      </select>
+      <select id="bbdd-filtro-carrera">
+        <option value="">Todas las carreras</option>
+      </select>
+      <input type="number" id="bbdd-edad-min" placeholder="Edad mín.">
+      <input type="number" id="bbdd-edad-max" placeholder="Edad máx.">
+      <button type="button" class="btn btn-ghost" id="btn-nueva-etiqueta">🏷️ Nueva etiqueta</button>
+    </div>
+    <p class="bbdd-contador" id="bbdd-contador"></p>
+
+    <div id="bbdd-ficha-wrap"></div>
+    <div class="bbdd-lista" id="bbdd-lista"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="nueva-etiqueta-modal">
+  <div class="modal-box">
+    <h3>Nueva etiqueta</h3>
+    <input type="text" id="nueva-etiqueta-nombre" placeholder="Nombre de la etiqueta">
+    <div class="modal-color-row">
+      <label for="nueva-etiqueta-color" class="staff-hint" style="margin:0;">Color</label>
+      <input type="color" id="nueva-etiqueta-color" value="#6b7280">
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="btn-nueva-etiqueta-cancelar">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btn-nueva-etiqueta-confirmar">Crear</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/theme.js?v=20260724a"></script>
+<script src="js/dialogs.js?v=20260818a"></script>
+<script src="js/auth-common.js?v=20260915a"></script>
+<script src="js/topbar-menu.js?v=20260902a"></script>
+<script src="js/common.js?v=20260823a"></script>
+<script src="js/bbdd.js?v=20260916a"></script>
+</body>
+</html>

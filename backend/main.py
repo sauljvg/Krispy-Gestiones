@@ -35,6 +35,8 @@ import scrape_jobs
 from auth_routes import COOKIE_NAME, require_admin, require_resenas
 from auth_routes import router as auth_router
 from agregadores_routes import router as agregadores_router
+from bbdd_routes import router as bbdd_router
+from bbdd_routes import router_publico as bbdd_router_publico
 from boletines_routes import router as boletines_router
 from boletines_routes import router_publico as boletines_router_publico
 from clima_routes import router as clima_router
@@ -140,6 +142,8 @@ app.include_router(informes_router, prefix="/api/informes")
 app.include_router(manuales_router, prefix="/api/manuales")
 app.include_router(kpis_router, prefix="/api/kpis")
 app.include_router(reclutamiento_router, prefix="/api/reclutamiento")
+app.include_router(bbdd_router, prefix="/api/bbdd")
+app.include_router(bbdd_router_publico, prefix="/api/public/bbdd")
 app.include_router(clima_router, prefix="/api/clima")
 app.include_router(entrevistas_router, prefix="/api/entrevistas")
 app.include_router(evaluaciones360_router, prefix="/api/evaluaciones360")
