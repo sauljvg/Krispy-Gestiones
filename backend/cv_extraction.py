@@ -34,6 +34,41 @@ PHONE_RE = re.compile(
     r"\+\d{1,3}[\s.-]?(?:\d[\s.-]?){6,12}\d"
     r"|\b[6789](?:[\s.-]?\d){8}\b"
 )
+
+# Extracción del teléfono en sí (distinto de PHONE_RE de arriba, que solo
+# se usa como señal de "hay algo con pinta de teléfono cerca" para detectar
+# el inicio de un candidato nuevo en un PDF por lotes) -- pedido explícito
+# del usuario 16/09: en vez de perseguir con la regex cada agrupación
+# posible de separadores (paréntesis, varios espacios seguidos...), se
+# captura una ventana ancha de dígitos+separadores típicos de teléfono y
+# LUEGO se valida quitando todo lo que no sea dígito: o quedan exactamente
+# 9 empezando por 6/7/8/9 (España sin prefijo), o el candidato empezaba por
+# "+" y quedan entre 8 y 15 dígitos (prefijo de país + número, sin fijar
+# cuántos dígitos exactos por país). Más robusto que enumerar patrones de
+# agrupación a mano. Espacio literal " " en la clase, no \s -- \s también
+# matchea saltos de línea, y con eso el número de una línea se fusionaba con
+# el último dígito de la línea ANTERIOR (p.ej. un año "...2022)" justo
+# encima) en un único candidato demasiado largo, que fallaba la validación
+# y de paso "se comía" el número real, que ya no se volvía a intentar por
+# separado (confirmado en vivo 16/09).
+_TELEFONO_CANDIDATO_RE = re.compile(r"\+?\d[\d ().-]{6,17}\d")
+
+
+def _telefono_valido(candidato: str) -> str | None:
+    solo_digitos = re.sub(r"\D", "", candidato)
+    if candidato.strip().startswith("+"):
+        return "+" + solo_digitos if 8 <= len(solo_digitos) <= 15 else None
+    if len(solo_digitos) == 9 and solo_digitos[0] in "6789":
+        return solo_digitos
+    return None
+
+
+def _buscar_telefono(texto: str) -> str | None:
+    for m in _TELEFONO_CANDIDATO_RE.finditer(texto):
+        valido = _telefono_valido(m.group(0))
+        if valido:
+            return valido
+    return None
 DNI_RE = re.compile(r"\b(\d{8}[A-Za-z]|[XYZxyz]\d{7}[A-Za-z])\b")
 DATE_RE = re.compile(r"\b\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}\b|\b\d{1,2}\s+de\s+[a-zA-Zé]+\s+de\s+\d{4}\b", re.IGNORECASE)
 PAGE_MARKER_RE = re.compile(r"--\s*\d+\s*of\s*\d+\s*--", re.IGNORECASE)
@@ -451,9 +486,9 @@ def _extraer_de_texto(texto_crudo: str) -> dict:
     if email_match:
         extraido["email"] = email_match.group(0)
 
-    phone_match = PHONE_RE.search(texto)
-    if phone_match:
-        extraido["telefono"] = re.sub(r"[\s.-]", "", phone_match.group(0))
+    telefono = _buscar_telefono(texto)
+    if telefono:
+        extraido["telefono"] = telefono
 
     dni_match = DNI_RE.search(texto)
     if dni_match:
