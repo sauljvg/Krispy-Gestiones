@@ -65,6 +65,37 @@
   .rgpd-box a { color: #5b2a2a; }
   .rgpd-salir { display: block; text-align: center; font-size: 13px; color: #888; margin-top: 10px; }
   [hidden] { display: none !important; }
+
+  /* Autocompletado (Nacionalidad / Idiomas) -- lista propia en vez de
+     <datalist> nativo: hace falta poder filtrar por dos alias a la vez
+     (español/inglés en Idiomas, ver datos-paises-idiomas.js) y <datalist>
+     solo compara contra el texto visible de cada opción. */
+  .autocomplete-wrap { position: relative; }
+  .autocomplete-dropdown {
+    position: absolute; left: 0; right: 0; top: 100%; z-index: 20;
+    background: #fff; border: 1px solid #ccc; border-radius: 8px; margin-top: 4px;
+    max-height: 220px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  }
+  .autocomplete-item { padding: 9px 12px; font-size: 14px; cursor: pointer; }
+  .autocomplete-item:hover { background: #f5f0e8; }
+
+  .fila-doble { display: flex; gap: 8px; align-items: stretch; margin-bottom: 8px; }
+  .fila-doble .autocomplete-wrap { flex: 1; min-width: 0; }
+  .fila-doble .select-nivel { flex: 0 0 148px; }
+  @media (max-width: 480px) { .fila-doble .select-nivel { flex: 0 0 108px; font-size: 13px; padding: 11px 6px; } }
+  .btn-quitar-fila {
+    flex: 0 0 auto; width: 40px; border: 1px solid #ccc; border-radius: 8px; background: #fff;
+    color: #900; cursor: pointer; font-size: 15px; padding: 0;
+  }
+  .fila-experiencia {
+    position: relative; border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin-bottom: 10px; background: #fafafa;
+  }
+  .btn-quitar-experiencia {
+    position: absolute; top: 10px; right: 10px; width: 26px; height: 26px; border-radius: 50%;
+    border: 1px solid #ccc; background: #fff; color: #900; cursor: pointer; font-size: 13px; padding: 0; line-height: 1;
+  }
+  .mini-label { display: block; font-size: 12px; font-weight: 600; margin: 6px 0 4px; color: #444; }
+  .fila-experiencia textarea { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid #ccc; font-family: inherit; font-size: 14px; }
 </style>
 </head>
 <body>
@@ -113,26 +144,44 @@
       </div>
       <div class="ie-pub-fila-2">
         <div class="ie-pub-campo">
-          <label>Fecha de nacimiento <span class="opcional">(opcional)</span></label>
-          <input type="date" id="f-fecha-nacimiento">
+          <label>Fecha de nacimiento</label>
+          <input type="date" id="f-fecha-nacimiento" required>
+          <p class="ie-pub-hint">Debes tener al menos 15 años para completar este formulario.</p>
         </div>
         <div class="ie-pub-campo">
           <label>Nacionalidad <span class="opcional">(opcional)</span></label>
-          <input type="text" id="f-nacionalidad">
+          <div class="autocomplete-wrap">
+            <input type="text" id="f-nacionalidad" autocomplete="off" placeholder="Escribe tu país...">
+          </div>
         </div>
       </div>
       <div class="ie-pub-campo">
         <label>Carrera</label>
         <select id="f-carrera"></select>
       </div>
+
       <div class="ie-pub-campo">
         <label>Idiomas <span class="opcional">(opcional)</span></label>
-        <input type="text" id="f-idiomas" placeholder="Ej. Español (nativo), Inglés (C1)">
+        <div id="idiomas-filas"></div>
+        <button type="button" class="ie-pub-btn-secundario" id="btn-add-idioma">+ Añadir idioma</button>
       </div>
+
       <div class="ie-pub-campo">
         <label>Disponibilidad geográfica <span class="opcional">(opcional)</span></label>
-        <input type="text" id="f-disponibilidad" placeholder="Ej. Madrid centro, coche propio">
+        <select id="f-disponibilidad">
+          <option value="">Selecciona una opción</option>
+          <option value="Sí, movilidad en todo el país">Sí, tengo movilidad en todo el país</option>
+          <option value="No, solo mi zona">No, solo puedo trabajar en mi zona</option>
+        </select>
       </div>
+
+      <div class="ie-pub-campo">
+        <label>Experiencia laboral <span class="opcional">(opcional)</span></label>
+        <p class="ie-pub-hint">¿Tienes algún trabajo actual o anterior? Cuéntanoslo.</p>
+        <div id="experiencia-filas"></div>
+        <button type="button" class="ie-pub-btn-secundario" id="btn-add-experiencia">+ Añadir experiencia</button>
+      </div>
+
       <div class="ie-pub-campo">
         <label>¿Algo más que quieras contarnos? <span class="opcional">(opcional)</span></label>
         <textarea id="f-notas" rows="3"></textarea>
@@ -148,8 +197,10 @@
   </div>
 </div>
 
+<script src="js/datos-paises-idiomas.js"></script>
 <script>
 const API_BASE = `${window.location.origin}/api`;
+const EDAD_MINIMA = 15;
 
 async function cargarCarreras() {
   const res = await fetch(`${API_BASE}/public/bbdd/carreras-ie`);
@@ -158,10 +209,156 @@ async function cargarCarreras() {
   select.innerHTML = '<option value="">Selecciona tu carrera</option>' + carreras.map((c) => `<option value="${c.replace(/"/g, "&quot;")}">${c}</option>`).join("");
 }
 
+// --- Autocompletado genérico (Nacionalidad / cada fila de Idiomas) ---
+function crearAutocomplete({ input, opciones, obtenerTexto, obtenerBusqueda, onSeleccionar }) {
+  const wrap = input.closest(".autocomplete-wrap") || input.parentElement;
+  wrap.style.position = "relative";
+  const dropdown = document.createElement("div");
+  dropdown.className = "autocomplete-dropdown";
+  dropdown.hidden = true;
+  wrap.appendChild(dropdown);
+
+  function render(lista) {
+    if (lista.length === 0) { dropdown.hidden = true; return; }
+    dropdown.innerHTML = lista.slice(0, 8).map((_, i) => `<div class="autocomplete-item" data-i="${i}"></div>`).join("");
+    Array.from(dropdown.children).forEach((el, i) => {
+      el.textContent = obtenerTexto(lista[i]);
+      el.addEventListener("mousedown", (ev) => {
+        ev.preventDefault();
+        onSeleccionar(lista[i]);
+        dropdown.hidden = true;
+      });
+    });
+    dropdown.hidden = false;
+  }
+
+  input.addEventListener("input", () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q) { dropdown.hidden = true; return; }
+    render(opciones.filter((op) => obtenerBusqueda(op).toLowerCase().includes(q)));
+  });
+  input.addEventListener("focus", () => { if (input.value.trim()) input.dispatchEvent(new Event("input")); });
+  input.addEventListener("blur", () => setTimeout(() => { dropdown.hidden = true; }, 150));
+}
+
+function wireAutocompleteNacionalidad() {
+  const input = document.getElementById("f-nacionalidad");
+  crearAutocomplete({
+    input, opciones: PAISES_ES,
+    obtenerTexto: (p) => p, obtenerBusqueda: (p) => p,
+    onSeleccionar: (p) => { input.value = p; },
+  });
+}
+
+// --- Filas repetibles de Idiomas ---
+function agregarFilaIdioma(prefill) {
+  const cont = document.getElementById("idiomas-filas");
+  const fila = document.createElement("div");
+  fila.className = "fila-doble fila-idioma";
+  fila.innerHTML = `
+    <div class="autocomplete-wrap"><input type="text" class="input-idioma" autocomplete="off" placeholder="Escribe un idioma (ej. inglés o english)..."></div>
+    <select class="select-nivel">
+      <option value="">Nivel</option>
+      ${NIVELES_IDIOMA.map((n) => `<option>${n}</option>`).join("")}
+    </select>
+    <button type="button" class="btn-quitar-fila" aria-label="Quitar idioma">✕</button>
+  `;
+  cont.appendChild(fila);
+  const input = fila.querySelector(".input-idioma");
+  if (prefill && prefill.idioma) input.value = prefill.idioma;
+  if (prefill && prefill.nivel) fila.querySelector(".select-nivel").value = prefill.nivel;
+  crearAutocomplete({
+    input, opciones: IDIOMAS_BUSCABLES,
+    obtenerTexto: (o) => o.es, obtenerBusqueda: (o) => `${o.es} ${o.en}`,
+    onSeleccionar: (o) => { input.value = o.es; },
+  });
+  fila.querySelector(".btn-quitar-fila").addEventListener("click", () => fila.remove());
+}
+
+function idiomasComoTexto() {
+  return Array.from(document.querySelectorAll(".fila-idioma")).map((fila) => {
+    const idioma = fila.querySelector(".input-idioma").value.trim();
+    const nivel = fila.querySelector(".select-nivel").value;
+    if (!idioma) return null;
+    return nivel ? `${idioma} (${nivel})` : idioma;
+  }).filter(Boolean).join(", ");
+}
+
+// --- Filas repetibles de Experiencia laboral ---
+function agregarFilaExperiencia(prefill) {
+  const cont = document.getElementById("experiencia-filas");
+  const fila = document.createElement("div");
+  fila.className = "fila-experiencia";
+  fila.innerHTML = `
+    <button type="button" class="btn-quitar-experiencia" aria-label="Quitar experiencia">✕</button>
+    <div class="ie-pub-fila-2">
+      <div><label class="mini-label">Puesto</label><input type="text" class="exp-puesto"></div>
+      <div><label class="mini-label">Empresa</label><input type="text" class="exp-empresa"></div>
+    </div>
+    <div class="ie-pub-fila-2">
+      <div><label class="mini-label">Desde</label><input type="text" class="exp-inicio" placeholder="Ej. Enero 2024"></div>
+      <div><label class="mini-label">Hasta</label><input type="text" class="exp-fin" placeholder="Ej. Actualidad"></div>
+    </div>
+    <label class="mini-label">Descripción <span class="opcional">(opcional)</span></label>
+    <textarea class="exp-descripcion" rows="2"></textarea>
+  `;
+  cont.appendChild(fila);
+  if (prefill) {
+    fila.querySelector(".exp-puesto").value = prefill.puesto || "";
+    fila.querySelector(".exp-empresa").value = prefill.empresa || "";
+    fila.querySelector(".exp-inicio").value = prefill.fecha_inicio || "";
+    fila.querySelector(".exp-fin").value = prefill.fecha_fin || "";
+    fila.querySelector(".exp-descripcion").value = prefill.descripcion || "";
+  }
+  fila.querySelector(".btn-quitar-experiencia").addEventListener("click", () => fila.remove());
+}
+
+function experienciaComoLista() {
+  return Array.from(document.querySelectorAll(".fila-experiencia")).map((fila) => ({
+    puesto: fila.querySelector(".exp-puesto").value.trim(),
+    empresa: fila.querySelector(".exp-empresa").value.trim(),
+    fecha_inicio: fila.querySelector(".exp-inicio").value.trim(),
+    fecha_fin: fila.querySelector(".exp-fin").value.trim(),
+    descripcion: fila.querySelector(".exp-descripcion").value.trim(),
+  })).filter((e) => e.puesto || e.empresa);
+}
+
+// --- Edad mínima ---
+// Aritmética con año/mes/día como números sueltos, sin pasar por Date +
+// toISOString/parseo UTC en ningún punto -- un Date de solo-fecha ("2015-01-01")
+// se interpreta como medianoche UTC, y convertirlo de vuelta a
+// año/mes/día LOCALES desplaza un día en cualquier huso horario detrás de
+// UTC (confirmado en vivo: el límite de "15 años" salía con un día de
+// diferencia al probarlo). Comparar los tres números directamente evita el
+// problema de raíz en vez de parchear un huso horario concreto.
+function hoyComponentes() {
+  const hoy = new Date();
+  return { anio: hoy.getFullYear(), mes: hoy.getMonth() + 1, dia: hoy.getDate() };
+}
+
+function fechaLimiteEdad(anios) {
+  const { anio, mes, dia } = hoyComponentes();
+  return `${anio - anios}-${String(mes).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
+}
+
+function edadDesde(fechaISO) {
+  const partes = (fechaISO || "").split("-").map(Number);
+  if (partes.length !== 3 || partes.some((n) => Number.isNaN(n))) return null;
+  const [anioNac, mesNac, diaNac] = partes;
+  const { anio, mes, dia } = hoyComponentes();
+  let edad = anio - anioNac;
+  const aunNoCumple = (mes < mesNac) || (mes === mesNac && dia < diaNac);
+  if (aunNoCumple) edad -= 1;
+  return edad;
+}
+
 document.getElementById("btn-rgpd-aceptar").addEventListener("click", () => {
   document.getElementById("rgpd-overlay").hidden = true;
   document.getElementById("ie-pub-wrap").hidden = false;
 });
+
+document.getElementById("btn-add-idioma").addEventListener("click", () => agregarFilaIdioma());
+document.getElementById("btn-add-experiencia").addEventListener("click", () => agregarFilaExperiencia());
 
 document.getElementById("btn-extraer-cv").addEventListener("click", async () => {
   const input = document.getElementById("f-cv");
@@ -184,12 +381,18 @@ document.getElementById("btn-extraer-cv").addEventListener("click", async () => 
     if (datos.telefono) document.getElementById("f-telefono").value = datos.telefono;
     if (datos.email) document.getElementById("f-email").value = datos.email;
     if (datos.fecha_nacimiento) document.getElementById("f-fecha-nacimiento").value = datos.fecha_nacimiento;
-    if (datos.disponibilidad) document.getElementById("f-disponibilidad").value = datos.disponibilidad;
+
+    if (Array.isArray(datos.experiencia_json) && datos.experiencia_json.length > 0) {
+      document.getElementById("experiencia-filas").innerHTML = "";
+      datos.experiencia_json.forEach((exp) => agregarFilaExperiencia(exp));
+    }
+
     const idiomasExtra = datos.extra_fields && datos.extra_fields.Idiomas;
-    if (idiomasExtra) document.getElementById("f-idiomas").value = idiomasExtra;
     hint.textContent = datos.sin_texto_extraible
       ? "No hemos podido leer texto de ese PDF -- rellena el formulario a mano."
-      : "Listo -- revisa que los datos sean correctos antes de enviar.";
+      : idiomasExtra
+        ? `Listo -- tu CV menciona estos idiomas: "${idiomasExtra}". Añádelos abajo con su nivel. Revisa el resto de datos antes de enviar.`
+        : "Listo -- revisa que los datos sean correctos antes de enviar.";
   } catch {
     hint.textContent = "No se pudo leer el CV -- rellena el formulario a mano.";
   }
@@ -201,7 +404,19 @@ document.getElementById("form-ie").addEventListener("submit", async (ev) => {
   const btn = document.getElementById("btn-enviar");
   errorEl.hidden = true;
   const nombre = document.getElementById("f-nombre").value.trim();
+  const fechaNacimiento = document.getElementById("f-fecha-nacimiento").value;
   if (!nombre) return;
+  if (!fechaNacimiento) {
+    errorEl.textContent = "Indica tu fecha de nacimiento.";
+    errorEl.hidden = false;
+    return;
+  }
+  const edad = edadDesde(fechaNacimiento);
+  if (edad === null || edad < EDAD_MINIMA) {
+    errorEl.textContent = `Debes tener al menos ${EDAD_MINIMA} años para completar este formulario.`;
+    errorEl.hidden = false;
+    return;
+  }
 
   btn.disabled = true;
   btn.textContent = "Enviando...";
@@ -209,12 +424,13 @@ document.getElementById("form-ie").addEventListener("submit", async (ev) => {
   formData.append("nombre_completo", nombre);
   formData.append("telefono", document.getElementById("f-telefono").value.trim());
   formData.append("email", document.getElementById("f-email").value.trim());
-  formData.append("fecha_nacimiento", document.getElementById("f-fecha-nacimiento").value);
+  formData.append("fecha_nacimiento", fechaNacimiento);
   formData.append("carrera", document.getElementById("f-carrera").value);
-  formData.append("idiomas", document.getElementById("f-idiomas").value.trim());
+  formData.append("idiomas", idiomasComoTexto());
   formData.append("nacionalidad", document.getElementById("f-nacionalidad").value.trim());
-  formData.append("disponibilidad", document.getElementById("f-disponibilidad").value.trim());
+  formData.append("disponibilidad", document.getElementById("f-disponibilidad").value);
   formData.append("notas", document.getElementById("f-notas").value.trim());
+  formData.append("experiencia_json", JSON.stringify(experienciaComoLista()));
   formData.append("rgpd_aceptado", "true");
   const cvInput = document.getElementById("f-cv");
   if (cvInput.files.length) formData.append("cv", cvInput.files[0]);
@@ -240,6 +456,10 @@ document.getElementById("form-ie").addEventListener("submit", async (ev) => {
   }
 });
 
+document.getElementById("f-fecha-nacimiento").max = fechaLimiteEdad(EDAD_MINIMA);
+document.getElementById("f-fecha-nacimiento").min = fechaLimiteEdad(100);
+wireAutocompleteNacionalidad();
+agregarFilaIdioma();
 cargarCarreras();
 </script>
 </body>

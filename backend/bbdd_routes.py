@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -17,6 +18,45 @@ router_publico = APIRouter()
 # más lo valida antes de llegar aquí) -- 10 MB es generoso para un PDF de CV
 # real de un par de páginas.
 MAX_CV_BYTES = 10 * 1024 * 1024
+
+# Pedido explícito del usuario 16/09: "la fecha de nacimiento aceptamos a
+# partir de 15 años, menores de eso no" -- el <input type="date"> del
+# formulario ya limita la fecha elegible con el mismo mínimo (ver
+# ie-formulario.html), pero eso es solo UX: la comprobación real, la que de
+# verdad protege el dato, tiene que vivir aquí (un formulario sin autenticar
+# se puede llamar directamente sin pasar por ese <input>).
+EDAD_MINIMA_IE = 15
+
+# Claves conocidas de una entrada de experiencia laboral (mismo shape que
+# reclutamiento.py::experiencia_json en el resto de la app, ver
+# _parsear_experiencia_local en cv_extraction.py) -- se filtra a esto antes
+# de guardar para que un formulario sin autenticar no pueda colar claves
+# arbitrarias dentro del JSON.
+CAMPOS_EXPERIENCIA = {"puesto", "empresa", "fecha_inicio", "fecha_fin", "descripcion"}
+
+
+def _sanear_experiencia_json(raw: str | None) -> list[dict]:
+    """Parsea y sanea la experiencia laboral que manda el formulario público
+    (viaja como texto JSON dentro de un campo de formulario, ver
+    ie-formulario.html) -- solo se aceptan las claves conocidas
+    (CAMPOS_EXPERIENCIA), el resto se descarta en vez de fallar entero, y una
+    entrada sin puesto ni empresa se descarta por vacía."""
+    if not raw:
+        return []
+    try:
+        datos = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        raise HTTPException(status_code=400, detail="No se pudo leer la experiencia laboral enviada")
+    if not isinstance(datos, list):
+        raise HTTPException(status_code=400, detail="No se pudo leer la experiencia laboral enviada")
+    resultado = []
+    for entrada in datos:
+        if not isinstance(entrada, dict):
+            continue
+        limpio = {k: (str(v).strip() if v else "") for k, v in entrada.items() if k in CAMPOS_EXPERIENCIA}
+        if limpio.get("puesto") or limpio.get("empresa"):
+            resultado.append(limpio)
+    return resultado
 
 
 class EtiquetaIn(BaseModel):
@@ -107,12 +147,13 @@ async def alta_publica_ie_route(
     nombre_completo: str = Form(...),
     telefono: str | None = Form(None),
     email: str | None = Form(None),
-    fecha_nacimiento: str | None = Form(None),
+    fecha_nacimiento: str = Form(...),
     carrera: str | None = Form(None),
     idiomas: str | None = Form(None),
     nacionalidad: str | None = Form(None),
     disponibilidad: str | None = Form(None),
     notas: str | None = Form(None),
+    experiencia_json: str | None = Form(None),
     rgpd_aceptado: bool = Form(...),
     cv: UploadFile | None = File(None),
 ):
@@ -120,11 +161,17 @@ async def alta_publica_ie_route(
         raise HTTPException(status_code=400, detail="Debes aceptar el tratamiento de tus datos para continuar")
     if not nombre_completo.strip():
         raise HTTPException(status_code=400, detail="Falta el nombre")
+    edad = bbdd_module._edad(fecha_nacimiento)
+    if edad is None:
+        raise HTTPException(status_code=400, detail="La fecha de nacimiento no es válida")
+    if edad < EDAD_MINIMA_IE:
+        raise HTTPException(status_code=400, detail=f"Debes tener al menos {EDAD_MINIMA_IE} años para completar este formulario")
     campos = {
         "nombre_completo": nombre_completo.strip(),
         "telefono": telefono, "email": email, "fecha_nacimiento": fecha_nacimiento,
         "carrera": carrera, "idiomas": idiomas, "nacionalidad": nacionalidad,
         "disponibilidad": disponibilidad, "notas": notas,
+        "experiencia_json": _sanear_experiencia_json(experiencia_json),
     }
     candidato_id = bbdd_module.crear_candidato_publico_ie(campos, empresa="kk")
     if cv is not None and cv.filename:
