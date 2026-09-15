@@ -265,6 +265,32 @@ def _contenido_de_seccion(texto: str, keywords: list[str], una_linea: bool, limi
     return ""
 
 
+# Nivel CEFR (o "Nativo") pegado al nombre del idioma -- patrón fiable en sí
+# mismo, independiente de encontrar dónde empieza/acaba la sección "Idiomas"
+# por cabecera (ver _contenido_de_seccion). Hace falta como último recurso
+# porque en plantillas de diseño a dos columnas (confirmado en vivo 16/09 con
+# un CV real, formato Canva) pdfplumber puede entrelazar "Idiomas" con la
+# columna de al lado línea a línea ("IDIOMAS ESPAÑOL C2" en la misma línea,
+# luego el teléfono, luego "INGLÉS B2"...) -- eso rompe la detección de
+# cabecera de siempre (exige que "Idiomas" ocupe toda su línea, ver
+# _indice_de_cabecera) y la sección queda vacía aunque el dato sí esté en el
+# PDF.
+NIVEL_IDIOMA_RE = re.compile(r"\b([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ]{2,20})\s+(A1|A2|B1|B2|C1|C2|Nativo)\b")
+
+
+def _idiomas_por_nivel(texto: str) -> str:
+    vistos = set()
+    encontrados = []
+    for m in NIVEL_IDIOMA_RE.finditer(texto):
+        idioma, nivel = m.group(1).strip(), m.group(2)
+        clave = idioma.lower()
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+        encontrados.append(f"{idioma.title()} ({nivel})")
+    return ", ".join(encontrados)
+
+
 # Rango de fechas tal como lo exportan estos CV -- "octubre de 2025 - abril
 # de 2026  (6 meses)", "septiembre de 2023 - agosto de 2025  (1 año y 11
 # meses)". Se usa como "ancla" para partir el bloque de Formación/
@@ -435,6 +461,12 @@ def _extraer_de_texto(texto_crudo: str) -> dict:
         contenido = _contenido_de_seccion(texto, keywords, una_linea)
         if contenido:
             extra[nombre_extra] = contenido[:200]
+    if "Idiomas" not in extra:
+        # Ver NIVEL_IDIOMA_RE/_idiomas_por_nivel -- último recurso cuando la
+        # búsqueda por cabecera (arriba) no encontró nada.
+        idiomas_por_nivel = _idiomas_por_nivel(texto)
+        if idiomas_por_nivel:
+            extra["Idiomas"] = idiomas_por_nivel[:200]
 
     extraido["extra_fields"] = extra
     # Ni nombre, ni email, ni teléfono -- lo más probable es que el PDF sea
