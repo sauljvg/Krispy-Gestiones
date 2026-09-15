@@ -521,38 +521,6 @@ def borrar_fotos_perfil_route():
     return reclutamiento.quitar_todas_las_fotos()
 
 
-@router.post("/admin/almacenamiento/reparar-rutas-encuestas", dependencies=[Depends(require_api_key)])
-def reparar_rutas_encuestas_route():
-    """TEMPORAL -- mismo bug que reparar-rutas-candidatos (ya quitado): los
-    fondos de imagen de Test/Encuestas también quedaron con la ruta
-    absoluta vieja de Railway (/data/uploads/encuestas_fondos) en vez de la
-    real en el VPS. Solo corrige si el archivo existe de verdad."""
-    import encuestas as encuestas_module
-
-    prefijo_viejo = "/data/uploads/encuestas_fondos"
-    nuevo_prefijo = encuestas_module.FONDOS_DIR
-
-    conn = encuestas_module.get_connection()
-    filas = conn.execute(
-        "SELECT id, fondo_ruta FROM encuestas WHERE fondo_ruta LIKE ?", (prefijo_viejo + "/%",)
-    ).fetchall()
-
-    corregidas = 0
-    sin_archivo = 0
-    for r in filas:
-        nueva = nuevo_prefijo + r["fondo_ruta"][len(prefijo_viejo):]
-        if os.path.isfile(nueva):
-            conn.execute("UPDATE encuestas SET fondo_ruta = ? WHERE id = ?", (nueva, r["id"]))
-            corregidas += 1
-        else:
-            sin_archivo += 1
-    conn.commit()
-    conn.close()
-    return {"corregidas": corregidas, "sin_archivo_en_disco": sin_archivo}
-
-
-
-
 @router.get("/admin/capturas/info", dependencies=[Depends(require_api_key)])
 def info_capturas_route():
     """Diagnóstico: número de archivos y tamaño total en CAPTURAS_DIR."""
