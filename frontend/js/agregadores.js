@@ -1788,6 +1788,9 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
         latlngReal,
         latlng,
         bearingReal,
+        // Fijo desde su creación, nunca se toca -- ver anguloOriginal más
+        // abajo, en la comparación de tolerancia de puntosLejanos/Cercanos.
+        anguloOriginal: bearingReal,
         local: agrProyeccionLocal(centro, latlng),
         extendidoPor: null,
         confirmado: l.limite_km != null,
@@ -1823,6 +1826,7 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
             latlngReal: latlng,
             latlng,
             bearingReal,
+            anguloOriginal: bearingReal,
             local: agrProyeccionLocal(centro, latlng),
             extendidoPor: null,
             confirmado: true,
@@ -1861,8 +1865,14 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
     .forEach((d) => {
       const latlng = [d.lat, d.lng];
       const bearing = agrAnguloDesde(centro, latlng);
+      // Comparado contra anguloOriginal (fijo), NO contra bearingReal (que
+      // se mueve cada vez que el vértice se extiende/encoge) -- comparar
+      // contra la posición ya movida dejaba que un vértice se arrastrara en
+      // cadena, salto a salto de 3°, terminando a decenas de grados de su
+      // ángulo real (confirmado en vivo 15/09 con Plenilunio/Uber Eats: un
+      // vértice a 135° terminó "vivendo" en 111.98° tras varios saltos).
       const vecino = base.find((b) => {
-        const diff = Math.abs(b.bearingReal - bearing);
+        const diff = Math.abs(b.anguloOriginal - bearing);
         return Math.min(diff, 360 - diff) < TOLERANCIA_ANGULO_GRADOS;
       });
       if (vecino) {
@@ -1913,8 +1923,10 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
       if (base.length < 2) return; // no hay borde todavía con el que comparar
       const latlng = [d.lat, d.lng];
       const bearing = agrAnguloDesde(centro, latlng);
+      // Igual que en puntosLejanos: contra anguloOriginal, no contra
+      // bearingReal, para no encadenar el arrastre de un vértice.
       const vecino = base.find((b) => {
-        const diff = Math.abs(b.bearingReal - bearing);
+        const diff = Math.abs(b.anguloOriginal - bearing);
         return Math.min(diff, 360 - diff) < TOLERANCIA_ANGULO_GRADOS;
       });
       if (vecino) {
