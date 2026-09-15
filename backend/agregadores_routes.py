@@ -572,6 +572,57 @@ def diagnostico_rutas_route():
     }
 
 
+@router.post("/admin/almacenamiento/reparar-rutas-candidatos", dependencies=[Depends(require_api_key)])
+def reparar_rutas_candidatos_route():
+    """TEMPORAL -- corrige el prefijo de ruta absoluta que quedó apuntando
+    al filesystem viejo de Railway (/data/...) en vez del real en el VPS
+    (reclutamiento.UPLOADS_DIR), tanto en candidatos.foto_ruta como en
+    candidato_archivos.ruta. Solo actualiza una fila si el archivo con la
+    ruta corregida existe de verdad en disco -- si no, la deja como está
+    (no inventa rutas). Quitar junto con diagnostico-rutas cuando ya no
+    haga falta."""
+    import reclutamiento
+    prefijo_viejo = "/data/uploads/candidatos"
+    nuevo_prefijo = reclutamiento.UPLOADS_DIR
+
+    conn = reclutamiento.get_connection()
+    fotos = conn.execute(
+        "SELECT id, foto_ruta FROM candidatos WHERE foto_ruta LIKE ?", (prefijo_viejo + "/%",)
+    ).fetchall()
+    archivos = conn.execute(
+        "SELECT id, ruta FROM candidato_archivos WHERE ruta LIKE ?", (prefijo_viejo + "/%",)
+    ).fetchall()
+
+    fotos_corregidas = 0
+    fotos_sin_archivo = 0
+    for r in fotos:
+        nueva = nuevo_prefijo + r["foto_ruta"][len(prefijo_viejo):]
+        if os.path.isfile(nueva):
+            conn.execute("UPDATE candidatos SET foto_ruta = ? WHERE id = ?", (nueva, r["id"]))
+            fotos_corregidas += 1
+        else:
+            fotos_sin_archivo += 1
+
+    archivos_corregidos = 0
+    archivos_sin_archivo = 0
+    for r in archivos:
+        nueva = nuevo_prefijo + r["ruta"][len(prefijo_viejo):]
+        if os.path.isfile(nueva):
+            conn.execute("UPDATE candidato_archivos SET ruta = ? WHERE id = ?", (nueva, r["id"]))
+            archivos_corregidos += 1
+        else:
+            archivos_sin_archivo += 1
+
+    conn.commit()
+    conn.close()
+    return {
+        "fotos_corregidas": fotos_corregidas,
+        "fotos_sin_archivo_en_disco": fotos_sin_archivo,
+        "archivos_pdf_corregidos": archivos_corregidos,
+        "archivos_pdf_sin_archivo_en_disco": archivos_sin_archivo,
+    }
+
+
 @router.get("/admin/capturas/info", dependencies=[Depends(require_api_key)])
 def info_capturas_route():
     """Diagnóstico: número de archivos y tamaño total en CAPTURAS_DIR."""
