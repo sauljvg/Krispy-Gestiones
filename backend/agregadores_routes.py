@@ -521,106 +521,36 @@ def borrar_fotos_perfil_route():
     return reclutamiento.quitar_todas_las_fotos()
 
 
-@router.get("/admin/almacenamiento/diagnostico-rutas", dependencies=[Depends(require_api_key)])
-def diagnostico_rutas_route():
-    """TEMPORAL -- diagnóstico de solo lectura del desfase de rutas tras la
-    migración a VPS: compara lo que dice la DB (candidato_archivos.ruta,
-    candidatos.foto_ruta) contra lo que hay de verdad en disco, para
-    entender por qué se rompieron las fotos de perfil. Quitar cuando ya no
-    haga falta."""
-    import reclutamiento
-    conn = reclutamiento.get_connection()
-    candidatos_con_foto = conn.execute(
-        "SELECT id, foto_ruta FROM candidatos WHERE foto_ruta IS NOT NULL LIMIT 8"
-    ).fetchall()
-    archivos_pdf = conn.execute(
-        "SELECT id, candidato_id, ruta, nombre_original FROM candidato_archivos "
-        "WHERE nombre_original LIKE '%.pdf' LIMIT 8"
-    ).fetchall()
-    conn.close()
-    prefijo_viejo = "/data/uploads/candidatos"
+@router.post("/admin/almacenamiento/reparar-rutas-encuestas", dependencies=[Depends(require_api_key)])
+def reparar_rutas_encuestas_route():
+    """TEMPORAL -- mismo bug que reparar-rutas-candidatos (ya quitado): los
+    fondos de imagen de Test/Encuestas también quedaron con la ruta
+    absoluta vieja de Railway (/data/uploads/encuestas_fondos) en vez de la
+    real en el VPS. Solo corrige si el archivo existe de verdad."""
+    import encuestas as encuestas_module
 
-    def _corregida(ruta: str) -> str:
-        if ruta and ruta.startswith(prefijo_viejo):
-            return reclutamiento.UPLOADS_DIR + ruta[len(prefijo_viejo):]
-        return ruta
+    prefijo_viejo = "/data/uploads/encuestas_fondos"
+    nuevo_prefijo = encuestas_module.FONDOS_DIR
 
-    return {
-        "uploads_dir": reclutamiento.UPLOADS_DIR,
-        "uploads_dir_existe": os.path.isdir(reclutamiento.UPLOADS_DIR),
-        "candidatos_con_foto_ruta_en_db": [
-            {
-                "id": r["id"],
-                "foto_ruta": r["foto_ruta"],
-                "existe": os.path.isfile(r["foto_ruta"]),
-                "ruta_corregida": _corregida(r["foto_ruta"]),
-                "existe_corregida": os.path.isfile(_corregida(r["foto_ruta"])),
-            }
-            for r in candidatos_con_foto
-        ],
-        "archivos_pdf_muestra": [
-            {
-                "archivo_id": r["id"],
-                "candidato_id": r["candidato_id"],
-                "ruta": r["ruta"],
-                "existe": bool(r["ruta"]) and os.path.isfile(r["ruta"]),
-                "ruta_corregida": _corregida(r["ruta"]),
-                "existe_corregida": bool(r["ruta"]) and os.path.isfile(_corregida(r["ruta"])),
-            }
-            for r in archivos_pdf
-        ],
-    }
-
-
-@router.post("/admin/almacenamiento/reparar-rutas-candidatos", dependencies=[Depends(require_api_key)])
-def reparar_rutas_candidatos_route():
-    """TEMPORAL -- corrige el prefijo de ruta absoluta que quedó apuntando
-    al filesystem viejo de Railway (/data/...) en vez del real en el VPS
-    (reclutamiento.UPLOADS_DIR), tanto en candidatos.foto_ruta como en
-    candidato_archivos.ruta. Solo actualiza una fila si el archivo con la
-    ruta corregida existe de verdad en disco -- si no, la deja como está
-    (no inventa rutas). Quitar junto con diagnostico-rutas cuando ya no
-    haga falta."""
-    import reclutamiento
-    prefijo_viejo = "/data/uploads/candidatos"
-    nuevo_prefijo = reclutamiento.UPLOADS_DIR
-
-    conn = reclutamiento.get_connection()
-    fotos = conn.execute(
-        "SELECT id, foto_ruta FROM candidatos WHERE foto_ruta LIKE ?", (prefijo_viejo + "/%",)
-    ).fetchall()
-    archivos = conn.execute(
-        "SELECT id, ruta FROM candidato_archivos WHERE ruta LIKE ?", (prefijo_viejo + "/%",)
+    conn = encuestas_module.get_connection()
+    filas = conn.execute(
+        "SELECT id, fondo_ruta FROM encuestas WHERE fondo_ruta LIKE ?", (prefijo_viejo + "/%",)
     ).fetchall()
 
-    fotos_corregidas = 0
-    fotos_sin_archivo = 0
-    for r in fotos:
-        nueva = nuevo_prefijo + r["foto_ruta"][len(prefijo_viejo):]
+    corregidas = 0
+    sin_archivo = 0
+    for r in filas:
+        nueva = nuevo_prefijo + r["fondo_ruta"][len(prefijo_viejo):]
         if os.path.isfile(nueva):
-            conn.execute("UPDATE candidatos SET foto_ruta = ? WHERE id = ?", (nueva, r["id"]))
-            fotos_corregidas += 1
+            conn.execute("UPDATE encuestas SET fondo_ruta = ? WHERE id = ?", (nueva, r["id"]))
+            corregidas += 1
         else:
-            fotos_sin_archivo += 1
-
-    archivos_corregidos = 0
-    archivos_sin_archivo = 0
-    for r in archivos:
-        nueva = nuevo_prefijo + r["ruta"][len(prefijo_viejo):]
-        if os.path.isfile(nueva):
-            conn.execute("UPDATE candidato_archivos SET ruta = ? WHERE id = ?", (nueva, r["id"]))
-            archivos_corregidos += 1
-        else:
-            archivos_sin_archivo += 1
-
+            sin_archivo += 1
     conn.commit()
     conn.close()
-    return {
-        "fotos_corregidas": fotos_corregidas,
-        "fotos_sin_archivo_en_disco": fotos_sin_archivo,
-        "archivos_pdf_corregidos": archivos_corregidos,
-        "archivos_pdf_sin_archivo_en_disco": archivos_sin_archivo,
-    }
+    return {"corregidas": corregidas, "sin_archivo_en_disco": sin_archivo}
+
+
 
 
 @router.get("/admin/capturas/info", dependencies=[Depends(require_api_key)])
