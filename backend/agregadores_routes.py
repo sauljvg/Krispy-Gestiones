@@ -408,7 +408,7 @@ def eliminar_pedidos_horas_tanda_route(tanda_id: int, _user: dict = Depends(requ
 @router.get("/direcciones/{tienda}", dependencies=[Depends(require_api_key)])
 def direcciones_route(
     tienda: str, cercano: bool = False, agregador: str | None = None, solo_sin_datos: bool = False,
-    ignorar_poligono: bool = False,
+    ignorar_poligono: bool = False, solo_disponibles: bool = False,
 ):
     """El scraper llama esto al empezar una pasada: genera (si hace falta)
     y geocodifica el grid server-side, así el geocoding se cachea una única
@@ -419,9 +419,15 @@ def direcciones_route(
     esos -- ver get_o_crear_direcciones. `ignorar_poligono=True` hace que
     "sin datos" no dé por buenos los puntos dentro del polígono de cobertura
     ya confirmado (ver _cobertura_confirmada_por_limite) -- para una pasada
-    puntual que quiera comprobar cada punto de verdad, sin esa suposición."""
+    puntual que quiera comprobar cada punto de verdad, sin esa suposición.
+    `solo_disponibles=True` es lo opuesto de solo_sin_datos: devuelve SOLO
+    los puntos cuyo último chequeo real de ese agregador fue disponible --
+    para la revalidación diaria de "solo verdes" (pedido explícito del
+    usuario 15/09)."""
     radios = agregadores_module.GRID_RADIOS_CERCANO_KM if cercano else agregadores_module.GRID_RADIOS_KM
-    return agregadores_module.get_o_crear_direcciones(tienda, radios, agregador, solo_sin_datos, ignorar_poligono)
+    return agregadores_module.get_o_crear_direcciones(
+        tienda, radios, agregador, solo_sin_datos, ignorar_poligono, solo_disponibles
+    )
 
 
 @router.post("/direcciones/reparar", dependencies=[Depends(require_api_key)])

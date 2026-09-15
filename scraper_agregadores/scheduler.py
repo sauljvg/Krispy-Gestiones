@@ -8,9 +8,16 @@ min, cuando lo que de verdad hace falta ahora es seguir empujando el
 descubrimiento del borde. Por eso cada pasada (cercano y completo, dos
 cadencias, mismo trabajo) ya SOLO cubre los puntos SIN DATOS de las 6 tiendas
 (crucen tienda o no) -- nunca re-chequea un punto que ya tiene un resultado
-real de ese agregador. Volver a vigilar puntos ya confirmados (para detectar
-un bloqueo nuevo en una zona ya mapeada) es una necesidad de OTRA fase, una
-vez el borde esté confirmado -- no de esta.
+real de ese agregador.
+
+Esa "otra fase" (vigilar puntos ya confirmados para detectar un bloqueo nuevo en
+una zona ya mapeada) llegó el 15/09, una vez el borde estaba razonablemente
+cubierto: vuelta_semanal_completa (sábados, TODO -- verde y rojo, reutiliza
+refrescar_todo.py) y revalidar_disponibles_diario (resto de días, SOLO los puntos
+cuyo último resultado fue disponible, ver revalidar_disponibles.py). Ambas se
+pausan mutuamente con chequeo_cercano/completo mientras corren (ver
+_pasada_pesada_exclusiva) -- no tiene sentido competir por la misma ventana
+visible de Uber Eats ni duplicar tráfico contra los agregadores a la vez.
 
 Los agregadores de una misma pasada corren en paralelo (sitios distintos, sin
 rate-limit cruzado); dentro de cada agregador las direcciones van secuenciales con pausa.
@@ -36,10 +43,13 @@ from collections import defaultdict
 from datetime import datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 import config
 import reenviar_cola
+import refrescar_todo
+import revalidar_disponibles
 from main import chequear_tienda
 from utils import api_client
 
@@ -47,6 +57,7 @@ logger = logging.getLogger("scheduler")
 
 _worker_index = 0
 _worker_count = 1
+_scheduler: AsyncIOScheduler | None = None
 
 
 def _pares_asignados() -> list[tuple[str, str]]:
@@ -255,12 +266,93 @@ async def reintentar_cola_local():
         logger.warning("Fallo reintentando la cola local de chequeos pendientes: %r", exc)
 
 
+async def _pasada_pesada_exclusiva(nombre: str, corutina) -> None:
+    """vuelta_semanal_completa y revalidar_disponibles_diario re-chequean CIENTOS de
+    puntos ya confirmados (a diferencia de chequeo_cercano/completo, que solo tocan
+    huecos) -- si corrieran a la vez que esos dos, se pisarían la ventana visible de
+    Uber Eats (ver utils/ventana.py) y duplicarían tráfico contra los agregadores en
+    la misma ventana horaria. Por eso se pausan chequeo_cercano/completo mientras dura
+    la pasada pesada, y se reanudan siempre al terminar (pedido explícito del usuario
+    15/09)."""
+    if _scheduler is not None:
+        for job_id in ("chequeo-cercano", "chequeo-completo"):
+            try:
+                _scheduler.pause_job(job_id)
+            except Exception as exc:
+                logger.warning("No se pudo pausar %s antes de %s: %r", job_id, nombre, exc)
+    try:
+        await corutina
+    finally:
+        if _scheduler is not None:
+            for job_id in ("chequeo-cercano", "chequeo-completo"):
+                try:
+                    _scheduler.resume_job(job_id)
+                except Exception as exc:
+                    logger.warning("No se pudo reanudar %s tras %s: %r", job_id, nombre, exc)
+
+
+async def vuelta_semanal_completa():
+    """Sábados: re-chequea TODOS los puntos activos (disponibles y no disponibles),
+    no solo los huecos sin datos -- el día de más tráfico real, para capturar el
+    máximo de cobertura disponible (pedido explícito del usuario 15/09). Reutiliza
+    refrescar_todo.py tal cual (mismo mecanismo de rondas para el Dashboard del
+    scraper). Solo corre con worker_count=1 (caso del VPS/daemon 24/7) -- con varios
+    workers habría que repartir el trabajo como hace revalidar_completo.py, que ya
+    existe aparte para pruebas de carga puntuales."""
+    if not config.SCRAPER_ENABLED:
+        logger.info("SCRAPER_ENABLED=False — se omite la vuelta semanal completa.")
+        return
+    if not es_horario_apertura():
+        logger.debug("Fuera de horas punta — se omite la vuelta semanal completa.")
+        return
+    if _worker_count != 1:
+        logger.debug("Vuelta semanal completa: solo corre con worker_count=1, se omite.")
+        return
+    await _pasada_pesada_exclusiva("vuelta semanal completa", refrescar_todo.main(config.AGREGADORES))
+
+
+async def revalidar_disponibles_diario():
+    """Resto de días (no sábado): re-chequea SOLO los puntos cuyo último resultado
+    real fue disponible, para detectar cuándo una zona que estaba libre deja de
+    estarlo (pedido explícito del usuario 15/09). No corre en sábado -- ese día ya
+    cubre lo mismo (y más) la vuelta semanal completa, no tiene sentido duplicar
+    tráfico contra los agregadores el mismo día."""
+    if not config.SCRAPER_ENABLED:
+        logger.info("SCRAPER_ENABLED=False — se omite la revalidación diaria de disponibles.")
+        return
+    if not es_horario_apertura():
+        logger.debug("Fuera de horas punta — se omite la revalidación diaria de disponibles.")
+        return
+    if _worker_count != 1:
+        logger.debug("Revalidación diaria de disponibles: solo corre con worker_count=1, se omite.")
+        return
+    await _pasada_pesada_exclusiva(
+        "revalidación diaria de disponibles", revalidar_disponibles.main(config.AGREGADORES)
+    )
+
+
+def _hora_inicio_horario() -> tuple[int, int]:
+    """Hora/minuto de inicio del primer tramo de HORARIOS_APERTURA, con 5 min de
+    margen para no arrancar a la vez que chequeo_cercano/completo (que también
+    disparan justo al abrir, ver es_horario_apertura) -- se deriva de la config en
+    vez de hardcodear "12:05" para no desincronizarse si SCRAPER_HORARIOS_APERTURA
+    cambia en el .env."""
+    inicio = config.HORARIOS_APERTURA[0]["inicio"] if config.HORARIOS_APERTURA else 12.0
+    hora = int(inicio)
+    minuto = int(round((inicio - hora) * 60)) + 5
+    if minuto >= 60:
+        hora += 1
+        minuto -= 60
+    return hora, minuto
+
+
 def crear_scheduler(worker_index: int = 0, worker_count: int = 1) -> AsyncIOScheduler:
-    global _worker_index, _worker_count
+    global _worker_index, _worker_count, _scheduler
     _worker_index = worker_index
     _worker_count = worker_count
 
     scheduler = AsyncIOScheduler()
+    _scheduler = scheduler
     scheduler.add_job(
         chequeo_cercano,
         trigger=IntervalTrigger(minutes=config.FRECUENCIA_CHEQUEO_CERCANO_MIN),
@@ -287,5 +379,26 @@ def crear_scheduler(worker_index: int = 0, worker_count: int = 1) -> AsyncIOSche
         max_instances=1,
         coalesce=True,
         misfire_grace_time=300,
+    )
+
+    hora_inicio, minuto_inicio = _hora_inicio_horario()
+    # Sábados: vuelta completa (verde+rojo) -- el día de más tráfico real, para
+    # capturar el máximo de cobertura disponible (pedido explícito del usuario 15/09).
+    scheduler.add_job(
+        vuelta_semanal_completa,
+        trigger=CronTrigger(day_of_week="sat", hour=hora_inicio, minute=minuto_inicio),
+        id="vuelta-semanal-completa",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
+    # Resto de días: revalidación de solo los puntos ya confirmados como disponibles.
+    scheduler.add_job(
+        revalidar_disponibles_diario,
+        trigger=CronTrigger(day_of_week="sun,mon,tue,wed,thu,fri", hour=hora_inicio, minute=minuto_inicio),
+        id="revalidar-disponibles-diario",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
     )
     return scheduler

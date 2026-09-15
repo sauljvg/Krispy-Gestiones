@@ -1545,6 +1545,28 @@ def _con_datos_reales(conn, resultado: list[dict], agregador: str) -> set:
     }
 
 
+def _ids_ultimo_disponible(conn, resultado: list[dict], agregador: str) -> set:
+    """A diferencia de _con_datos_reales (¿alguna vez hubo un chequeo real?),
+    esto mira solo el chequeo MÁS RECIENTE de cada punto para ese agregador --
+    para la revalidación diaria de "solo verdes" (detectar cuándo una zona que
+    estaba disponible deja de estarlo, pedido explícito del usuario 15/09)."""
+    if not resultado:
+        return set()
+    ids = [r["id"] for r in resultado]
+    marcadores = ",".join("?" * len(ids))
+    filas = conn.execute(
+        f"""SELECT direccion_id, disponible FROM agregadores_chequeos
+            WHERE agregador=? AND error_texto IS NULL AND direccion_id IN ({marcadores})
+            AND id IN (
+                SELECT MAX(id) FROM agregadores_chequeos
+                WHERE agregador=? AND error_texto IS NULL AND direccion_id IN ({marcadores})
+                GROUP BY direccion_id
+            )""",
+        (agregador, *ids, agregador, *ids),
+    ).fetchall()
+    return {fila["direccion_id"] for fila in filas if fila["disponible"]}
+
+
 def _radio_limite(fila) -> float | None:
     """Devuelve únicamente distancias reales confirmadas de cobertura disponible."""
     if fila["limite_km"] is not None and fila["limite_km"] > 0:
@@ -1608,7 +1630,7 @@ def _priorizar_sin_datos(conn, resultado: list[dict], agregador: str) -> list[di
 
 def get_o_crear_direcciones(
     tienda: str, radios_km=None, agregador: str | None = None, solo_sin_datos: bool = False,
-    ignorar_poligono: bool = False,
+    ignorar_poligono: bool = False, solo_disponibles: bool = False,
 ) -> list[dict]:
     if tienda not in TIENDAS:
         return []
@@ -1709,7 +1731,13 @@ def get_o_crear_direcciones(
             if inactivos:
                 resultado = [r for r in resultado if r["id"] not in inactivos]
 
-        if agregador and solo_sin_datos:
+        if agregador and solo_disponibles:
+            # Revalidación diaria de "solo verdes" (pedido explícito del usuario
+            # 15/09): a diferencia de solo_sin_datos, aquí SÍ queremos puntos con
+            # dato real -- pero solo los que la última vez salieron disponibles.
+            disponibles = _ids_ultimo_disponible(conn, resultado, agregador)
+            resultado = [r for r in resultado if r["id"] in disponibles]
+        elif agregador and solo_sin_datos:
             con_datos = _con_datos_reales(conn, resultado, agregador)
             # ignorar_poligono=True: pasada puntual que quiere comprobar cada punto de
             # verdad, sin dar por buenos los que caen dentro del polígono de cobertura

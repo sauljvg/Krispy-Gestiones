@@ -139,7 +139,7 @@ async def eliminar_direccion(direccion_id: int, agregador: str | None = None):
 
 async def obtener_direcciones(
     tienda: str, cercano: bool = False, agregador: str = None, solo_sin_datos: bool = False,
-    ignorar_poligono: bool = False,
+    ignorar_poligono: bool = False, solo_disponibles: bool = False,
 ) -> list[dict]:
     """`agregador`, si se pasa, hace que el backend devuelva primero los
     puntos que ese agregador todavía no ha comprobado nunca de verdad (ver
@@ -151,7 +151,11 @@ async def obtener_direcciones(
 
     `ignorar_poligono=True`: no da por buenos los puntos dentro del polígono
     de cobertura ya confirmado -- para una pasada puntual que quiera
-    comprobar cada punto de verdad (ver revalidar_ubereats_sin_poligono.py)."""
+    comprobar cada punto de verdad (ver revalidar_ubereats_sin_poligono.py).
+
+    `solo_disponibles=True`: lo opuesto de solo_sin_datos -- solo devuelve
+    puntos cuyo último chequeo real fue disponible, para la revalidación
+    diaria de "solo verdes" (ver revalidar_disponibles.py)."""
     url = f"{config.KG_API_BASE_URL}/api/agregadores/direcciones/{tienda}"
     params = {"cercano": str(cercano).lower()}
     if agregador:
@@ -160,6 +164,8 @@ async def obtener_direcciones(
         params["solo_sin_datos"] = "true"
     if ignorar_poligono:
         params["ignorar_poligono"] = "true"
+    if solo_disponibles:
+        params["solo_disponibles"] = "true"
     return await _solicitar("GET", url, params=params, headers=_headers(), timeout=60)
 
 

@@ -43,11 +43,9 @@ AGREGADORES = ["ubereats", "glovo", "justeat"]
 
 # Dos cadencias (10 min / 60 min) sobre EL MISMO trabajo: cubrir puntos sin
 # datos aún, para seguir empujando el descubrimiento del borde de cobertura
-# (ver scheduler.py). Ya no hay un recorrido "completo" que re-chequee lo ya
-# confirmado -- eso es una necesidad de otra fase, una vez el borde esté
-# confirmado, no de esta (pedido explícito del usuario 10/08). Se mantienen
-# las dos cadencias tal cual por si conviene retomar una vigilancia periódica
-# más adelante sin tener que rehacer el scheduler entero.
+# (ver scheduler.py). La vigilancia de lo ya confirmado (detectar un bloqueo
+# nuevo en zona ya mapeada) llegó el 15/09 como pasadas aparte -- ver
+# vuelta_semanal_completa / revalidar_disponibles_diario en scheduler.py.
 FRECUENCIA_CHEQUEO_CERCANO_MIN = 10
 FRECUENCIA_CHEQUEO_COMPLETO_MIN = 60
 
