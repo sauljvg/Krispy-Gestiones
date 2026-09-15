@@ -538,11 +538,24 @@ def diagnostico_rutas_route():
         "WHERE nombre_original LIKE '%.pdf' LIMIT 8"
     ).fetchall()
     conn.close()
+    prefijo_viejo = "/data/uploads/candidatos"
+
+    def _corregida(ruta: str) -> str:
+        if ruta and ruta.startswith(prefijo_viejo):
+            return reclutamiento.UPLOADS_DIR + ruta[len(prefijo_viejo):]
+        return ruta
+
     return {
         "uploads_dir": reclutamiento.UPLOADS_DIR,
         "uploads_dir_existe": os.path.isdir(reclutamiento.UPLOADS_DIR),
         "candidatos_con_foto_ruta_en_db": [
-            {"id": r["id"], "foto_ruta": r["foto_ruta"], "existe": os.path.isfile(r["foto_ruta"])}
+            {
+                "id": r["id"],
+                "foto_ruta": r["foto_ruta"],
+                "existe": os.path.isfile(r["foto_ruta"]),
+                "ruta_corregida": _corregida(r["foto_ruta"]),
+                "existe_corregida": os.path.isfile(_corregida(r["foto_ruta"])),
+            }
             for r in candidatos_con_foto
         ],
         "archivos_pdf_muestra": [
@@ -551,6 +564,8 @@ def diagnostico_rutas_route():
                 "candidato_id": r["candidato_id"],
                 "ruta": r["ruta"],
                 "existe": bool(r["ruta"]) and os.path.isfile(r["ruta"]),
+                "ruta_corregida": _corregida(r["ruta"]),
+                "existe_corregida": bool(r["ruta"]) and os.path.isfile(_corregida(r["ruta"])),
             }
             for r in archivos_pdf
         ],
