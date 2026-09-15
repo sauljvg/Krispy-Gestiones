@@ -52,11 +52,28 @@ async def _chequear_agregador_aislado(tienda: str, agregador_nombre: str) -> boo
         return False
 
 
+async def _total_puntos_disponibles(agregador: str) -> int:
+    """Cuenta las direcciones DISPONIBLES (ver solo_disponibles) de las 6
+    tiendas para este agregador -- para que total_objetivo case con
+    "hechos" (direcciones distintas chequeadas, ver
+    agregadores.py::get_ronda_actual). Mismo bug que refrescar_todo.py
+    (confirmado en vivo 15/09, pasar len(TIENDAS_SCHEDULER) ahí mostraba un
+    progreso sin relación con el real) -- corregido aquí desde el principio."""
+    total = 0
+    for tienda in config.TIENDAS_SCHEDULER:
+        direcciones = await api_client.obtener_direcciones(
+            tienda, cercano=False, agregador=agregador, solo_disponibles=True
+        )
+        total += len(direcciones)
+    return total
+
+
 async def _revalidar_agregador(agregador: str) -> tuple[int, int]:
     """Re-chequea las 6 tiendas para UN agregador, registrado como su propia
     ronda para que el Dashboard del scraper muestre progreso en vivo."""
     try:
-        await api_client.iniciar_ronda(agregador, len(config.TIENDAS_SCHEDULER), 1)
+        total_objetivo = await _total_puntos_disponibles(agregador)
+        await api_client.iniciar_ronda(agregador, total_objetivo, 1)
     except Exception as exc:
         logger.warning("No se pudo avisar del inicio de ronda para %s (sigue igual): %r", agregador, exc)
 
