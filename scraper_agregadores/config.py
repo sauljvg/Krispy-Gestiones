@@ -120,12 +120,13 @@ MAX_TIENDAS_PARALELO = int(os.getenv("MAX_TIENDAS_PARALELO", "3"))
 #     sí compitiendo por CPU, con riesgo real de afectar también a la web en
 #     producción (mismo servidor). 4 dejó al menos 1 núcleo libre para el
 #     resto (backend, OS).
-#   - justeat=20: sin problemas de bloqueo documentados a ninguna
-#     concurrencia probada -- pero es headless (sin ventana real que
-#     renderizar, mucho más barato de CPU que Uber Eats), así que el límite
-#     de 4 núcleos de arriba no tiene por qué aplicarle igual de mal; a
-#     confirmar en vivo (pedido explícito del usuario 15/09).
-MAX_WORKERS_POR_AGREGADOR = {"glovo": 1, "ubereats": 4, "justeat": 20}
+#   - justeat=4: sin problemas de bloqueo documentados a ninguna concurrencia
+#     probada -- pero probado en vivo a 20 en este VPS el 15/09 y fue PEOR
+#     que Uber Eats a 10 (load average 23.45, memoria cayendo a 1.6GB
+#     libres, 0 chequeos terminados en 22s): el techo real de esta máquina
+#     es la CPU (4 núcleos, sin sobra para 20 tareas headless a la vez), no
+#     JustEat en sí -- así que va al mismo límite que Uber Eats por ahora.
+MAX_WORKERS_POR_AGREGADOR = {"glovo": 1, "ubereats": 4, "justeat": 4}
 
 KG_API_BASE_URL = os.getenv("KG_API_BASE_URL", "http://localhost:8000")
 KG_API_KEY = os.getenv("KG_API_KEY", "")
