@@ -30,7 +30,7 @@ logger = logging.getLogger("revalidar_disponibles")
 MODO_SESION = "revalidar_disponibles"
 
 
-async def _chequear_agregador_aislado(tienda: str, agregador_nombre: str) -> bool:
+async def _chequear_agregador_aislado(tienda: str, agregador_nombre: str, ventana_slot: int | None = None) -> bool:
     try:
         await chequear_tienda(
             tienda, agregador_nombre,
@@ -40,6 +40,7 @@ async def _chequear_agregador_aislado(tienda: str, agregador_nombre: str) -> boo
             # permitir_reuso=False: mismo motivo que refrescar_todo.py/revalidar_completo.py
             # -- si no, podría reportar como "recién comprobado" un dato de hasta 24h.
             permitir_reuso=False,
+            ventana_slot=ventana_slot,
         )
         return True
     except Exception as exc:
@@ -70,19 +71,33 @@ async def _total_puntos_disponibles(agregador: str) -> int:
 
 async def _revalidar_agregador(agregador: str) -> tuple[int, int]:
     """Re-chequea las 6 tiendas para UN agregador, registrado como su propia
-    ronda para que el Dashboard del scraper muestre progreso en vivo."""
+    ronda para que el Dashboard del scraper muestre progreso en vivo.
+
+    Tiendas en paralelo (hasta config.MAX_TIENDAS_PARALELO a la vez), igual
+    que el daemon normal y que refrescar_todo.py -- ver ahí el mismo
+    comentario (confirmado en vivo 15/09 que la versión secuencial no
+    coincidía con la estimación de tiempos dada al usuario)."""
     try:
         total_objetivo = await _total_puntos_disponibles(agregador)
         await api_client.iniciar_ronda(agregador, total_objetivo, 1)
     except Exception as exc:
         logger.warning("No se pudo avisar del inicio de ronda para %s (sigue igual): %r", agregador, exc)
 
-    exitosos = fallidos = 0
-    for tienda in config.TIENDAS_SCHEDULER:
-        logger.info("=== [%s] Tienda: %s ===", agregador, tienda)
-        ok = await _chequear_agregador_aislado(tienda, agregador)
-        exitosos += 1 if ok else 0
-        fallidos += 0 if ok else 1
+    semaforo_tiendas = asyncio.Semaphore(config.MAX_TIENDAS_PARALELO)
+    slot_ubereats_counter = {"n": 0}
+
+    async def _tienda(tienda: str) -> bool:
+        async with semaforo_tiendas:
+            logger.info("=== [%s] Tienda: %s ===", agregador, tienda)
+            slot = None
+            if agregador == "ubereats":
+                slot = slot_ubereats_counter["n"]
+                slot_ubereats_counter["n"] += 1
+            return await _chequear_agregador_aislado(tienda, agregador, ventana_slot=slot)
+
+    resultados = await asyncio.gather(*(_tienda(tienda) for tienda in config.TIENDAS_SCHEDULER))
+    exitosos = sum(1 for r in resultados if r)
+    fallidos = sum(1 for r in resultados if not r)
 
     try:
         await api_client.finalizar_ronda(agregador)
