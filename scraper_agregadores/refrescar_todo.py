@@ -85,21 +85,28 @@ async def _refrescar_agregador(agregador: str) -> tuple[int, int]:
     ronda (worker_count=1) para que el Dashboard del scraper muestre
     progreso en vivo de esta pasada, igual que ya hace revalidar_completo.py.
 
-    Tiendas en paralelo (hasta config.MAX_TIENDAS_PARALELO a la vez), igual
-    que el daemon normal (ver scheduler.py::_chequeo) -- antes esto era
-    estrictamente secuencial, una tienda detrás de otra (~6x más lento de lo
-    necesario y sin relación con el ritmo real del daemon en el que se basó
-    la estimación de tiempos dada al usuario, confirmado en vivo 15/09).
-    Cada tienda con Uber Eats asignado pide un slot de la rejilla compartida
-    (utils/ventana.py) para que sus ventanas visibles no se apilen si corren
-    a la vez -- Glovo/JustEat son headless, no lo necesitan."""
+    Tiendas en paralelo, hasta el límite POR AGREGADOR de
+    config.MAX_TIENDAS_PARALELO_POR_AGREGADOR (ver ahí el porqué de cada
+    número -- Glovo se queda en 1/secuencial a propósito, tiene un bloqueo
+    por IP documentado y confirmado en vivo a cualquier concurrencia alta,
+    ver ESTADO_PROYECTO.md 26/08). Antes esto era estrictamente secuencial
+    para los tres agregadores por igual (~6x más lento de lo necesario y sin
+    relación con el ritmo real del daemon en el que se basó la estimación de
+    tiempos dada al usuario, confirmado en vivo 15/09) -- la primera versión
+    de este paralelismo usaba el mismo límite para los tres, lo que habría
+    vuelto a bloquear Glovo (corregido antes de que la pasada llegara a
+    Glovo, mismo día). Cada tienda con Uber Eats asignado pide un slot de la
+    rejilla compartida (utils/ventana.py) para que sus ventanas visibles no
+    se apilen si corren a la vez -- Glovo/JustEat son headless, no lo
+    necesitan."""
     try:
         total_objetivo = await _total_puntos(agregador)
         await api_client.iniciar_ronda(agregador, total_objetivo, 1)
     except Exception as exc:
         logger.warning("No se pudo avisar del inicio de ronda para %s (sigue igual): %r", agregador, exc)
 
-    semaforo_tiendas = asyncio.Semaphore(config.MAX_TIENDAS_PARALELO)
+    max_paralelo = config.MAX_TIENDAS_PARALELO_POR_AGREGADOR.get(agregador, config.MAX_TIENDAS_PARALELO)
+    semaforo_tiendas = asyncio.Semaphore(max_paralelo)
     slot_ubereats_counter = {"n": 0}
 
     async def _tienda(tienda: str) -> bool:

@@ -73,17 +73,17 @@ async def _revalidar_agregador(agregador: str) -> tuple[int, int]:
     """Re-chequea las 6 tiendas para UN agregador, registrado como su propia
     ronda para que el Dashboard del scraper muestre progreso en vivo.
 
-    Tiendas en paralelo (hasta config.MAX_TIENDAS_PARALELO a la vez), igual
-    que el daemon normal y que refrescar_todo.py -- ver ahí el mismo
-    comentario (confirmado en vivo 15/09 que la versión secuencial no
-    coincidía con la estimación de tiempos dada al usuario)."""
+    Tiendas en paralelo, hasta el límite POR AGREGADOR de
+    config.MAX_TIENDAS_PARALELO_POR_AGREGADOR -- ver ahí el porqué de cada
+    número (Glovo secuencial a propósito, bloqueo por IP documentado)."""
     try:
         total_objetivo = await _total_puntos_disponibles(agregador)
         await api_client.iniciar_ronda(agregador, total_objetivo, 1)
     except Exception as exc:
         logger.warning("No se pudo avisar del inicio de ronda para %s (sigue igual): %r", agregador, exc)
 
-    semaforo_tiendas = asyncio.Semaphore(config.MAX_TIENDAS_PARALELO)
+    max_paralelo = config.MAX_TIENDAS_PARALELO_POR_AGREGADOR.get(agregador, config.MAX_TIENDAS_PARALELO)
+    semaforo_tiendas = asyncio.Semaphore(max_paralelo)
     slot_ubereats_counter = {"n": 0}
 
     async def _tienda(tienda: str) -> bool:

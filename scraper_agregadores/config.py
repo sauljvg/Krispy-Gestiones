@@ -95,6 +95,25 @@ SCRAPER_RETRY_MAX = int(os.getenv("SCRAPER_RETRY_MAX", "3"))
 # el equipo aguanta bien con 3 sin problemas.
 MAX_TIENDAS_PARALELO = int(os.getenv("MAX_TIENDAS_PARALELO", "3"))
 
+# Límite de tiendas en paralelo POR AGREGADOR para las pasadas de alto volumen
+# (refrescar_todo.py, revalidar_disponibles.py -- re-chequean CIENTOS de puntos
+# reales por agregador, a diferencia del daemon normal de arriba, que casi
+# siempre tiene 0 puntos sin_datos pendientes y por eso nunca llegó a exponer
+# este problema). Basado en lo medido en vivo (ver ESTADO_PROYECTO.md 26/08 y
+# 04/09):
+#   - glovo=1 (secuencial): a CUALQUIER concurrencia alta probada (20/15/10/5
+#     workers) Glovo se bloquea ~29-31% de las peticiones por límite de IP del
+#     lado de Glovo, no del código -- ni NordVPN lo arregla. "NO relanzar Glovo
+#     con muchos workers seguidos desde la misma IP -- seguir insistiendo solo
+#     prolonga el bloqueo" (pedido explícito del usuario 26/08).
+#   - ubereats=3: igual que el daemon (MAX_TIENDAS_PARALELO de arriba) -- con
+#     4 workers dio el mejor resultado medido (18.1 puntos/min), aunque hay un
+#     corte de sesión sin resolver del todo a los ~13-15 min de ronda sostenida
+#     (ver 04/09); 3 se queda en el lado seguro de ese límite.
+#   - justeat=6 (todas las tiendas a la vez): sin problemas de bloqueo
+#     documentados a ninguna concurrencia probada (hasta 20 workers).
+MAX_TIENDAS_PARALELO_POR_AGREGADOR = {"glovo": 1, "ubereats": 3, "justeat": 6}
+
 KG_API_BASE_URL = os.getenv("KG_API_BASE_URL", "http://localhost:8000")
 KG_API_KEY = os.getenv("KG_API_KEY", "")
 
