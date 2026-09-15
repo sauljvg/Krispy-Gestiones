@@ -24,7 +24,7 @@
   .ie-pub-cv-box {
     border: 1px dashed #ccc; border-radius: 12px; padding: 16px; margin: 20px 0; text-align: center;
   }
-  .ie-pub-cv-box input[type="file"] { display: block; margin: 0 auto 10px; font-size: 13px; max-width: 100%; }
+  .ie-pub-cv-box input[type="file"] { display: block; margin: 10px auto 0; font-size: 13px; max-width: 100%; }
   /* Botón nativo de "Seleccionar archivo" -- por defecto lo pinta el
      navegador gris y pequeño, sin relación visual con el resto del
      formulario (pedido explícito del usuario: más grande y azul IE). */
@@ -151,8 +151,8 @@
     <p class="ie-pub-sub">Déjanos tus datos para futuros procesos de selección. Puedes subir tu CV para rellenar el formulario automáticamente, o escribir tus datos a mano.</p>
 
     <div class="ie-pub-cv-box">
-      <input type="file" id="f-cv" accept="application/pdf">
       <p class="ie-pub-hint">Sube tu CV en PDF y lo leemos automáticamente para rellenar el formulario.</p>
+      <input type="file" id="f-cv" accept="application/pdf">
       <div class="ie-pub-spinner-row" id="cv-cargando" hidden>
         <span class="ie-pub-spinner"></span>
         <span>Leyendo tu CV...</span>
