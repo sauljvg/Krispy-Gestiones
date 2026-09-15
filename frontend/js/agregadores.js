@@ -1744,22 +1744,22 @@ function agrCruceConBorde(a, b, bearingDeg) {
   return t;
 }
 
-function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uniones, rellenos) {
+function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uniones, rellenos, agregadorNombre) {
   // Polígono "araña/radar": un vértice por ángulo, a la distancia real del
   // límite de cobertura en esa dirección concreta -- a diferencia del
   // envolvente convexo, esto SÍ puede representar huecos de cobertura (ej.
   // cerrado al norte, abierto al sur), porque conecta los vértices en orden
   // angular en vez de "abombar hacia fuera". Además marca cada vértice con
   // un punto clicable (ángulo + límite exacto de esa dirección).
-  if (!limites || limites.length === 0) return null;
-  const agregador = limites[0].agregador;
+  const agregador = agregadorNombre || (limites && limites[0] && limites[0].agregador);
+  if (!agregador) return null;
 
   // Todos los dots de esta tienda contribuyen al polígono -- se restauró el
   // algoritmo del 10/08 09:00 que no filtraba por tienda más cercana
   // (pedido explícito del usuario 10/08 tarde).
   const direccionesPropias = (direccionesTienda || []);
 
-  const base = [...limites]
+  const baseDesdeLimites = [...(limites || [])]
     // "sin datos (todo falló)" no aporta ni siquiera una cota aproximada --
     // se salta ese ángulo del polígono en vez de inventar un radio (ver
     // agrRadioDeLimite). Deja un hueco angular más ancho, pero eso es
@@ -1786,14 +1786,54 @@ function agrDibujarPoligonoLimite(limites, centro, color, direccionesTienda, uni
         extendidoPor: null,
         confirmado: l.limite_km != null,
       };
-    })
-    // Se ordena por el ángulo REAL de cada posición (no el pedido) -- dibujar
-    // en la dirección REAL comprobada puede desplazar un vértice de su
-    // ángulo nominal (zonas con pocas calles numeradas geocodifican varios
-    // ángulos pedidos a la misma calle o a calles muy próximas). Conectar
-    // por el ángulo pedido cruzaba las líneas del polígono en esos casos
-    // (confirmado en vivo 09/08 con La Gavia).
-    .sort((a, b) => a.bearingReal - b.bearingReal);
+    });
+
+  // Una tienda sin NINGÚN límite guardado para este agregador (nunca se le
+  // corrió buscar_limite_cobertura.py, que es un script manual/aparte del
+  // daemon normal) se quedaba sin polígono aunque el daemon ya llevara
+  // tiempo confirmando dots disponibles ahí -- puntosLejanos/Cercanos, más
+  // abajo, solo AJUSTAN una base ya existente (necesitan 2+ vértices para
+  // comparar contra un borde), así que con 0-1 límites se saltaban todos los
+  // dots sin dibujar nada (pedido explícito del usuario 15/09: el polígono
+  // debe reflejar los dots que el daemon YA encontró, sin depender de correr
+  // esa búsqueda -- "no debemos crear más dots"). Con menos de 2 límites se
+  // arma una base de arranque directamente desde los propios dots
+  // disponibles de esta tienda (mismo criterio que puntosLejanos), para que
+  // el resto del algoritmo (ajuste fino, huecos por no_disponible, relleno)
+  // tenga con qué trabajar. Si además hay límites reales, esos son más
+  // precisos (vienen de búsqueda binaria, no del grid) y se respetan tal
+  // cual -- esto es solo un arranque, nunca sustituye un límite ya medido.
+  const baseSinOrdenar = baseDesdeLimites.length >= 2
+    ? baseDesdeLimites
+    : direccionesPropias
+        .filter((d) => (d.detalle || {})[agregador]?.estado === "disponible" && d.lat != null && d.lng != null && d.distancia_km != null)
+        .map((d) => {
+          const latlng = [d.lat, d.lng];
+          const bearingReal = agrAnguloDesde(centro, latlng);
+          return {
+            angulo: null,
+            radio: d.distancia_km,
+            limite: null,
+            latlngReal: latlng,
+            latlng,
+            bearingReal,
+            local: agrProyeccionLocal(centro, latlng),
+            extendidoPor: null,
+            confirmado: true,
+            // El renderizado de vértices (más abajo) espera punto.dir cuando
+            // no hay punto.limite -- sin esto, ver el polígono con "cobertura
+            // combinada" desactivada rompía con un TypeError en cuanto una
+            // tienda arrancaba su base desde dots en vez de límites.
+            dir: d,
+          };
+        });
+  // Se ordena por el ángulo REAL de cada posición (no el pedido) -- dibujar
+  // en la dirección REAL comprobada puede desplazar un vértice de su
+  // ángulo nominal (zonas con pocas calles numeradas geocodifican varios
+  // ángulos pedidos a la misma calle o a calles muy próximas). Conectar
+  // por el ángulo pedido cruzaba las líneas del polígono en esos casos
+  // (confirmado en vivo 09/08 con La Gavia).
+  const base = [...baseSinOrdenar].sort((a, b) => a.bearingReal - b.bearingReal);
 
   // El muestreo por ángulos fijos (cada 45°/22.5°) puede dejar huecos donde
   // un punto ya comprobado y disponible (grid normal) queda fuera del borde
@@ -2218,13 +2258,13 @@ async function agrActualizarPoligonoLimite() {
       const limitesAgregador = limites.filter((l) => l.agregador === agrFiltroAgregador);
       const unionesAgregador = uniones.filter((u) => u.agregador === agrFiltroAgregador);
       const rellenosAgregador = rellenos.filter((r) => r.agregador === agrFiltroAgregador);
-      agregarAnillo(agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[agrFiltroAgregador] || "#0ca30c", direccionesTienda, unionesAgregador, rellenosAgregador));
+      agregarAnillo(agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[agrFiltroAgregador] || "#0ca30c", direccionesTienda, unionesAgregador, rellenosAgregador, agrFiltroAgregador));
     } else {
       Object.keys(AGR_NOMBRE_AGREGADOR).forEach((nombre) => {
         const limitesAgregador = limites.filter((l) => l.agregador === nombre);
         const unionesAgregador = uniones.filter((u) => u.agregador === nombre);
         const rellenosAgregador = rellenos.filter((r) => r.agregador === nombre);
-        agregarAnillo(agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[nombre] || "#888", direccionesTienda, unionesAgregador, rellenosAgregador));
+        agregarAnillo(agrDibujarPoligonoLimite(limitesAgregador, centro, AGR_COLOR_MARCA[nombre] || "#888", direccionesTienda, unionesAgregador, rellenosAgregador, nombre));
       });
     }
   });
