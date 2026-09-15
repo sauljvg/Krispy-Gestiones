@@ -5,14 +5,18 @@ descubrir puntos nuevos (ver scheduler.py, que desde el 10/08 solo cubre
 sin_datos). Corre hasta terminar una vuelta completa de las 6 tiendas x 3
 agregadores (o hasta Ctrl+C).
 
-Un agregador detrás de otro (no en paralelo entre sí como antes) -- para
-poder registrar cada agregador como una "ronda" propia (ver
+Un agregador detrás de otro (no en paralelo entre sí) -- para poder
+registrar cada agregador como una "ronda" propia (ver
 api_client.iniciar_ronda/finalizar_ronda, el mismo mecanismo que usa
 revalidar_completo.py) y que el progreso se vea en vivo en el "Dashboard
 del scraper" de agregadores.html, en vez de solo en este log de consola.
-Con un único worker (no reparte direcciones entre varios procesos, a
-diferencia de revalidar_completo.py -- este script está pensado para
-lanzarse una vez a mano antes de una demo, no como prueba de carga).
+
+DENTRO de cada agregador, las direcciones SÍ se reparten en paralelo entre
+varias tareas asyncio (hasta config.MAX_WORKERS_POR_AGREGADOR a la vez,
+distinto por agregador -- ver config.py) -- mismo reparto por dirección
+que revalidar_completo.py (--worker-count), pero como tareas dentro de un
+único proceso en vez de procesos separados (pedido explícito del usuario
+15/09, antes esto era estrictamente secuencial).
 
 Usa su propio modo de sesión ("refresco_manual", ver agregadores_sesiones)
 en vez de reutilizar "completo" -- ese es el modo del scheduler automático
@@ -39,12 +43,37 @@ logger = logging.getLogger("refrescar_todo")
 MODO_SESION = "refresco_manual"
 
 
-async def _chequear_agregador_aislado(tienda: str, agregador_nombre: str, ventana_slot: int | None = None) -> bool:
+async def _puntos_todos(agregador: str) -> list[dict]:
+    """Todas las direcciones activas reales de las 6 tiendas para este
+    agregador, cada una anotada con su tienda -- mismo cálculo que
+    revalidar_completo.py::_puntos_todos. El total (len de esto) es lo que
+    se pasa como total_objetivo de la ronda para que case con "hechos" (que
+    el backend cuenta como direcciones DISTINTAS chequeadas, ver
+    agregadores.py::get_ronda_actual) -- pasar len(TIENDAS_SCHEDULER) ahí
+    (bug confirmado en vivo 15/09: mostraba "81/10" a mitad de una pasada
+    real) hacía que el progreso mostrado no tuviera ninguna relación con el
+    real."""
+    puntos = []
+    for tienda in config.TIENDAS_SCHEDULER:
+        direcciones = await api_client.obtener_direcciones(tienda, cercano=False, agregador=agregador)
+        for d in direcciones:
+            d["tienda"] = tienda
+            puntos.append(d)
+    return puntos
+
+
+async def _chequear_punto_aislado(punto: dict, agregador_nombre: str, ventana_slot: int | None = None) -> bool:
+    """Chequea UNA dirección suelta (no una tienda entera) -- cada llamada
+    crea su propio scraper con su propia sesión de navegador (ver
+    main.py::chequear_tienda, scraper=None por defecto), así que es seguro
+    lanzar varias de estas a la vez con asyncio.gather sin que se pisen
+    entre sí (a diferencia de compartir un único scraper entre tareas
+    paralelas)."""
+    tienda = punto["tienda"]
     try:
         await chequear_tienda(
             tienda, agregador_nombre,
-            cercano=False, delay_seg=config.DELAY_ENTRE_CHEQUEOS_SEG,
-            solo_sin_datos=False,  # re-chequea TODO, no solo lo que falta
+            direcciones_override=[punto],
             # permitir_reuso=False: nunca reutiliza un chequeo cercano ya
             # existente, siempre scrapea de verdad -- si no, "refrescar antes
             # de una demo" podría acabar copiando un chequeo de hasta 24h y
@@ -55,7 +84,7 @@ async def _chequear_agregador_aislado(tienda: str, agregador_nombre: str, ventan
         )
         return True
     except Exception as exc:
-        logger.error("Fallo re-chequeando %s / %s: %r", tienda, agregador_nombre, exc)
+        logger.error("Fallo re-chequeando %s / %s @ %s: %r", tienda, agregador_nombre, punto.get("direccion_text"), exc)
         await api_client.registrar_alerta(
             tipo="scraper_error",
             mensaje=f"{agregador_nombre}: excepción no controlada (refresco completo) — {exc!r}",
@@ -64,61 +93,41 @@ async def _chequear_agregador_aislado(tienda: str, agregador_nombre: str, ventan
         return False
 
 
-async def _total_puntos(agregador: str) -> int:
-    """Cuenta las direcciones activas reales de las 6 tiendas para este
-    agregador -- ver revalidar_completo.py::_puntos_todos, mismo cálculo.
-    Necesario para que total_objetivo case con "hechos" (que el backend
-    cuenta como direcciones DISTINTAS chequeadas, ver
-    agregadores.py::get_ronda_actual) -- pasar len(TIENDAS_SCHEDULER) aquí
-    (bug confirmado en vivo 15/09: mostraba "81/10" a mitad de una pasada
-    real, arrastrando además un total de prueba de otra fuente) hacía que el
-    progreso mostrado no tuviera ninguna relación con el real."""
-    total = 0
-    for tienda in config.TIENDAS_SCHEDULER:
-        direcciones = await api_client.obtener_direcciones(tienda, cercano=False, agregador=agregador)
-        total += len(direcciones)
-    return total
-
-
 async def _refrescar_agregador(agregador: str) -> tuple[int, int]:
-    """Re-chequea las 6 tiendas para UN agregador, registrado como su propia
-    ronda (worker_count=1) para que el Dashboard del scraper muestre
-    progreso en vivo de esta pasada, igual que ya hace revalidar_completo.py.
+    """Re-chequea TODAS las direcciones de las 6 tiendas para UN agregador,
+    registrado como su propia ronda (worker_count=1) para que el Dashboard
+    del scraper muestre progreso en vivo, igual que ya hace
+    revalidar_completo.py.
 
-    Tiendas en paralelo, hasta el límite POR AGREGADOR de
-    config.MAX_TIENDAS_PARALELO_POR_AGREGADOR (ver ahí el porqué de cada
-    número -- Glovo se queda en 1/secuencial a propósito, tiene un bloqueo
-    por IP documentado y confirmado en vivo a cualquier concurrencia alta,
-    ver ESTADO_PROYECTO.md 26/08). Antes esto era estrictamente secuencial
-    para los tres agregadores por igual (~6x más lento de lo necesario y sin
-    relación con el ritmo real del daemon en el que se basó la estimación de
-    tiempos dada al usuario, confirmado en vivo 15/09) -- la primera versión
-    de este paralelismo usaba el mismo límite para los tres, lo que habría
-    vuelto a bloquear Glovo (corregido antes de que la pasada llegara a
-    Glovo, mismo día). Cada tienda con Uber Eats asignado pide un slot de la
-    rejilla compartida (utils/ventana.py) para que sus ventanas visibles no
-    se apilen si corren a la vez -- Glovo/JustEat son headless, no lo
-    necesitan."""
+    Direcciones sueltas repartidas entre hasta config.MAX_WORKERS_POR_AGREGADOR
+    tareas asyncio en paralelo (ver ahí el porqué de cada número -- Glovo se
+    queda en 1/secuencial a propósito, tiene un bloqueo por IP documentado y
+    confirmado en vivo a cualquier concurrencia alta, ver ESTADO_PROYECTO.md
+    26/08). Mismo reparto por dirección que revalidar_completo.py
+    (--worker-count), pero dentro de un único proceso. Cada worker con Uber
+    Eats asignado pide un slot de la rejilla compartida (utils/ventana.py)
+    para que sus ventanas visibles no se apilen -- Glovo/JustEat son
+    headless, no lo necesitan."""
+    puntos = await _puntos_todos(agregador)
     try:
-        total_objetivo = await _total_puntos(agregador)
-        await api_client.iniciar_ronda(agregador, total_objetivo, 1)
+        await api_client.iniciar_ronda(agregador, len(puntos), 1)
     except Exception as exc:
         logger.warning("No se pudo avisar del inicio de ronda para %s (sigue igual): %r", agregador, exc)
 
-    max_paralelo = config.MAX_TIENDAS_PARALELO_POR_AGREGADOR.get(agregador, config.MAX_TIENDAS_PARALELO)
-    semaforo_tiendas = asyncio.Semaphore(max_paralelo)
+    max_paralelo = config.MAX_WORKERS_POR_AGREGADOR.get(agregador, config.MAX_TIENDAS_PARALELO)
+    semaforo = asyncio.Semaphore(max_paralelo)
     slot_ubereats_counter = {"n": 0}
 
-    async def _tienda(tienda: str) -> bool:
-        async with semaforo_tiendas:
-            logger.info("=== [%s] Tienda: %s ===", agregador, tienda)
+    async def _punto(punto: dict) -> bool:
+        async with semaforo:
             slot = None
             if agregador == "ubereats":
                 slot = slot_ubereats_counter["n"]
                 slot_ubereats_counter["n"] += 1
-            return await _chequear_agregador_aislado(tienda, agregador, ventana_slot=slot)
+            return await _chequear_punto_aislado(punto, agregador, ventana_slot=slot)
 
-    resultados = await asyncio.gather(*(_tienda(tienda) for tienda in config.TIENDAS_SCHEDULER))
+    logger.info("[%s] %d direcciones repartidas entre hasta %d a la vez.", agregador, len(puntos), max_paralelo)
+    resultados = await asyncio.gather(*(_punto(p) for p in puntos))
     exitosos = sum(1 for r in resultados if r)
     fallidos = sum(1 for r in resultados if not r)
 
@@ -136,7 +145,8 @@ async def main(agregadores: list[str]):
 
     logger.info(
         "Refresco COMPLETO iniciado contra %s -- las 6 tiendas x %s, re-chequeando "
-        "TODO lo ya existente (no solo huecos). Puede tardar bastante, ~4s de pausa por chequeo.",
+        "TODO lo ya existente (no solo huecos), con paralelismo por dirección "
+        "(ver config.MAX_WORKERS_POR_AGREGADOR).",
         config.KG_API_BASE_URL, agregadores,
     )
 

@@ -95,24 +95,34 @@ SCRAPER_RETRY_MAX = int(os.getenv("SCRAPER_RETRY_MAX", "3"))
 # el equipo aguanta bien con 3 sin problemas.
 MAX_TIENDAS_PARALELO = int(os.getenv("MAX_TIENDAS_PARALELO", "3"))
 
-# Límite de tiendas en paralelo POR AGREGADOR para las pasadas de alto volumen
-# (refrescar_todo.py, revalidar_disponibles.py -- re-chequean CIENTOS de puntos
-# reales por agregador, a diferencia del daemon normal de arriba, que casi
-# siempre tiene 0 puntos sin_datos pendientes y por eso nunca llegó a exponer
-# este problema). Basado en lo medido en vivo (ver ESTADO_PROYECTO.md 26/08 y
-# 04/09):
+# Límite de chequeos EN PARALELO POR AGREGADOR (una DIRECCIÓN a la vez por
+# worker, no una tienda entera -- a diferencia de MAX_TIENDAS_PARALELO de
+# arriba) para las pasadas de alto volumen (refrescar_todo.py,
+# revalidar_disponibles.py -- re-chequean CIENTOS de puntos reales por
+# agregador, a diferencia del daemon normal, que casi siempre tiene 0 puntos
+# sin_datos pendientes y por eso nunca llegó a exponer este problema). Mismo
+# reparto por dirección que revalidar_completo.py (--worker-count), pero
+# como tareas asyncio dentro de un único proceso en vez de procesos
+# separados. Basado en lo medido en vivo (ver ESTADO_PROYECTO.md 26/08 y
+# 04/09) + pedido explícito del usuario 15/09 de subir Uber Eats a 10 y
+# JustEat a 20 "para ver cómo se comporta el servidor":
 #   - glovo=1 (secuencial): a CUALQUIER concurrencia alta probada (20/15/10/5
 #     workers) Glovo se bloquea ~29-31% de las peticiones por límite de IP del
 #     lado de Glovo, no del código -- ni NordVPN lo arregla. "NO relanzar Glovo
 #     con muchos workers seguidos desde la misma IP -- seguir insistiendo solo
-#     prolonga el bloqueo" (pedido explícito del usuario 26/08).
-#   - ubereats=3: igual que el daemon (MAX_TIENDAS_PARALELO de arriba) -- con
-#     4 workers dio el mejor resultado medido (18.1 puntos/min), aunque hay un
-#     corte de sesión sin resolver del todo a los ~13-15 min de ronda sostenida
-#     (ver 04/09); 3 se queda en el lado seguro de ese límite.
-#   - justeat=6 (todas las tiendas a la vez): sin problemas de bloqueo
-#     documentados a ninguna concurrencia probada (hasta 20 workers).
-MAX_TIENDAS_PARALELO_POR_AGREGADOR = {"glovo": 1, "ubereats": 3, "justeat": 6}
+#     prolonga el bloqueo" (pedido explícito del usuario 26/08). Esto NO se
+#     toca al margen de lo que se pruebe con los otros dos.
+#   - ubereats=10: el mejor resultado medido en vivo fue con 4 workers (18.1
+#     puntos/min) -- a 20 workers el rendimiento por worker bajó a más de la
+#     mitad, y hay un corte de sesión sin resolver del todo a los ~13-15 min
+#     de ronda sostenida que persiste 10+ min tras pararse (ver 04/09). 10 es
+#     una prueba deliberada por encima del punto conocido como "mejor", para
+#     ver en vivo si el problema es proporcional al volumen o aparece igual
+#     -- vigilar de cerca (CPU/memoria del proceso, huecos largos en el log,
+#     racha de fallos técnicos) las primeras rondas con este valor.
+#   - justeat=20: sin problemas de bloqueo documentados a ninguna
+#     concurrencia probada.
+MAX_WORKERS_POR_AGREGADOR = {"glovo": 1, "ubereats": 10, "justeat": 20}
 
 KG_API_BASE_URL = os.getenv("KG_API_BASE_URL", "http://localhost:8000")
 KG_API_KEY = os.getenv("KG_API_KEY", "")

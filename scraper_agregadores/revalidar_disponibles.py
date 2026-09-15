@@ -8,8 +8,10 @@ la vuelta semanal, no de esta pasada diaria.
 
 Mismo patrón que refrescar_todo.py: un agregador detrás de otro, registrado como su
 propia "ronda" (ver api_client.iniciar_ronda/finalizar_ronda) para que el progreso se
-vea en vivo en el Dashboard del scraper. Un único worker -- pensado para correr dentro
-del daemon (ver scheduler.py) o lanzarse a mano.
+vea en vivo en el Dashboard del scraper. DENTRO de cada agregador, las direcciones se
+reparten en paralelo entre varias tareas asyncio (hasta config.MAX_WORKERS_POR_AGREGADOR,
+distinto por agregador -- ver config.py). Pensado para correr dentro del daemon (ver
+scheduler.py) o lanzarse a mano.
 
 Uso:
     venv/Scripts/python revalidar_disponibles.py
@@ -30,13 +32,33 @@ logger = logging.getLogger("revalidar_disponibles")
 MODO_SESION = "revalidar_disponibles"
 
 
-async def _chequear_agregador_aislado(tienda: str, agregador_nombre: str, ventana_slot: int | None = None) -> bool:
+async def _puntos_disponibles(agregador: str) -> list[dict]:
+    """Todas las direcciones DISPONIBLES (ver solo_disponibles) de las 6
+    tiendas para este agregador, cada una anotada con su tienda. El total
+    (len de esto) es lo que se pasa como total_objetivo de la ronda -- ver
+    refrescar_todo.py::_puntos_todos, mismo motivo (bug confirmado en vivo
+    15/09, pasar len(TIENDAS_SCHEDULER) mostraba un progreso sin relación
+    con el real)."""
+    puntos = []
+    for tienda in config.TIENDAS_SCHEDULER:
+        direcciones = await api_client.obtener_direcciones(
+            tienda, cercano=False, agregador=agregador, solo_disponibles=True
+        )
+        for d in direcciones:
+            d["tienda"] = tienda
+            puntos.append(d)
+    return puntos
+
+
+async def _chequear_punto_aislado(punto: dict, agregador_nombre: str, ventana_slot: int | None = None) -> bool:
+    """Chequea UNA dirección suelta -- ver refrescar_todo.py::_chequear_punto_aislado,
+    mismo motivo (cada llamada crea su propio scraper con su propia sesión,
+    seguro de lanzar varias a la vez)."""
+    tienda = punto["tienda"]
     try:
         await chequear_tienda(
             tienda, agregador_nombre,
-            cercano=False, delay_seg=config.DELAY_ENTRE_CHEQUEOS_SEG,
-            solo_sin_datos=False,
-            solo_disponibles=True,  # solo los puntos cuyo último dato real fue disponible
+            direcciones_override=[punto],
             # permitir_reuso=False: mismo motivo que refrescar_todo.py/revalidar_completo.py
             # -- si no, podría reportar como "recién comprobado" un dato de hasta 24h.
             permitir_reuso=False,
@@ -44,7 +66,7 @@ async def _chequear_agregador_aislado(tienda: str, agregador_nombre: str, ventan
         )
         return True
     except Exception as exc:
-        logger.error("Fallo revalidando disponible %s / %s: %r", tienda, agregador_nombre, exc)
+        logger.error("Fallo revalidando disponible %s / %s @ %s: %r", tienda, agregador_nombre, punto.get("direccion_text"), exc)
         await api_client.registrar_alerta(
             tipo="scraper_error",
             mensaje=f"{agregador_nombre}: excepción no controlada (revalidación de disponibles) — {exc!r}",
@@ -53,49 +75,34 @@ async def _chequear_agregador_aislado(tienda: str, agregador_nombre: str, ventan
         return False
 
 
-async def _total_puntos_disponibles(agregador: str) -> int:
-    """Cuenta las direcciones DISPONIBLES (ver solo_disponibles) de las 6
-    tiendas para este agregador -- para que total_objetivo case con
-    "hechos" (direcciones distintas chequeadas, ver
-    agregadores.py::get_ronda_actual). Mismo bug que refrescar_todo.py
-    (confirmado en vivo 15/09, pasar len(TIENDAS_SCHEDULER) ahí mostraba un
-    progreso sin relación con el real) -- corregido aquí desde el principio."""
-    total = 0
-    for tienda in config.TIENDAS_SCHEDULER:
-        direcciones = await api_client.obtener_direcciones(
-            tienda, cercano=False, agregador=agregador, solo_disponibles=True
-        )
-        total += len(direcciones)
-    return total
-
-
 async def _revalidar_agregador(agregador: str) -> tuple[int, int]:
-    """Re-chequea las 6 tiendas para UN agregador, registrado como su propia
-    ronda para que el Dashboard del scraper muestre progreso en vivo.
+    """Re-chequea las direcciones DISPONIBLES de las 6 tiendas para UN
+    agregador, registrado como su propia ronda para que el Dashboard del
+    scraper muestre progreso en vivo.
 
-    Tiendas en paralelo, hasta el límite POR AGREGADOR de
-    config.MAX_TIENDAS_PARALELO_POR_AGREGADOR -- ver ahí el porqué de cada
-    número (Glovo secuencial a propósito, bloqueo por IP documentado)."""
+    Direcciones sueltas repartidas entre hasta config.MAX_WORKERS_POR_AGREGADOR
+    tareas asyncio en paralelo -- ver refrescar_todo.py, mismo patrón y
+    mismo motivo (Glovo secuencial a propósito, bloqueo por IP documentado)."""
+    puntos = await _puntos_disponibles(agregador)
     try:
-        total_objetivo = await _total_puntos_disponibles(agregador)
-        await api_client.iniciar_ronda(agregador, total_objetivo, 1)
+        await api_client.iniciar_ronda(agregador, len(puntos), 1)
     except Exception as exc:
         logger.warning("No se pudo avisar del inicio de ronda para %s (sigue igual): %r", agregador, exc)
 
-    max_paralelo = config.MAX_TIENDAS_PARALELO_POR_AGREGADOR.get(agregador, config.MAX_TIENDAS_PARALELO)
-    semaforo_tiendas = asyncio.Semaphore(max_paralelo)
+    max_paralelo = config.MAX_WORKERS_POR_AGREGADOR.get(agregador, config.MAX_TIENDAS_PARALELO)
+    semaforo = asyncio.Semaphore(max_paralelo)
     slot_ubereats_counter = {"n": 0}
 
-    async def _tienda(tienda: str) -> bool:
-        async with semaforo_tiendas:
-            logger.info("=== [%s] Tienda: %s ===", agregador, tienda)
+    async def _punto(punto: dict) -> bool:
+        async with semaforo:
             slot = None
             if agregador == "ubereats":
                 slot = slot_ubereats_counter["n"]
                 slot_ubereats_counter["n"] += 1
-            return await _chequear_agregador_aislado(tienda, agregador, ventana_slot=slot)
+            return await _chequear_punto_aislado(punto, agregador, ventana_slot=slot)
 
-    resultados = await asyncio.gather(*(_tienda(tienda) for tienda in config.TIENDAS_SCHEDULER))
+    logger.info("[%s] %d direcciones disponibles repartidas entre hasta %d a la vez.", agregador, len(puntos), max_paralelo)
+    resultados = await asyncio.gather(*(_punto(p) for p in puntos))
     exitosos = sum(1 for r in resultados if r)
     fallidos = sum(1 for r in resultados if not r)
 
