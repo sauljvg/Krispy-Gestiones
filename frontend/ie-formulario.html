@@ -6,7 +6,7 @@
 <title>Krispy Kreme × IE University</title>
 <link rel="icon" type="image/png" href="assets/favicon-kk.png">
 <style>
-  :root { color-scheme: light; }
+  :root { color-scheme: light; --ie-blue: #2563eb; --ie-blue-dark: #1d4ed8; }
   * { box-sizing: border-box; }
   body {
     margin: 0; min-height: 100vh; font-family: system-ui, sans-serif;
@@ -34,17 +34,14 @@
     width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid #ccc;
     font-size: 15px; font-family: inherit; background: #fff; color: #222;
   }
-  .ie-pub-fila-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  @media (max-width: 480px) { .ie-pub-fila-2 { grid-template-columns: 1fr; } }
-
   .ie-pub-btn {
-    width: 100%; background: #5b2a2a; color: #fff; border: none; border-radius: 10px; padding: 14px 24px;
+    width: 100%; background: var(--ie-blue); color: #fff; border: none; border-radius: 10px; padding: 14px 24px;
     font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 8px;
   }
   .ie-pub-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .ie-pub-btn:hover:not(:disabled) { filter: brightness(1.08); }
+  .ie-pub-btn:hover:not(:disabled) { background: var(--ie-blue-dark); }
   .ie-pub-btn-secundario {
-    width: 100%; background: #fff; color: #5b2a2a; border: 1px solid #5b2a2a; border-radius: 10px; padding: 11px 20px;
+    width: 100%; background: #fff; color: var(--ie-blue); border: 1px solid var(--ie-blue); border-radius: 10px; padding: 11px 20px;
     font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 8px;
   }
 
@@ -95,7 +92,10 @@
     border: 1px solid #ccc; background: #fff; color: #900; cursor: pointer; font-size: 13px; padding: 0; line-height: 1;
   }
   .mini-label { display: block; font-size: 12px; font-weight: 600; margin: 6px 0 4px; color: #444; }
-  .fila-experiencia textarea { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid #ccc; font-family: inherit; font-size: 14px; }
+  .fila-experiencia input, .fila-experiencia textarea {
+    width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid #ccc;
+    font-size: 15px; font-family: inherit; background: #fff; color: #222; margin-bottom: 4px;
+  }
 </style>
 </head>
 <body>
@@ -111,7 +111,7 @@
       tratamiento, cuánto tiempo se conservan tus datos y cómo ejercer tus derechos -- antes de decidir.
     </p>
     <p><a href="privacidad.html#bbdd-ie" target="_blank" rel="noopener">Ver condiciones completas de privacidad</a></p>
-    <button type="button" class="ie-pub-btn" id="btn-rgpd-aceptar">Acepto y continúo</button>
+    <button type="button" class="ie-pub-btn" id="btn-rgpd-aceptar">Aceptar y continuar</button>
     <a href="https://www.ie.edu" class="rgpd-salir">No acepto — salir</a>
   </div>
 </div>
@@ -132,27 +132,23 @@
         <label>Nombre completo</label>
         <input type="text" id="f-nombre" required>
       </div>
-      <div class="ie-pub-fila-2">
-        <div class="ie-pub-campo">
-          <label>Teléfono <span class="opcional">(opcional)</span></label>
-          <input type="tel" id="f-telefono">
-        </div>
-        <div class="ie-pub-campo">
-          <label>Email <span class="opcional">(opcional)</span></label>
-          <input type="email" id="f-email">
-        </div>
+      <div class="ie-pub-campo">
+        <label>Teléfono <span class="opcional">(opcional)</span></label>
+        <input type="tel" id="f-telefono">
       </div>
-      <div class="ie-pub-fila-2">
-        <div class="ie-pub-campo">
-          <label>Fecha de nacimiento</label>
-          <input type="date" id="f-fecha-nacimiento" required>
-          <p class="ie-pub-hint">Debes tener al menos 15 años para completar este formulario.</p>
-        </div>
-        <div class="ie-pub-campo">
-          <label>Nacionalidad <span class="opcional">(opcional)</span></label>
-          <div class="autocomplete-wrap">
-            <input type="text" id="f-nacionalidad" autocomplete="off" placeholder="Escribe tu país...">
-          </div>
+      <div class="ie-pub-campo">
+        <label>Email <span class="opcional">(opcional)</span></label>
+        <input type="email" id="f-email">
+      </div>
+      <div class="ie-pub-campo">
+        <label>Fecha de nacimiento</label>
+        <input type="date" id="f-fecha-nacimiento" required>
+        <p class="ie-pub-hint">Debes tener al menos 15 años para completar este formulario.</p>
+      </div>
+      <div class="ie-pub-campo">
+        <label>Nacionalidad <span class="opcional">(opcional)</span></label>
+        <div class="autocomplete-wrap">
+          <input type="text" id="f-nacionalidad" autocomplete="off" placeholder="Escribe tu país...">
         </div>
       </div>
       <div class="ie-pub-campo">
@@ -291,14 +287,10 @@ function agregarFilaExperiencia(prefill) {
   fila.className = "fila-experiencia";
   fila.innerHTML = `
     <button type="button" class="btn-quitar-experiencia" aria-label="Quitar experiencia">✕</button>
-    <div class="ie-pub-fila-2">
-      <div><label class="mini-label">Puesto</label><input type="text" class="exp-puesto"></div>
-      <div><label class="mini-label">Empresa</label><input type="text" class="exp-empresa"></div>
-    </div>
-    <div class="ie-pub-fila-2">
-      <div><label class="mini-label">Desde</label><input type="text" class="exp-inicio" placeholder="Ej. Enero 2024"></div>
-      <div><label class="mini-label">Hasta</label><input type="text" class="exp-fin" placeholder="Ej. Actualidad"></div>
-    </div>
+    <label class="mini-label">Puesto</label><input type="text" class="exp-puesto">
+    <label class="mini-label">Empresa</label><input type="text" class="exp-empresa">
+    <label class="mini-label">Desde</label><input type="text" class="exp-inicio" placeholder="Ej. Enero 2024">
+    <label class="mini-label">Hasta</label><input type="text" class="exp-fin" placeholder="Ej. Actualidad">
     <label class="mini-label">Descripción <span class="opcional">(opcional)</span></label>
     <textarea class="exp-descripcion" rows="2"></textarea>
   `;

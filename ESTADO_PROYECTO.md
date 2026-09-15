@@ -509,3 +509,27 @@ De paso esta sesión:
     despues las busquedas desde dentro (client-side), que vuelven a llamar a la API sin
     recargar: ahi serian ~0.3s y UNA peticion por punto, que es lo que de verdad
     atacaria el limite por IP.
+
+## Pendiente -- i18n (inglés/español) de toda la web (16/09/2026)
+
+Pedido explícito del usuario: **toda la plataforma (no solo un módulo) debe
+poder verse en inglés además de español** -- reconoce que es un trabajo
+grande, pidió solo dejarlo anotado por ahora, no implementarlo.
+
+No hay ningún trabajo empezado todavía (ni backend ni frontend). Lo que
+implicaría, para cuando se aborde:
+- **Frontend**: todo el texto vive hoy como literales en HTML/JS (sin
+  ningún sistema de traducción/i18n) -- haría falta introducir uno
+  (diccionario de claves por idioma + selector de idioma persistente, ver
+  patrón de `kt-theme` en localStorage para el tema claro/oscuro como
+  referencia de cómo ya se guarda una preferencia de usuario) y pasar cada
+  página por él. Es la parte más grande, decenas de archivos `.html`/`.js`.
+- **Backend**: los mensajes de error/validación que devuelve la API (los
+  `HTTPException(detail=...)`, ver por ejemplo bbdd_routes.py) están en
+  español y se muestran tal cual en el frontend -- también tendrían que
+  traducirse o mandar un código en vez de texto libre.
+- **Contenido generado por usuarios** (nombres de vacantes, notas,
+  respuestas de tests...) no se traduciría -- solo la interfaz.
+- Candidato lógico para empezar, si se aborda por partes: el formulario
+  público del IE (`ie-formulario.html`) y `privacidad.html`, que van a
+  recibir tráfico de estudiantes que pueden no leer español.
