@@ -26,6 +26,16 @@
   }
   .ie-pub-cv-box input[type="file"] { display: block; margin: 0 auto 10px; font-size: 13px; }
   .ie-pub-hint { font-size: 12px; color: #777; margin: 6px 0 0; }
+  .ie-pub-spinner-row {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    font-size: 13px; color: var(--ie-blue); margin-top: 8px;
+  }
+  .ie-pub-spinner {
+    width: 16px; height: 16px; flex: 0 0 auto; border-radius: 50%;
+    border: 2px solid color-mix(in srgb, var(--ie-blue) 25%, transparent); border-top-color: var(--ie-blue);
+    animation: ie-pub-girar 0.7s linear infinite;
+  }
+  @keyframes ie-pub-girar { to { transform: rotate(360deg); } }
 
   .ie-pub-campo { margin: 14px 0; }
   .ie-pub-campo label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; }
@@ -123,7 +133,11 @@
 
     <div class="ie-pub-cv-box">
       <input type="file" id="f-cv" accept="application/pdf">
-      <button type="button" class="ie-pub-btn-secundario" id="btn-extraer-cv">📄 Rellenar automáticamente desde mi CV</button>
+      <p class="ie-pub-hint">Sube tu CV en PDF y lo leemos automáticamente para rellenar el formulario.</p>
+      <div class="ie-pub-spinner-row" id="cv-cargando" hidden>
+        <span class="ie-pub-spinner"></span>
+        <span>Leyendo tu CV...</span>
+      </div>
       <p class="ie-pub-hint" id="cv-hint"></p>
     </div>
 
@@ -352,19 +366,20 @@ document.getElementById("btn-rgpd-aceptar").addEventListener("click", () => {
 document.getElementById("btn-add-idioma").addEventListener("click", () => agregarFilaIdioma());
 document.getElementById("btn-add-experiencia").addEventListener("click", () => agregarFilaExperiencia());
 
-document.getElementById("btn-extraer-cv").addEventListener("click", async () => {
+document.getElementById("f-cv").addEventListener("change", async () => {
   const input = document.getElementById("f-cv");
   const hint = document.getElementById("cv-hint");
-  if (!input.files.length) {
-    hint.textContent = "Primero elige un archivo PDF.";
-    return;
-  }
-  hint.textContent = "Leyendo tu CV...";
+  const cargando = document.getElementById("cv-cargando");
+  hint.textContent = "";
+  if (!input.files.length) return;
+
+  cargando.hidden = false;
   const formData = new FormData();
   formData.append("file", input.files[0]);
   try {
     const res = await fetch(`${API_BASE}/public/bbdd/ie/extraer-cv`, { method: "POST", body: formData });
     const datos = await res.json();
+    cargando.hidden = true;
     if (!res.ok) {
       hint.textContent = datos.detail || "No se pudo leer el CV -- rellena el formulario a mano.";
       return;
@@ -386,6 +401,7 @@ document.getElementById("btn-extraer-cv").addEventListener("click", async () => 
         ? `Listo -- tu CV menciona estos idiomas: "${idiomasExtra}". Añádelos abajo con su nivel. Revisa el resto de datos antes de enviar.`
         : "Listo -- revisa que los datos sean correctos antes de enviar.";
   } catch {
+    cargando.hidden = true;
     hint.textContent = "No se pudo leer el CV -- rellena el formulario a mano.";
   }
 });
