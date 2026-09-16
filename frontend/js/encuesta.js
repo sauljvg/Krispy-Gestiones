@@ -356,12 +356,7 @@ function renderPagina(index) {
   }
 
   const esUltima = posActual === totalPaginas - 1;
-  // Progreso "adelantado": raíz cuadrada en vez de lineal -- las primeras
-  // páginas ya muestran un % alto (motiva a seguir nada más empezar) y los
-  // incrementos se hacen mas pequeños según se acerca al final (pedido
-  // explícito del usuario, truco habitual en formularios largos tipo
-  // Typeform para que se sienta "ya casi" desde el principio).
-  const pctProgreso = Math.round(Math.sqrt((posActual + 1) / totalPaginas) * 100);
+  const pctProgreso = Math.round(((posActual + 1) / totalPaginas) * 100);
   const card = document.getElementById("encuesta-card");
   card.innerHTML = `
     <div class="encuesta-progreso-sticky">
@@ -425,7 +420,7 @@ function renderPagina(index) {
     const pctEl = card.querySelector(".encuesta-progreso-pct");
     const fillEl = card.querySelector(".encuesta-progreso-fill");
     if (pctEl && fillEl) {
-      const pct = Math.round(Math.sqrt((posAhora + 1) / totalAhora) * 100);
+      const pct = Math.round(((posAhora + 1) / totalAhora) * 100);
       pctEl.textContent = `${pct}%`;
       fillEl.style.width = `${pct}%`;
     }
