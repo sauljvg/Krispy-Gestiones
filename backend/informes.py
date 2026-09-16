@@ -795,6 +795,39 @@ def recalcular_resultados_pendientes():
     return {"revisadas": len(filas), "actualizadas": actualizadas}
 
 
+RESULTADOS_EDITABLES = ("⭐ Excelente", "✅ Alineado", "❌ No apto")
+
+
+def actualizar_resultado(respuesta_id, nuevo_resultado):
+    """Corrige a mano el RESULTADO (Apto/No apto/Excelente) de una respuesta
+    ya puntuada -- pedido explícito del usuario 16/09: alguien puede quedar
+    "No apto" por un margen mínimo (p.ej. 0.75 puntos) sin que haya
+    respondido nada realmente mal, y RRHH necesita poder ajustarlo sin
+    reimportar el Excel entero. Solo se aceptan los 3 resultados que puede
+    devolver scoring_valores.calcular() -- no un texto libre, para no acabar
+    con variantes sueltas que no encajen en el filtro de get_respuestas()
+    (ver filtro_aptos, que busca '%No apto%' literal)."""
+    if nuevo_resultado not in RESULTADOS_EDITABLES:
+        raise ValueError(f"Resultado no válido: {nuevo_resultado!r}")
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT datos_json FROM informe_respuestas WHERE id = ?", (respuesta_id,)
+    ).fetchone()
+    if row is None:
+        conn.close()
+        raise ValueError("Respuesta no encontrada")
+    datos = json.loads(row["datos_json"])
+    if "RESULTADO" not in datos:
+        conn.close()
+        raise ValueError("Esta respuesta no tiene un resultado que editar")
+    conn.execute(
+        "UPDATE informe_respuestas SET datos_json = json_set(datos_json, '$.RESULTADO', ?) WHERE id = ?",
+        (nuevo_resultado, respuesta_id),
+    )
+    conn.commit()
+    conn.close()
+
+
 def forzar_no_apto(respuesta_id):
     """Fuerza RESULTADO = "No apto" en una respuesta ya insertada -- usado
     cuando quien respondió un Test marcó una opción configurada como

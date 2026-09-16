@@ -305,6 +305,19 @@ def vacantes_de_respuestas_route(tipo_clave: str, hoja: str | None = None, _user
         raise HTTPException(status_code=404, detail=str(exc))
 
 
+class ResultadoIn(BaseModel):
+    resultado: str
+
+
+@router.patch("/respuestas/{respuesta_id}/resultado")
+def actualizar_resultado_route(respuesta_id: int, body: ResultadoIn, _user: dict = Depends(require_informes)):
+    try:
+        informes_module.actualizar_resultado(respuesta_id, body.resultado)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
 @router.post("/respuestas/{respuesta_id}/cv")
 async def subir_cv_route(respuesta_id: int, file: UploadFile = File(...), _user: dict = Depends(require_informes)):
     content = await file.read()

@@ -14,6 +14,21 @@ let vacanteFiltroNombre = "";
 
 const EMPRESA = new URLSearchParams(location.search).get("empresa") === "saona" ? "saona" : "kk";
 
+// Editar el RESULTADO a mano (16/09, pedido explícito del usuario): alguien
+// puede quedar "No apto" por un margen mínimo (p.ej. 0.75 puntos) sin haber
+// respondido nada realmente mal, y RRHH necesita poder corregirlo sin
+// reimportar el Excel entero. Solo estos 3 -- ver informes.RESULTADOS_EDITABLES,
+// el backend rechaza cualquier otro texto.
+const RESULTADO_OPCIONES = ["⭐ Excelente", "✅ Alineado", "❌ No apto"];
+
+function opcionesResultado(actual) {
+  // Si el resultado actual no es uno de los 3 editables (p.ej. "❌ No apto
+  // (respuesta descalificatoria)", que pone el sistema solo) se añade igual
+  // como opción para no perderlo de vista al abrir el desplegable.
+  const lista = actual && !RESULTADO_OPCIONES.includes(actual) ? [actual, ...RESULTADO_OPCIONES] : RESULTADO_OPCIONES;
+  return lista.map((o) => `<option value="${escapeHTML(o)}"${o === actual ? " selected" : ""}>${escapeHTML(o)}</option>`).join("");
+}
+
 // Iconos SVG en vez de ▲▼ — se ven igual de nítidos en cualquier sistema.
 const ICONO_FLECHA_ARRIBA = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
 const ICONO_FLECHA_ABAJO = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>`;
@@ -524,6 +539,15 @@ function renderTable() {
           <td><input type="checkbox" class="row-check" data-id="${r.id}" ${checked}></td>
           ${columnasVisibles.map((c) => {
             const valor = r.datos[c] ?? "";
+            if (c === "RESULTADO") {
+              return `<td class="col-resultado">
+                <span class="resultado-texto">${escapeHTML(valor)}</span>
+                <select class="resultado-select" hidden>${opcionesResultado(valor)}</select>
+                <button type="button" class="btn-resultado btn-editar-resultado">Editar</button>
+                <button type="button" class="btn-resultado btn-guardar-resultado" hidden>Guardar</button>
+                <button type="button" class="btn-resultado btn-cancelar-resultado" hidden>Cancelar</button>
+              </td>`;
+            }
             const mostrar = data.columnas_fecha.includes(c) ? formatFechaCorta(valor) : valor;
             return `<td title="${escapeHTML(valor)}">${escapeHTML(mostrar)}</td>`;
           }).join("")}
@@ -564,11 +588,52 @@ function renderTable() {
   // propia acción y no deben además cambiar la selección.
   tbody.querySelectorAll("tr[data-id]").forEach((row) => {
     row.addEventListener("click", (e) => {
-      if (e.target.closest(".row-check, .btn-cv, .input-cv-upload, .btn-dejar-compartir-informe")) return;
+      if (e.target.closest(".row-check, .btn-cv, .input-cv-upload, .btn-dejar-compartir-informe, .col-resultado")) return;
       const cb = row.querySelector(".row-check");
       if (!cb) return;
       cb.checked = !cb.checked;
       cb.dispatchEvent(new Event("change"));
+    });
+  });
+
+  tbody.querySelectorAll("tr[data-id]").forEach((row) => {
+    const celda = row.querySelector(".col-resultado");
+    if (!celda) return;
+    const texto = celda.querySelector(".resultado-texto");
+    const select = celda.querySelector(".resultado-select");
+    const btnEditar = celda.querySelector(".btn-editar-resultado");
+    const btnGuardar = celda.querySelector(".btn-guardar-resultado");
+    const btnCancelar = celda.querySelector(".btn-cancelar-resultado");
+    const valorOriginal = select.value;
+
+    btnEditar.addEventListener("click", () => {
+      texto.hidden = true;
+      select.hidden = false;
+      btnEditar.hidden = true;
+      btnGuardar.hidden = false;
+      btnCancelar.hidden = false;
+    });
+    btnCancelar.addEventListener("click", () => {
+      select.value = valorOriginal;
+      texto.hidden = false;
+      select.hidden = true;
+      btnEditar.hidden = false;
+      btnGuardar.hidden = true;
+      btnCancelar.hidden = true;
+    });
+    btnGuardar.addEventListener("click", async () => {
+      const respuestaId = row.dataset.id;
+      const res = await fetch(`${AUTH_API_BASE}/informes/respuestas/${respuestaId}/resultado`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resultado: select.value }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        mostrarAviso(err.detail || "No se pudo guardar el resultado.");
+        return;
+      }
+      await loadRespuestas();
     });
   });
 
