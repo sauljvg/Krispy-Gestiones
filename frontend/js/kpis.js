@@ -63,10 +63,11 @@ function motivoCorto(motivo) {
   return corte > 0 ? motivo.slice(0, corte) : motivo;
 }
 
-let chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo;
+let chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo, chartNacionalidad, chartEdadCentro;
 let usuarioActual = null;
 let ultimoResumen = null;
 let unidadRotacionMensual = "numero"; // "numero" | "pct"
+let segmentoActivo = "operativa"; // "operativa" | "oficina"
 
 function lineChart(canvasId, labels, valores, { sufijo = "" } = {}) {
   const ctx = document.getElementById(canvasId).getContext("2d");
@@ -123,12 +124,33 @@ function barChart(canvasId, pares, { horizontal = true, sufijo = "", maxLenLabel
   });
 }
 
+function pieChart(canvasId, pares) {
+  const ctx = document.getElementById(canvasId).getContext("2d");
+  const colorTexto = colorTextoActual();
+  const total = pares.reduce((s, [, n]) => s + n, 0);
+  return new Chart(ctx, {
+    type: "pie",
+    data: {
+      labels: pares.map(([nombre]) => nombre),
+      datasets: [{ data: pares.map(([, n]) => n), backgroundColor: pares.map((_, i) => COLORES[i % COLORES.length]) }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "right", labels: { color: colorTexto, boxWidth: 12 } },
+        tooltip: { callbacks: { label: (ctx2) => `${ctx2.label}: ${ctx2.parsed} (${pct1(ctx2.parsed, total)}%)` } },
+      },
+    },
+  });
+}
+
 function destruirCharts() {
-  [chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo].forEach((c) => c?.destroy());
+  [chartRotacionMensual, chartRotacionCentro, chartHorasCentro, chartBajasMotivo, chartNacionalidad, chartEdadCentro].forEach((c) => c?.destroy());
 }
 
 async function cargarResumen() {
-  const r = await fetch(`${AUTH_API_BASE}/kpis/resumen`);
+  const r = await fetch(`${AUTH_API_BASE}/kpis/resumen?segmento=${segmentoActivo}`);
   if (!r.ok) return;
   const d = await r.json();
 
@@ -285,6 +307,11 @@ function renderTarjetas(d, mesesFiltrados, hasta, etiquetaRango) {
   document.getElementById("kpi-promocion-sub").textContent = promociones
     ? `${promociones} promociones -- ${etiquetaRango}`
     : "sin movimientos de puesto registrados en este periodo";
+
+  document.getElementById("kpi-edad-media").textContent = d.edad_media !== null ? `${d.edad_media} años` : "--";
+  document.getElementById("kpi-edad-media-sub").textContent = d.con_dato_edad
+    ? `sobre ${d.con_dato_edad} de ${headcountHasta} con fecha de nacimiento`
+    : "sin dato de fecha de nacimiento";
 }
 
 function renderGraficosFiltrados() {
@@ -374,6 +401,26 @@ function renderGraficosFiltrados() {
   listaJornada.innerHTML = (serieHasta.por_jornada || [])
     .map(([horas, n]) => `<li><span>${horas}h/sem</span><span class="n">${n}</span></li>`)
     .join("");
+
+  // --- Nacionalidades (plantilla activa de hoy, no depende del filtro Desde/Hasta) --
+  const sinNacionalidad = !d.nacionalidades || d.nacionalidades.length === 0;
+  document.getElementById("kpi-nacionalidad-aviso").hidden = !sinNacionalidad;
+  document.getElementById("chart-nacionalidad").style.display = sinNacionalidad ? "none" : "";
+  chartNacionalidad?.destroy();
+  if (!sinNacionalidad) {
+    chartNacionalidad = pieChart("chart-nacionalidad", d.nacionalidades);
+  }
+  document.getElementById("kpi-nacionalidad-sub").textContent = `${d.con_dato_nacionalidad} de ${headcountHasta} con nacionalidad registrada.`;
+
+  // --- Edad media por centro (misma foto de hoy) --------------------------
+  const sinEdad = !d.edad_media_por_centro || d.edad_media_por_centro.length === 0;
+  document.getElementById("kpi-edad-centro-aviso").hidden = !sinEdad;
+  document.getElementById("chart-edad-centro").style.display = sinEdad ? "none" : "";
+  chartEdadCentro?.destroy();
+  if (!sinEdad) {
+    chartEdadCentro = barChart("chart-edad-centro", d.edad_media_por_centro, { sufijo: " años" });
+  }
+  document.getElementById("kpi-edad-centro-sub").textContent = `${d.con_dato_edad} de ${headcountHasta} con fecha de nacimiento.`;
 }
 
 // --- Movimientos internos (traslados de centro / promociones de puesto) ---
@@ -511,6 +558,19 @@ async function importarExcel(file) {
   await cargarResumen();
 }
 
+async function importarOdoo(files) {
+  const formData = new FormData();
+  for (const file of files) formData.append("files", file);
+  const res = await fetch(`${AUTH_API_BASE}/kpis/importar-odoo`, { method: "POST", body: formData });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    mostrarAviso(err.detail || "No se pudo importar el archivo.");
+    return;
+  }
+  await cargarUltimaImportacion();
+  await cargarResumen();
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   const user = await checkAuth("/kpis.html");
   if (!user) return;
@@ -529,6 +589,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!file) return;
     importarExcel(file);
     e.target.value = "";
+  });
+  document.getElementById("kpi-input-importar-odoo").addEventListener("change", (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    importarOdoo(files);
+    e.target.value = "";
+  });
+
+  document.querySelectorAll("[data-segmento]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.dataset.segmento === segmentoActivo) return;
+      segmentoActivo = btn.dataset.segmento;
+      document.querySelectorAll("[data-segmento]").forEach((b) => b.classList.toggle("active", b === btn));
+      cargarResumen();
+    });
   });
 
   document.getElementById("kpi-jornada-info-btn").addEventListener("click", (e) => {

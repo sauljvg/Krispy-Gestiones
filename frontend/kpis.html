@@ -100,11 +100,21 @@
     </div>
 
     <div class="kpis-toolbar">
+      <div class="kpi-toggle" role="group" aria-label="Segmento">
+        <button type="button" class="kpi-toggle-btn active" id="kpi-segmento-operativa" data-segmento="operativa">Operativa</button>
+        <button type="button" class="kpi-toggle-btn" id="kpi-segmento-oficina" data-segmento="oficina">Oficina</button>
+      </div>
       <span id="kpi-ultima-importacion" class="staff-hint"></span>
-      <label id="kpi-import-wrap" class="btn btn-ghost btn-upload" hidden style="margin-left:auto;">
-        ⬆ Importar Excel de plantilla
-        <input type="file" id="kpi-input-importar" accept=".xlsx,.xls" hidden>
-      </label>
+      <div id="kpi-import-wrap" hidden style="margin-left:auto; display:flex; gap:8px;">
+        <label class="btn btn-ghost btn-upload">
+          ⬆ Importar Excel de plantilla (GO)
+          <input type="file" id="kpi-input-importar" accept=".xlsx,.xls" hidden>
+        </label>
+        <label class="btn btn-ghost btn-upload" title="Uno o varios exports de Odoo a la vez (activos de oficina, activos de tienda/fábrica, bajas...)">
+          ⬆ Importar desde Odoo
+          <input type="file" id="kpi-input-importar-odoo" accept=".xlsx,.xls" multiple hidden>
+        </label>
+      </div>
     </div>
 
     <div id="kpi-contenido">
@@ -140,6 +150,26 @@
           <div class="label">% Promoción interna</div>
           <div class="valor" id="kpi-promocion">--</div>
           <div class="sub" id="kpi-promocion-sub"></div>
+        </div>
+        <div class="kpi-stat-card">
+          <div class="label">Edad media</div>
+          <div class="valor" id="kpi-edad-media">--</div>
+          <div class="sub" id="kpi-edad-media-sub"></div>
+        </div>
+      </div>
+
+      <div class="kpi-charts-grid" id="kpi-nacionalidad-edad-grid">
+        <div class="kpi-chart-card">
+          <h2>Nacionalidades</h2>
+          <p class="sub" id="kpi-nacionalidad-sub"></p>
+          <div id="kpi-nacionalidad-aviso" class="kpi-aviso-bajas" hidden>Todavía no hay dato de nacionalidad de la plantilla activa.</div>
+          <div style="position:relative; height:300px;"><canvas id="chart-nacionalidad"></canvas></div>
+        </div>
+        <div class="kpi-chart-card">
+          <h2>Edad media por centro</h2>
+          <p class="sub" id="kpi-edad-centro-sub"></p>
+          <div id="kpi-edad-centro-aviso" class="kpi-aviso-bajas" hidden>Todavía no hay dato de fecha de nacimiento de la plantilla activa.</div>
+          <div style="position:relative; height:300px;"><canvas id="chart-edad-centro"></canvas></div>
         </div>
       </div>
 
@@ -269,6 +299,6 @@
 <script src="js/auth-common.js?v=20260915a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/kpis.js?v=20260903l"></script>
+<script src="js/kpis.js?v=20260916a"></script>
 </body>
 </html>
