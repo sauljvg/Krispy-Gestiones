@@ -3,6 +3,7 @@ let currentCentro = null;
 let ultimoReporte = null;
 let centrosActuales = [];
 let centrosConocidosCache = [];
+let motivosConocidosCache = [];
 let chartsBloques = [];
 let chartMotivos = null;
 let chartEvolucionTotal = null;
@@ -94,6 +95,9 @@ async function loadCentros() {
   centrosConocidosCache = centrosConocidos;
   const selectManual = document.getElementById("salida-manual-centro");
   if (selectManual) selectManual.innerHTML = centrosConocidos.map((c) => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join("");
+
+  const resMotivos = await fetch(`${AUTH_API_BASE}/entrevistas/motivos-conocidos?${conEmpresa(new URLSearchParams())}`);
+  motivosConocidosCache = resMotivos.ok ? await resMotivos.json() : [];
 
   const grid = document.getElementById("centro-grid");
   const cards = [`<div class="centro-card" data-centro="">🏢 Todos los centros</div>`].concat(
@@ -687,6 +691,18 @@ function renderTablaMotivosEditar(filas) {
     centrosConocidosCache
       .map((c) => `<option value="${escapeHTML(c)}"${c === actual ? " selected" : ""}>${escapeHTML(c)}</option>`)
       .join("");
+  // Si el motivo actual de esta fila no está en el catálogo conocido (dato
+  // suelto o ya corregido a mano antes de tener este selector), se añade
+  // igualmente como opción para no perderlo silenciosamente al abrir el
+  // desplegable.
+  const opcionesMotivo = (actual) => {
+    const lista = actual && !motivosConocidosCache.includes(actual)
+      ? [actual, ...motivosConocidosCache]
+      : motivosConocidosCache;
+    return [`<option value="">(sin motivo)</option>`]
+      .concat(lista.map((m) => `<option value="${escapeHTML(m)}"${m === actual ? " selected" : ""}>${escapeHTML(m)}</option>`))
+      .join("");
+  };
 
   tbody.innerHTML = filas
     .map(
@@ -704,7 +720,7 @@ function renderTablaMotivosEditar(filas) {
       </td>
       <td>
         <span class="motivo-texto">${escapeHTML(f.motivo || "—")}</span>
-        <input type="text" class="motivo-input" value="${escapeHTML(f.motivo || "")}" hidden>
+        <select class="select-vincular-salida motivo-select" hidden>${opcionesMotivo(f.motivo)}</select>
       </td>
       <td style="white-space:nowrap;">
         <button type="button" class="btn-registrar-salida btn-editar-motivo">Editar</button>
@@ -726,7 +742,7 @@ function renderTablaMotivosEditar(filas) {
       errorMsg: "No se pudo guardar el centro.",
     });
     wireEdicionInline(tr, {
-      textoSel: ".motivo-texto", inputSel: ".motivo-input", editarSel: ".btn-editar-motivo",
+      textoSel: ".motivo-texto", inputSel: ".motivo-select", editarSel: ".btn-editar-motivo",
       guardarSel: ".btn-guardar-motivo", cancelarSel: ".btn-cancelar-motivo",
       leerValor: (input) => input.value.trim(),
       vacioMsg: "El motivo no puede quedar vacío.",

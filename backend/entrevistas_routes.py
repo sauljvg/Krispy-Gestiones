@@ -126,6 +126,11 @@ def list_centros_conocidos_route(empresa: str = "kk", _user: dict = Depends(requ
     return entrevistas_module.list_centros_conocidos(empresa)
 
 
+@router.get("/motivos-conocidos")
+def list_motivos_conocidos_route(empresa: str = "kk", _user: dict = Depends(require_entrevistas)):
+    return entrevistas_module.list_motivos_conocidos(empresa)
+
+
 # --- Import masivo de bajas (pegado desde Excel o captura de pantalla) ---
 # Rutas ESTÁTICAS ("/bajas/...") declaradas antes de "/{oleada_id}/..." a
 # propósito -- aunque aquí no debería colisionar (oleada_id es int, "bajas"

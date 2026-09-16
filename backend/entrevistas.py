@@ -868,6 +868,32 @@ def list_centros_conocidos(empresa="kk"):
     return [r["centro"] for r in rows]
 
 
+def list_motivos_conocidos(empresa="kk"):
+    """Todos los motivos de baja ya usados alguna vez para esta empresa --
+    tanto en las respuestas del propio formulario de salida como en las
+    bajas importadas (Excel de GO, o pegado/captura ya traducido vía
+    motivo_codigos) -- más el catálogo de motivo_codigos aunque nunca se
+    haya usado en una respuesta todavía. Pedido por el usuario 16/09 para
+    que "Corregir el centro o el motivo" ofrezca un selector con las
+    opciones reales en vez de texto libre."""
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT DISTINCT motivo FROM (
+            SELECT r.motivo AS motivo FROM entrevistas_respuestas r
+            JOIN entrevistas_oleadas o ON o.id = r.oleada_id
+            WHERE o.empresa = ? AND r.motivo IS NOT NULL AND r.motivo != ''
+            UNION
+            SELECT s.motivo AS motivo FROM entrevistas_salidas s
+            JOIN entrevistas_oleadas o ON o.id = s.oleada_id
+            WHERE o.empresa = ? AND s.motivo IS NOT NULL AND s.motivo != ''
+            UNION
+            SELECT descripcion AS motivo FROM motivo_codigos
+        ) ORDER BY motivo
+    """, (empresa, empresa)).fetchall()
+    conn.close()
+    return [r["motivo"] for r in rows]
+
+
 def _hash_fila(fila):
     blob = json.dumps(fila, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
