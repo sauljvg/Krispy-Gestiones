@@ -103,9 +103,12 @@
   #tipo-detail-table th.col-drop-target { box-shadow: inset 2px 0 0 var(--acento); }
   #tipo-detail-table td.col-resultado { white-space: normal; }
   .resultado-select {
-    padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border);
-    background: var(--surface-page); color: var(--text-primary); font-size: 12px; max-width: 220px;
+    appearance: none; -webkit-appearance: none; -moz-appearance: none;
+    border: none; background: transparent; color: inherit; font: inherit;
+    padding: 0; margin: 0; cursor: default; text-align: center; text-align-last: center;
+    max-width: 100%;
   }
+  .resultado-select:focus { outline: none; }
 </style>
 </head>
 <body>
@@ -270,6 +273,6 @@
 <script src="js/auth-common.js?v=20260915a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/informes.js?v=20260916b"></script>
+<script src="js/informes.js?v=20260916c"></script>
 </body>
 </html>

@@ -8,7 +8,7 @@ from pydantic import BaseModel
 import auth as auth_module
 import informes as informes_module
 import reclutamiento as reclutamiento_module
-from auth_routes import get_current_user
+from auth_routes import get_current_user, require_admin
 from db import get_connection
 
 router = APIRouter()
@@ -310,7 +310,7 @@ class ResultadoIn(BaseModel):
 
 
 @router.patch("/respuestas/{respuesta_id}/resultado")
-def actualizar_resultado_route(respuesta_id: int, body: ResultadoIn, _user: dict = Depends(require_informes)):
+def actualizar_resultado_route(respuesta_id: int, body: ResultadoIn, _user: dict = Depends(require_admin)):
     try:
         informes_module.actualizar_resultado(respuesta_id, body.resultado)
     except ValueError as exc:

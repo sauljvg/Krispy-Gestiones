@@ -1,3 +1,4 @@
+let usuarioActual = null;
 let currentTipo = null;
 let currentHoja = null;
 let currentColumnas = [];
@@ -539,8 +540,8 @@ function renderTable() {
           <td><input type="checkbox" class="row-check" data-id="${r.id}" ${checked}></td>
           ${columnasVisibles.map((c) => {
             const valor = r.datos[c] ?? "";
-            if (c === "RESULTADO") {
-              return `<td class="col-resultado">
+            if (c === "RESULTADO" && usuarioActual?.rol === "admin") {
+              return `<td class="col-resultado" title="${escapeHTML(valor)}">
                 <select class="resultado-select">${opcionesResultado(valor)}</select>
               </td>`;
             }
@@ -710,6 +711,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     window.location.href = "/";
     return;
   }
+  usuarioActual = user;
   wireUserBar(user);
   aplicarBrandingEmpresa();
 
