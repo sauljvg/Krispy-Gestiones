@@ -385,10 +385,29 @@ def _idiomas_por_nivel(texto: str) -> str:
 # Experiencia en entradas sueltas (ver _parsear_entradas_fechadas): cada
 # entrada real termina en una de estas líneas, así que sirve tanto para
 # saber dónde acaba una entrada como para sacar sus fechas.
+#
+# Ampliado 16/09 con CVs reales de candidatos (no exportados de InfoJobs):
+# "Enero 2025 - Actualidad" (mes sin "de"), "may. 2025 – actualidad" (mes
+# abreviado con punto), "06/2025 – Actualidad" (mes numérico), "2022 – 2024"
+# (solo año) y guion largo/corto ("-", "–", "—"). Cada formato nuevo es una
+# alternativa más dentro del mismo token de fecha, así que
+# _parsear_entradas_fechadas no necesita cambios: sigue funcionando igual,
+# solo que ahora reconoce más líneas como "esto es una fecha".
+_MES_RE = (
+    r"(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre"
+    r"|octubre|noviembre|diciembre|ene|feb|mar|abr|may|jun|jul|ago|sept|sep|oct|nov|dic)\.?"
+)
+_FECHA_TOKEN_RE = (
+    rf"(?:\d{{1,2}}\s+de\s+{_MES_RE}\s+de\s+\d{{4}}"
+    rf"|{_MES_RE}\s+de\s+\d{{4}}"
+    rf"|{_MES_RE}\s+\d{{4}}"
+    rf"|\d{{1,2}}/\d{{4}}"
+    rf"|\d{{4}})"
+)
 RANGO_FECHAS_RE = re.compile(
-    r"(?P<inicio>\d{1,2}\s+de\s+[a-záéíóúñ]+\s+de\s+\d{4}|[a-záéíóúñ]+\s+de\s+\d{4})"
-    r"\s*-\s*"
-    r"(?P<fin>\d{1,2}\s+de\s+[a-záéíóúñ]+\s+de\s+\d{4}|[a-záéíóúñ]+\s+de\s+\d{4}|actualidad|actualmente|actual)",
+    rf"(?P<inicio>{_FECHA_TOKEN_RE})"
+    rf"\s*[-–—]\s*"
+    rf"(?P<fin>{_FECHA_TOKEN_RE}|actualidad|actualmente|actual|presente)",
     re.IGNORECASE,
 )
 
@@ -432,6 +451,18 @@ def _parsear_formacion_local(texto_seccion: str) -> list[dict]:
         tipo, especifico, centro = e["contexto"] if len(e["contexto"]) == 3 else (None, None, None)
         if not centro:
             continue
+        # CV a dos columnas mal ordenado por la extracción de texto: si
+        # alguna de las 3 líneas de contexto es en realidad el email o
+        # teléfono de contacto (coló de otra columna), la entrada entera es
+        # basura -- mejor descartarla que guardar un email como "centro".
+        if any(_es_linea_de_contacto(l) for l in (tipo, especifico, centro) if l):
+            continue
+        # Mismo caso de columnas desordenadas: si una de las líneas de
+        # contexto ES OTRO rango de fechas, es que el texto está desplazado
+        # (una fecha ocupó el hueco de un título/centro) y la entrada no es
+        # de fiar.
+        if any(l and RANGO_FECHAS_RE.search(l) for l in (tipo, especifico, centro)):
+            continue
         if not especifico or especifico.lower() == (tipo or "").lower():
             titulo = tipo or especifico
         else:
@@ -463,6 +494,13 @@ def _parsear_experiencia_local(texto_seccion: str) -> list[dict]:
         if len(e["contexto"]) < 2:
             continue
         puesto, empresa = e["contexto"][-2], e["contexto"][-1]
+        if _es_linea_de_contacto(puesto) or _es_linea_de_contacto(empresa):
+            continue
+        # Ver el mismo comentario en _parsear_formacion_local: puesto/empresa
+        # que en realidad son otro rango de fechas delatan columnas
+        # desordenadas -- descartar en vez de guardar una fecha como puesto.
+        if RANGO_FECHAS_RE.search(puesto) or RANGO_FECHAS_RE.search(empresa):
+            continue
         fin_bloque = entradas[j + 1]["idx"] - 2 if j + 1 < len(entradas) else len(lineas)
         descripcion = " ".join(lineas[e["idx"] + 1:max(e["idx"] + 1, fin_bloque)]).strip()
         resultado.append({
@@ -530,6 +568,42 @@ def _parsear_experiencia_pipe(texto_seccion: str) -> list[dict]:
             continue
         texto_sin_vineta = _VINETA_RE.sub("", linea)
         actual["descripcion"] = (actual["descripcion"] + " " + texto_sin_vineta).strip()[:600]
+    if actual:
+        resultado.append(actual)
+    return resultado
+
+
+# Un tercer formato de plantilla, distinto a los dos de arriba: todo en una
+# sola línea "Puesto | Empresa (fecha_inicio - fecha_fin)", con la
+# descripción en la(s) línea(s) siguiente(s) hasta la próxima línea que siga
+# el mismo patrón -- confirmado en vivo 16/09 con un CV real.
+_EXPERIENCIA_PARENTESIS_RE = re.compile(
+    r"^(?P<puesto>.+?)\s*\|\s*(?P<empresa>.+?)\s*\((?P<inicio>.+?)\s*[-–—]\s*(?P<fin>.+?)\)\s*$"
+)
+
+
+def _parsear_experiencia_parentesis(texto_seccion: str) -> list[dict]:
+    lineas = [l.strip() for l in texto_seccion.split("\n") if l.strip()]
+    resultado = []
+    actual = None
+    for linea in lineas:
+        m = _EXPERIENCIA_PARENTESIS_RE.match(linea)
+        if m:
+            if actual:
+                resultado.append(actual)
+            actual = {
+                "puesto": m.group("puesto").strip(),
+                "empresa": m.group("empresa").strip(),
+                "fecha_inicio": m.group("inicio").strip(),
+                "fecha_fin": m.group("fin").strip(),
+                "descripcion": "",
+            }
+            continue
+        if actual is None:
+            continue
+        if _es_linea_de_contacto(linea):
+            continue
+        actual["descripcion"] = (actual["descripcion"] + " " + linea).strip()[:600]
     if actual:
         resultado.append(actual)
     return resultado
@@ -603,6 +677,8 @@ def _extraer_de_texto(texto_crudo: str) -> dict:
         experiencia_json = _parsear_experiencia_local(extraido["experiencia"])
         if not experiencia_json:
             experiencia_json = _parsear_experiencia_pipe(extraido["experiencia"])
+        if not experiencia_json:
+            experiencia_json = _parsear_experiencia_parentesis(extraido["experiencia"])
         if experiencia_json:
             extraido["experiencia_json"] = experiencia_json
 
