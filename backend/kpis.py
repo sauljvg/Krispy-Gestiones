@@ -41,6 +41,22 @@ CENTROS_GO_A_CORTO = {
     "GO - TIENDA GRANPLAZA2": "Gran Plaza 2",
 }
 
+# Export de Odoo (credenciales) para la plantilla activa/bajas (16/09,
+# pedido explícito del usuario para poder subirlo directo en vez del Excel
+# de GO) -- la columna "Compañía" trae el centro real con un prefijo de
+# código de Odoo delante ("T-MD07 PLE-Plenilunio"), o el nombre genérico de
+# la empresa ("Glaseados Originales S.L.") para quien trabaja en oficina.
+ODOO_COMPANIA_A_CENTRO = {
+    "F-MD01 PQS-Parquesur Fábrica": "ParqueSur Fabrica",
+    "T-MD02 PQS-Parquesur": "ParqueSur Tienda",
+    "T-MD03 PRC-Princesa": "Princesa",
+    "T-MD04 CLD-Caleido": "Caleido",
+    "T-MD05 LGV-La Gavia": "La Gavia",
+    "T-MD06 GPZ-Gran Plaza 2": "Gran Plaza 2",
+    "T-MD07 PLE-Plenilunio": "Plenilunio",
+}
+ODOO_COMPANIA_OFICINA = "Glaseados Originales S.L."
+
 HORAS_JORNADA_COMPLETA = 40  # pedido explícito del usuario
 
 # Administración central ("GO - ADMIN CENTRAL" / "Oficina Central") no cuenta
@@ -121,6 +137,24 @@ _ALIAS_COLUMNAS = {
     "motivo de baja de la compania": "motivo_baja",
 }
 
+# Export de Odoo -- ver ODOO_COMPANIA_A_CENTRO arriba. "creado el" NO se
+# mapea a propósito: es la fecha en que se creó el registro de credencial en
+# Odoo (una migración masiva histórica, no la fecha de alta real de la
+# persona -- confirmado viendo que decenas de personas distintas comparten
+# el mismo "Creado el" exacto), así que no sirve como fecha_antiguedad.
+_ALIAS_COLUMNAS_ODOO = {
+    "id de credencial": "codigo_empleado",
+    "nombre del empleado": "nombre",
+    "compania": "compania_raw",
+    "horas contrato": "horas_contrato",
+    "fecha de nacimiento": "fecha_nacimiento",
+    "nacionalidad (pais)": "nacionalidad",
+    "pais de nacimiento": "pais_nacimiento",
+    "departamento": "departamento",
+    "puesto de trabajo": "puesto",
+    "fecha de salida": "fecha_baja",
+}
+
 
 def ensure_kpis_tables():
     conn = get_connection()
@@ -137,6 +171,14 @@ def ensure_kpis_tables():
             motivo_baja TEXT
         )
     """)
+    # fecha_nacimiento/nacionalidad/pais_nacimiento/departamento se añadieron
+    # el 16/09 al importar por primera vez el export de Odoo (antes solo
+    # existía el Excel de GO, que no trae estos datos) -- ALTER TABLE en vez
+    # de recrear, para no perder lo que ya hubiera en kpi_empleados.
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(kpi_empleados)")}
+    for col in ("fecha_nacimiento", "nacionalidad", "pais_nacimiento", "departamento"):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE kpi_empleados ADD COLUMN {col} TEXT")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS kpi_importaciones (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -289,6 +331,119 @@ def import_excel(contenido, nombre_archivo, subido_por):
     conn.commit()
     conn.close()
     return {"filas": len(registros)}
+
+
+def _centro_odoo(compania_raw, codigo_empleado, centro_existente_por_codigo):
+    """Resuelve el centro real a partir de la "Compañía" de Odoo. Si trae el
+    nombre genérico de la empresa (personal de oficina, ver
+    ODOO_COMPANIA_OFICINA), se respeta lo que YA teníamos en la web para esa
+    persona si había algo -- pedido explícito del usuario 16/09 ("si tienes
+    ese conflicto te quedas con lo que tenemos en web") -- y si no había
+    nada, se asume Oficina Central (es justo lo que describe ese archivo)."""
+    texto = _texto(compania_raw)
+    if texto is None:
+        return centro_existente_por_codigo.get(codigo_empleado)
+    if texto == ODOO_COMPANIA_OFICINA:
+        return centro_existente_por_codigo.get(codigo_empleado) or "Oficina Central"
+    return ODOO_COMPANIA_A_CENTRO.get(texto, texto)
+
+
+def import_excel_odoo(archivos, subido_por):
+    """archivos: lista de (nombre_archivo, contenido_bytes) -- uno o varios
+    exports de Odoo a la vez (activos de oficina, activos de tienda/fábrica,
+    bajas...); cada uno se detecta solo, según traiga o no la columna "Fecha
+    de salida" (ver _ALIAS_COLUMNAS_ODOO). A diferencia de import_excel (el
+    Excel de GO, que sustituye TODA la tabla de golpe), aquí se hace upsert
+    por codigo_empleado fila a fila: no se toca fecha_antiguedad (Odoo no la
+    exporta -- su "Creado el" es de una migración masiva, no la fecha de
+    alta real, ver _ALIAS_COLUMNAS_ODOO) y, si la fila viene de un archivo
+    de bajas, se conserva el motivo_baja que ya hubiera (Odoo tampoco trae
+    motivo, solo fecha) para no perder lo ya reconciliado a mano con
+    Entrevista de Salida. Aparecer en un archivo de ACTIVOS sí limpia
+    fecha_baja/motivo_baja -- confirma que esa persona sigue de alta hoy."""
+    conn = get_connection()
+    centro_existente = {
+        r["codigo_empleado"]: r["centro"]
+        for r in conn.execute("SELECT codigo_empleado, centro FROM kpi_empleados").fetchall()
+    }
+    motivo_existente = {
+        r["codigo_empleado"]: r["motivo_baja"]
+        for r in conn.execute(
+            "SELECT codigo_empleado, motivo_baja FROM kpi_empleados WHERE motivo_baja IS NOT NULL"
+        ).fetchall()
+    }
+
+    total_filas = 0
+    for nombre_archivo, contenido in archivos:
+        es_xls = nombre_archivo.lower().endswith(".xls") and not nombre_archivo.lower().endswith(".xlsx")
+        try:
+            filas = _leer_filas_xls(contenido) if es_xls else _leer_filas_xlsx(contenido)
+        except Exception as exc:
+            conn.close()
+            raise ValueError(f"No se pudo leer «{nombre_archivo}»: {exc}")
+        if not filas:
+            continue
+
+        encabezado = [_normaliza(str(c)) for c in filas[0]]
+        indice = {}
+        for i, col in enumerate(encabezado):
+            clave = _ALIAS_COLUMNAS_ODOO.get(col)
+            if clave:
+                indice[clave] = i
+        if "codigo_empleado" not in indice or "nombre" not in indice:
+            conn.close()
+            raise ValueError(f"«{nombre_archivo}» no tiene el formato esperado del export de Odoo")
+        es_archivo_bajas = "fecha_baja" in indice
+
+        for fila in filas[1:]:
+            if fila is None or all(v is None or str(v).strip() == "" for v in fila):
+                continue
+
+            def val(clave, fila=fila):
+                i = indice.get(clave)
+                return fila[i] if i is not None and i < len(fila) else None
+
+            codigo = _codigo_empleado(val("codigo_empleado"))
+            if not codigo:
+                continue
+            centro = _centro_odoo(val("compania_raw"), codigo, centro_existente)
+            horas = _numero(val("horas_contrato"))
+            porcentaje = round(horas / HORAS_JORNADA_COMPLETA * 100, 1) if horas is not None else None
+            fecha_baja = _fecha_a_iso(val("fecha_baja")) if es_archivo_bajas else None
+            motivo_baja = motivo_existente.get(codigo) if es_archivo_bajas else None
+
+            conn.execute("""
+                INSERT INTO kpi_empleados
+                    (codigo_empleado, centro, nombre, puesto, porcentaje_jornada,
+                     fecha_nacimiento, nacionalidad, pais_nacimiento, departamento,
+                     fecha_baja, motivo_baja)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(codigo_empleado) DO UPDATE SET
+                    centro = excluded.centro,
+                    nombre = excluded.nombre,
+                    puesto = excluded.puesto,
+                    porcentaje_jornada = excluded.porcentaje_jornada,
+                    fecha_nacimiento = excluded.fecha_nacimiento,
+                    nacionalidad = excluded.nacionalidad,
+                    pais_nacimiento = excluded.pais_nacimiento,
+                    departamento = excluded.departamento,
+                    fecha_baja = excluded.fecha_baja,
+                    motivo_baja = excluded.motivo_baja
+            """, (
+                codigo, centro, _texto(val("nombre")), _texto(val("puesto")), porcentaje,
+                _fecha_a_iso(val("fecha_nacimiento")), _texto(val("nacionalidad")), _texto(val("pais_nacimiento")),
+                _texto(val("departamento")), fecha_baja, motivo_baja,
+            ))
+            centro_existente[codigo] = centro
+            total_filas += 1
+
+    conn.execute(
+        "INSERT INTO kpi_importaciones (archivo_nombre, importado_por, filas) VALUES (?, ?, ?)",
+        (", ".join(n for n, _ in archivos), subido_por, total_filas),
+    )
+    conn.commit()
+    conn.close()
+    return {"filas": total_filas}
 
 
 def get_ultima_importacion():
@@ -546,7 +701,57 @@ def _por_jornada(empleados_activos):
     return sorted(conteo.items(), key=lambda x: x[0]), sin_dato
 
 
-def compute_resumen():
+def _edad(fecha_nacimiento, hoy):
+    if not fecha_nacimiento:
+        return None
+    try:
+        anio, mes, dia = (int(x) for x in fecha_nacimiento[:10].split("-"))
+    except ValueError:
+        return None
+    edad = hoy.year - anio
+    if (hoy.month, hoy.day) < (mes, dia):
+        edad -= 1
+    return edad
+
+
+def _nacionalidad_y_edad(empleados_activos, hoy):
+    """Gráfico de tarta de nacionalidades + edad media, general y por centro
+    -- pedido explícito del usuario 16/09 tras añadir estos campos al
+    importar el export de Odoo. Ambos se calculan solo sobre quien tiene el
+    dato (una plantilla mixta, con gente del Excel viejo de GO sin estos
+    campos todavía, no debe salir con "(sin dato)" contando como si fuera
+    una nacionalidad real, ni bajar la edad media a 0)."""
+    nacionalidades = {}
+    edades = []
+    edades_por_centro = {}
+    for e in empleados_activos:
+        nac = (e.get("nacionalidad") or "").strip()
+        if nac:
+            nacionalidades[nac] = nacionalidades.get(nac, 0) + 1
+        edad = _edad(e.get("fecha_nacimiento"), hoy)
+        if edad is not None:
+            edades.append(edad)
+            centro = e.get("centro") or "(sin centro)"
+            edades_por_centro.setdefault(centro, []).append(edad)
+    edad_media_por_centro = sorted(
+        ((c, round(sum(es) / len(es), 1)) for c, es in edades_por_centro.items()),
+        key=lambda x: x[0],
+    )
+    return {
+        "nacionalidades": sorted(nacionalidades.items(), key=lambda x: -x[1]),
+        "edad_media": round(sum(edades) / len(edades), 1) if edades else None,
+        "edad_media_por_centro": edad_media_por_centro,
+        "con_dato_nacionalidad": sum(nacionalidades.values()),
+        "con_dato_edad": len(edades),
+    }
+
+
+def compute_resumen(segmento="operativa"):
+    """segmento="operativa" (por defecto, comportamiento de siempre): tienda
+    y fábrica, sin Oficina Central ni puestos de mando de área/dirección.
+    segmento="oficina" (16/09, pedido explícito del usuario para poder ver
+    los KPIs de oficina por separado en vez de solo descartarlos): justo lo
+    contrario, SOLO Oficina Central."""
     conn = get_connection()
     empleados = [dict(r) for r in conn.execute("SELECT * FROM kpi_empleados").fetchall()]
     bajas = _get_bajas(conn)
@@ -558,12 +763,18 @@ def compute_resumen():
     movimientos_puesto = [dict(r) for r in movimientos_puesto]
     conn.close()
 
-    codigos_excluidos = {
-        e["codigo_empleado"] for e in empleados
-        if e["centro"] in CENTROS_EXCLUIDOS or puesto_no_operativo(e.get("puesto"))
-    }
+    if segmento == "oficina":
+        codigos_excluidos = {e["codigo_empleado"] for e in empleados if e["centro"] not in CENTROS_EXCLUIDOS}
+    else:
+        codigos_excluidos = {
+            e["codigo_empleado"] for e in empleados
+            if e["centro"] in CENTROS_EXCLUIDOS or puesto_no_operativo(e.get("puesto"))
+        }
     empleados = [e for e in empleados if e["codigo_empleado"] not in codigos_excluidos]
-    bajas = [b for b in bajas if b["centro"] not in CENTROS_EXCLUIDOS]
+    if segmento == "oficina":
+        bajas = [b for b in bajas if b["centro"] in CENTROS_EXCLUIDOS]
+    else:
+        bajas = [b for b in bajas if b["centro"] not in CENTROS_EXCLUIDOS]
     movimientos_puesto = [m for m in movimientos_puesto if m["codigo_empleado"] not in codigos_excluidos]
 
     hoy = datetime.date.today()
@@ -574,6 +785,7 @@ def compute_resumen():
     headcount_por_centro_lista, horas_por_centro_lista = _headcount_y_horas_por_centro(
         activos, movimientos_centro, hoy_str
     )
+    nacionalidad_y_edad = _nacionalidad_y_edad(activos, hoy)
 
     # --- Serie mensual completa (todo el histórico de Entrevista de Salida) -
     # Se calcula para TODOS los meses con datos (no solo los últimos 12) para
@@ -729,6 +941,8 @@ def compute_resumen():
         "horas_por_centro": horas_por_centro_lista,
         "sin_datos_plantilla": headcount_activo == 0,
         "sin_datos_bajas": len(bajas) == 0,
+        "segmento": segmento,
+        **nacionalidad_y_edad,
     }
 
 

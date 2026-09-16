@@ -28,8 +28,10 @@ def require_kpis(user: dict = Depends(get_current_user)) -> dict:
 
 
 @router.get("/resumen")
-def resumen_route(_user: dict = Depends(require_kpis)):
-    return kpis_module.compute_resumen()
+def resumen_route(segmento: str = "operativa", _user: dict = Depends(require_kpis)):
+    if segmento not in ("operativa", "oficina"):
+        raise HTTPException(status_code=400, detail="segmento debe ser 'operativa' u 'oficina'")
+    return kpis_module.compute_resumen(segmento)
 
 
 @router.get("/ultima-importacion")
@@ -44,6 +46,23 @@ async def importar_route(file: UploadFile = File(...), user: dict = Depends(requ
     contenido = await file.read()
     try:
         resultado = kpis_module.import_excel(contenido, file.filename, user["username"])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, **resultado}
+
+
+@router.post("/importar-odoo")
+async def importar_odoo_route(files: list[UploadFile] = File(...), user: dict = Depends(require_admin)):
+    """Export de Odoo (16/09) -- uno o varios archivos a la vez (activos de
+    oficina, activos de tienda/fábrica, bajas...), ver
+    kpis_module.import_excel_odoo. A diferencia de /importar (Excel de GO,
+    un único archivo que sustituye toda la tabla), este hace upsert."""
+    for f in files:
+        if not f.filename.lower().endswith((".xlsx", ".xls")):
+            raise HTTPException(status_code=400, detail=f"«{f.filename}» no es un Excel (.xlsx o .xls)")
+    archivos = [(f.filename, await f.read()) for f in files]
+    try:
+        resultado = kpis_module.import_excel_odoo(archivos, user["username"])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True, **resultado}
