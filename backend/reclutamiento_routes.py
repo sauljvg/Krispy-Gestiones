@@ -734,28 +734,46 @@ async def extraer_cv_route(empresa: str = "kk", file: UploadFile = File(...), _u
     lo revise antes de guardar. Si trae varios candidatos concatenados (PDF
     por lotes), aquí solo se detectan los rangos de página de cada uno para
     poder recortarlos después (ver adjuntar_pdf_lote_confirmar_route, que es
-    quien de verdad crea/rellena cada ficha)."""
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Sube el CV en formato PDF")
+    quien de verdad crea/rellena cada ficha).
+
+    También acepta un ZIP con varios PDF sueltos (uno por candidato, p.ej. lo
+    que descarga un portal de empleo al pedir "todos los adjuntos") -- cada
+    PDF del ZIP se extrae POR SEPARADO y se fusiona con
+    cv_extraction.fusionar_zip_pdfs, que ya devuelve tanto los candidatos
+    como los rangos de página EXACTOS (uno por archivo del ZIP), sin pasar
+    por la heurística de detectar_paginas_por_candidato (pensada para un PDF
+    de lote ya fusionado, no para este caso)."""
+    if not file.filename.lower().endswith((".pdf", ".zip")):
+        raise HTTPException(status_code=400, detail="Sube el CV en PDF, o un ZIP con varios PDF")
     contenido = await file.read()
-    try:
-        # asyncio.to_thread: extraer_cv es una función normal (bloqueante,
-        # de CPU) llamada dentro de una ruta async -- sin esto, mientras lee
-        # un PDF grande deja colgado el único hilo que atiende TODAS las
-        # peticiones de la app, no solo la de quien subió el archivo (ya
-        # pasó en producción con un patrón parecido, ver reextraer_todos_route
-        # más abajo). Corriéndolo en otro hilo, quien sube el PDF sigue
-        # esperando su propia respuesta igual, pero deja de bloquear a todo
-        # el mundo mientras tanto.
-        candidatos = await asyncio.to_thread(cv_extraction.extraer_cv, contenido)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+    rangos_exactos = None
+    if file.filename.lower().endswith(".zip"):
+        try:
+            contenido, rangos_exactos, candidatos = await asyncio.to_thread(cv_extraction.fusionar_zip_pdfs, contenido)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    else:
+        try:
+            # asyncio.to_thread: extraer_cv es una función normal (bloqueante,
+            # de CPU) llamada dentro de una ruta async -- sin esto, mientras lee
+            # un PDF grande deja colgado el único hilo que atiende TODAS las
+            # peticiones de la app, no solo la de quien subió el archivo (ya
+            # pasó en producción con un patrón parecido, ver reextraer_todos_route
+            # más abajo). Corriéndolo en otro hilo, quien sube el PDF sigue
+            # esperando su propia respuesta igual, pero deja de bloquear a todo
+            # el mundo mientras tanto.
+            candidatos = await asyncio.to_thread(cv_extraction.extraer_cv, contenido)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
     rangos = []
     if len(candidatos) > 1:
-        try:
-            rangos = await asyncio.to_thread(cv_extraction.detectar_paginas_por_candidato, contenido)
-        except Exception:
-            rangos = []
+        if rangos_exactos is not None:
+            rangos = rangos_exactos
+        else:
+            try:
+                rangos = await asyncio.to_thread(cv_extraction.detectar_paginas_por_candidato, contenido)
+            except Exception:
+                rangos = []
     division_disponible = len(rangos) == len(candidatos)
     # Avisa si alguno de los candidatos leídos ya tiene ficha (mismo
     # teléfono, email o nombre exacto) -- el caso real que motivó esto: subir
@@ -782,22 +800,36 @@ async def adjuntar_pdf_lote_route(empresa: str = "kk", file: UploadFile = File(.
     número de rangos detectado no coincide con el número de candidatos
     extraídos, se marca division_disponible=false para ese caso y se deja
     que el frontend recorte a mano o adjunte el PDF completo como antes. No
-    adjunta nada todavía: eso lo hace /candidatos/adjuntar-pdf-lote/confirmar."""
+    adjunta nada todavía: eso lo hace /candidatos/adjuntar-pdf-lote/confirmar.
+
+    También acepta un ZIP con un PDF por candidato (ver el mismo comentario
+    en extraer_cv_route) -- los rangos de página salen exactos del propio
+    ZIP, sin heurística."""
     _exigir_modulo_empresa(empresa, user)
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Sube el PDF con todos los candidatos")
+    if not file.filename.lower().endswith((".pdf", ".zip")):
+        raise HTTPException(status_code=400, detail="Sube el PDF (o ZIP) con todos los candidatos")
     contenido = await file.read()
-    try:
-        # Ver el mismo comentario en extraer_cv_route -- esto puede ser un
-        # PDF de hasta ~50 candidatos, el caso donde más tarda y más
-        # importa no bloquear al resto de la app mientras se procesa.
-        candidatos = await asyncio.to_thread(cv_extraction.extraer_cv, contenido)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
-    try:
-        rangos = await asyncio.to_thread(cv_extraction.detectar_paginas_por_candidato, contenido)
-    except Exception:
-        rangos = []
+    rangos_exactos = None
+    if file.filename.lower().endswith(".zip"):
+        try:
+            contenido, rangos_exactos, candidatos = await asyncio.to_thread(cv_extraction.fusionar_zip_pdfs, contenido)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    else:
+        try:
+            # Ver el mismo comentario en extraer_cv_route -- esto puede ser un
+            # PDF de hasta ~50 candidatos, el caso donde más tarda y más
+            # importa no bloquear al resto de la app mientras se procesa.
+            candidatos = await asyncio.to_thread(cv_extraction.extraer_cv, contenido)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+    if rangos_exactos is not None:
+        rangos = rangos_exactos
+    else:
+        try:
+            rangos = await asyncio.to_thread(cv_extraction.detectar_paginas_por_candidato, contenido)
+        except Exception:
+            rangos = []
     division_disponible = len(rangos) == len(candidatos)
     resultado = []
     for i, c in enumerate(candidatos):
@@ -1094,14 +1126,33 @@ async def adjuntar_pdf_lote_confirmar_route(
     _rellenar_huecos_en_segundo_plano). Nunca pisa datos que el reclutador
     ya haya rellenado (ver rellenar_huecos_candidato) ni crea fichas nuevas
     -- eso lo sigue haciendo solo la extracción original al subir el PDF por
-    primera vez."""
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Sube el PDF con todos los candidatos")
+    primera vez.
+
+    Si lo que se subió fue un ZIP (ver extraer_cv_route), se vuelve a
+    fusionar aquí con los mismos PDF en el mismo orden -- fusionar_zip_pdfs
+    es determinista (orden alfabético), así que la numeración de página
+    sale IDÉNTICA a la de la vista previa y los rangos del `mapeo` siguen
+    valiendo sin tener que mandarlos de vuelta."""
+    if not file.filename.lower().endswith((".pdf", ".zip")):
+        raise HTTPException(status_code=400, detail="Sube el PDF (o ZIP) con todos los candidatos")
     try:
         items = json.loads(mapeo)
     except (json.JSONDecodeError, TypeError):
         raise HTTPException(status_code=400, detail="mapeo inválido")
     contenido = await file.read()
+    # A partir de aquí `contenido` es SIEMPRE un PDF de verdad (fusionado o
+    # tal cual se subió) y `nombre_archivo` va siempre con extensión .pdf,
+    # aunque el recorte falle y se acabe adjuntando el lote entero -- si no,
+    # una ficha creada desde un ZIP se quedaría con un adjunto ".zip" que ni
+    # el botón "Re-extraer" del frontend reconoce (mira la extensión, ver
+    # compartidos.js).
+    nombre_archivo = file.filename
+    if nombre_archivo.lower().endswith(".zip"):
+        try:
+            contenido, _, _ = await asyncio.to_thread(cv_extraction.fusionar_zip_pdfs, contenido)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        nombre_archivo = nombre_archivo[:-4] + ".pdf"
     adjuntados = 0
     items_para_rellenar = []
     for item in items:
@@ -1116,7 +1167,7 @@ async def adjuntar_pdf_lote_confirmar_route(
                 recorte = cv_extraction.recortar_pdf(contenido, int(pagina_inicio), int(pagina_fin))
             except Exception:
                 recorte = contenido
-        archivo_id = reclutamiento_module.agregar_archivo(candidato_id, file.filename, recorte)
+        archivo_id = reclutamiento_module.agregar_archivo(candidato_id, nombre_archivo, recorte)
         adjuntados += 1
         if pagina_inicio and pagina_fin:
             items_para_rellenar.append((candidato_id, archivo_id))

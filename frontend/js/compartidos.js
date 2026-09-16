@@ -930,7 +930,7 @@ function vacanteFormHTML() {
         <div class="form-field form-field-full"><label>Notas</label><textarea id="vacante-notas" style="min-height:50px;">${v ? escapeHTML(v.notas || "") : ""}</textarea></div>
         ${!v ? `<div class="form-field form-field-full">
           <label>Subir CVs para esta vacante (opcional)</label>
-          <input type="file" id="vacante-cv-lote" accept=".pdf">
+          <input type="file" id="vacante-cv-lote" accept=".pdf,.zip" multiple>
           <p class="staff-hint" style="margin-top:4px;">El CV de una persona o un PDF con varios juntos -- las fichas se crean ya asignadas a esta vacante.</p>
         </div>` : ""}
       </div>
@@ -988,7 +988,7 @@ async function guardarVacante() {
   const centro = document.getElementById("vacante-centro").value.trim() || null;
   const notas = document.getElementById("vacante-notas").value.trim() || null;
   const archivoInput = document.getElementById("vacante-cv-lote");
-  const archivo = !vacanteEditando && archivoInput?.files.length ? archivoInput.files[0] : null;
+  const archivo = !vacanteEditando && archivoInput?.files.length ? await archivoOZipDesdeInput(archivoInput.files) : null;
   const btn = document.getElementById("btn-guardar-vacante");
   if (btn) btn.disabled = true;
   let res;
@@ -1598,7 +1598,7 @@ function renderForm() {
 
   const subirCvHTML = esEdicion ? "" : `
     <div class="subir-cv-row">
-      <input type="file" id="input-cv-nuevo" accept=".pdf">
+      <input type="file" id="input-cv-nuevo" accept=".pdf,.zip" multiple>
       <button type="button" id="btn-extraer-cv" class="btn btn-ghost">📄 Subir CV y rellenar automáticamente</button>
     </div>
     <p class="staff-hint" style="margin-top:-6px;">Puedes subir el CV de 1 candidato o un PDF con varios CVs juntos (hasta unos 50) — se detectan todos automáticamente.</p>
@@ -2016,7 +2016,7 @@ function abrirAdjuntarLote() {
         creados y se adjunta a cada uno que coincida — no se crea ninguna ficha nueva.
       </p>
       <div class="subir-cv-row">
-        <input type="file" id="input-lote-pdf" accept=".pdf">
+        <input type="file" id="input-lote-pdf" accept=".pdf,.zip" multiple>
         <button type="button" id="btn-previsualizar-lote" class="btn btn-ghost">Comprobar coincidencias</button>
       </div>
       <div id="lote-resultado-wrap"></div>
@@ -2031,7 +2031,7 @@ async function previsualizarLote() {
     resultadoWrap.innerHTML = `<p class="extraccion-aviso local">Selecciona primero el PDF.</p>`;
     return;
   }
-  loteArchivoPendiente = input.files[0];
+  loteArchivoPendiente = await archivoOZipDesdeInput(input.files);
   resultadoWrap.innerHTML = `<p class="staff-hint">Leyendo el PDF y buscando coincidencias...</p>`;
   const formData = new FormData();
   formData.append("file", loteArchivoPendiente);
@@ -2174,7 +2174,21 @@ async function extraerCvYRellenar() {
     avisoWrap.innerHTML = `<p class="extraccion-aviso local">Selecciona primero un PDF.</p>`;
     return;
   }
-  await procesarPdfNuevosCandidatos(input.files[0], avisoWrap, {});
+  await procesarPdfNuevosCandidatos(await archivoOZipDesdeInput(input.files), avisoWrap, {});
+}
+
+// Los selectores de CV dejan elegir varios archivos a la vez (input
+// multiple) -- si es más de uno, se empaquetan aquí mismo en un ZIP en
+// memoria con JSZip (cargado en compartidos.html) para poder mandarlo tal
+// cual al backend, que ya sabe leer un ZIP con un PDF por candidato (ver
+// fusionar_zip_pdfs). Con uno solo no hace falta el viaje de zip+unzip.
+async function archivoOZipDesdeInput(files) {
+  const lista = Array.from(files);
+  if (lista.length <= 1) return lista[0] || null;
+  const zip = new JSZip();
+  for (const f of lista) zip.file(f.name, f);
+  const blob = await zip.generateAsync({ type: "blob" });
+  return new File([blob], "cvs.zip", { type: "application/zip" });
 }
 
 // Lee el PDF con el método local -- instantáneo, sin esperas. Si trae un

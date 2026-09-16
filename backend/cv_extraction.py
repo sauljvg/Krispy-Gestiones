@@ -795,6 +795,79 @@ def recortar_pdf(pdf_bytes: bytes, pagina_inicio: int, pagina_fin: int) -> bytes
     return salida.getvalue()
 
 
+def fusionar_zip_pdfs(zip_bytes: bytes) -> tuple[bytes, list[tuple[int, int]], list[dict]]:
+    """Une en un solo PDF todos los PDF sueltos de un ZIP (p.ej. "descargar
+    todos los adjuntos" de un correo o de un portal de empleo), en orden
+    alfabético de nombre de archivo -- así fusionar el mismo ZIP dos veces
+    (vista previa y confirmación, ver adjuntar_pdf_lote_confirmar_route) da
+    siempre la MISMA numeración de página.
+
+    A diferencia de un PDF de lote (un único archivo con varios candidatos
+    ya concatenados por quien lo subió, donde hace falta la heurística de
+    detectar_paginas_por_candidato para adivinar dónde empieza cada uno),
+    aquí el límite entre candidatos lo da el propio ZIP: se asume que CADA
+    PDF DEL ZIP ES UN CANDIDATO. Por eso cada PDF se extrae POR SEPARADO
+    (extraer_cv) antes de fusionar, en vez de fusionar primero y extraer
+    sobre el conjunto -- probado en vivo: la segmentación por heurística
+    (pensada para un PDF de lote ya fusionado) no siempre acierta cuántos
+    candidatos hay en el PDF unido, aunque los límites reales sean exactos.
+    Extrayendo archivo a archivo no hace falta acertar nada: cada PDF del
+    ZIP con exactamente 1 candidato detectado se empareja 1:1 con su rango
+    de página real. Un PDF del ZIP con 0 o 2+ candidatos (el propio archivo
+    ya era un lote, o no se pudo leer) se suma igualmente a la lista de
+    candidatos pero SIN rango emparejado -- eso hace que, para ese caso
+    raro, division_disponible salga False en el caller y se caiga al mismo
+    respaldo de siempre (adjuntar el PDF completo), igual que ya pasa hoy
+    cuando la heurística de un PDF de lote no cuadra."""
+    import os as _os
+    import zipfile
+
+    from pypdf import PdfReader, PdfWriter
+
+    writer = PdfWriter()
+    rangos: list[tuple[int, int]] = []
+    candidatos: list[dict] = []
+    pagina_actual = 1
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        nombres = sorted(
+            n for n in zf.namelist()
+            if n.lower().endswith(".pdf")
+            and not n.startswith("__MACOSX/")
+            and not _os.path.basename(n).startswith(".")
+        )
+        if not nombres:
+            raise ValueError("El ZIP no contiene ningún PDF")
+        for nombre in nombres:
+            datos = zf.read(nombre)
+            reader = PdfReader(io.BytesIO(datos))
+            n_paginas = len(reader.pages)
+            if n_paginas == 0:
+                continue
+            for pagina in reader.pages:
+                writer.add_page(pagina)
+            rango = (pagina_actual, pagina_actual + n_paginas - 1)
+            pagina_actual += n_paginas
+            try:
+                candidatos_archivo = extraer_cv(datos)
+            except Exception:
+                candidatos_archivo = []
+            if len(candidatos_archivo) == 1:
+                candidatos.append(candidatos_archivo[0])
+                rangos.append(rango)
+            else:
+                # Irregular (0 o 2+ candidatos en este PDF suelto): se suman
+                # los candidatos que haya, pero sin rango -- desalinea
+                # a propósito rangos/candidatos para que el caller lo trate
+                # como "división no disponible" en vez de adjuntar un
+                # recorte a la persona equivocada.
+                candidatos.extend(candidatos_archivo)
+    if not candidatos:
+        raise ValueError("No se reconoció ningún candidato en los PDF del ZIP")
+    salida = io.BytesIO()
+    writer.write(salida)
+    return salida.getvalue(), rangos, candidatos
+
+
 def extraer_cv(pdf_bytes: bytes) -> list[dict]:
     """Extrae los candidatos de un PDF con el método local (sin IA externa).
     El PDF puede traer un único candidato o varios (hasta ~50) concatenados

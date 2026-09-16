@@ -584,6 +584,10 @@
 <script src="js/auth-common.js?v=20260915a"></script>
 <script src="js/topbar-menu.js?v=20260902a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/compartidos.js?v=20260910d"></script>
+<!-- Solo para empaquetar en ZIP varios PDF sueltos elegidos a la vez en los
+     selectores de CV (ver empaquetarComoZip en compartidos.js) -- el backend
+     ya sabe leer ese ZIP (ver fusionar_zip_pdfs). -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="js/compartidos.js?v=20260916a"></script>
 </body>
 </html>
