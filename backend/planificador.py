@@ -68,6 +68,12 @@ BOCADILLO_DESDE_MIN = 6 * 60
 COMPLEMENTARIAS_TECHO = 1.45
 COMPLEMENTARIAS_VOLUNTARIAS_DESDE = 1.30
 
+# Tope de horas de trabajo efectivo por año natural (16/09, pedido explícito
+# del usuario) -- a diferencia del tope semanal (145 % del contrato, solo
+# aplica a quien admite complementarias), este es un tope DURO para TODO el
+# mundo, sin excepción de tipo de contrato.
+TECHO_ANUAL_HORAS = 1780
+
 # "Dirección de trabajo" / "Rol" que espera Odoo (planning.slot) al reimportar.
 # Editable por centro en "Horario del centro"; esto es solo el valor de partida.
 _DIRECCION_ODOO_DEFECTO = {
@@ -1067,6 +1073,36 @@ def _chequear_techo(conn, empresa, centro, trabajador_id, fecha, nueva_dur, excl
         )
 
 
+def _minutos_trabajo_anio(conn, empresa, centro, trabajador_id, fecha, excluir_id=None):
+    """Minutos de trabajo efectivo ya planificados a una persona en el año
+    NATURAL (1 ene - 31 dic) de `fecha` -- mismo criterio que
+    _minutos_trabajo_semana, pero para el tope anual de 1.780 h."""
+    anio = fecha[:4]
+    q = ("SELECT COALESCE(SUM(duracion_min), 0) FROM planificador_turnos "
+         "WHERE empresa = ? AND centro = ? AND trabajador_id = ? AND tipo = 'trabajo' "
+         "AND fecha BETWEEN ? AND ?")
+    p = [empresa, centro, trabajador_id, f"{anio}-01-01", f"{anio}-12-31"]
+    if excluir_id is not None:
+        q += " AND id != ?"
+        p.append(excluir_id)
+    return conn.execute(q, p).fetchone()[0]
+
+
+def _chequear_techo_anual(conn, empresa, centro, trabajador_id, fecha, nueva_dur, excluir_id=None):
+    """Rechaza si planificar `nueva_dur` min a esta persona la dejaría por
+    encima de TECHO_ANUAL_HORAS ese año natural -- tope duro, sin excepción
+    de tipo de contrato (a diferencia de _chequear_techo, el semanal)."""
+    if trabajador_id == SIN_ASIGNAR:
+        return
+    techo = TECHO_ANUAL_HORAS * 60
+    total = _minutos_trabajo_anio(conn, empresa, centro, trabajador_id, fecha, excluir_id=excluir_id) + int(nueva_dur)
+    if total > techo:
+        raise ValueError(
+            f"Llegaría a {round(total / 60, 1)} h en {fecha[:4]} y el tope anual es "
+            f"{TECHO_ANUAL_HORAS} h. Recorta el turno o repártelo con otra persona."
+        )
+
+
 # --- Centros ---
 
 def centros_disponibles(empresa):
@@ -1506,6 +1542,7 @@ def crear_turno(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min,
             raise ValueError("El turno se solapa con otro de esa persona")
         try:
             _chequear_techo(conn, empresa, centro, trabajador_id, fecha, int(duracion_min))
+            _chequear_techo_anual(conn, empresa, centro, trabajador_id, fecha, int(duracion_min))
         except ValueError:
             conn.close()
             raise
@@ -1542,6 +1579,8 @@ def actualizar_turno(turno_id, inicio_min=None, duracion_min=None):
         try:
             _chequear_techo(conn, row["empresa"], row["centro"], row["trabajador_id"], row["fecha"], dur,
                             excluir_id=turno_id)
+            _chequear_techo_anual(conn, row["empresa"], row["centro"], row["trabajador_id"], row["fecha"], dur,
+                                  excluir_id=turno_id)
         except ValueError:
             conn.close()
             raise
@@ -1575,6 +1614,8 @@ def fusionar_turnos(id_a, id_b):
     try:
         _chequear_techo(conn, a["empresa"], a["centro"], a["trabajador_id"], a["fecha"],
                         (fin - ini) - b["duracion_min"], excluir_id=id_a)
+        _chequear_techo_anual(conn, a["empresa"], a["centro"], a["trabajador_id"], a["fecha"],
+                              (fin - ini) - b["duracion_min"], excluir_id=id_a)
     except ValueError:
         conn.close()
         raise
@@ -1631,6 +1672,8 @@ def asignar_turno(turno_id, trabajador_id):
         try:
             _chequear_techo(conn, t["empresa"], t["centro"], trabajador_id, t["fecha"], t["duracion_min"],
                             excluir_id=turno_id)
+            _chequear_techo_anual(conn, t["empresa"], t["centro"], trabajador_id, t["fecha"], t["duracion_min"],
+                                  excluir_id=turno_id)
         except ValueError:
             conn.close()
             raise
@@ -1892,17 +1935,33 @@ def chequear_descanso_persona(empresa, centro, trabajador_id, fecha, inicio_min,
     return ko, ("No cumple el descanso mínimo de 12 h entre jornadas." if ko else "")
 
 
+def _minutos_anio_por_trabajador(empresa, centro, anio):
+    """{trabajador_id: minutos de trabajo efectivo ya planificados ese año
+    natural} -- una sola consulta agrupada en vez de una por persona (ver
+    sugerencias, que la usa para el aviso del tope de 1.780 h/año)."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT trabajador_id, COALESCE(SUM(duracion_min), 0) AS mins FROM planificador_turnos "
+        "WHERE empresa = ? AND centro = ? AND tipo = 'trabajo' AND fecha BETWEEN ? AND ? "
+        "GROUP BY trabajador_id",
+        (empresa, centro, f"{anio}-01-01", f"{anio}-12-31"),
+    ).fetchall()
+    conn.close()
+    return {r["trabajador_id"]: r["mins"] for r in rows}
+
+
 def sugerencias(empresa, centro, fecha, inicio_min, duracion_min):
     """Para un hueco [inicio, inicio+duracion) de un día concreto, devuelve la
     plantilla del centro ordenada: primero quien está DISPONIBLE (sin turno
     solapado, día libre ni vacaciones ese día), de menos a más horas ya
     planificadas en la semana; después el resto (en gris) con el motivo. Cada
-    persona lleva avisos: se pasaría de contrato, o menos de 12 h de descanso
-    entre jornadas."""
+    persona lleva avisos: se pasaría de contrato, superaría el tope anual de
+    1.780 h, o menos de 12 h de descanso entre jornadas."""
     ini, fin = int(inicio_min), int(inicio_min) + int(duracion_min)
     trabajadores = list_trabajadores(empresa, centro)
     turnos_sem = turnos_semana(empresa, centro, fecha)
     min_sem = _minutos_semana(turnos_sem)
+    min_anio = _minutos_anio_por_trabajador(empresa, centro, fecha[:4])
     del_dia = [t for t in turnos_sem if t["fecha"] == fecha]
     ventana = _turnos_ventana_por_trab(empresa, centro, fecha)
     cfg = get_config(empresa, centro)
@@ -1925,6 +1984,8 @@ def sugerencias(empresa, centro, fecha, inicio_min, duracion_min):
         admite = _admite_complementarias(contrato, jc_ok)
         techo = _techo_semana_min(contrato, jc_ok)
         supera_techo = techo is not None and proyectado > techo
+        ms_anio = min_anio.get(wid, 0)
+        supera_techo_anual = (ms_anio + int(duracion_min)) > TECHO_ANUAL_HORAS * 60
         complementaria = ""
         avisos = []
         if contrato and proyectado / 60 > contrato:
@@ -1936,12 +1997,16 @@ def sugerencias(empresa, centro, fecha, inicio_min, duracion_min):
             else:
                 complementaria = "pactada"
                 avisos.append("horas complementarias")
+        if supera_techo_anual:
+            avisos.append(f"superaría las {TECHO_ANUAL_HORAS} h anuales")
         if _descanso_12h_ko(ventana.get(wid, []), fecha, ini, fin, cierre_min):
             avisos.append("No cumple el descanso mínimo de 12 h entre jornadas")
         if ocupado:
             motivo = "ya trabaja ese día"
         elif fuera:
             motivo = ETIQUETAS_NO_TRABAJO[fuera].removeprefix("el ").removeprefix("una ")
+        elif supera_techo_anual:
+            motivo = f"supera las {TECHO_ANUAL_HORAS} h anuales"
         elif supera_techo:
             motivo = "supera el 145 % de su contrato"
         else:
@@ -1951,11 +2016,12 @@ def sugerencias(empresa, centro, fecha, inicio_min, duracion_min):
             "nombre": w["nombre"],
             "minutos_semana": ms,
             "horas_contrato": contrato,
-            "disponible": not ocupado and not fuera and not supera_techo,
+            "disponible": not ocupado and not fuera and not supera_techo and not supera_techo_anual,
             "motivo": motivo,
             "aviso": " · ".join(avisos),
             "complementaria": complementaria,
             "supera_techo": supera_techo,
+            "supera_techo_anual": supera_techo_anual,
         })
     out.sort(key=lambda x: (not x["disponible"], bool(x["aviso"]), x["minutos_semana"], x["nombre"].lower()))
     return out
