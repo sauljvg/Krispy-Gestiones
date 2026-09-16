@@ -541,11 +541,7 @@ function renderTable() {
             const valor = r.datos[c] ?? "";
             if (c === "RESULTADO") {
               return `<td class="col-resultado">
-                <span class="resultado-texto">${escapeHTML(valor)}</span>
-                <select class="resultado-select" hidden>${opcionesResultado(valor)}</select>
-                <button type="button" class="btn-resultado btn-editar-resultado">Editar</button>
-                <button type="button" class="btn-resultado btn-guardar-resultado" hidden>Guardar</button>
-                <button type="button" class="btn-resultado btn-cancelar-resultado" hidden>Cancelar</button>
+                <select class="resultado-select">${opcionesResultado(valor)}</select>
               </td>`;
             }
             const mostrar = data.columnas_fecha.includes(c) ? formatFechaCorta(valor) : valor;
@@ -597,40 +593,24 @@ function renderTable() {
   });
 
   tbody.querySelectorAll("tr[data-id]").forEach((row) => {
-    const celda = row.querySelector(".col-resultado");
-    if (!celda) return;
-    const texto = celda.querySelector(".resultado-texto");
-    const select = celda.querySelector(".resultado-select");
-    const btnEditar = celda.querySelector(".btn-editar-resultado");
-    const btnGuardar = celda.querySelector(".btn-guardar-resultado");
-    const btnCancelar = celda.querySelector(".btn-cancelar-resultado");
+    const select = row.querySelector(".resultado-select");
+    if (!select) return;
     const valorOriginal = select.value;
-
-    btnEditar.addEventListener("click", () => {
-      texto.hidden = true;
-      select.hidden = false;
-      btnEditar.hidden = true;
-      btnGuardar.hidden = false;
-      btnCancelar.hidden = false;
-    });
-    btnCancelar.addEventListener("click", () => {
-      select.value = valorOriginal;
-      texto.hidden = false;
-      select.hidden = true;
-      btnEditar.hidden = false;
-      btnGuardar.hidden = true;
-      btnCancelar.hidden = true;
-    });
-    btnGuardar.addEventListener("click", async () => {
+    select.addEventListener("click", (e) => e.stopPropagation());
+    select.addEventListener("change", async () => {
       const respuestaId = row.dataset.id;
+      const nuevoValor = select.value;
+      select.disabled = true;
       const res = await fetch(`${AUTH_API_BASE}/informes/respuestas/${respuestaId}/resultado`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resultado: select.value }),
+        body: JSON.stringify({ resultado: nuevoValor }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         mostrarAviso(err.detail || "No se pudo guardar el resultado.");
+        select.value = valorOriginal;
+        select.disabled = false;
         return;
       }
       await loadRespuestas();
