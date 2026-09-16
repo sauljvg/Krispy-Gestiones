@@ -93,11 +93,33 @@ def _abrir_conexion_nueva() -> sqlite3.Connection:
 
 
 def get_connection():
-    try:
-        conn = _pool.get_nowait()
-    except queue.Empty:
-        conn = _abrir_conexion_nueva()
-    return _ConexionPooled(conn)
+    # Validación al sacar la conexión del pool (16/09): una conexión pooled
+    # puede quedar "envenenada" (sqlite3.OperationalError: disk I/O error en
+    # cualquier query, ver comentario del pool arriba) por una causa externa
+    # al propio código -- carga sostenida del scraper (27/08) o, como pasó
+    # hoy, otro proceso escribiendo directamente sobre krispy_kreme.db
+    # mientras la app tenía conexiones abiertas. Antes, una vez una conexión
+    # del pool quedaba mala, seguía devolviéndose a peticiones futuras
+    # indefinidamente -- la web entera se quedaba dando 500 (incluido el
+    # login) hasta que alguien lo notaba y reiniciaba el servicio a mano. Un
+    # "SELECT 1" es una query casi gratis: si falla, se descarta esa
+    # conexión y se prueba con la siguiente (o se abre una nueva si el pool
+    # se queda vacío) en vez de devolverla tal cual -- así el sistema se
+    # autorepara solo en la siguiente petición, sin intervención manual.
+    while True:
+        try:
+            conn = _pool.get_nowait()
+        except queue.Empty:
+            return _ConexionPooled(_abrir_conexion_nueva())
+        try:
+            conn.execute("SELECT 1")
+        except sqlite3.Error:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            continue
+        return _ConexionPooled(conn)
 
 
 def dict_rows(cursor):
