@@ -410,7 +410,7 @@ function renderGraficosFiltrados() {
   if (!sinNacionalidad) {
     chartNacionalidad = pieChart("chart-nacionalidad", d.nacionalidades);
   }
-  document.getElementById("kpi-nacionalidad-sub").textContent = `${d.con_dato_nacionalidad} de ${headcountHasta} con nacionalidad registrada.`;
+  document.getElementById("kpi-nacionalidad-sub").textContent = `${d.con_dato_nacionalidad} de ${serieHasta.headcount_activo} con nacionalidad registrada.`;
 
   // --- Edad media por centro (misma foto de hoy) --------------------------
   const sinEdad = !d.edad_media_por_centro || d.edad_media_por_centro.length === 0;
@@ -420,7 +420,7 @@ function renderGraficosFiltrados() {
   if (!sinEdad) {
     chartEdadCentro = barChart("chart-edad-centro", d.edad_media_por_centro, { sufijo: " años" });
   }
-  document.getElementById("kpi-edad-centro-sub").textContent = `${d.con_dato_edad} de ${headcountHasta} con fecha de nacimiento.`;
+  document.getElementById("kpi-edad-centro-sub").textContent = `${d.con_dato_edad} de ${serieHasta.headcount_activo} con fecha de nacimiento.`;
 }
 
 // --- Movimientos internos (traslados de centro / promociones de puesto) ---
