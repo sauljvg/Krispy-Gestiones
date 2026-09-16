@@ -870,26 +870,28 @@ def list_centros_conocidos(empresa="kk"):
 
 def list_motivos_conocidos(empresa="kk"):
     """Todos los motivos de baja ya usados alguna vez para esta empresa --
-    tanto en las respuestas del propio formulario de salida como en las
-    bajas importadas (Excel de GO, o pegado/captura ya traducido vía
+    en las bajas importadas (Excel de GO, o pegado/captura ya traducido vía
     motivo_codigos) -- más el catálogo de motivo_codigos aunque nunca se
-    haya usado en una respuesta todavía. Pedido por el usuario 16/09 para
-    que "Corregir el centro o el motivo" ofrezca un selector con las
-    opciones reales en vez de texto libre."""
+    haya usado en una baja todavía. Pedido por el usuario 16/09 para que
+    "Corregir el centro o el motivo" ofrezca un selector con las opciones
+    reales en vez de texto libre.
+
+    entrevistas_respuestas NO tiene una columna "motivo" fija -- el motivo
+    de cada respuesta vive dentro de datos_json bajo una columna detectada
+    dinámicamente por importación (ver update_motivo/_column_roles), así
+    que no se puede incluir aquí con una consulta SQL simple; el catálogo
+    sale de entrevistas_salidas (que sí tiene columna motivo propia) y de
+    motivo_codigos."""
     conn = get_connection()
     rows = conn.execute("""
         SELECT DISTINCT motivo FROM (
-            SELECT r.motivo AS motivo FROM entrevistas_respuestas r
-            JOIN entrevistas_oleadas o ON o.id = r.oleada_id
-            WHERE o.empresa = ? AND r.motivo IS NOT NULL AND r.motivo != ''
-            UNION
             SELECT s.motivo AS motivo FROM entrevistas_salidas s
             JOIN entrevistas_oleadas o ON o.id = s.oleada_id
             WHERE o.empresa = ? AND s.motivo IS NOT NULL AND s.motivo != ''
             UNION
             SELECT descripcion AS motivo FROM motivo_codigos
         ) ORDER BY motivo
-    """, (empresa, empresa)).fetchall()
+    """, (empresa,)).fetchall()
     conn.close()
     return [r["motivo"] for r in rows]
 
