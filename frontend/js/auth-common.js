@@ -1,8 +1,25 @@
 const AUTH_API_BASE = `${window.location.origin}/api`;
 
+// Solo un 401/403 real de /auth/me significa "no autenticado" -- cualquier
+// otro fallo (500 por un hipo puntual de la base de datos, o la petición de
+// red que no llega durante el segundo en que se reinicia el servicio tras un
+// deploy) NO es que la sesión haya caducado, es un problema transitorio. Sin
+// este reintento, cualquier recarga que coincidiera con ese instante mandaba
+// a la persona a volver a iniciar sesión aunque su cookie siguiera siendo
+// válida -- confirmado en producción (16/09) con "disk I/O error" en los
+// logs justo en esos momentos.
 async function checkAuth(nextPath) {
-  const res = await fetch(`${AUTH_API_BASE}/auth/me`);
-  if (!res.ok) {
+  let res;
+  for (let intento = 0; intento < 3; intento++) {
+    try {
+      res = await fetch(`${AUTH_API_BASE}/auth/me`);
+    } catch {
+      res = null;
+    }
+    if (res && (res.ok || res.status === 401 || res.status === 403)) break;
+    if (intento < 2) await new Promise((r) => setTimeout(r, 700));
+  }
+  if (!res || !res.ok) {
     window.location.href = "/login.html?next=" + encodeURIComponent(nextPath || window.location.pathname);
     return null;
   }
