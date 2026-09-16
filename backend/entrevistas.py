@@ -1522,8 +1522,6 @@ def delete_salida(salida_id):
 # --- Import masivo de bajas (pegado desde Excel o captura de pantalla,
 # ver bajas_import.py) -- pedido explícito del usuario 16/09 ---
 
-ETIQUETA_OLEADA_BAJAS_IMPORTADAS = "Bajas importadas"
-
 
 def resolver_codigo_centro(codigo):
     """{"centro", "empresa"} si ya conocemos este código corto de centro
@@ -1568,28 +1566,18 @@ def eliminar_codigo_centro(codigo):
 
 
 def get_or_crear_oleada_bajas_importadas(empresa):
-    """Todas las bajas importadas por pegado/captura de una misma empresa
-    van a UNA oleada reutilizable ("Bajas importadas"), no una oleada nueva
-    por cada vez que se pega una hoja -- es un registro continuo (RRHH va
-    pegando bajas según se producen), no una encuesta con oleadas
-    separadas como las de verdad."""
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT id FROM entrevistas_oleadas WHERE empresa = ? AND etiqueta = ?",
-        (empresa, ETIQUETA_OLEADA_BAJAS_IMPORTADAS),
-    ).fetchone()
-    if row:
-        oleada_id = row["id"]
-        conn.close()
-        return oleada_id
-    cur = conn.execute(
-        "INSERT INTO entrevistas_oleadas (etiqueta, empresa) VALUES (?, ?)",
-        (ETIQUETA_OLEADA_BAJAS_IMPORTADAS, empresa),
-    )
-    conn.commit()
-    oleada_id = cur.lastrowid
-    conn.close()
-    return oleada_id
+    """Las bajas importadas por pegado/captura van a la MISMA oleada que ya
+    usa el resto de Entrevistas de salida de esa empresa -- pedido
+    explícito del usuario ("es solo una entrevista de salida completa", no
+    una aparte para lo importado). Reutiliza get_or_create_oleada(nueva=
+    False, ...), la misma función que ya usa el import de Excel cuando NO
+    se marca "Nuevo Registro": la oleada MÁS RECIENTE de esa empresa (o
+    crea la primera si de verdad no hay ninguna todavía).
+
+    (Antes esto creaba una oleada aparte etiquetada "Bajas importadas" --
+    corregido en vivo 16/09 tras ver que dejaba una oleada separada de la
+    oleada real en el desplegable de Entrevistas de salida.)"""
+    return get_or_create_oleada(False, empresa=empresa)
 
 
 def agregar_bajas_masivo(filas: list[dict]) -> dict:
