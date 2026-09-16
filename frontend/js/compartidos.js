@@ -882,10 +882,16 @@ function renderVacantesGrid() {
 function actualizarSelectFiltroVacante() {
   const select = document.getElementById("candidatos-filtro-vacante");
   const valorPrevio = select.value;
+  // Solo vacantes abiertas -- al cerrarse o cubrirse desaparece de este
+  // desplegable (aunque siga en vacantesTodasCache para otros usos, como
+  // mostrar el nombre de la vacante ya asignada de un candidato). Sin este
+  // filtro la lista solo crece con cada vacante que se cierra, hasta hacerse
+  // eterna (pedido explícito del usuario).
+  const abiertas = vacantesTodasCache.filter((v) => v.estado === "abierta");
   select.innerHTML = `
     <option value="">Todos los candidatos</option>
     <option value="sin_vacante">Sin vacante asignada</option>
-    ${vacantesTodasCache.map((v) => `<option value="${v.id}">${escapeHTML(v.puesto)}${v.centro ? ` · ${escapeHTML(v.centro)}` : ""}</option>`).join("")}
+    ${abiertas.map((v) => `<option value="${v.id}">${escapeHTML(v.puesto)}${v.centro ? ` · ${escapeHTML(v.centro)}` : ""}</option>`).join("")}
   `;
   if (Array.from(select.options).some((o) => o.value === valorPrevio)) select.value = valorPrevio;
 }
