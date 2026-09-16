@@ -414,7 +414,7 @@ async function actualizarEnVivo() {
 }
 setInterval(() => {
   if (document.getElementById("tests-tbody")) actualizarEnVivo();
-}, 20000);
+}, 3000);
 
 // scroll=false se usa para refrescos "en el sitio" tras guardar algo dentro
 // de un test que ya está abierto (guardar campos, mover/borrar una página o
