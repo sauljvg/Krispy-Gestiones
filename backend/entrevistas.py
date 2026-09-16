@@ -708,17 +708,19 @@ def ensure_entrevistas_tables():
             creado_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
-    # Sin el código numérico delante -- así casa con el texto que ya usaba
-    # RRHH a mano en entrevistas_salidas.motivo (p.ej. "Baja Voluntaria" en
-    # Saona) en vez de crear una variante duplicada en el selector de
-    # motivos (ver list_motivos_conocidos).
+    # Mismo estilo "NN Texto" (código SEPE delante, sin guion) que ya usan
+    # el resto de motivos en entrevistas_salidas.motivo (p.ej. "07 Cese en
+    # periodo de prueba a instancia del empresario") -- confirmado por el
+    # usuario que el número sí debe ir delante, solo sin guion para no
+    # duplicar variantes distintas del mismo motivo en el selector (ver
+    # list_motivos_conocidos).
     conn.execute(
         "INSERT OR IGNORE INTO motivo_codigos (codigo, descripcion, creado_por) VALUES (?, ?, ?)",
-        ("BV", "Baja Voluntaria", "sistema"),
+        ("BV", "51 Baja Voluntaria", "sistema"),
     )
     conn.execute(
         "INSERT OR IGNORE INTO motivo_codigos (codigo, descripcion, creado_por) VALUES (?, ?, ?)",
-        ("BVPP", "Baja Voluntaria del Trabajador", "sistema"),
+        ("BVPP", "21 Baja Voluntaria del Trabajador", "sistema"),
     )
     # Override manual de un cruce respuesta<->salida — para cuando la misma
     # persona aparece en las dos auditorías (p.ej. "FLORES, LENIN MICHAEL" en
