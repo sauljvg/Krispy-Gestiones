@@ -487,12 +487,21 @@ def _parsear_experiencia_local(texto_seccion: str) -> list[dict]:
 _EXPERIENCIA_PIPE_RE = re.compile(
     r"^(\d{4})\s*[-–—]\s*(\d{4}|actualidad|actual|presente)\s*\|\s*(.+)$", re.IGNORECASE
 )
+_VINETA_RE = re.compile(r"^[-•\uf0b7]\s*")
+_PALABRAS_CONTACTO_NORM = {"contacto", "telefono", "telefono:", "correo electronico", "correo electronico:", "email", "email:", "e-mail", "e-mail:"}
+
+
+def _es_linea_de_contacto(linea: str) -> bool:
+    if EMAIL_RE.search(linea) or PHONE_RE.search(linea):
+        return True
+    return _normalizar(linea.strip()) in _PALABRAS_CONTACTO_NORM
 
 
 def _parsear_experiencia_pipe(texto_seccion: str) -> list[dict]:
     lineas = [l.strip() for l in texto_seccion.split("\n") if l.strip()]
     resultado = []
     actual = None
+    en_cabecera = False
     for linea in lineas:
         m = _EXPERIENCIA_PIPE_RE.match(linea)
         if m:
@@ -506,12 +515,21 @@ def _parsear_experiencia_pipe(texto_seccion: str) -> list[dict]:
                 "fecha_inicio": m.group(1), "fecha_fin": m.group(2).capitalize(),
                 "descripcion": "",
             }
-        elif actual:
-            # Línea de la viñeta de descripción de la entrada en curso --
-            # se van acumulando hasta la siguiente fecha reconocida (o el
-            # final de la sección).
-            viñeta = re.sub(r"^[-•]\s*", "", linea)
-            actual["descripcion"] = (actual["descripcion"] + " " + viñeta).strip()[:600]
+            en_cabecera = True
+            continue
+        if actual is None:
+            continue
+        es_vineta = bool(_VINETA_RE.match(linea))
+        if es_vineta:
+            en_cabecera = False
+        if en_cabecera and not es_vineta:
+            campo = "empresa" if actual["empresa"] else "puesto"
+            actual[campo] = (actual[campo] + " " + linea).strip()
+            continue
+        if _es_linea_de_contacto(linea):
+            continue
+        texto_sin_vineta = _VINETA_RE.sub("", linea)
+        actual["descripcion"] = (actual["descripcion"] + " " + texto_sin_vineta).strip()[:600]
     if actual:
         resultado.append(actual)
     return resultado
