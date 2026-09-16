@@ -60,6 +60,13 @@
   .plan-turno.vacaciones { background: color-mix(in srgb, #2f8fd6 32%, var(--surface-1)); color: var(--text-primary); border-color: #2f8fd6; }
   /* Vacaciones = mismo layout que el día libre (banda a toda la franja) pero en azul. Doble clase para ganar al .plan-turno.libre de más abajo. */
   .plan-turno.libre.vacaciones { background: color-mix(in srgb, #2f8fd6 26%, var(--surface-1)); color: var(--text-primary); }
+  /* Ausencias/devolución de festivo (16/09): mismo patrón de doble clase que vacaciones, un color por tipo. */
+  .plan-turno.ausencia_justificada { background: color-mix(in srgb, #3aa76d 32%, var(--surface-1)); color: var(--text-primary); border-color: #3aa76d; }
+  .plan-turno.libre.ausencia_justificada { background: color-mix(in srgb, #3aa76d 26%, var(--surface-1)); color: var(--text-primary); }
+  .plan-turno.ausencia_injustificada { background: color-mix(in srgb, #c0392b 32%, var(--surface-1)); color: var(--text-primary); border-color: #c0392b; }
+  .plan-turno.libre.ausencia_injustificada { background: color-mix(in srgb, #c0392b 26%, var(--surface-1)); color: var(--text-primary); }
+  .plan-turno.devolucion_festivo { background: color-mix(in srgb, #7b4fb0 32%, var(--surface-1)); color: var(--text-primary); border-color: #7b4fb0; }
+  .plan-turno.libre.devolucion_festivo { background: color-mix(in srgb, #7b4fb0 26%, var(--surface-1)); color: var(--text-primary); }
   .plan-turno.slot-activo { outline: 2px solid var(--text-primary); outline-offset: 1px; }
   .plan-turno .plan-turno-asig { position: absolute; top: 1px; right: 20px; width: 15px; height: 15px; line-height: 14px; text-align: center; border-radius: 4px; background: rgba(0,0,0,.2); font-size: 11px; opacity: 0; transition: opacity .1s; }
   .plan-turno:hover .plan-turno-asig { opacity: 1; }
@@ -75,12 +82,19 @@
   .plan-slot-personas { margin-top: 8px; }
   .plan-slot-personas .plan-sug-fila { cursor: default; }
   .plan-slot-personas .plan-sp-quitar { cursor: pointer; color: var(--status-bad, #d9534f); font-weight: 700; padding: 0 4px; }
-  .plan-vac-btn { border-color: #2f8fd6 !important; }
+  .plan-ausencia-select {
+    border: 1px solid var(--border); background: var(--surface-page); color: var(--text-secondary);
+    border-radius: 5px; padding: 2px 4px; font-size: 10.5px; cursor: pointer; max-width: 120px;
+  }
+  .plan-ausencia-select:hover { border-color: var(--acento); }
   .plan-dia-total { font-size: 13px; color: var(--text-secondary); margin: 0 0 8px; }
   .plan-dia-total b { color: var(--text-primary); }
   .plan-sem-total { background: color-mix(in srgb, var(--acento) 5%, var(--surface-1)); border-top: 2px solid var(--border); }
   .plan-sem-total .plan-sem-celda b { font-size: 12.5px; }
   .plan-sem-celda.vacaciones { background: color-mix(in srgb, #2f8fd6 18%, transparent); }
+  .plan-sem-celda.ausencia_justificada { background: color-mix(in srgb, #3aa76d 18%, transparent); }
+  .plan-sem-celda.ausencia_injustificada { background: color-mix(in srgb, #c0392b 18%, transparent); }
+  .plan-sem-celda.devolucion_festivo { background: color-mix(in srgb, #7b4fb0 18%, transparent); }
   .plan-slots-total { text-align: center; font-size: 10.5px; color: var(--text-secondary); border-top: 1px solid var(--border); padding-top: 4px; margin-top: auto; }
   .plan-slots-total b { color: var(--text-primary); }
   /* Bloque "negativo": día libre de la persona -- toda la franja en gris. */
@@ -364,15 +378,15 @@
 
 <dialog class="plan-dialog" id="plan-dialog-vacaciones">
   <div class="plan-dialog-cab">
-    <h3>Vacaciones · <span class="plan-vac-nombre"></span></h3>
+    <h3><span class="plan-vac-tipo-nombre">Vacaciones</span> · <span class="plan-vac-nombre"></span></h3>
     <button type="button" class="btn btn-ghost" data-cerrar>✕</button>
   </div>
   <div class="plan-dialog-body">
-    <p class="staff-hint">Cada día se marca como vacaciones (jornada completa). Por defecto la semana lunes–domingo; ajusta las fechas para días sueltos.</p>
+    <p class="staff-hint">Cada día se marca como <span class="plan-vac-tipo-minuscula">vacaciones</span> (jornada completa). Por defecto la semana lunes–domingo; ajusta las fechas para días sueltos.</p>
     <div class="plan-config-campo"><label for="plan-vac-desde">Desde</label><input type="date" id="plan-vac-desde"></div>
     <div class="plan-config-campo"><label for="plan-vac-hasta">Hasta</label><input type="date" id="plan-vac-hasta"></div>
     <div style="display:flex; gap:8px;">
-      <button type="button" class="btn btn-primary" id="plan-vac-guardar">Guardar vacaciones</button>
+      <button type="button" class="btn btn-primary" id="plan-vac-guardar">Guardar</button>
       <button type="button" class="btn btn-ghost" id="plan-vac-quitar">Quitar</button>
     </div>
   </div>
@@ -418,6 +432,6 @@
 <script src="js/auth-common.js?v=20260915a"></script>
 <script src="js/topbar-menu.js?v=20260910a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/planificador.js?v=20260914f"></script>
+<script src="js/planificador.js?v=20260916a"></script>
 </body>
 </html>

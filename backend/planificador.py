@@ -34,7 +34,24 @@ SIN_ASIGNAR = 0  # trabajador_id de un turno/slot todavía sin persona
 MIN_TURNO_MIN = 60      # un turno de trabajo dura entre 1 h...
 MAX_TURNO_MIN = 600     # ...y 10 h
 DESCANSO_ENTRE_JORNADAS_MIN = 12 * 60   # 12 h de descanso entre el fin de una jornada y el inicio de la siguiente
-_TIPOS_NO_TRABAJO = ("libre", "vacaciones")   # bloques que no cuentan como horas trabajadas
+_TIPOS_NO_TRABAJO = (
+    "libre", "vacaciones", "ausencia_justificada", "ausencia_injustificada", "devolucion_festivo",
+)   # bloques que no cuentan como horas trabajadas
+
+# Ausencias justificada/injustificada y devolución de festivos (16/09, pedido
+# explícito del usuario) -- mismo mecanismo que vacaciones (bloque de jornada
+# completa por rango de fechas, ver set_ausencia), "libre" queda aparte porque
+# se activa/desactiva día a día con un botón (ver toggleLibre en el frontend),
+# no por rango.
+TIPOS_AUSENCIA_RANGO = ("vacaciones", "ausencia_justificada", "ausencia_injustificada", "devolucion_festivo")
+
+ETIQUETAS_NO_TRABAJO = {
+    "libre": "el día libre",
+    "vacaciones": "vacaciones",
+    "ausencia_justificada": "una ausencia justificada",
+    "ausencia_injustificada": "una ausencia injustificada",
+    "devolucion_festivo": "una devolución de festivo",
+}
 
 # Convenio de Madrid (art. 16): en turnos de 6 h o más, la pausa del bocadillo
 # de 20 min NO computa como trabajo efectivo. En el planificador esos 20 min se
@@ -1465,15 +1482,21 @@ def _solapa(conn, trabajador_id, fecha, ini, fin, excluir_id=None):
 def crear_turno(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, creado_por, tipo="trabajo"):
     conn = get_connection()
     if tipo in _TIPOS_NO_TRABAJO:
-        # Solo un "día libre"/"vacaciones" por persona y fecha -- no se duplica.
+        # Solo UN tipo de "no trabajo" (libre/vacaciones/ausencia.../devolución
+        # de festivo) por persona y fecha -- no tiene sentido que coexistan dos.
+        # Mismo tipo que ya había = no se duplica (idempotente); tipo distinto
+        # = error claro en vez de dejar un estado ambiguo.
+        placeholders = ",".join("?" for _ in _TIPOS_NO_TRABAJO)
         ya = conn.execute(
-            "SELECT id FROM planificador_turnos WHERE empresa = ? AND centro = ? AND trabajador_id = ? "
-            "AND fecha = ? AND tipo = ?",
-            (empresa, centro, trabajador_id, fecha, tipo),
+            f"SELECT id, tipo FROM planificador_turnos WHERE empresa = ? AND centro = ? AND trabajador_id = ? "
+            f"AND fecha = ? AND tipo IN ({placeholders})",
+            (empresa, centro, trabajador_id, fecha, *_TIPOS_NO_TRABAJO),
         ).fetchone()
         if ya:
             conn.close()
-            return ya["id"]
+            if ya["tipo"] == tipo:
+                return ya["id"]
+            raise ValueError(f"Esa persona ya tiene {ETIQUETAS_NO_TRABAJO[ya['tipo']]} ese día")
     else:
         if not (MIN_TURNO_MIN <= int(duracion_min) <= MAX_TURNO_MIN):
             conn.close()
@@ -1597,13 +1620,14 @@ def asignar_turno(turno_id, trabajador_id):
         if solapa:
             conn.close()
             raise ValueError("Esa persona ya tiene un turno a esa hora")
+        placeholders = ",".join("?" for _ in _TIPOS_NO_TRABAJO)
         libre = conn.execute(
-            "SELECT tipo FROM planificador_turnos WHERE trabajador_id = ? AND fecha = ? AND tipo IN ('libre', 'vacaciones')",
-            (trabajador_id, t["fecha"]),
+            f"SELECT tipo FROM planificador_turnos WHERE trabajador_id = ? AND fecha = ? AND tipo IN ({placeholders})",
+            (trabajador_id, t["fecha"], *_TIPOS_NO_TRABAJO),
         ).fetchone()
         if libre:
             conn.close()
-            raise ValueError("Esa persona tiene " + ("vacaciones" if libre["tipo"] == "vacaciones" else "el día libre"))
+            raise ValueError("Esa persona tiene " + ETIQUETAS_NO_TRABAJO[libre["tipo"]])
         try:
             _chequear_techo(conn, t["empresa"], t["centro"], trabajador_id, t["fecha"], t["duracion_min"],
                             excluir_id=turno_id)
@@ -1629,39 +1653,52 @@ def _rango_fechas(desde, hasta):
     return [(d0 + datetime.timedelta(days=i)).isoformat() for i in range(n + 1)]
 
 
-def set_vacaciones(empresa, centro, trabajador_id, desde, hasta, quitar=False):
-    """Marca (o quita) vacaciones de una persona en un rango de fechas. Cada
-    día es un bloque a jornada completa, como el día libre. No cuenta horas."""
+def set_ausencia(empresa, centro, trabajador_id, desde, hasta, tipo="vacaciones", quitar=False):
+    """Marca (o quita) vacaciones/ausencia justificada/injustificada/devolución
+    de festivo de una persona en un rango de fechas -- ver TIPOS_AUSENCIA_RANGO.
+    Cada día es un bloque a jornada completa, como el día libre. No cuenta
+    horas. Un día que ya tenga OTRO tipo de "no trabajo" (p.ej. ya está de
+    vacaciones y se intenta marcar como ausencia injustificada) se salta en
+    vez de duplicar/pisar -- mismo criterio que crear_turno, pero sin
+    interrumpir el resto del rango por un solo día en conflicto."""
+    if tipo not in TIPOS_AUSENCIA_RANGO:
+        raise ValueError(f"Tipo de ausencia no válido: {tipo!r}")
     fechas = _rango_fechas(desde, hasta)
     cfg = get_config(empresa, centro)
     conn = get_connection()
+    placeholders = ",".join("?" for _ in _TIPOS_NO_TRABAJO)
     n = 0
     for f in fechas:
         if quitar:
             cur = conn.execute(
                 "DELETE FROM planificador_turnos WHERE empresa = ? AND centro = ? AND trabajador_id = ? "
-                "AND fecha = ? AND tipo = 'vacaciones'",
-                (empresa, centro, trabajador_id, f),
+                "AND fecha = ? AND tipo = ?",
+                (empresa, centro, trabajador_id, f, tipo),
             )
             n += cur.rowcount
         else:
             ya = conn.execute(
-                "SELECT id FROM planificador_turnos WHERE empresa = ? AND centro = ? AND trabajador_id = ? "
-                "AND fecha = ? AND tipo = 'vacaciones'",
-                (empresa, centro, trabajador_id, f),
+                f"SELECT id FROM planificador_turnos WHERE empresa = ? AND centro = ? AND trabajador_id = ? "
+                f"AND fecha = ? AND tipo IN ({placeholders})",
+                (empresa, centro, trabajador_id, f, *_TIPOS_NO_TRABAJO),
             ).fetchone()
             if ya:
                 continue
             conn.execute(
                 "INSERT INTO planificador_turnos "
                 "(empresa, centro, trabajador_id, fecha, inicio_min, duracion_min, tipo, creado_por) "
-                "VALUES (?, ?, ?, ?, ?, ?, 'vacaciones', 'planificador')",
-                (empresa, centro, trabajador_id, f, cfg["apertura_min"], cfg["cierre_min"] - cfg["apertura_min"]),
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'planificador')",
+                (empresa, centro, trabajador_id, f, cfg["apertura_min"], cfg["cierre_min"] - cfg["apertura_min"], tipo),
             )
             n += 1
     conn.commit()
     conn.close()
     return n
+
+
+def set_vacaciones(empresa, centro, trabajador_id, desde, hasta, quitar=False):
+    """Alias de compatibilidad -- set_ausencia(tipo='vacaciones')."""
+    return set_ausencia(empresa, centro, trabajador_id, desde, hasta, tipo="vacaciones", quitar=quitar)
 
 
 # --- Biblioteca de slots (horarios predefinidos) ---
@@ -1903,10 +1940,8 @@ def sugerencias(empresa, centro, fecha, inicio_min, duracion_min):
             avisos.append("No cumple el descanso mínimo de 12 h entre jornadas")
         if ocupado:
             motivo = "ya trabaja ese día"
-        elif fuera == "vacaciones":
-            motivo = "vacaciones"
         elif fuera:
-            motivo = "día libre"
+            motivo = ETIQUETAS_NO_TRABAJO[fuera].removeprefix("el ").removeprefix("una ")
         elif supera_techo:
             motivo = "supera el 145 % de su contrato"
         else:

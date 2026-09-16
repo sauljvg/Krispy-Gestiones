@@ -271,18 +271,21 @@ class VacacionesIn(BaseModel):
     trabajador_id: int
     desde: str
     hasta: str
+    tipo: str = "vacaciones"
     quitar: bool = False
 
 
 @router.post("/vacaciones")
 def vacaciones_route(body: VacacionesIn, empresa: str = "kk", user: dict = Depends(require_planificador)):
     _exigir_centro(user, body.centro)
+    if body.tipo not in planificador_module.TIPOS_AUSENCIA_RANGO:
+        raise HTTPException(status_code=400, detail="Tipo de ausencia inválido")
     w = planificador_module.get_trabajador(body.trabajador_id)
     if w is None or w["centro"] != body.centro or w["empresa"] != empresa:
         raise HTTPException(status_code=400, detail="Esa persona no es de este centro")
     try:
-        n = planificador_module.set_vacaciones(
-            empresa, body.centro, body.trabajador_id, body.desde, body.hasta, quitar=body.quitar
+        n = planificador_module.set_ausencia(
+            empresa, body.centro, body.trabajador_id, body.desde, body.hasta, tipo=body.tipo, quitar=body.quitar
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

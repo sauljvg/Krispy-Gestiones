@@ -19,6 +19,18 @@ const SIN_ASIGNAR = 0;
 const BOCADILLO_MIN = 20;
 const BOCADILLO_DESDE = 360;
 
+// Tipos de "no trabajo" por rango de fechas (16/09, pedido explícito del
+// usuario) -- mismo mecanismo que vacaciones (bloque de jornada completa,
+// ver abrirDialogoVacaciones/wireVacaciones). "libre" queda aparte, se
+// activa/desactiva día a día con el botón "Día libre" (ver toggleLibre).
+const ETIQUETAS_AUSENCIA = {
+  vacaciones: { icono: "🏖", nombre: "Vacaciones", minuscula: "vacaciones", boton: "Guardar vacaciones" },
+  ausencia_justificada: { icono: "✅", nombre: "Ausencia justificada", minuscula: "ausencia justificada", boton: "Guardar ausencia" },
+  ausencia_injustificada: { icono: "❌", nombre: "Ausencia injustificada", minuscula: "ausencia injustificada", boton: "Guardar ausencia" },
+  devolucion_festivo: { icono: "🎉", nombre: "Devolución de festivo", minuscula: "devolución de festivo", boton: "Guardar devolución" },
+};
+const TIPOS_NO_TRABAJO = ["libre", ...Object.keys(ETIQUETAS_AUSENCIA)];
+
 const S = {
   centro: "",
   fecha: hoyISO(),
@@ -316,11 +328,15 @@ function renderDia() {
   wireInputsProyeccion();
   S.trabajadores.forEach((t) => wireLane(cont.querySelector(`.plan-lane[data-trab="${t.id}"]`), t.id));
   cont.querySelectorAll(".plan-turno").forEach(wireTurno);
-  cont.querySelectorAll(".plan-libre-btn:not(.plan-vac-btn)").forEach((btn) => {
+  cont.querySelectorAll(".plan-libre-btn").forEach((btn) => {
     btn.addEventListener("click", () => toggleLibre(Number(btn.dataset.trab), S.fecha));
   });
-  cont.querySelectorAll(".plan-vac-btn").forEach((btn) => {
-    btn.addEventListener("click", () => abrirDialogoVacaciones(Number(btn.dataset.trab), btn.dataset.nombre));
+  cont.querySelectorAll(".plan-ausencia-select").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      if (!sel.value) return;
+      abrirDialogoVacaciones(Number(sel.dataset.trab), sel.dataset.nombre, sel.value);
+      sel.value = "";
+    });
   });
   cont.querySelectorAll(".plan-trab-nombre[data-trab]").forEach((el) => {
     el.addEventListener("click", () => abrirFichaTrabajador(Number(el.dataset.trab)));
@@ -549,7 +565,10 @@ function filaTrabajador(t) {
         ${barraHorasHTML(min, contrato)}
         <div class="plan-fila-acciones">
           <button type="button" class="plan-libre-btn ${tieneLibre ? "activo" : ""}" data-trab="${t.id}">${tieneLibre ? "Quitar libre" : "Día libre"}</button>
-          <button type="button" class="plan-libre-btn plan-vac-btn" data-trab="${t.id}" data-nombre="${escapeHTML(t.nombre)}">🏖 Vacaciones</button>
+          <select class="plan-ausencia-select" data-trab="${t.id}" data-nombre="${escapeHTML(t.nombre)}">
+            <option value="">+ Ausencia…</option>
+            ${Object.entries(ETIQUETAS_AUSENCIA).map(([tipo, et]) => `<option value="${tipo}">${et.icono} ${et.nombre}</option>`).join("")}
+          </select>
           ${descansoIndicadorHTML(t.id, min, contrato)}
         </div>
       </div>
@@ -561,11 +580,13 @@ function filaTrabajador(t) {
 }
 
 function turnoHTML(t) {
-  if (t.tipo === "libre" || t.tipo === "vacaciones") {
-    const vac = t.tipo === "vacaciones";
-    return `<div class="plan-turno libre ${vac ? "vacaciones" : ""}" data-id="${t.id}" data-tipo="${t.tipo}">
-      <span class="plan-turno-txt">${vac ? "Vacaciones" : "Libre"}</span>
-      <span class="plan-turno-x" title="${vac ? "Quitar vacaciones (solo este día)" : "Quitar día libre"}">✕</span>
+  if (TIPOS_NO_TRABAJO.includes(t.tipo)) {
+    const et = ETIQUETAS_AUSENCIA[t.tipo];
+    const texto = et ? et.nombre : "Libre";
+    const tituloX = et ? `Quitar ${et.minuscula} (solo este día)` : "Quitar día libre";
+    return `<div class="plan-turno libre ${t.tipo !== "libre" ? t.tipo : ""}" data-id="${t.id}" data-tipo="${t.tipo}">
+      <span class="plan-turno-txt">${texto}</span>
+      <span class="plan-turno-x" title="${tituloX}">✕</span>
     </div>`;
   }
   const sin = t.trabajador_id === SIN_ASIGNAR;
@@ -664,9 +685,11 @@ function refrescarCalculadas() {
 // ---------------------------------------------------------------- arrastrar / crear
 
 function wireTurno(el) {
-  // Día libre y vacaciones: bloque fijo a toda la franja -- no se mueve ni se
-  // estira, y la ✕ lo quita sin preguntar (como el botón "Quitar libre").
-  const esLibre = el.dataset.tipo === "libre" || el.dataset.tipo === "vacaciones";
+  // Día libre y cualquier tipo de ausencia (vacaciones, justificada,
+  // injustificada, devolución de festivo): bloque fijo a toda la franja --
+  // no se mueve ni se estira, y la ✕ lo quita sin preguntar (como el botón
+  // "Quitar libre").
+  const esLibre = TIPOS_NO_TRABAJO.includes(el.dataset.tipo);
   // Un "slot grupo" (varias personas en el mismo horario) lleva data-ids con
   // todos los turnos que representa; mover/estirar o quitar afecta a todos.
   const ids = el.dataset.ids ? el.dataset.ids.split(",").filter(Boolean) : [el.dataset.id];
@@ -1386,10 +1409,16 @@ function wireSlots() {
 }
 
 let _vacTrab = null;
-function abrirDialogoVacaciones(trabajadorId, nombre) {
+let _vacTipo = "vacaciones";
+function abrirDialogoVacaciones(trabajadorId, nombre, tipo = "vacaciones") {
   _vacTrab = trabajadorId;
+  _vacTipo = tipo;
+  const et = ETIQUETAS_AUSENCIA[tipo];
   const dlg = document.getElementById("plan-dialog-vacaciones");
   dlg.querySelector(".plan-vac-nombre").textContent = nombre || nombreTrabajador(trabajadorId);
+  dlg.querySelector(".plan-vac-tipo-nombre").textContent = et.nombre;
+  dlg.querySelector(".plan-vac-tipo-minuscula").textContent = et.minuscula;
+  dlg.querySelector("#plan-vac-guardar").textContent = et.boton;
   const d = new Date(S.fecha + "T12:00:00");
   const lun = new Date(d);
   lun.setDate(d.getDate() - ((d.getDay() + 6) % 7));
@@ -1411,11 +1440,11 @@ function wireVacaciones() {
     const r = await fetch(url("vacaciones"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ centro: S.centro, trabajador_id: _vacTrab, desde, hasta, quitar }),
+      body: JSON.stringify({ centro: S.centro, trabajador_id: _vacTrab, desde, hasta, tipo: _vacTipo, quitar }),
     });
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
-      mostrarAviso(e.detail || "No se pudo guardar las vacaciones.");
+      mostrarAviso(e.detail || "No se pudo guardar.");
       return;
     }
     dlg.close();
@@ -1601,15 +1630,16 @@ function renderSemana() {
       .map((d) => {
         const delDia = S.turnos.filter((x) => x.trabajador_id === t.id && x.fecha === d);
         const libre = delDia.some((x) => x.tipo === "libre");
-        const vac = delDia.some((x) => x.tipo === "vacaciones");
+        const ausenciaTipo = delDia.find((x) => x.tipo !== "libre" && TIPOS_NO_TRABAJO.includes(x.tipo))?.tipo;
         const trabajo = delDia.filter((x) => x.tipo === "trabajo").sort((a, b) => a.inicio_min - b.inicio_min);
         const chips = trabajo
           .map((x) => `<span class="plan-sem-chip">${fmtHHMM(x.inicio_min)}–${fmtHHMM(x.inicio_min + presenciaMin(x.duracion_min))}</span>`)
           .join("");
-        const fuera = vac ? "vacaciones" : libre ? "libre" : "";
+        const fuera = ausenciaTipo || (libre ? "libre" : "");
+        const textoFuera = ausenciaTipo ? ETIQUETAS_AUSENCIA[ausenciaTipo].nombre : "Libre";
         return `<div class="plan-sem-celda ${fuera}" data-trab="${t.id}" data-fecha="${d}">
           <span class="plan-sem-luna ${libre ? "activo" : ""}" data-trab="${t.id}" data-fecha="${d}" title="Día libre">🛏</span>
-          ${fuera ? `<span class="plan-sem-libre-txt">${vac ? "Vacaciones" : "Libre"}</span>` : chips}
+          ${fuera ? `<span class="plan-sem-libre-txt">${textoFuera}</span>` : chips}
         </div>`;
       })
       .join("");
