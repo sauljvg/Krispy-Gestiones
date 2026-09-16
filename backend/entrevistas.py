@@ -708,15 +708,13 @@ def ensure_entrevistas_tables():
             creado_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
-    # Mismo estilo "NN Texto" (código SEPE delante, sin guion) que ya usan
-    # el resto de motivos en entrevistas_salidas.motivo (p.ej. "07 Cese en
-    # periodo de prueba a instancia del empresario") -- confirmado por el
-    # usuario que el número sí debe ir delante, solo sin guion para no
-    # duplicar variantes distintas del mismo motivo en el selector (ver
-    # list_motivos_conocidos).
+    # BV y BVPP son dos abreviaturas de RRHH para el mismo motivo real (el
+    # usuario confirmó que "51" y "21" se refieren a lo mismo) -- ambos
+    # códigos cortos se traducen a la MISMA descripción, así el selector de
+    # motivos no muestra dos entradas para una sola cosa.
     conn.execute(
         "INSERT OR IGNORE INTO motivo_codigos (codigo, descripcion, creado_por) VALUES (?, ?, ?)",
-        ("BV", "51 Baja Voluntaria", "sistema"),
+        ("BV", "21 Baja Voluntaria del Trabajador", "sistema"),
     )
     conn.execute(
         "INSERT OR IGNORE INTO motivo_codigos (codigo, descripcion, creado_por) VALUES (?, ?, ?)",
