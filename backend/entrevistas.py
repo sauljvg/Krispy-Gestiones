@@ -667,6 +667,14 @@ def ensure_entrevistas_tables():
     # importadas del Excel "Salidas Totales" no tienen este dato.
     if "codigo_empleado" not in cols_salidas:
         conn.execute("ALTER TABLE entrevistas_salidas ADD COLUMN codigo_empleado TEXT")
+    # sin_recordatorio: la persona pidió que no se le vuelva a mandar el
+    # email de "Enviar Recordatorio" -- pedido explícito del usuario 16/09.
+    # Persistente (no hay que acordarse de desmarcarla cada vez que se
+    # manda un recordatorio nuevo) -- ver wireRecordatorio en el frontend,
+    # que además dejar elegir a mano quién entra en CADA envío concreto con
+    # checkboxes (seleccionar todo/quitar selección/una a una).
+    if "sin_recordatorio" not in cols_salidas:
+        conn.execute("ALTER TABLE entrevistas_salidas ADD COLUMN sin_recordatorio INTEGER NOT NULL DEFAULT 0")
     # Mapa de códigos cortos de centro ("TLGV", "MADM"...) tal como los usa
     # la hoja de bajas que pega/sube RRHH -- NO es el mismo formato que
     # CENTROS_CONOCIDOS_KK ni que el "T-MDxx COD-Nombre" del Excel de
@@ -1421,14 +1429,24 @@ def list_salidas(oleada_id, centro=None):
 def _fetch_salidas(conn, oleada_id, centro):
     if centro:
         rows = conn.execute(
-            "SELECT id, centro, nombre, fecha_baja, puesto, email, motivo FROM entrevistas_salidas WHERE oleada_id = ? AND centro = ?",
+            "SELECT id, centro, nombre, fecha_baja, puesto, email, motivo, sin_recordatorio FROM entrevistas_salidas WHERE oleada_id = ? AND centro = ?",
             (oleada_id, centro),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id, centro, nombre, fecha_baja, puesto, email, motivo FROM entrevistas_salidas WHERE oleada_id = ?", (oleada_id,)
+            "SELECT id, centro, nombre, fecha_baja, puesto, email, motivo, sin_recordatorio FROM entrevistas_salidas WHERE oleada_id = ?", (oleada_id,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def set_sin_recordatorio(salida_id, valor: bool):
+    """Marca (o desmarca) que esta persona no quiere volver a recibir el
+    email de recordatorio -- persistente, no depende de acordarse de
+    desmarcar su checkbox cada vez que se manda un recordatorio nuevo."""
+    conn = get_connection()
+    conn.execute("UPDATE entrevistas_salidas SET sin_recordatorio = ? WHERE id = ?", (1 if valor else 0, salida_id))
+    conn.commit()
+    conn.close()
 
 
 def _fetch_matches_manual(conn, respuesta_ids):
@@ -1768,7 +1786,10 @@ def compute_evolucion(oleada_id, centro=None):
         enriquecidas.append({"fila": fila, "cuatrimestre": cuat, "matched": matched})
 
     auditoria_f = [
-        {"salida_id": s["id"], "nombre": s["nombre"], "fecha_baja": s["fecha_baja"], "centro": s["centro"], "email": s["email"], "motivo": s["motivo"]}
+        {
+            "salida_id": s["id"], "nombre": s["nombre"], "fecha_baja": s["fecha_baja"], "centro": s["centro"],
+            "email": s["email"], "motivo": s["motivo"], "sin_recordatorio": bool(s["sin_recordatorio"]),
+        }
         for s in salidas
         if s["id"] not in usadas_ids
     ]

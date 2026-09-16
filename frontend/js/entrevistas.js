@@ -326,7 +326,7 @@ function renderDetalleBloques(statsPorPeriodo) {
     .join("");
 }
 
-function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquetaVacio, alEliminar, alEditarEmail, alEditarMotivo) {
+function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquetaVacio, alEliminar, alEditarEmail, alEditarMotivo, esRecordatorio) {
   const wrap = document.getElementById(wrapId);
   const lista = document.getElementById(listaId);
   document.getElementById(summaryId).textContent = `${items.length} ${etiquetaVacio}`;
@@ -334,14 +334,33 @@ function renderAuditoria(wrapId, summaryId, listaId, items, formatoItem, etiquet
   lista.innerHTML = items
     .map((it) => `
       <li>
-        <span>${escapeHTML(formatoItem(it))}</span>
+        ${esRecordatorio ? `<input type="checkbox" class="chk-recordatorio" data-id="${it.salida_id}" ${it.email && !it.sin_recordatorio ? "checked" : ""} ${it.email ? "" : "disabled"}>` : ""}
+        <span style="flex:1;">${escapeHTML(formatoItem(it))}</span>
         <span class="auditoria-acciones">
           ${alEditarMotivo ? `<button type="button" class="btn-editar-motivo-auditoria${it.motivo ? "" : " btn-sin-email"}" data-id="${it.salida_id}" data-motivo="${escapeHTML(it.motivo || "")}" title="${it.motivo ? "Editar motivo" : "Falta el motivo de la salida"}">${it.motivo ? `📝 ${escapeHTML(it.motivo)}` : "📝 sin motivo"}</button>` : ""}
           ${alEditarEmail ? `<button type="button" class="btn-editar-email-auditoria${it.email ? "" : " btn-sin-email"}" data-id="${it.salida_id}" data-email="${escapeHTML(it.email || "")}" title="${it.email ? "Editar email" : "Falta el email — no llegará el recordatorio"}">✉ ${it.email ? "email" : "sin email"}</button>` : ""}
+          ${esRecordatorio ? `<button type="button" class="btn-silenciar-auditoria${it.sin_recordatorio ? " activo" : ""}" data-id="${it.salida_id}" data-activo="${it.sin_recordatorio ? "1" : "0"}" title="${it.sin_recordatorio ? "Ya no recibe recordatorios -- clic para volver a incluirla" : "Esta persona pidió no recibir más recordatorios"}">${it.sin_recordatorio ? "🔕 silenciada" : "🔔"}</button>` : ""}
           ${alEliminar ? `<button type="button" class="btn-eliminar-auditoria" data-id="${it.salida_id}" title="Eliminar registro">🗑</button>` : ""}
         </span>
       </li>`)
     .join("");
+  if (esRecordatorio) {
+    lista.querySelectorAll(".btn-silenciar-auditoria").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const nuevoValor = btn.dataset.activo !== "1";
+        const res = await fetch(`${AUTH_API_BASE}/entrevistas/${currentOleada}/salidas/${btn.dataset.id}/sin-recordatorio`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ valor: nuevoValor }),
+        });
+        if (!res.ok) {
+          mostrarAviso("No se pudo actualizar.");
+          return;
+        }
+        await loadEvolucion(currentCentro);
+      });
+    });
+  }
   if (alEliminar) {
     lista.querySelectorAll(".btn-eliminar-auditoria").forEach((btn) => {
       btn.addEventListener("click", async () => {
@@ -385,12 +404,25 @@ async function wireRecordatorio(auditoriaF) {
   const hint = document.getElementById("recordatorio-hint");
   const conEmail = auditoriaF.filter((a) => a.email);
   const sinEmail = auditoriaF.length - conEmail.length;
-  btn.disabled = conEmail.length === 0;
+  const silenciadas = conEmail.filter((a) => a.sin_recordatorio).length;
   hint.hidden = auditoriaF.length === 0;
   hint.textContent =
-    conEmail.length === 0
-      ? "Ninguna de estas salidas tiene email guardado (la hoja Salidas Totales no traía columna de correo)."
-      : `${conEmail.length} con email · ${sinEmail} sin email (no se les puede incluir).`;
+    auditoriaF.length === 0
+      ? ""
+      : `${conEmail.length} con email (${silenciadas} silenciada${silenciadas === 1 ? "" : "s"}) · ${sinEmail} sin email (no se les puede incluir). Usa los checkboxes para elegir a quién se envía este recordatorio.`;
+
+  // Se recalcula en cada envío a partir de los checkboxes marcados -- no
+  // es un envío automático a todo el mundo, es lo que el usuario haya
+  // seleccionado en ese momento (ver seleccionar todo/quitar selección/
+  // una a una, y el botón 🔕 para excluir a alguien de forma permanente).
+  const emailPorId = new Map(conEmail.map((a) => [a.salida_id, a.email]));
+
+  document.getElementById("btn-recordatorio-todo").onclick = () => {
+    document.querySelectorAll(".chk-recordatorio:not(:disabled)").forEach((chk) => { chk.checked = true; });
+  };
+  document.getElementById("btn-recordatorio-ninguno").onclick = () => {
+    document.querySelectorAll(".chk-recordatorio").forEach((chk) => { chk.checked = false; });
+  };
 
   let enlaceCorto = "";
   try {
@@ -402,7 +434,12 @@ async function wireRecordatorio(auditoriaF) {
   }
 
   btn.onclick = () => {
-    const destinatarios = conEmail.map((a) => a.email).join(",");
+    const idsMarcados = Array.from(document.querySelectorAll(".chk-recordatorio:checked")).map((chk) => Number(chk.dataset.id));
+    const destinatarios = idsMarcados.map((id) => emailPorId.get(id)).filter(Boolean).join(",");
+    if (!destinatarios) {
+      mostrarAviso("Marca al menos una persona con email para enviarle el recordatorio.");
+      return;
+    }
     const empresaNombre = EMPRESA === "saona" ? "Saona" : "Krispy Kreme España";
     const remitente = usuarioActual?.nombre || "Equipo RRHH";
     const asunto = encodeURIComponent("Recordatorio: Entrevista de Salida pendiente");
@@ -615,7 +652,8 @@ async function loadEvolucion(centro) {
       "salidas sin ninguna respuesta detectada",
       usuarioActual.rol === "admin" ? eliminarSalida : null,
       editarEmailSalida,
-      editarMotivoSalida
+      editarMotivoSalida,
+      true
     );
     wireRecordatorio(data.auditoria_f);
     renderAuditoriaG(data.auditoria_g, data.auditoria_f);

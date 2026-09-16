@@ -35,6 +35,10 @@ class MotivoIn(BaseModel):
     motivo: str
 
 
+class SinRecordatorioIn(BaseModel):
+    valor: bool
+
+
 class CentroIn(BaseModel):
     centro: str
 
@@ -306,6 +310,13 @@ def actualizar_salida_motivo_route(oleada_id: int, salida_id: int, body: SalidaM
         entrevistas_module.update_salida_motivo(salida_id, body.motivo)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
+@router.patch("/{oleada_id}/salidas/{salida_id}/sin-recordatorio")
+def actualizar_salida_sin_recordatorio_route(oleada_id: int, salida_id: int, body: SinRecordatorioIn, _user: dict = Depends(require_entrevistas_oleada)):
+    _exigir_misma_oleada(oleada_id, salida_id=salida_id)
+    entrevistas_module.set_sin_recordatorio(salida_id, body.valor)
     return {"ok": True}
 
 

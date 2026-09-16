@@ -89,6 +89,12 @@
   }
   .btn-eliminar-auditoria:hover { border-color: #c0392b; }
   .auditoria-acciones { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .chk-recordatorio { width: 16px; height: 16px; accent-color: var(--acento); cursor: pointer; flex-shrink: 0; }
+  .btn-silenciar-auditoria {
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary);
+    border-radius: 6px; padding: 2px 8px; font-size: 12px; cursor: pointer; white-space: nowrap;
+  }
+  .btn-silenciar-auditoria.activo { border-color: var(--status-critical, #c0392b); color: var(--status-critical, #c0392b); }
   .btn-editar-email-auditoria {
     border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
     border-radius: 6px; padding: 2px 8px; font-size: 12px; cursor: pointer; white-space: nowrap;
@@ -225,7 +231,11 @@
           </table></div>
           <details class="auditoria-details" id="auditoria-f-wrap">
             <summary id="auditoria-f-summary"></summary>
-            <button type="button" id="btn-enviar-recordatorio" class="btn btn-ghost" style="margin:8px 0;">✉ Enviar Recordatorio</button>
+            <div class="recordatorio-acciones" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0;">
+              <button type="button" id="btn-enviar-recordatorio" class="btn btn-ghost">✉ Enviar Recordatorio</button>
+              <button type="button" id="btn-recordatorio-todo" class="btn btn-ghost">Seleccionar todo</button>
+              <button type="button" id="btn-recordatorio-ninguno" class="btn btn-ghost">Quitar selección</button>
+            </div>
             <p id="recordatorio-hint" class="staff-hint" style="margin:0 0 8px;" hidden></p>
             <ul id="auditoria-f-lista"></ul>
           </details>
