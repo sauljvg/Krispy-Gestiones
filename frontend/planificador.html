@@ -196,6 +196,17 @@
   .plan-sem-slot-num { font-weight: 700; }
 
   dialog.plan-dialog { border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); color: var(--text-primary); max-width: 620px; width: 92vw; padding: 0; }
+  dialog.plan-dialog.ancho { max-width: 960px; }
+  .plan-tplh-acciones { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-bottom: 14px; }
+  .plan-tplh-acciones .campo { display: flex; flex-direction: column; gap: 4px; }
+  .plan-tplh-acciones label { font-size: 12px; color: var(--text-secondary); }
+  .plan-tplh-acciones input[type="number"] { width: 90px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); }
+  .plan-tplh-tabla { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-bottom: 18px; }
+  .plan-tplh-tabla th, .plan-tplh-tabla td { text-align: center; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .plan-tplh-tabla th { color: var(--text-secondary); font-weight: 600; }
+  .plan-tplh-tabla td:first-child, .plan-tplh-tabla th:first-child { text-align: left; }
+  .plan-tplh-tabla tr.total td { font-weight: 700; border-top: 2px solid var(--border); }
+  .plan-tplh-h4 { margin: 18px 0 6px; font-size: 14px; }
   dialog.plan-dialog::backdrop { background: rgba(0,0,0,.45); }
   .plan-dialog-cab { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border); }
   .plan-dialog-cab h3 { margin: 0; font-size: 16px; }
@@ -266,6 +277,7 @@
       <button type="button" class="plan-btn-icono" id="plan-btn-plantilla">👥 Plantilla</button>
       <button type="button" class="plan-btn-icono" id="plan-btn-config">⚙ Horario del centro</button>
       <button type="button" class="plan-btn-icono" id="plan-btn-export" title="Descarga la semana en el formato de Odoo (planning.slot)">⬇ Exportar a Odoo</button>
+      <button type="button" class="plan-btn-icono" id="plan-btn-tplh">📈 Optimización de turnos</button>
     </div>
 
     <div id="plan-contenido"></div>
@@ -343,6 +355,53 @@
     </div>
     <button type="button" class="btn btn-primary" id="plan-cfg-guardar">Guardar</button>
     <p class="config-error" id="plan-cfg-error" hidden></p>
+  </div>
+</dialog>
+
+<dialog class="plan-dialog ancho" id="plan-dialog-tplh">
+  <div class="plan-dialog-cab">
+    <h3>Optimización de turnos · <span id="plan-tplh-centro-nombre"></span></h3>
+    <button type="button" class="btn btn-ghost" data-cerrar>✕</button>
+  </div>
+  <div class="plan-dialog-body">
+    <p class="staff-hint">
+      Importa el TPLH mensual (horas planificadas / TSX vendidos / TPLH real, el mismo Excel que ya maneja
+      el area manager o el director de operaciones) para construir un histórico real por centro. Con ese
+      histórico se calcula una proyección de tickets para la semana que viene -- una <b>estimación</b>, no una
+      certeza: nadie puede saber de antemano cuántos tickets se van a vender, mejora sola cuantos más meses
+      se importen.
+    </p>
+    <div class="plan-tplh-acciones">
+      <div class="campo">
+        <label for="plan-tplh-anio">Año del Excel</label>
+        <input type="number" id="plan-tplh-anio" min="2020" max="2100">
+      </div>
+      <label class="btn btn-ghost btn-upload">⬆ Importar Excel TPLH (todos los centros)
+        <input type="file" id="plan-tplh-input" accept=".xlsx,.xls" hidden>
+      </label>
+    </div>
+    <p class="staff-hint" id="plan-tplh-import-resultado"></p>
+
+    <h4 class="plan-tplh-h4">Histórico de <span id="plan-tplh-centro-nombre-2"></span></h4>
+    <div style="overflow-x:auto;">
+      <table class="plan-tplh-tabla">
+        <thead><tr><th>Semana</th><th>Horas planif.</th><th>TSX vendidos</th><th>TPLH real</th></tr></thead>
+        <tbody id="plan-tplh-historico-tbody"></tbody>
+      </table>
+    </div>
+    <p class="staff-hint" id="plan-tplh-sin-historico" hidden>Todavía no hay TPLH importado para este centro.</p>
+
+    <h4 class="plan-tplh-h4">Proyección para la semana del <span id="plan-tplh-proy-semana"></span></h4>
+    <p class="staff-hint" id="plan-tplh-sin-objetivo" hidden>
+      Este centro no tiene un objetivo de TPLH configurado todavía -- ponlo en "Horario del centro" para
+      que aquí salgan las horas sugeridas.
+    </p>
+    <div style="overflow-x:auto;">
+      <table class="plan-tplh-tabla">
+        <thead><tr><th>Día</th><th>TSX previsto</th><th>Semanas con dato</th><th>Horas sugeridas</th></tr></thead>
+        <tbody id="plan-tplh-proyeccion-tbody"></tbody>
+      </table>
+    </div>
   </div>
 </dialog>
 
@@ -432,6 +491,6 @@
 <script src="js/auth-common.js?v=20260915a"></script>
 <script src="js/topbar-menu.js?v=20260910a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/planificador.js?v=20260916a"></script>
+<script src="js/planificador.js?v=20260916b"></script>
 </body>
 </html>

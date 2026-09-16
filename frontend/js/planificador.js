@@ -1912,6 +1912,103 @@ function wireConfig() {
   });
 }
 
+// ---------------------------------------------------------------- TPLH (Optimización de turnos)
+// Histórico de horas planificadas / TSX vendidos / TPLH real, importado del
+// Excel mensual del area manager/director de operaciones -- ver
+// backend/planificador_tplh.py. La proyección es una estimación (promedio
+// histórico de TSX por día de la semana ÷ el TPLH objetivo ya configurado en
+// "Horario del centro"), no una certeza -- mejora sola con más meses importados.
+
+function lunesDeLaSemanaQueViene() {
+  const d = new Date(S.fecha + "T12:00:00");
+  const dow = (d.getDay() + 6) % 7; // 0 = lunes
+  d.setDate(d.getDate() - dow + 7);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+const DIAS_TPLH = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+
+async function cargarHistoricoTPLH() {
+  const tbody = document.getElementById("plan-tplh-historico-tbody");
+  const aviso = document.getElementById("plan-tplh-sin-historico");
+  if (!S.centro) return;
+  const r = await fetch(url("tplh/historico", { centro: S.centro }));
+  if (!r.ok) return;
+  const semanas = await r.json();
+  aviso.hidden = semanas.length > 0;
+  tbody.innerHTML = semanas
+    .slice()
+    .reverse()
+    .map(
+      (s) => `<tr>
+        <td>${escapeHTML(s.semana)}</td>
+        <td>${s.horas_totales ?? "—"}</td>
+        <td>${s.tsx_totales ?? "—"}</td>
+        <td>${s.tplh_medio ?? "—"}</td>
+      </tr>`
+    )
+    .join("");
+}
+
+async function cargarProyeccionTPLH() {
+  if (!S.centro) return;
+  const lunes = lunesDeLaSemanaQueViene();
+  document.getElementById("plan-tplh-proy-semana").textContent = fechaCorta(lunes);
+  const r = await fetch(url("tplh/proyeccion", { centro: S.centro, fecha_lunes: lunes }));
+  if (!r.ok) return;
+  const proy = await r.json();
+  document.getElementById("plan-tplh-sin-objetivo").hidden = !proy.sin_objetivo;
+  document.getElementById("plan-tplh-proyeccion-tbody").innerHTML = proy.dias
+    .map(
+      (d, i) => `<tr>
+        <td>${DIAS_TPLH[i]} ${fechaCorta(d.fecha)}</td>
+        <td>${d.tsx_previsto ?? "—"}</td>
+        <td>${d.n_semanas_con_dato}</td>
+        <td>${d.horas_sugeridas ?? "—"}</td>
+      </tr>`
+    )
+    .join("");
+}
+
+function wireTPLH() {
+  const dlg = document.getElementById("plan-dialog-tplh");
+  dlg.querySelector("[data-cerrar]").addEventListener("click", () => dlg.close());
+  document.getElementById("plan-btn-tplh").addEventListener("click", () => {
+    if (!S.centro) return;
+    document.getElementById("plan-tplh-centro-nombre").textContent = S.centro;
+    document.getElementById("plan-tplh-centro-nombre-2").textContent = S.centro;
+    document.getElementById("plan-tplh-anio").value = new Date().getFullYear();
+    document.getElementById("plan-tplh-import-resultado").textContent = "";
+    cargarHistoricoTPLH();
+    cargarProyeccionTPLH();
+    dlg.showModal();
+  });
+  document.getElementById("plan-tplh-input").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const anio = document.getElementById("plan-tplh-anio").value || new Date().getFullYear();
+    const formData = new FormData();
+    formData.append("file", file);
+    const resultadoEl = document.getElementById("plan-tplh-import-resultado");
+    resultadoEl.textContent = "Importando…";
+    const r = await fetch(url("tplh/importar", { anio }), { method: "POST", body: formData });
+    e.target.value = "";
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      resultadoEl.textContent = err.detail || "No se pudo importar el archivo.";
+      return;
+    }
+    const data = await r.json();
+    resultadoEl.textContent =
+      `Importado: ${data.filas} filas de ${data.centros.length} centro(s) (${data.centros.join(", ")}).` +
+      (data.semanas_sin_reconocer.length
+        ? ` No se reconoció la semana: ${data.semanas_sin_reconocer.join(", ")}.`
+        : "");
+    cargarHistoricoTPLH();
+    cargarProyeccionTPLH();
+  });
+}
+
 // ---------------------------------------------------------------- init
 
 function aplicarBranding() {
@@ -1938,6 +2035,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   aplicarBranding();
   wireRoster();
   wireConfig();
+  wireTPLH();
   wireSlots();
   wireVacaciones();
   wireFichaTrabajador();

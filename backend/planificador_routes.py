@@ -1,9 +1,12 @@
+import datetime
+
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
 import auth as auth_module
 import clima as clima_module
 import planificador as planificador_module
+import planificador_tplh as tplh_module
 from auth_routes import get_current_user
 
 router = APIRouter()
@@ -475,3 +478,47 @@ def exportar_odoo_route(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
     )
+
+
+# --- TPLH (Optimización de turnos) --------------------------------------
+# Histórico de horas planificadas / TSX vendidos / TPLH real por centro,
+# importado del Excel mensual que ya maneja el area manager o el director de
+# operaciones -- ver planificador_tplh.py para el detalle. Un solo Excel trae
+# TODOS los centros a la vez (un bloque por centro), así que estas rutas no
+# llevan centro/_exigir_centro en el import; sí lo llevan las de consulta.
+
+@router.post("/tplh/importar")
+async def tplh_importar_route(
+    file: UploadFile = File(...), anio: int | None = None,
+    empresa: str = "kk", user: dict = Depends(require_planificador),
+):
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Sube un archivo Excel (.xlsx o .xls)")
+    contenido = await file.read()
+    try:
+        resultado = tplh_module.importar_tplh_excel(
+            contenido, file.filename, anio or datetime.date.today().year, user["username"], empresa=empresa
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, **resultado}
+
+
+@router.get("/tplh/historico")
+def tplh_historico_route(
+    centro: str = "", empresa: str = "kk", meses: int = 6, user: dict = Depends(require_planificador),
+):
+    if not centro:
+        raise HTTPException(status_code=400, detail="Falta centro")
+    _exigir_centro(user, centro)
+    return tplh_module.get_historico(empresa, centro, meses=meses)
+
+
+@router.get("/tplh/proyeccion")
+def tplh_proyeccion_route(
+    centro: str = "", fecha_lunes: str = "", empresa: str = "kk", user: dict = Depends(require_planificador),
+):
+    if not centro or not fecha_lunes:
+        raise HTTPException(status_code=400, detail="Faltan centro o fecha_lunes")
+    _exigir_centro(user, centro)
+    return tplh_module.proyeccion(empresa, centro, fecha_lunes)
