@@ -61,6 +61,7 @@ class ResolucionCentroIn(BaseModel):
 class ImportarBajasIn(BaseModel):
     filas: list[FilaBajaIn]
     resoluciones_centro: dict[str, ResolucionCentroIn] = {}
+    resoluciones_motivo: dict[str, str] = {}
 
 
 router = APIRouter()
@@ -138,6 +139,17 @@ def eliminar_codigo_centro_route(codigo: str, _user: dict = Depends(require_admi
     return {"ok": True}
 
 
+@router.get("/bajas/codigos-motivo")
+def listar_codigos_motivo_route(_user: dict = Depends(require_entrevistas_cualquiera)):
+    return entrevistas_module.listar_codigos_motivo()
+
+
+@router.delete("/bajas/codigos-motivo/{codigo}")
+def eliminar_codigo_motivo_route(codigo: str, _user: dict = Depends(require_admin)):
+    entrevistas_module.eliminar_codigo_motivo(codigo)
+    return {"ok": True}
+
+
 @router.post("/bajas/parsear-texto")
 def parsear_bajas_texto_route(body: PegadoIn, _user: dict = Depends(require_entrevistas_cualquiera)):
     filas = bajas_import_module.parsear_pegado_excel(body.texto)
@@ -164,26 +176,43 @@ async def parsear_bajas_imagen_route(file: UploadFile = File(...), _user: dict =
 
 @router.post("/bajas/importar")
 def importar_bajas_route(body: ImportarBajasIn, user: dict = Depends(require_entrevistas_cualquiera)):
-    # 1) Resolver el centro de cada fila -- ya conocido (centro_codigos) o
-    # recién indicado por el usuario en esta misma llamada
-    # (resoluciones_centro, que además se guarda para la próxima vez).
-    pendientes = set()
+    # 1) Resolver centro Y motivo de cada fila -- ya conocidos
+    # (centro_codigos/motivo_codigos, este último sembrado con BV/BVPP) o
+    # recién indicados por el usuario en esta misma llamada
+    # (resoluciones_centro/resoluciones_motivo, que además se guardan para
+    # la próxima vez). Se juntan los dos tipos de pendientes en una sola
+    # respuesta -- mejor que el usuario los resuelva todos de una vez que
+    # descubrirlos uno a uno en varias vueltas.
+    pendientes_centro = set()
+    pendientes_motivo = set()
     filas_resueltas = []
     for fila in body.filas:
-        codigo = (fila.codigo_centro or "").strip()
-        resuelto = entrevistas_module.resolver_codigo_centro(codigo) if codigo else None
-        if not resuelto and codigo in body.resoluciones_centro:
-            resolucion = body.resoluciones_centro[codigo]
-            entrevistas_module.guardar_codigo_centro(codigo, resolucion.centro, resolucion.empresa, user["username"])
-            resuelto = {"centro": resolucion.centro, "empresa": resolucion.empresa}
-        if not resuelto:
-            if codigo:
-                pendientes.add(codigo)
-            continue
-        filas_resueltas.append({**fila.model_dump(), "centro": resuelto["centro"], "empresa": resuelto["empresa"]})
+        codigo_centro = (fila.codigo_centro or "").strip()
+        resuelto_centro = entrevistas_module.resolver_codigo_centro(codigo_centro) if codigo_centro else None
+        if not resuelto_centro and codigo_centro in body.resoluciones_centro:
+            resolucion = body.resoluciones_centro[codigo_centro]
+            entrevistas_module.guardar_codigo_centro(codigo_centro, resolucion.centro, resolucion.empresa, user["username"])
+            resuelto_centro = {"centro": resolucion.centro, "empresa": resolucion.empresa}
+        if not resuelto_centro and codigo_centro:
+            pendientes_centro.add(codigo_centro)
 
-    if pendientes:
-        return {"ok": False, "pendientes": sorted(pendientes)}
+        codigo_motivo = (fila.motivo or "").strip()
+        motivo_resuelto = entrevistas_module.resolver_codigo_motivo(codigo_motivo) if codigo_motivo else None
+        if not motivo_resuelto and codigo_motivo in body.resoluciones_motivo:
+            motivo_resuelto = body.resoluciones_motivo[codigo_motivo].strip()
+            entrevistas_module.guardar_codigo_motivo(codigo_motivo, motivo_resuelto, user["username"])
+        if not motivo_resuelto and codigo_motivo:
+            pendientes_motivo.add(codigo_motivo)
+
+        if not resuelto_centro or not motivo_resuelto:
+            continue
+        filas_resueltas.append({
+            **fila.model_dump(), "centro": resuelto_centro["centro"], "empresa": resuelto_centro["empresa"],
+            "motivo": motivo_resuelto,
+        })
+
+    if pendientes_centro or pendientes_motivo:
+        return {"ok": False, "pendientes_centro": sorted(pendientes_centro), "pendientes_motivo": sorted(pendientes_motivo)}
 
     # 2) Con todo resuelto, comprobar que el usuario tiene Entrevistas de
     # salida de CADA empresa involucrada (una importación puede mezclar

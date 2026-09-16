@@ -1079,21 +1079,25 @@ function renderBajasMasivoPreview() {
   document.getElementById("btn-bajas-masivo-confirmar").hidden = false;
 }
 
-async function confirmarBajasMasivo(resolucionesCentro) {
+async function confirmarBajasMasivo(resolucionesCentro, resolucionesMotivo) {
   const resultadoWrap = document.getElementById("bajas-masivo-resultado-wrap");
   resultadoWrap.innerHTML = "";
   const res = await fetch(`${AUTH_API_BASE}/entrevistas/bajas/importar`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filas: bajasMasivoFilas, resoluciones_centro: resolucionesCentro || {} }),
+    body: JSON.stringify({
+      filas: bajasMasivoFilas,
+      resoluciones_centro: resolucionesCentro || {},
+      resoluciones_motivo: resolucionesMotivo || {},
+    }),
   });
   const datos = await res.json();
   if (!res.ok) {
     resultadoWrap.innerHTML = `<p class="bajas-masivo-resultado error">${escapeHTML(datos.detail || "No se pudo importar.")}</p>`;
     return;
   }
-  if (datos.pendientes && datos.pendientes.length > 0) {
-    renderBajasMasivoPendientes(datos.pendientes);
+  if ((datos.pendientes_centro && datos.pendientes_centro.length > 0) || (datos.pendientes_motivo && datos.pendientes_motivo.length > 0)) {
+    renderBajasMasivoPendientes(datos.pendientes_centro || [], datos.pendientes_motivo || []);
     return;
   }
   document.getElementById("bajas-masivo-pendientes-wrap").innerHTML = "";
@@ -1102,38 +1106,55 @@ async function confirmarBajasMasivo(resolucionesCentro) {
   await loadOleadas();
 }
 
-function renderBajasMasivoPendientes(codigos) {
+function renderBajasMasivoPendientes(codigosCentro, codigosMotivo) {
   const wrap = document.getElementById("bajas-masivo-pendientes-wrap");
   wrap.innerHTML = `
     <div class="bajas-masivo-pendientes">
-      <p style="margin:0 0 6px;"><b>Estos códigos de centro no los conozco todavía -- dime a qué centro y empresa corresponden (se recuerda para la próxima vez):</b></p>
-      ${codigos.map((c) => `
-        <div class="bajas-masivo-pendiente-fila" data-codigo="${escapeHTML(c)}">
-          <code>${escapeHTML(c)}</code>
-          <input type="text" class="bmp-centro" placeholder="Nombre del centro (ej. La Gavia)">
-          <select class="bmp-empresa">
-            <option value="kk">Krispy Kreme</option>
-            <option value="saona">Saona</option>
-          </select>
-        </div>
-      `).join("")}
+      ${codigosCentro.length > 0 ? `
+        <p style="margin:0 0 6px;"><b>Estos códigos de centro no los conozco todavía -- dime a qué centro y empresa corresponden (se recuerda para la próxima vez):</b></p>
+        ${codigosCentro.map((c) => `
+          <div class="bajas-masivo-pendiente-fila bmp-centro-fila" data-codigo="${escapeHTML(c)}">
+            <code>${escapeHTML(c)}</code>
+            <input type="text" class="bmp-centro" placeholder="Nombre del centro (ej. La Gavia)">
+            <select class="bmp-empresa">
+              <option value="kk">Krispy Kreme</option>
+              <option value="saona">Saona</option>
+            </select>
+          </div>
+        `).join("")}
+      ` : ""}
+      ${codigosMotivo.length > 0 ? `
+        <p style="margin:10px 0 6px;"><b>Estos códigos de motivo no los conozco todavía -- dime qué significan (se recuerda para la próxima vez):</b></p>
+        ${codigosMotivo.map((c) => `
+          <div class="bajas-masivo-pendiente-fila bmp-motivo-fila" data-codigo="${escapeHTML(c)}">
+            <code>${escapeHTML(c)}</code>
+            <input type="text" class="bmp-motivo" placeholder="Motivo real (ej. 51 - Baja Voluntaria)">
+          </div>
+        `).join("")}
+      ` : ""}
     </div>
   `;
   const btnConfirmar = document.getElementById("btn-bajas-masivo-confirmar");
   btnConfirmar.hidden = false;
   btnConfirmar.onclick = async () => {
-    const resoluciones = {};
+    const resolucionesCentro = {};
+    const resolucionesMotivo = {};
     let faltan = false;
-    wrap.querySelectorAll(".bajas-masivo-pendiente-fila").forEach((fila) => {
+    wrap.querySelectorAll(".bmp-centro-fila").forEach((fila) => {
       const centro = fila.querySelector(".bmp-centro").value.trim();
       if (!centro) faltan = true;
-      resoluciones[fila.dataset.codigo] = { centro, empresa: fila.querySelector(".bmp-empresa").value };
+      resolucionesCentro[fila.dataset.codigo] = { centro, empresa: fila.querySelector(".bmp-empresa").value };
+    });
+    wrap.querySelectorAll(".bmp-motivo-fila").forEach((fila) => {
+      const motivo = fila.querySelector(".bmp-motivo").value.trim();
+      if (!motivo) faltan = true;
+      resolucionesMotivo[fila.dataset.codigo] = motivo;
     });
     if (faltan) {
-      mostrarAviso("Indica el centro para cada código pendiente.");
+      mostrarAviso("Rellena todos los campos pendientes.");
       return;
     }
-    await confirmarBajasMasivo(resoluciones);
+    await confirmarBajasMasivo(resolucionesCentro, resolucionesMotivo);
     btnConfirmar.onclick = () => confirmarBajasMasivo();
   };
 }

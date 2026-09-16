@@ -685,6 +685,29 @@ def ensure_entrevistas_tables():
             creado_en TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # Igual que centro_codigos pero para el motivo de baja -- la hoja trae
+    # códigos cortos ("BV", "BVPP") en vez del motivo real. Sembrado con los
+    # dos que confirmó el usuario 16/09 (INSERT OR IGNORE: si ya existen
+    # por una resolución manual anterior, no se pisan). Cualquier código
+    # nuevo se resuelve la primera vez que aparece, igual que un centro
+    # desconocido.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS motivo_codigos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo TEXT NOT NULL UNIQUE,
+            descripcion TEXT NOT NULL,
+            creado_por TEXT,
+            creado_en TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute(
+        "INSERT OR IGNORE INTO motivo_codigos (codigo, descripcion, creado_por) VALUES (?, ?, ?)",
+        ("BV", "51 - Baja Voluntaria", "sistema"),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO motivo_codigos (codigo, descripcion, creado_por) VALUES (?, ?, ?)",
+        ("BVPP", "21 - Baja Voluntaria del Trabajador", "sistema"),
+    )
     # Override manual de un cruce respuesta<->salida — para cuando la misma
     # persona aparece en las dos auditorías (p.ej. "FLORES, LENIN MICHAEL" en
     # Salidas Totales vs "Lenin flores alvarado" en su propia respuesta) pero
@@ -1561,6 +1584,46 @@ def listar_codigos_centro():
 def eliminar_codigo_centro(codigo):
     conn = get_connection()
     conn.execute("DELETE FROM centro_codigos WHERE codigo = ?", ((codigo or "").strip(),))
+    conn.commit()
+    conn.close()
+
+
+def resolver_codigo_motivo(codigo):
+    """La descripción real si ya conocemos este código corto de motivo (ver
+    motivo_codigos, sembrado con BV/BVPP), o None si es la primera vez."""
+    conn = get_connection()
+    row = conn.execute("SELECT descripcion FROM motivo_codigos WHERE codigo = ?", ((codigo or "").strip(),)).fetchone()
+    conn.close()
+    return row["descripcion"] if row else None
+
+
+def guardar_codigo_motivo(codigo, descripcion, creado_por=None):
+    codigo = (codigo or "").strip()
+    descripcion = (descripcion or "").strip()
+    if not codigo or not descripcion:
+        raise ValueError("Código y descripción son obligatorios")
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT INTO motivo_codigos (codigo, descripcion, creado_por) VALUES (?, ?, ?)
+        ON CONFLICT(codigo) DO UPDATE SET descripcion = excluded.descripcion
+        """,
+        (codigo, descripcion, creado_por),
+    )
+    conn.commit()
+    conn.close()
+
+
+def listar_codigos_motivo():
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM motivo_codigos ORDER BY codigo").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def eliminar_codigo_motivo(codigo):
+    conn = get_connection()
+    conn.execute("DELETE FROM motivo_codigos WHERE codigo = ?", ((codigo or "").strip(),))
     conn.commit()
     conn.close()
 
