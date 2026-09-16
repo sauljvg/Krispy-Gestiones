@@ -85,7 +85,13 @@ PAGE_MARKER_RE = re.compile(r"--\s*\d+\s*of\s*\d+\s*--", re.IGNORECASE)
 PIE_PAGINA_SCORE_RE = re.compile(r"[ \t]*\d{1,3}\s*/\s*\d{1,3}\s*$")
 
 SECTIONS = [
-    ("experiencia", ["experiencia laboral", "experiencia profesional", "experiencia"], False),
+    # "voluntariado" como último sinónimo (no primero) -- _contenido_de_seccion
+    # prueba la lista en orden y devuelve la primera que encuentre, así que
+    # un CV con "Experiencia" de verdad la sigue usando esa; voluntariado
+    # solo entra si no hay ninguna sección de experiencia reconocida, caso
+    # habitual en un perfil de estudiante sin trabajo remunerado todavía
+    # (confirmado en vivo 16/09 con un CV real).
+    ("experiencia", ["experiencia laboral", "experiencia profesional", "experiencia", "voluntariado"], False),
     ("formacion", ["formación académica", "formacion academica", "formación", "formacion", "estudios", "educación", "educacion"], False),
     ("disponibilidad", ["disponibilidad"], False),
     ("direccion", ["dirección", "direccion", "domicilio"], True),
@@ -470,6 +476,47 @@ def _parsear_experiencia_local(texto_seccion: str) -> list[dict]:
     return resultado
 
 
+# Formato distinto (no una variación del de arriba, un diseño de plantilla
+# diferente): "AAAA – AAAA | Puesto – Empresa" o "AAAA – Actualidad |
+# Puesto", con el rango de AÑOS (no "mes de año") y el puesto YA en la
+# misma línea en vez de en líneas de contexto separadas antes de la fecha
+# -- confirmado en vivo 16/09 con un CV real. Cada entrada de este formato
+# empieza su propia línea con el rango, así que se recorre línea a línea
+# en vez de con el enfoque "N líneas de contexto antes" de
+# _parsear_entradas_fechadas (aquí no aplica, el orden está invertido).
+_EXPERIENCIA_PIPE_RE = re.compile(
+    r"^(\d{4})\s*[-–—]\s*(\d{4}|actualidad|actual|presente)\s*\|\s*(.+)$", re.IGNORECASE
+)
+
+
+def _parsear_experiencia_pipe(texto_seccion: str) -> list[dict]:
+    lineas = [l.strip() for l in texto_seccion.split("\n") if l.strip()]
+    resultado = []
+    actual = None
+    for linea in lineas:
+        m = _EXPERIENCIA_PIPE_RE.match(linea)
+        if m:
+            if actual:
+                resultado.append(actual)
+            resto = m.group(3).strip()
+            partes = re.split(r"\s+[-–—]\s+", resto, maxsplit=1)
+            actual = {
+                "puesto": partes[0].strip(),
+                "empresa": partes[1].strip() if len(partes) > 1 else "",
+                "fecha_inicio": m.group(1), "fecha_fin": m.group(2).capitalize(),
+                "descripcion": "",
+            }
+        elif actual:
+            # Línea de la viñeta de descripción de la entrada en curso --
+            # se van acumulando hasta la siguiente fecha reconocida (o el
+            # final de la sección).
+            viñeta = re.sub(r"^[-•]\s*", "", linea)
+            actual["descripcion"] = (actual["descripcion"] + " " + viñeta).strip()[:600]
+    if actual:
+        resultado.append(actual)
+    return resultado
+
+
 def _extraer_de_texto(texto_crudo: str) -> dict:
     texto = PAGE_MARKER_RE.sub("", texto_crudo)
     texto = _separar_cabeceras_pegadas(texto)
@@ -536,6 +583,8 @@ def _extraer_de_texto(texto_crudo: str) -> dict:
             extraido["formacion_json"] = formacion_json
     if extraido.get("experiencia"):
         experiencia_json = _parsear_experiencia_local(extraido["experiencia"])
+        if not experiencia_json:
+            experiencia_json = _parsear_experiencia_pipe(extraido["experiencia"])
         if experiencia_json:
             extraido["experiencia_json"] = experiencia_json
 
