@@ -109,6 +109,35 @@
     background: var(--surface-page); color: var(--text-primary); font-size: 13px;
   }
   .salida-manual-row input[type="text"], .salida-manual-row input[type="email"] { flex: 1; min-width: 160px; }
+
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none;
+    align-items: flex-start; justify-content: center; z-index: 100; padding: 24px 12px; overflow-y: auto;
+  }
+  .modal-overlay.visible { display: flex; }
+  .modal-box-ancho {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 24px; width: 100%; max-width: 760px;
+  }
+  .modal-box-ancho h3 { margin: 0 0 6px; font-size: 17px; }
+  .bajas-masivo-textarea {
+    width: 100%; min-height: 110px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-page); color: var(--text-primary); font-size: 13px; font-family: monospace;
+    box-sizing: border-box; resize: vertical;
+  }
+  .bajas-masivo-acciones { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; align-items: center; }
+  .bajas-masivo-preview-table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 10px 0; }
+  .bajas-masivo-preview-table th, .bajas-masivo-preview-table td {
+    text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  .bajas-masivo-pendientes { background: color-mix(in srgb, var(--status-warning, #c98a12) 12%, transparent); border: 1px solid var(--status-warning, #c98a12); border-radius: 8px; padding: 10px 14px; margin: 10px 0; }
+  .bajas-masivo-pendiente-fila { display: flex; gap: 8px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+  .bajas-masivo-pendiente-fila code { background: var(--surface-page); padding: 2px 6px; border-radius: 4px; }
+  .bajas-masivo-pendiente-fila input, .bajas-masivo-pendiente-fila select {
+    padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-page); color: var(--text-primary); font-size: 12.5px;
+  }
+  .bajas-masivo-resultado { font-size: 13px; margin-top: 10px; }
+  .bajas-masivo-resultado.error { color: var(--status-critical, #c0392b); }
   .detalle-bloque-details { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
   .detalle-bloque-details summary { cursor: pointer; font-size: 14px; font-weight: 600; padding: 4px 0; }
   .detalle-tabla { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
@@ -162,6 +191,7 @@
       </label>
 
       <button id="btn-exportar-pdf" class="btn btn-ghost" hidden>⬇ Exportar PDF</button>
+      <button id="btn-abrir-bajas-masivo" class="btn btn-ghost" type="button">📋 Importar bajas (pegar/captura)</button>
     </div>
 
     <div class="centro-grid" id="centro-grid"></div>
@@ -243,6 +273,36 @@
     </div>
   </div>
 </div>
+
+<div class="modal-overlay" id="bajas-masivo-modal">
+  <div class="modal-box-ancho">
+    <h3>Importar bajas (pegar desde Excel o subir una captura)</h3>
+    <p class="staff-hint" style="margin-top:0;">
+      Pega una selección de celdas de Excel (con su fila de cabecera: ID, Nombre y Apellidos, Centro, Fecha Baja,
+      Puesto/Posición, Motivo Baja, Mail) o sube una captura de pantalla de la tabla. Puedes pegar varias tablas
+      juntas (p.ej. una por marca).
+    </p>
+    <textarea class="bajas-masivo-textarea" id="bajas-masivo-textarea" placeholder="Pega aquí la tabla copiada de Excel..."></textarea>
+    <div class="bajas-masivo-acciones">
+      <button type="button" class="btn btn-ghost" id="btn-bajas-masivo-procesar-texto">Procesar pegado</button>
+      <label class="btn btn-ghost btn-upload" style="margin:0;">
+        📷 Subir captura
+        <input type="file" id="bajas-masivo-input-imagen" accept="image/*" hidden>
+      </label>
+      <span class="staff-hint" id="bajas-masivo-cargando" style="margin:0;" hidden>Leyendo...</span>
+    </div>
+
+    <div id="bajas-masivo-preview-wrap"></div>
+    <div id="bajas-masivo-pendientes-wrap"></div>
+    <div id="bajas-masivo-resultado-wrap"></div>
+
+    <div class="modal-actions" style="margin-top:14px;">
+      <button type="button" class="btn btn-ghost" id="btn-bajas-masivo-cerrar">Cerrar</button>
+      <button type="button" class="btn btn-primary" id="btn-bajas-masivo-confirmar" hidden>Confirmar importación</button>
+    </div>
+  </div>
+</div>
+
 <script src="js/theme.js?v=20260723g"></script>
 <script src="js/dialogs.js?v=20260818a"></script>
 <script src="js/icons.js?v=20260915a"></script>

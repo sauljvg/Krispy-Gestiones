@@ -3,7 +3,9 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 import auth as auth_module
+import bajas_import as bajas_import_module
 import entrevistas as entrevistas_module
+import gemini as gemini_module
 from auth_routes import get_current_user, require_admin
 from entrevistas_pdf import generar_pdf
 
@@ -36,6 +38,31 @@ class MotivoIn(BaseModel):
 class CentroIn(BaseModel):
     centro: str
 
+
+class PegadoIn(BaseModel):
+    texto: str
+
+
+class FilaBajaIn(BaseModel):
+    codigo_empleado: str | None = None
+    nombre: str
+    codigo_centro: str | None = None
+    fecha_baja: str
+    puesto: str | None = None
+    motivo: str
+    email: str | None = None
+
+
+class ResolucionCentroIn(BaseModel):
+    centro: str
+    empresa: str
+
+
+class ImportarBajasIn(BaseModel):
+    filas: list[FilaBajaIn]
+    resoluciones_centro: dict[str, ResolucionCentroIn] = {}
+
+
 router = APIRouter()
 
 
@@ -45,6 +72,18 @@ def _modulo_para_empresa(empresa: str) -> str:
 
 def require_entrevistas(empresa: str = "kk", user: dict = Depends(get_current_user)) -> dict:
     if not auth_module.tiene_modulo(user, _modulo_para_empresa(empresa)):
+        raise HTTPException(status_code=403, detail="No tienes acceso a Entrevistas de Salida")
+    return user
+
+
+def require_entrevistas_cualquiera(user: dict = Depends(get_current_user)) -> dict:
+    """Para las rutas de import masivo de bajas -- de entrada no se sabe
+    todavía a qué empresa(s) pertenecen las filas (eso se resuelve DESPUÉS
+    de parsear, contra centro_codigos), así que aquí solo se exige tener
+    Entrevistas de salida de AL MENOS una marca; el permiso fino por
+    empresa se comprueba en importar_bajas_route, una vez resueltos los
+    centros de cada fila."""
+    if not (auth_module.tiene_modulo(user, "informes") or auth_module.tiene_modulo(user, "saona_informes")):
         raise HTTPException(status_code=403, detail="No tienes acceso a Entrevistas de Salida")
     return user
 
@@ -80,6 +119,82 @@ def list_oleadas_route(empresa: str = "kk", _user: dict = Depends(require_entrev
 @router.get("/centros-conocidos")
 def list_centros_conocidos_route(empresa: str = "kk", _user: dict = Depends(require_entrevistas)):
     return entrevistas_module.list_centros_conocidos(empresa)
+
+
+# --- Import masivo de bajas (pegado desde Excel o captura de pantalla) ---
+# Rutas ESTÁTICAS ("/bajas/...") declaradas antes de "/{oleada_id}/..." a
+# propósito -- aunque aquí no debería colisionar (oleada_id es int, "bajas"
+# no lo es), es el mismo cuidado que ya se sigue en otras rutas de la app
+# con un patrón parecido.
+
+@router.get("/bajas/codigos-centro")
+def listar_codigos_centro_route(_user: dict = Depends(require_entrevistas_cualquiera)):
+    return entrevistas_module.listar_codigos_centro()
+
+
+@router.delete("/bajas/codigos-centro/{codigo}")
+def eliminar_codigo_centro_route(codigo: str, _user: dict = Depends(require_admin)):
+    entrevistas_module.eliminar_codigo_centro(codigo)
+    return {"ok": True}
+
+
+@router.post("/bajas/parsear-texto")
+def parsear_bajas_texto_route(body: PegadoIn, _user: dict = Depends(require_entrevistas_cualquiera)):
+    filas = bajas_import_module.parsear_pegado_excel(body.texto)
+    if not filas:
+        raise HTTPException(status_code=400, detail="No se reconoció ninguna fila -- revisa que hayas pegado la tabla completa, con su fila de cabecera")
+    return {"filas": filas}
+
+
+@router.post("/bajas/parsear-imagen")
+async def parsear_bajas_imagen_route(file: UploadFile = File(...), _user: dict = Depends(require_entrevistas_cualquiera)):
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="Sube una imagen (captura de pantalla)")
+    contenido = await file.read()
+    if len(contenido) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="La imagen es demasiado grande (máximo 10 MB)")
+    try:
+        filas = bajas_import_module.extraer_bajas_de_imagen(contenido, file.content_type)
+    except gemini_module.GeminiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    if not filas:
+        raise HTTPException(status_code=400, detail="No se reconoció ninguna fila en la imagen")
+    return {"filas": filas}
+
+
+@router.post("/bajas/importar")
+def importar_bajas_route(body: ImportarBajasIn, user: dict = Depends(require_entrevistas_cualquiera)):
+    # 1) Resolver el centro de cada fila -- ya conocido (centro_codigos) o
+    # recién indicado por el usuario en esta misma llamada
+    # (resoluciones_centro, que además se guarda para la próxima vez).
+    pendientes = set()
+    filas_resueltas = []
+    for fila in body.filas:
+        codigo = (fila.codigo_centro or "").strip()
+        resuelto = entrevistas_module.resolver_codigo_centro(codigo) if codigo else None
+        if not resuelto and codigo in body.resoluciones_centro:
+            resolucion = body.resoluciones_centro[codigo]
+            entrevistas_module.guardar_codigo_centro(codigo, resolucion.centro, resolucion.empresa, user["username"])
+            resuelto = {"centro": resolucion.centro, "empresa": resolucion.empresa}
+        if not resuelto:
+            if codigo:
+                pendientes.add(codigo)
+            continue
+        filas_resueltas.append({**fila.model_dump(), "centro": resuelto["centro"], "empresa": resuelto["empresa"]})
+
+    if pendientes:
+        return {"ok": False, "pendientes": sorted(pendientes)}
+
+    # 2) Con todo resuelto, comprobar que el usuario tiene Entrevistas de
+    # salida de CADA empresa involucrada (una importación puede mezclar
+    # filas de KK y de Saona, como en el caso real que motivó esto).
+    empresas = {f["empresa"] for f in filas_resueltas}
+    for empresa in empresas:
+        if not auth_module.tiene_modulo(user, _modulo_para_empresa(empresa)):
+            raise HTTPException(status_code=403, detail=f"No tienes acceso a Entrevistas de salida de {empresa}")
+
+    resultado = entrevistas_module.agregar_bajas_masivo(filas_resueltas)
+    return {"ok": True, **resultado}
 
 
 @router.get("/{oleada_id}/centros")

@@ -961,4 +961,179 @@ document.addEventListener("DOMContentLoaded", async () => {
       loadEvolucion(currentCentro);
     }, 0);
   });
+
+  wireBajasMasivo();
 });
+
+// --- Importar bajas masivo (pegado desde Excel o captura de pantalla) ---
+// No depende de currentOleada/EMPRESA -- una sola importación puede traer
+// filas de KK y de Saona a la vez (caso real que motivó esto), cada una se
+// resuelve a su propia empresa vía el código de centro (ver
+// backend/entrevistas.py::resolver_codigo_centro).
+
+let bajasMasivoFilas = [];
+
+function wireBajasMasivo() {
+  const overlay = document.getElementById("bajas-masivo-modal");
+
+  document.getElementById("btn-abrir-bajas-masivo").addEventListener("click", () => {
+    resetBajasMasivoModal();
+    overlay.classList.add("visible");
+  });
+  document.getElementById("btn-bajas-masivo-cerrar").addEventListener("click", () => {
+    overlay.classList.remove("visible");
+  });
+
+  document.getElementById("btn-bajas-masivo-procesar-texto").addEventListener("click", async () => {
+    const texto = document.getElementById("bajas-masivo-textarea").value;
+    if (!texto.trim()) {
+      mostrarAviso("Pega antes la tabla copiada de Excel.");
+      return;
+    }
+    await bajasMasivoCargando(true);
+    try {
+      const res = await fetch(`${AUTH_API_BASE}/entrevistas/bajas/parsear-texto`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texto }),
+      });
+      const datos = await res.json();
+      if (!res.ok) {
+        mostrarAviso(datos.detail || "No se pudo leer el texto pegado.");
+        return;
+      }
+      bajasMasivoFilas = datos.filas;
+      renderBajasMasivoPreview();
+    } finally {
+      await bajasMasivoCargando(false);
+    }
+  });
+
+  document.getElementById("bajas-masivo-input-imagen").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    await bajasMasivoCargando(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`${AUTH_API_BASE}/entrevistas/bajas/parsear-imagen`, { method: "POST", body: formData });
+      const datos = await res.json();
+      if (!res.ok) {
+        mostrarAviso(datos.detail || "No se pudo leer la captura.");
+        return;
+      }
+      bajasMasivoFilas = datos.filas;
+      renderBajasMasivoPreview();
+    } finally {
+      await bajasMasivoCargando(false);
+    }
+  });
+
+  document.getElementById("btn-bajas-masivo-confirmar").onclick = () => confirmarBajasMasivo();
+}
+
+async function bajasMasivoCargando(activo) {
+  document.getElementById("bajas-masivo-cargando").hidden = !activo;
+}
+
+function resetBajasMasivoModal() {
+  bajasMasivoFilas = [];
+  document.getElementById("bajas-masivo-textarea").value = "";
+  document.getElementById("bajas-masivo-preview-wrap").innerHTML = "";
+  document.getElementById("bajas-masivo-pendientes-wrap").innerHTML = "";
+  document.getElementById("bajas-masivo-resultado-wrap").innerHTML = "";
+  const btnConfirmar = document.getElementById("btn-bajas-masivo-confirmar");
+  btnConfirmar.hidden = true;
+  btnConfirmar.onclick = () => confirmarBajasMasivo();
+}
+
+function renderBajasMasivoPreview() {
+  document.getElementById("bajas-masivo-pendientes-wrap").innerHTML = "";
+  document.getElementById("bajas-masivo-resultado-wrap").innerHTML = "";
+  const wrap = document.getElementById("bajas-masivo-preview-wrap");
+  if (bajasMasivoFilas.length === 0) {
+    wrap.innerHTML = '<p class="staff-hint">No se reconoció ninguna fila.</p>';
+    document.getElementById("btn-bajas-masivo-confirmar").hidden = true;
+    return;
+  }
+  wrap.innerHTML = `
+    <p class="staff-hint">${bajasMasivoFilas.length} fila(s) reconocida(s) -- revisa antes de confirmar.</p>
+    <div class="table-scroll"><table class="bajas-masivo-preview-table">
+      <thead><tr><th>ID</th><th>Nombre</th><th>Centro</th><th>Fecha baja</th><th>Puesto</th><th>Motivo</th><th>Email</th></tr></thead>
+      <tbody>
+        ${bajasMasivoFilas.map((f) => `
+          <tr>
+            <td>${escapeHTML(f.codigo_empleado || "")}</td>
+            <td>${escapeHTML(f.nombre || "")}</td>
+            <td>${escapeHTML(f.codigo_centro || "")}</td>
+            <td>${escapeHTML(f.fecha_baja || "")}</td>
+            <td>${escapeHTML(f.puesto || "")}</td>
+            <td>${escapeHTML(f.motivo || "")}</td>
+            <td>${escapeHTML(f.email || "")}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table></div>
+  `;
+  document.getElementById("btn-bajas-masivo-confirmar").hidden = false;
+}
+
+async function confirmarBajasMasivo(resolucionesCentro) {
+  const resultadoWrap = document.getElementById("bajas-masivo-resultado-wrap");
+  resultadoWrap.innerHTML = "";
+  const res = await fetch(`${AUTH_API_BASE}/entrevistas/bajas/importar`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filas: bajasMasivoFilas, resoluciones_centro: resolucionesCentro || {} }),
+  });
+  const datos = await res.json();
+  if (!res.ok) {
+    resultadoWrap.innerHTML = `<p class="bajas-masivo-resultado error">${escapeHTML(datos.detail || "No se pudo importar.")}</p>`;
+    return;
+  }
+  if (datos.pendientes && datos.pendientes.length > 0) {
+    renderBajasMasivoPendientes(datos.pendientes);
+    return;
+  }
+  document.getElementById("bajas-masivo-pendientes-wrap").innerHTML = "";
+  resultadoWrap.innerHTML = `<p class="bajas-masivo-resultado">✅ ${datos.creados} baja(s) registrada(s)${datos.duplicados.length ? `, ${datos.duplicados.length} ya existían` : ""}${datos.descartados.length ? `, ${datos.descartados.length} descartada(s) por faltar datos` : ""}.</p>`;
+  document.getElementById("btn-bajas-masivo-confirmar").hidden = true;
+  await loadOleadas();
+}
+
+function renderBajasMasivoPendientes(codigos) {
+  const wrap = document.getElementById("bajas-masivo-pendientes-wrap");
+  wrap.innerHTML = `
+    <div class="bajas-masivo-pendientes">
+      <p style="margin:0 0 6px;"><b>Estos códigos de centro no los conozco todavía -- dime a qué centro y empresa corresponden (se recuerda para la próxima vez):</b></p>
+      ${codigos.map((c) => `
+        <div class="bajas-masivo-pendiente-fila" data-codigo="${escapeHTML(c)}">
+          <code>${escapeHTML(c)}</code>
+          <input type="text" class="bmp-centro" placeholder="Nombre del centro (ej. La Gavia)">
+          <select class="bmp-empresa">
+            <option value="kk">Krispy Kreme</option>
+            <option value="saona">Saona</option>
+          </select>
+        </div>
+      `).join("")}
+    </div>
+  `;
+  const btnConfirmar = document.getElementById("btn-bajas-masivo-confirmar");
+  btnConfirmar.hidden = false;
+  btnConfirmar.onclick = async () => {
+    const resoluciones = {};
+    let faltan = false;
+    wrap.querySelectorAll(".bajas-masivo-pendiente-fila").forEach((fila) => {
+      const centro = fila.querySelector(".bmp-centro").value.trim();
+      if (!centro) faltan = true;
+      resoluciones[fila.dataset.codigo] = { centro, empresa: fila.querySelector(".bmp-empresa").value };
+    });
+    if (faltan) {
+      mostrarAviso("Indica el centro para cada código pendiente.");
+      return;
+    }
+    await confirmarBajasMasivo(resoluciones);
+    btnConfirmar.onclick = () => confirmarBajasMasivo();
+  };
+}

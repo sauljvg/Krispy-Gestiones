@@ -659,6 +659,32 @@ def ensure_entrevistas_tables():
     # alta a mano (ver add_salida, donde SÍ es obligatorio).
     if "motivo" not in cols_salidas:
         conn.execute("ALTER TABLE entrevistas_salidas ADD COLUMN motivo TEXT")
+    # codigo_empleado: el ID de la hoja de bajas (import masivo por pegado o
+    # captura de pantalla, ver bajas_import.py) -- se guarda para poder
+    # deduplicar entre dos pegados que se solapen (misma persona, mismo
+    # ID) sin depender de que el nombre esté escrito exactamente igual las
+    # dos veces. Nullable: las salidas dadas de alta a mano (add_salida) o
+    # importadas del Excel "Salidas Totales" no tienen este dato.
+    if "codigo_empleado" not in cols_salidas:
+        conn.execute("ALTER TABLE entrevistas_salidas ADD COLUMN codigo_empleado TEXT")
+    # Mapa de códigos cortos de centro ("TLGV", "MADM"...) tal como los usa
+    # la hoja de bajas que pega/sube RRHH -- NO es el mismo formato que
+    # CENTROS_CONOCIDOS_KK ni que el "T-MDxx COD-Nombre" del Excel de
+    # nómina (_centro_desde_compania_puesto), es una tercera fuente con sus
+    # propias siglas. Se resuelve la primera vez que aparece un código
+    # nuevo (RRHH dice a qué centro/empresa corresponde, ver
+    # entrevistas_routes.py) y queda recordado para las siguientes
+    # importaciones sin volver a preguntar.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS centro_codigos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo TEXT NOT NULL UNIQUE,
+            centro TEXT NOT NULL,
+            empresa TEXT NOT NULL,
+            creado_por TEXT,
+            creado_en TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
     # Override manual de un cruce respuesta<->salida — para cuando la misma
     # persona aparece en las dos auditorías (p.ej. "FLORES, LENIN MICHAEL" en
     # Salidas Totales vs "Lenin flores alvarado" en su propia respuesta) pero
@@ -1491,6 +1517,135 @@ def delete_salida(salida_id):
     conn.execute("DELETE FROM entrevistas_salidas WHERE id = ?", (salida_id,))
     conn.commit()
     conn.close()
+
+
+# --- Import masivo de bajas (pegado desde Excel o captura de pantalla,
+# ver bajas_import.py) -- pedido explícito del usuario 16/09 ---
+
+ETIQUETA_OLEADA_BAJAS_IMPORTADAS = "Bajas importadas"
+
+
+def resolver_codigo_centro(codigo):
+    """{"centro", "empresa"} si ya conocemos este código corto de centro
+    (ver centro_codigos), o None si es la primera vez que aparece."""
+    conn = get_connection()
+    row = conn.execute("SELECT centro, empresa FROM centro_codigos WHERE codigo = ?", ((codigo or "").strip(),)).fetchone()
+    conn.close()
+    return {"centro": row["centro"], "empresa": row["empresa"]} if row else None
+
+
+def guardar_codigo_centro(codigo, centro, empresa, creado_por=None):
+    codigo = (codigo or "").strip()
+    centro = (centro or "").strip()
+    if not codigo or not centro:
+        raise ValueError("Código y centro son obligatorios")
+    if empresa not in ("kk", "saona"):
+        raise ValueError("Empresa inválida")
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT INTO centro_codigos (codigo, centro, empresa, creado_por) VALUES (?, ?, ?, ?)
+        ON CONFLICT(codigo) DO UPDATE SET centro = excluded.centro, empresa = excluded.empresa
+        """,
+        (codigo, centro, empresa, creado_por),
+    )
+    conn.commit()
+    conn.close()
+
+
+def listar_codigos_centro():
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM centro_codigos ORDER BY empresa, centro").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def eliminar_codigo_centro(codigo):
+    conn = get_connection()
+    conn.execute("DELETE FROM centro_codigos WHERE codigo = ?", ((codigo or "").strip(),))
+    conn.commit()
+    conn.close()
+
+
+def get_or_crear_oleada_bajas_importadas(empresa):
+    """Todas las bajas importadas por pegado/captura de una misma empresa
+    van a UNA oleada reutilizable ("Bajas importadas"), no una oleada nueva
+    por cada vez que se pega una hoja -- es un registro continuo (RRHH va
+    pegando bajas según se producen), no una encuesta con oleadas
+    separadas como las de verdad."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT id FROM entrevistas_oleadas WHERE empresa = ? AND etiqueta = ?",
+        (empresa, ETIQUETA_OLEADA_BAJAS_IMPORTADAS),
+    ).fetchone()
+    if row:
+        oleada_id = row["id"]
+        conn.close()
+        return oleada_id
+    cur = conn.execute(
+        "INSERT INTO entrevistas_oleadas (etiqueta, empresa) VALUES (?, ?)",
+        (ETIQUETA_OLEADA_BAJAS_IMPORTADAS, empresa),
+    )
+    conn.commit()
+    oleada_id = cur.lastrowid
+    conn.close()
+    return oleada_id
+
+
+def agregar_bajas_masivo(filas: list[dict]) -> dict:
+    """Alta en bloque de bajas YA resueltas -- cada fila trae "centro" y
+    "empresa" ya asignados (el paso de resolver códigos de centro
+    desconocidos vive en entrevistas_routes.py, no aquí; esta función
+    asume que ya no hay ninguno pendiente).
+
+    Deduplica por codigo_empleado cuando viene (pegar la misma hoja dos
+    veces, o una hoja que se solapa con una importación anterior, no debe
+    duplicar salidas ya registradas). Una fila sin nombre/centro/fecha/
+    motivo se descarta en vez de inventar un valor -- motivo es
+    obligatorio a propósito, igual que en add_salida."""
+    # Se resuelve el oleada_id de cada empresa presente ANTES de abrir la
+    # conexión del bucle -- get_or_crear_oleada_bajas_importadas abre (y
+    # cierra) su propia conexión, y llamarla DENTRO del bucle con la
+    # conexión principal ya con un INSERT sin confirmar producía
+    # "database is locked" (confirmado en vivo 16/09): dos conexiones
+    # queriendo escribir a la vez, una con una transacción ya abierta.
+    empresas_presentes = {f.get("empresa") for f in filas if f.get("empresa") in ("kk", "saona")}
+    oleada_por_empresa = {empresa: get_or_crear_oleada_bajas_importadas(empresa) for empresa in empresas_presentes}
+
+    conn = get_connection()
+    creados = 0
+    duplicados = []
+    descartados = []
+    for fila in filas:
+        nombre = (fila.get("nombre") or "").strip()
+        centro = (fila.get("centro") or "").strip()
+        fecha_baja = (fila.get("fecha_baja") or "").strip()
+        motivo = (fila.get("motivo") or "").strip()
+        empresa = fila.get("empresa")
+        if not (nombre and centro and fecha_baja and motivo and empresa in ("kk", "saona")):
+            descartados.append({"nombre": nombre or "(sin nombre)"})
+            continue
+        codigo_empleado = (fila.get("codigo_empleado") or "").strip() or None
+        if codigo_empleado:
+            existente = conn.execute(
+                "SELECT id FROM entrevistas_salidas WHERE codigo_empleado = ?", (codigo_empleado,)
+            ).fetchone()
+            if existente:
+                duplicados.append({"codigo_empleado": codigo_empleado, "nombre": nombre})
+                continue
+        email = (fila.get("email") or "").strip() or None
+        if email and not _EMAIL_RE.match(email):
+            email = None
+        oleada_id = oleada_por_empresa[empresa]
+        conn.execute(
+            "INSERT INTO entrevistas_salidas (oleada_id, centro, nombre, fecha_baja, puesto, email, motivo, codigo_empleado) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (oleada_id, centro, nombre, fecha_baja, (fila.get("puesto") or "").strip() or None, email, motivo, codigo_empleado),
+        )
+        creados += 1
+    conn.commit()
+    conn.close()
+    return {"creados": creados, "duplicados": duplicados, "descartados": descartados}
 
 
 def compute_evolucion(oleada_id, centro=None):
