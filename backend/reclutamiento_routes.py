@@ -423,7 +423,10 @@ def list_candidatos_route(
     # list_vacantes_route más arriba, mismo motivo).
     if empresa:
         _exigir_modulo_empresa(empresa, user)
-    return reclutamiento_module.list_candidatos(empresa=empresa, estado=estado, q=q, vacante_id=vacante_id, sin_vacante=sin_vacante)
+    return reclutamiento_module.list_candidatos(
+        empresa=empresa, estado=estado, q=q, vacante_id=vacante_id, sin_vacante=sin_vacante,
+        excluir_vacantes_cerradas=True,
+    )
 
 
 @router.get("/candidatos/descartados-antiguos")
@@ -465,7 +468,10 @@ def conteo_por_estado_route(
 ):
     if empresa:
         _exigir_modulo_empresa(empresa, user)
-    return reclutamiento_module.contar_por_estado(empresa=empresa, q=q, vacante_id=vacante_id, sin_vacante=sin_vacante)
+    return reclutamiento_module.contar_por_estado(
+        empresa=empresa, q=q, vacante_id=vacante_id, sin_vacante=sin_vacante,
+        excluir_vacantes_cerradas=True,
+    )
 
 
 @router.put("/candidatos/estado-multiple")

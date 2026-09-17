@@ -974,7 +974,7 @@ def exportar_candidatos(candidato_ids: list[int], columnas: list[str]) -> list[d
     return salida
 
 
-def list_candidatos(empresa=None, estado=None, q=None, vacante_id=None, sin_vacante=False):
+def list_candidatos(empresa=None, estado=None, q=None, vacante_id=None, sin_vacante=False, excluir_vacantes_cerradas=False):
     conn = get_connection()
     clauses = []
     params = []
@@ -989,6 +989,14 @@ def list_candidatos(empresa=None, estado=None, q=None, vacante_id=None, sin_vaca
         params.append(vacante_id)
     elif sin_vacante:
         clauses.append("c.vacante_id IS NULL")
+    elif excluir_vacantes_cerradas:
+        # Vista "Todos los candidatos" de Reclutamiento (no de Base de Datos,
+        # que sigue queriendo TODOS sin excepción -- ver bbdd.candidatos_bbdd):
+        # oculta los de una vacante ya cerrada/cubierta, para que la lista no
+        # crezca sin parar con cada vacante que se cierra (pedido explícito
+        # del usuario). Los candidatos sin ninguna vacante asignada (recién
+        # subidos, aún sin triar) siguen apareciendo igual que antes.
+        clauses.append("(c.vacante_id IS NULL OR v.estado = 'abierta')")
     if q:
         clauses.append("(c.nombre_completo LIKE ? OR c.telefono LIKE ? OR c.email LIKE ? OR c.puesto_solicitado LIKE ?)")
         like = f"%{q}%"
@@ -1011,6 +1019,7 @@ def list_candidatos(empresa=None, estado=None, q=None, vacante_id=None, sin_vaca
                fr.fecha AS cita_fecha, fr.hora AS cita_hora,
                fr.direccion AS cita_direccion, fr.mapa_url AS cita_mapa_url
         FROM candidatos c
+        LEFT JOIN vacantes v ON v.id = c.vacante_id
         LEFT JOIN informe_respuestas r ON r.id = c.respuesta_id
         LEFT JOIN encuesta_respuestas er ON er.informe_respuesta_id = c.respuesta_id
         LEFT JOIN entrevista_reservas res ON res.respuesta_id = er.id
@@ -1469,7 +1478,7 @@ def marcar_invitados_test(candidato_ids: list[int], encuesta_id: int):
     conn.close()
 
 
-def contar_por_estado(empresa=None, q=None, vacante_id=None, sin_vacante=False):
+def contar_por_estado(empresa=None, q=None, vacante_id=None, sin_vacante=False, excluir_vacantes_cerradas=False):
     """Conteo de candidatos por estado con los mismos filtros que
     list_candidatos (menos el propio estado) — alimenta los números de cada
     pestaña en la vista de Reclutamiento."""
@@ -1477,19 +1486,25 @@ def contar_por_estado(empresa=None, q=None, vacante_id=None, sin_vacante=False):
     clauses = []
     params = []
     if empresa:
-        clauses.append("empresa = ?")
+        clauses.append("c.empresa = ?")
         params.append(empresa)
     if vacante_id is not None:
-        clauses.append("vacante_id = ?")
+        clauses.append("c.vacante_id = ?")
         params.append(vacante_id)
     elif sin_vacante:
-        clauses.append("vacante_id IS NULL")
+        clauses.append("c.vacante_id IS NULL")
+    elif excluir_vacantes_cerradas:
+        # Ver el mismo comentario en list_candidatos.
+        clauses.append("(c.vacante_id IS NULL OR v.estado = 'abierta')")
     if q:
-        clauses.append("(nombre_completo LIKE ? OR telefono LIKE ? OR email LIKE ? OR puesto_solicitado LIKE ?)")
+        clauses.append("(c.nombre_completo LIKE ? OR c.telefono LIKE ? OR c.email LIKE ? OR c.puesto_solicitado LIKE ?)")
         like = f"%{q}%"
         params.extend([like, like, like, like])
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    rows = conn.execute(f"SELECT estado, COUNT(*) AS n FROM candidatos {where} GROUP BY estado", params).fetchall()
+    rows = conn.execute(
+        f"SELECT c.estado, COUNT(*) AS n FROM candidatos c LEFT JOIN vacantes v ON v.id = c.vacante_id {where} GROUP BY c.estado",
+        params,
+    ).fetchall()
     conn.close()
     conteo = {e: 0 for e in ESTADOS}
     for r in rows:
