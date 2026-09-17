@@ -23,8 +23,24 @@ async function fetchJSON(url) {
 // por el middleware de permisos, así que aquí solo hace falta bloquear la UI.
 let tiendasPermitidas = [];
 
+// Reintenta hasta 3 veces con una pequeña espera: /api/stores puede fallar
+// una vez por un error transitorio de SQLite (ver db.py) y esta es la única
+// llamada que rellena el selector de tienda -- si falla sin reintento, el
+// selector se queda colgado en solo "Todas" el resto de la sesión aunque el
+// backend ya se haya recuperado (visto en vivo 17/09, la CPO se quedó así).
+async function fetchJSONConReintento(url, intentos = 3) {
+  for (let i = 1; i <= intentos; i++) {
+    try {
+      return await fetchJSON(url);
+    } catch (err) {
+      if (i === intentos) throw err;
+      await new Promise((r) => setTimeout(r, 400 * i));
+    }
+  }
+}
+
 async function loadStores() {
-  const { stores } = await fetchJSON(`${API_BASE}/stores`);
+  const { stores } = await fetchJSONConReintento(`${API_BASE}/stores`);
   const select = document.getElementById("filter-tienda");
   const current = select.value;
   const restringidoAUna = tiendasPermitidas.length === 1;

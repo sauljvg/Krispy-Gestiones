@@ -3,6 +3,7 @@ import os
 import queue
 import sqlite3
 import threading
+import time
 
 # DATA_DIR: raíz del repo por defecto (comportamiento de siempre, tanto en
 # local como en Replit). En un hosting con disco realmente persistente
@@ -41,6 +42,48 @@ _wal_configurado = False
 _wal_lock = threading.Lock()
 
 
+# Mensajes de sqlite3.OperationalError que sabemos transitorios (ver
+# comentario largo en get_connection): reintentar una vez con una conexión
+# nueva los resuelve casi siempre. Cualquier otro OperationalError (SQL mal
+# formado, tabla que no existe...) no es transitorio y no debe reintentarse.
+_ERRORES_REINTENTABLES = ("disk i/o error", "database is locked")
+
+
+def _es_reintentable(exc: sqlite3.OperationalError) -> bool:
+    msg = str(exc).lower()
+    return any(m in msg for m in _ERRORES_REINTENTABLES)
+
+
+class _CursorPooled:
+    """Envoltorio sobre sqlite3.Cursor a juego con _ConexionPooled: mucho
+    código hace `cur = conn.cursor(); cur.execute(...)` en vez de
+    `conn.execute(...)` directo (p.ej. analytics.get_stats, con varias
+    queries seguidas sobre el mismo cursor) -- el reintento por "disk I/O
+    error" tiene que vivir aquí también, no solo en _ConexionPooled.execute,
+    o esas ~360 llamadas se quedarían sin cubrir."""
+
+    def __init__(self, pooled: "_ConexionPooled"):
+        self._pooled = pooled
+        self._cur = pooled._conn.cursor()
+
+    def execute(self, sql, params=()):
+        try:
+            self._cur.execute(sql, params)
+        except sqlite3.OperationalError as exc:
+            if not _es_reintentable(exc):
+                raise
+            self._pooled._reabrir()
+            self._cur = self._pooled._conn.cursor()
+            self._cur.execute(sql, params)
+        return self
+
+    def __getattr__(self, nombre):
+        return getattr(self._cur, nombre)
+
+    def __iter__(self):
+        return iter(self._cur)
+
+
 class _ConexionPooled:
     """Envoltorio fino sobre sqlite3.Connection -- ver comentario del pool
     arriba. No se usa en ningún sitio como context manager (`with
@@ -50,6 +93,33 @@ class _ConexionPooled:
     def __init__(self, conn: sqlite3.Connection):
         self._conn = conn
         self._devuelta = False
+
+    def _reabrir(self):
+        """Descarta la conexión actual (probablemente envenenada) y abre una
+        nueva -- usado por el reintento de execute()/cursor() cuando la
+        query falla por "disk I/O error"/"database is locked" (16/09,
+        confirmado en vivo: el CPO se quedó con el selector de tienda
+        colgado en "Todas" porque /api/stores falló una vez sin reintento
+        alguno). Una pausa corta antes de reintentar le da tiempo al
+        problema transitorio a despejarse."""
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+        time.sleep(0.1)
+        self._conn = _abrir_conexion_nueva()
+
+    def execute(self, sql, params=()):
+        try:
+            return self._conn.execute(sql, params)
+        except sqlite3.OperationalError as exc:
+            if not _es_reintentable(exc):
+                raise
+            self._reabrir()
+            return self._conn.execute(sql, params)
+
+    def cursor(self):
+        return _CursorPooled(self)
 
     def close(self):
         if self._devuelta:
