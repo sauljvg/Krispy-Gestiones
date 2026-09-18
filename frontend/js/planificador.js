@@ -158,6 +158,7 @@ function lunesDe(iso) {
 async function cargarCentros() {
   const res = await fetch(url("centros"));
   const data = res.ok ? await res.json() : { centros: [] };
+  S.centros = data.centros;
   const sel = document.getElementById("plan-centro");
   sel.innerHTML = data.centros.map((c) => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join("");
   if (data.centros.length === 0) {
@@ -199,6 +200,8 @@ async function cargarDia() {
   S.proyeccion = normalizarProyeccion(data.proyeccion || {});
   S.slots = data.slots || [];
   S.dias = data.dias || [];
+  S.minimo = data.minimo || null;
+  S.minimos = data.minimos || {};
   S.slotActivo = null;
   document.getElementById("plan-fecha-txt").textContent =
     S.vista === "semana" ? `Semana del ${fechaCorta(data.lunes || S.fecha)}` : fechaLarga(S.fecha);
@@ -357,15 +360,26 @@ function celdasPlanificado() {
 
 function idealCalculado(m) {
   const p = S.proyeccion[m] || {};
-  if (p.personal_ideal_manual != null && p.personal_ideal_manual !== "") return Number(p.personal_ideal_manual);
-  if (S.config.tipo_centro === "fabrica") {
+  let ideal = null;
+  if (p.personal_ideal_manual != null && p.personal_ideal_manual !== "") {
+    ideal = Number(p.personal_ideal_manual);
+  } else if (S.config.tipo_centro === "fabrica") {
     const obj = S.config.objetivo_docenas_hora;
-    if (!obj || p.docenas_prevista == null) return null;
-    return Math.round((p.docenas_prevista / obj) * 10) / 10;
+    if (obj && p.docenas_prevista != null) ideal = Math.round((p.docenas_prevista / obj) * 10) / 10;
+  } else {
+    const obj = S.config.objetivo_transacciones_hora;
+    if (obj && p.transacciones_prevista != null) ideal = Math.round((p.transacciones_prevista / obj) * 10) / 10;
   }
-  const obj = S.config.objetivo_transacciones_hora;
-  if (!obj || p.transacciones_prevista == null) return null;
-  return Math.round((p.transacciones_prevista / obj) * 10) / 10;
+  // Suelo de apertura/cierre (ver planificador_minimos): aunque la
+  // proyección por TPLH pida menos gente (o no haya proyección todavía), la
+  // primera y última franja del día no pueden bajar de la cantidad mínima
+  // para abrir/cerrar la tienda (pedido explícito del usuario 17/09).
+  if (S.minimo) {
+    const fr = franjas();
+    if (m === fr[0] && S.minimo.min_apertura > (ideal ?? -Infinity)) ideal = S.minimo.min_apertura;
+    else if (m === fr[fr.length - 1] && S.minimo.min_cierre > (ideal ?? -Infinity)) ideal = S.minimo.min_cierre;
+  }
+  return ideal;
 }
 
 function planificadoEnFranja(m) {
@@ -1473,6 +1487,36 @@ function fichaMostrarPaso(paso) {
   dlg.querySelector("#plan-ficha-paso-pin").hidden = paso !== "pin";
 }
 
+async function fichaActualizarPrestamo(t) {
+  const dlg = document.getElementById("plan-dialog-ficha");
+  const bloqueActivo = dlg.querySelector("#plan-ficha-prestamo-activo");
+  const bloqueForm = dlg.querySelector("#plan-ficha-prestamo-form");
+  const btnAbrir = dlg.querySelector("#plan-ficha-prestamo-abrir");
+  dlg.querySelector("#plan-ficha-prestamo-error").hidden = true;
+  if (t.prestado_centro) {
+    bloqueActivo.hidden = false;
+    bloqueForm.hidden = true;
+    btnAbrir.hidden = true;
+    dlg.querySelector("#plan-ficha-prestamo-texto").textContent =
+      `Prestado/a a ${t.prestado_centro} del ${t.prestado_desde} al ${t.prestado_hasta}.`;
+    return;
+  }
+  bloqueActivo.hidden = true;
+  bloqueForm.hidden = true;
+  btnAbrir.hidden = false;
+  const selCentro = dlg.querySelector("#plan-ficha-prestamo-centro");
+  if (!_todosCentrosCache) {
+    const res = await fetch(url("centros-todos"));
+    const data = res.ok ? await res.json() : { centros: [] };
+    _todosCentrosCache = data.centros;
+  }
+  selCentro.innerHTML = _todosCentrosCache
+    .filter((c) => c !== t.centro)
+    .map((c) => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`)
+    .join("");
+}
+let _todosCentrosCache = null;
+
 function abrirFichaTrabajador(trabajadorId) {
   const t = S.trabajadores.find((w) => w.id === trabajadorId);
   if (!t) return;
@@ -1487,6 +1531,7 @@ function abrirFichaTrabajador(trabajadorId) {
   dlg.querySelector("#plan-ficha-pin").value = "";
   dlg.querySelector("#plan-ficha-pin-error").hidden = true;
   fichaMostrarPaso("datos");
+  fichaActualizarPrestamo(t);
   dlg.showModal();
 }
 
@@ -1553,6 +1598,43 @@ function wireFichaTrabajador() {
   dlg.querySelector("#plan-ficha-pin-confirmar").addEventListener("click", confirmarPin);
   dlg.querySelector("#plan-ficha-pin").addEventListener("keydown", (e) => {
     if (e.key === "Enter") confirmarPin();
+  });
+
+  dlg.querySelector("#plan-ficha-prestamo-abrir").addEventListener("click", () => {
+    dlg.querySelector("#plan-ficha-prestamo-abrir").hidden = true;
+    dlg.querySelector("#plan-ficha-prestamo-form").hidden = false;
+    dlg.querySelector("#plan-ficha-prestamo-desde").value = S.fecha;
+    dlg.querySelector("#plan-ficha-prestamo-hasta").value = S.fecha;
+  });
+  dlg.querySelector("#plan-ficha-prestamo-confirmar").addEventListener("click", async () => {
+    const centro_destino = dlg.querySelector("#plan-ficha-prestamo-centro").value;
+    const desde = dlg.querySelector("#plan-ficha-prestamo-desde").value;
+    const hasta = dlg.querySelector("#plan-ficha-prestamo-hasta").value;
+    const errorEl = dlg.querySelector("#plan-ficha-prestamo-error");
+    errorEl.hidden = true;
+    if (!centro_destino || !desde || !hasta) {
+      errorEl.textContent = "Rellena la tienda destino y las dos fechas.";
+      errorEl.hidden = false;
+      return;
+    }
+    const r = await fetch(url(`roster/${_fichaTrab}/prestamo`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ centro_destino, desde, hasta }),
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      errorEl.textContent = e.detail || "No se pudo guardar el préstamo.";
+      errorEl.hidden = false;
+      return;
+    }
+    dlg.close();
+    cargarDia();
+  });
+  dlg.querySelector("#plan-ficha-prestamo-cancelar").addEventListener("click", async () => {
+    await fetch(url(`roster/${_fichaTrab}/prestamo`), { method: "DELETE" });
+    dlg.close();
+    cargarDia();
   });
 }
 

@@ -115,6 +115,25 @@ _CONFIG_SEED_POR_CENTRO = {
     "Plenilunio": (9 * 60 + 10, 22 * 60 + 30),
 }
 
+# Personal mínimo de apertura/cierre por centro y día de la semana (0=lunes,
+# 6=domingo) -- pedido explícito del usuario (17/09): aunque la proyección
+# por TPLH pida menos gente en una franja, la tienda igual necesita esta
+# cantidad mínima para poder abrir o cerrar. Es un SUELO sobre el personal
+# ideal calculado (ver idealCalculado en planificador.js), no un reemplazo:
+# solo actúa si el mínimo es mayor que lo que pide la proyección. Un mismo
+# valor se repite de lunes a jueves y de viernes a domingo salvo la
+# excepción de La Gavia, que cierra con 3 en sábado/domingo en vez de 2 --
+# por eso el mapa es por día suelto, no por "grupo de días", para poder
+# guardar esa excepción sin inventar un tercer grupo.
+_MINIMOS_SEED_POR_CENTRO = {
+    "Gran Plaza 2":      {0: (1, 1), 1: (1, 1), 2: (1, 1), 3: (1, 1), 4: (1, 2), 5: (1, 2), 6: (1, 2)},
+    "Plenilunio":        {0: (1, 2), 1: (1, 2), 2: (1, 2), 3: (1, 2), 4: (2, 3), 5: (2, 3), 6: (2, 3)},
+    "Caleido":           {0: (1, 2), 1: (1, 2), 2: (1, 2), 3: (1, 2), 4: (1, 2), 5: (1, 2), 6: (1, 2)},
+    "Princesa":          {0: (1, 2), 1: (1, 2), 2: (1, 2), 3: (1, 2), 4: (1, 2), 5: (1, 2), 6: (1, 2)},
+    "La Gavia":          {0: (1, 2), 1: (1, 2), 2: (1, 2), 3: (1, 2), 4: (1, 2), 5: (1, 3), 6: (1, 3)},
+    "ParqueSur Tienda":  {0: (2, 3), 1: (2, 3), 2: (2, 3), 3: (2, 3), 4: (2, 4), 5: (2, 4), 6: (2, 4)},
+}
+
 # Slots "de siempre" por centro. (nombre, inicio_min, duracion_min) donde
 # inicio/duracion son de TRABAJO EFECTIVO (sin contar el bocadillo). El lado
 # del bocadillo se calcula solo con `_bocadillo_lado`. Sacados de los patrones
@@ -514,6 +533,47 @@ def ensure_planificador_tables():
     except Exception as exc:  # nunca romper el arranque por la fusión
         print(f"[planificador] no se pudo fusionar trabajadores duplicados: {exc}")
     _aplicar_correcciones_trabajadores(conn, "kk")
+
+    # Mínimo de apertura/cierre por centro y día de la semana (ver
+    # _MINIMOS_SEED_POR_CENTRO). Solo se siembra si el centro no tiene NADA
+    # todavía -- así el gerente puede editar los números sin que se
+    # resiembren por encima en el próximo arranque.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS planificador_minimos (
+            empresa TEXT NOT NULL DEFAULT 'kk',
+            centro TEXT NOT NULL,
+            dia_semana INTEGER NOT NULL,
+            min_apertura INTEGER NOT NULL DEFAULT 0,
+            min_cierre INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (empresa, centro, dia_semana)
+        )
+    """)
+    for centro, dias in _MINIMOS_SEED_POR_CENTRO.items():
+        ya = conn.execute(
+            "SELECT COUNT(*) FROM planificador_minimos WHERE empresa = 'kk' AND centro = ?", (centro,)
+        ).fetchone()[0]
+        if ya:
+            continue
+        for dow, (min_ap, min_ci) in dias.items():
+            conn.execute(
+                "INSERT INTO planificador_minimos (empresa, centro, dia_semana, min_apertura, min_cierre) "
+                "VALUES ('kk', ?, ?, ?, ?)",
+                (centro, dow, min_ap, min_ci),
+            )
+
+    # Préstamo temporal a otra tienda (17/09, pedido explícito): mientras
+    # dura, el trabajador deja de verse en su centro de origen y pasa a
+    # planificarse en prestado_centro -- ver aplicar_prestamos_vencidos, que
+    # lo devuelve solo en cuanto pasa prestado_hasta. No se modela como fila
+    # nueva ni como cambio de `centro` (perdería el origen) -- son 3 columnas
+    # sueltas en el propio trabajador porque a lo sumo hay UN préstamo activo
+    # a la vez por persona.
+    cols_trab2 = {r[1] for r in conn.execute("PRAGMA table_info(planificador_trabajadores)")}
+    if "prestado_centro" not in cols_trab2:
+        conn.execute("ALTER TABLE planificador_trabajadores ADD COLUMN prestado_centro TEXT")
+        conn.execute("ALTER TABLE planificador_trabajadores ADD COLUMN prestado_desde TEXT")
+        conn.execute("ALTER TABLE planificador_trabajadores ADD COLUMN prestado_hasta TEXT")
+
     conn.commit()
     conn.close()
 
@@ -1193,16 +1253,99 @@ def set_config(empresa, centro, apertura_min, cierre_min, objetivo_transacciones
 
 # --- Roster ---
 
-def list_trabajadores(empresa, centro, incluir_inactivos=False):
+def aplicar_prestamos_vencidos(empresa):
+    """Un préstamo temporal a otra tienda (ver prestar_trabajador) termina
+    solo en cuanto pasa prestado_hasta, sin que nadie tenga que deshacerlo a
+    mano -- list_trabajadores llama esto primero cada vez que se carga el
+    planificador (pedido explícito del usuario 17/09)."""
     conn = get_connection()
-    sql = "SELECT * FROM planificador_trabajadores WHERE empresa = ? AND centro = ?"
-    params = [empresa, centro]
+    hoy = datetime.date.today().isoformat()
+    conn.execute(
+        "UPDATE planificador_trabajadores SET prestado_centro = NULL, prestado_desde = NULL, prestado_hasta = NULL "
+        "WHERE empresa = ? AND prestado_hasta IS NOT NULL AND prestado_hasta < ?",
+        (empresa, hoy),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_trabajadores(empresa, centro, incluir_inactivos=False):
+    aplicar_prestamos_vencidos(empresa)
+    conn = get_connection()
+    hoy = datetime.date.today().isoformat()
+    # Mientras dura un préstamo activo, la persona deja de verse en su centro
+    # de origen (primera rama) y pasa a verse en el centro destino (segunda
+    # rama) -- ver aplicar_prestamos_vencidos para cuando termina.
+    sql = """
+        SELECT * FROM planificador_trabajadores
+        WHERE empresa = ? AND (
+            (centro = ? AND NOT (prestado_centro IS NOT NULL AND prestado_desde <= ? AND prestado_hasta >= ?))
+            OR (prestado_centro = ? AND prestado_desde <= ? AND prestado_hasta >= ?)
+        )
+    """
+    params = [empresa, centro, hoy, hoy, centro, hoy, hoy]
     if not incluir_inactivos:
         sql += " AND activo = 1"
     sql += " ORDER BY nombre COLLATE NOCASE"
     rows = conn.execute(sql, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def prestar_trabajador(trabajador_id, centro_destino, desde, hasta):
+    if hasta < desde:
+        raise ValueError("La fecha de fin no puede ser anterior a la de inicio")
+    conn = get_connection()
+    fila = conn.execute("SELECT centro FROM planificador_trabajadores WHERE id = ?", (trabajador_id,)).fetchone()
+    if not fila:
+        conn.close()
+        raise ValueError("Trabajador no encontrado")
+    if fila["centro"] == centro_destino:
+        conn.close()
+        raise ValueError("El centro de destino no puede ser el mismo de origen")
+    conn.execute(
+        "UPDATE planificador_trabajadores SET prestado_centro = ?, prestado_desde = ?, prestado_hasta = ? WHERE id = ?",
+        (centro_destino, desde, hasta, trabajador_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def cancelar_prestamo(trabajador_id):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE planificador_trabajadores SET prestado_centro = NULL, prestado_desde = NULL, prestado_hasta = NULL "
+        "WHERE id = ?",
+        (trabajador_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_minimos(empresa, centro):
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT dia_semana, min_apertura, min_cierre FROM planificador_minimos WHERE empresa = ? AND centro = ? "
+        "ORDER BY dia_semana",
+        (empresa, centro),
+    ).fetchall()
+    conn.close()
+    return {r["dia_semana"]: {"min_apertura": r["min_apertura"], "min_cierre": r["min_cierre"]} for r in rows}
+
+
+def set_minimo(empresa, centro, dia_semana, min_apertura, min_cierre):
+    if dia_semana not in range(7):
+        raise ValueError("Día de semana inválido (0=lunes..6=domingo)")
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO planificador_minimos (empresa, centro, dia_semana, min_apertura, min_cierre) "
+        "VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT (empresa, centro, dia_semana) DO UPDATE SET "
+        "min_apertura = excluded.min_apertura, min_cierre = excluded.min_cierre",
+        (empresa, centro, dia_semana, min_apertura, min_cierre),
+    )
+    conn.commit()
+    conn.close()
 
 
 def cargar_desde_kpis(empresa, centro):
@@ -2166,6 +2309,7 @@ def _trabajadores_para_vista(empresa, centro, turnos_sem):
 def dia_completo(empresa, centro, fecha):
     cfg = get_config(empresa, centro)
     turnos_sem = turnos_semana(empresa, centro, fecha)
+    dia_semana = datetime.date.fromisoformat(fecha).weekday()
     return {
         "config": cfg,
         "trabajadores": _trabajadores_para_vista(empresa, centro, turnos_sem),
@@ -2176,6 +2320,7 @@ def dia_completo(empresa, centro, fecha):
         "proyeccion": {str(k): v for k, v in get_proyeccion(empresa, centro, fecha).items()},
         "slots": list_slots(empresa, centro),
         "lunes": _lunes_de(fecha),
+        "minimo": get_minimos(empresa, centro).get(dia_semana),
     }
 
 
@@ -2184,6 +2329,7 @@ def semana_completa(empresa, centro, fecha):
     dias = [(datetime.date.fromisoformat(lunes) + datetime.timedelta(days=i)).isoformat() for i in range(7)]
     cfg = get_config(empresa, centro)
     turnos_sem = turnos_semana(empresa, centro, fecha)
+    minimos_por_dow = get_minimos(empresa, centro)
     return {
         "config": cfg,
         "trabajadores": _trabajadores_para_vista(empresa, centro, turnos_sem),
@@ -2194,6 +2340,7 @@ def semana_completa(empresa, centro, fecha):
         "slots": list_slots(empresa, centro),
         "lunes": lunes,
         "dias": dias,
+        "minimos": {d: minimos_por_dow.get(datetime.date.fromisoformat(d).weekday()) for d in dias},
     }
 
 

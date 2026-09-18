@@ -43,6 +43,39 @@ def centros_route(empresa: str = "kk", user: dict = Depends(require_planificador
     return {"centros": [c for c in todos if not permitidos or c in permitidos]}
 
 
+@router.get("/centros-todos")
+def centros_todos_route(empresa: str = "kk", user: dict = Depends(require_planificador)):
+    """Sin restricción por centro -- a diferencia de /centros, aquí hace
+    falta el listado completo aunque el gerente solo gestione uno: es el que
+    alimenta el desplegable de "a qué tienda presto a esta persona" (ver
+    prestar_trabajador_route), y el destino casi siempre es una tienda que
+    ese gerente NO gestiona. Solo se ven nombres de tienda, nada sensible."""
+    return {"centros": planificador_module.centros_disponibles(empresa)}
+
+
+@router.get("/minimos")
+def minimos_route(empresa: str = "kk", centro: str = "", user: dict = Depends(require_planificador)):
+    _exigir_centro(user, centro)
+    return planificador_module.get_minimos(empresa, centro)
+
+
+class MinimoIn(BaseModel):
+    centro: str
+    dia_semana: int
+    min_apertura: int
+    min_cierre: int
+
+
+@router.put("/minimos")
+def set_minimo_route(body: MinimoIn, empresa: str = "kk", user: dict = Depends(require_planificador)):
+    _exigir_centro(user, body.centro)
+    try:
+        planificador_module.set_minimo(empresa, body.centro, body.dia_semana, body.min_apertura, body.min_cierre)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
 @router.get("/dia")
 def dia_route(empresa: str = "kk", centro: str = "", fecha: str = "", user: dict = Depends(require_planificador)):
     if not centro or not fecha:
@@ -171,6 +204,41 @@ def eliminar_trabajador_route(trabajador_id: int, empresa: str = "kk", user: dic
         raise HTTPException(status_code=404, detail="Trabajador no encontrado")
     _exigir_centro(user, t["centro"])
     planificador_module.eliminar_trabajador(trabajador_id)
+    return {"ok": True}
+
+
+class PrestamoIn(BaseModel):
+    centro_destino: str
+    desde: str
+    hasta: str
+
+
+@router.post("/roster/{trabajador_id}/prestamo")
+def prestar_trabajador_route(
+    trabajador_id: int, body: PrestamoIn, empresa: str = "kk", user: dict = Depends(require_planificador)
+):
+    """Presta temporalmente a otra tienda -- solo hace falta acceso al centro
+    de ORIGEN (el que ya tiene el gerente), no al destino, precisamente
+    porque el caso de uso es prestar a una tienda que el gerente no
+    gestiona."""
+    t = planificador_module.get_trabajador(trabajador_id)
+    if t is None:
+        raise HTTPException(status_code=404, detail="Trabajador no encontrado")
+    _exigir_centro(user, t["centro"])
+    try:
+        planificador_module.prestar_trabajador(trabajador_id, body.centro_destino, body.desde, body.hasta)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
+@router.delete("/roster/{trabajador_id}/prestamo")
+def cancelar_prestamo_route(trabajador_id: int, empresa: str = "kk", user: dict = Depends(require_planificador)):
+    t = planificador_module.get_trabajador(trabajador_id)
+    if t is None:
+        raise HTTPException(status_code=404, detail="Trabajador no encontrado")
+    _exigir_centro(user, t["centro"])
+    planificador_module.cancelar_prestamo(trabajador_id)
     return {"ok": True}
 
 

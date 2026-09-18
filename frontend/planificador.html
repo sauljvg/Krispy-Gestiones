@@ -473,6 +473,31 @@
     </div>
     <button type="button" class="btn btn-primary" id="plan-ficha-guardar">Guardar</button>
     <p class="config-error" id="plan-ficha-error" hidden></p>
+
+    <hr style="margin:16px 0; border:none; border-top:1px solid var(--border);">
+
+    <div id="plan-ficha-prestamo-activo" hidden>
+      <p class="staff-hint" id="plan-ficha-prestamo-texto"></p>
+      <button type="button" class="btn btn-ghost" id="plan-ficha-prestamo-cancelar">Cancelar préstamo</button>
+    </div>
+    <div id="plan-ficha-prestamo-form" hidden>
+      <p class="staff-hint">Préstamo temporal a otra tienda: mientras dure, deja de verse aquí y pasa a la tienda destino. Al llegar la fecha de fin, vuelve solo.</p>
+      <div class="plan-config-campo">
+        <label for="plan-ficha-prestamo-centro">Tienda destino</label>
+        <select id="plan-ficha-prestamo-centro" style="width:220px;"></select>
+      </div>
+      <div class="plan-config-campo">
+        <label for="plan-ficha-prestamo-desde">Desde</label>
+        <input type="date" id="plan-ficha-prestamo-desde">
+      </div>
+      <div class="plan-config-campo">
+        <label for="plan-ficha-prestamo-hasta">Hasta</label>
+        <input type="date" id="plan-ficha-prestamo-hasta">
+      </div>
+      <button type="button" class="btn btn-primary" id="plan-ficha-prestamo-confirmar">Prestar</button>
+      <p class="config-error" id="plan-ficha-prestamo-error" hidden></p>
+    </div>
+    <button type="button" class="btn btn-ghost" id="plan-ficha-prestamo-abrir" hidden>Prestar a otra tienda</button>
   </div>
   <div class="plan-dialog-body" id="plan-ficha-paso-pin" hidden>
     <p class="staff-hint">Introduce tu PIN para confirmar el cambio.</p>
@@ -491,6 +516,6 @@
 <script src="js/auth-common.js?v=20260915a"></script>
 <script src="js/topbar-menu.js?v=20260910a"></script>
 <script src="js/common.js?v=20260823a"></script>
-<script src="js/planificador.js?v=20260916b"></script>
+<script src="js/planificador.js?v=20260918a"></script>
 </body>
 </html>
